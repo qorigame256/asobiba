@@ -381,6 +381,7 @@ p { margin: 0; }
 .mj .mj-hand-tile.selected { transform: translateY(-10px); }
 .mj .mj-hand-tile.dim { opacity: .45; }
 .mj button.mj-hand-tile { cursor: pointer; }
+.mj { touch-action: manipulation; } /* 牌は2回タップで切るので、iPhone のダブルタップでの拡大・移動を止める */
 .mj-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .mj-actions:empty { display: none; }
 .mj-claim { flex-basis: 100%; display: flex; justify-content: center; align-items: center; gap: 6px; font-size: .9rem; }

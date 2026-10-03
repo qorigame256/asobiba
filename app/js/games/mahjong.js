@@ -594,11 +594,14 @@ function tileEl(id, { small = false, back = false, side = false } = {}) {
   // 牌の絵は img/mj/（FluffyStuff の riichi-mahjong-tiles。CC0）。土台（Front）の上に模様を重ねる
   const k = kindOf(id);
   const face = E.isHonor(k) ? TILE_HONOR[k - E.EAST] : TILE_SUIT[E.suitOf(k)] + E.numberOf(k) + (RED_IDS.has(id) ? '-Dora' : '');
-  e.style.backgroundImage = `url(img/mj/${face}.svg), url(img/mj/Front.svg)`;
+  // ドラの牌は土台を薄い黄色にして目立たせる（本人の希望。赤ドラは絵が赤いので、表示牌から決まるドラだけ）
+  const dora = doraKinds.has(k);
+  e.style.backgroundImage = `url(img/mj/${face}.svg), url(img/mj/${dora ? 'Front-Dora' : 'Front'}.svg)`;
   e.setAttribute('role', 'img');
-  e.setAttribute('aria-label', tileText(k) + (RED_IDS.has(id) ? '（赤）' : ''));
+  e.setAttribute('aria-label', tileText(k) + (RED_IDS.has(id) ? '（赤）' : '') + (dora ? '（ドラ）' : ''));
   return e;
 }
+let doraKinds = new Set(); // いま描いている局のドラの種類（render の始めに決める）
 const TILE_SUIT = ['Man', 'Pin', 'Sou'];
 const TILE_HONOR = ['Ton', 'Nan', 'Shaa', 'Pei', 'Haku', 'Hatsu', 'Chun'];
 const sortHand = (ids) => ids.slice().sort((a, b) => kindOf(a) - kindOf(b) || RED_IDS.has(b) - RED_IDS.has(a));
@@ -774,8 +777,13 @@ function render(root, s, o) {
   const h = s.h;
   const me = o.me >= 0 ? o.me : 0;
   const watching = o.me < 0;
+  doraKinds = new Set(Array.from({ length: 1 + h.kans }, (_, i) => E.doraKind(kindOf(doraInd(h, i)), s.n === 3)));
+  // 作り直す間にページが短くなって上へ戻されないよう、スクロールの位置を覚えて戻す（iPhone で牌を押すと上へ戻された）
+  const scrollY = window.scrollY;
+  root.style.minHeight = root.offsetHeight + 'px';
   root.innerHTML = '';
   root.className = 'board mj';
+  queueMicrotask(() => { root.style.minHeight = ''; if (window.scrollY !== scrollY) window.scrollTo(0, scrollY); });
   const key = `${s.seq}:${o.me}`;
   if (ui.key !== key) ui = { key, sel: null, riichi: false };
   const draw = () => render(root, s, o);
