@@ -91,12 +91,30 @@ function pickColor(hand, skip) {
 
 let picking = null; // ワイルドの色を選んでいる途中 { step, i }（通信で描き直されても閉じないよう外に持つ）
 
+// 札の絵（2026-10-04 本人の希望で本家風に。ロゴや本家の絵は写さず、形だけ似せて自分で描いた）。
+// 色の札は「色の地・斜めの白い楕円・縁取りした大きな数字や記号・左上と右下に小さく同じもの」。6 と 9 は下線で見分ける。
+const OUTLINE = '#2d2a26';
+const svg = (body) => `<svg class="ccard-sym" viewBox="0 0 100 100" aria-hidden="true">${body}</svg>`;
+// 縁取り: 太い黒の線の上に、札の色の線を重ねる
+const stroked = (d, w) => `<path d="${d}" fill="none" stroke="${OUTLINE}" stroke-width="${w + 7}" stroke-linecap="round" stroke-linejoin="round"/>`
+  + `<path d="${d}" fill="none" stroke="var(--cc)" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round"/>`;
+const smallCard = (x, y, rot, fill) => `<rect x="${x}" y="${y}" width="30" height="44" rx="5" transform="rotate(${rot} ${x + 15} ${y + 22})" fill="${fill}" stroke="${OUTLINE}" stroke-width="4"/>`;
+const SYMBOL = {
+  S: svg(stroked('M50 22 A28 28 0 1 1 49.9 22 Z M30 70 L70 30', 11)),
+  R: svg(stroked('M16 54 L48 22 M48 22 L32 22 M48 22 L48 38', 9) + stroked('M84 46 L52 78 M52 78 L68 78 M52 78 L52 62', 9)),
+  D: svg(smallCard(24, 34, -12, 'var(--cc)') + smallCard(44, 20, -12, 'var(--cc)')),
+  W4: svg(smallCard(12, 40, -12, '#2f6fb3') + smallCard(28, 26, -12, '#3a9d55') + smallCard(42, 34, -12, '#e8a913') + smallCard(58, 20, -12, '#e04b3c')),
+};
+
 function cardEl(card, tag = 'div') {
   const e = document.createElement(tag);
   const k = kindOf(card);
-  const label = KIND_LABEL[k] ?? k;
-  e.className = `ccard c-${colorOf(card) ?? 'w'}`;
-  e.innerHTML = `<span class="ccard-oval"><span>${label}</span></span><span class="ccard-corner">${label}</span>`;
+  const corner = KIND_LABEL[k] ?? k;
+  const big = SYMBOL[k] ?? (k === 'W' ? '' : `<span class="ccard-num${k === '6' || k === '9' ? ' ul' : ''}">${k}</span>`);
+  const small = k === 'S' || k === 'R' ? SYMBOL[k] : k === '6' || k === '9' ? `<span class="ul">${k}</span>` : corner;
+  e.className = `ccard c-${colorOf(card) ?? 'w'} k-${k}`;
+  e.innerHTML = `<span class="ccard-oval"></span><span class="ccard-face">${big}</span>`
+    + `<span class="ccard-corner">${small}</span><span class="ccard-corner br">${small}</span>`;
   e.setAttribute('aria-label', cardName(card));
   return e;
 }

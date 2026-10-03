@@ -14,6 +14,32 @@ assert.equal(T.apply(play(T, [4]), 4), null, '埋まったマス');
 s = play(T, [0, 1, 2, 4, 3, 5, 7, 6, 8]);
 assert.deepEqual(T.result(s), { winner: null, cells: [] }, '引き分け');
 
+// スーパーマルバツ（詳細設定「盤」= スーパー）
+const big = (over = {}) => ({ ...T.init({ rules: { size: 'super' } }), ...over });
+s = big();
+assert.equal(s.next, 4, '最初は真ん中の盤');
+assert.equal(T.apply(s, 0), null, '最初に真ん中以外の盤には置けない');
+s = T.apply(s, 4 * 9 + 2);
+assert.equal(s.next, 2, '右上のマスに置いたら次は右上の盤');
+assert.equal(T.apply(s, 4 * 9 + 0), null, '決められた盤の外には置けない');
+// ○ が盤0の 0・1 を持っていて、2 に置くと盤0を取る。2 の位置の盤（右上）が取られていれば次はどこでも
+let bd = Array(81).fill(null); bd[0] = 0; bd[1] = 0;
+let ow = Array(9).fill(null); ow[2] = 1;
+s = T.apply(big({ board: bd, owner: ow, next: 0 }), 2);
+assert.equal(s.owner[0], 0, '小さい盤で3つ並べたらその盤を取る');
+assert.equal(s.next, null, '送り先が取られた盤ならどこでも置ける');
+assert.equal(T.apply(s, 2 * 9 + 5), null, '取られた盤には自由に置けるときも置けない');
+assert.ok(T.apply(s, 7 * 9 + 5), '空いている盤なら置ける');
+// 盤0が埋まって誰も並ばない → 引き分けの盤
+bd = Array(81).fill(null); [0, 1, 0, 0, 1, 1, 1, 0].forEach((v, i) => { bd[i] = v; });
+s = T.apply(big({ board: bd, next: 0 }), 8); // ○ が 8 に置く（0・4・8 は ○・1・… で並ばない）
+assert.equal(s.owner[0], 'd', '埋まって並ばない盤は引き分けの盤');
+s = T.apply(big({ board: Array(81).fill(null), owner: [null, 'd', ...Array(7).fill(null)], next: 4 }), 4 * 9 + 1);
+assert.equal(s.next, null, '引き分けの盤へ送られたらどこでも置ける');
+assert.deepEqual(T.result(big({ owner: [0, 0, 0, 1, 1, null, null, null, null] })), { winner: 0, cells: [0, 1, 2] }, '取った盤が3つ並んだら勝ち');
+assert.equal(T.result(big({ owner: [0, 1, 0, 'd', 1, 0, 1, 0, 1] })).winner, null, '置ける盤が無くなったら引き分け');
+assert.equal(T.result(big({ owner: [0, 1, 0, 'd', null, 0, 1, 0, 1] })), null, 'まだ置ける盤があれば続く');
+
 // コネクトフォー
 s = play(C, [0, 1, 0, 1, 0, 1, 0]);
 assert.equal(C.result(s).winner, 0, 'たて4');

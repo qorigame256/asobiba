@@ -363,7 +363,8 @@ function statusHtml(game, st, res) {
   }
   let html = `<div class="status-main">${main}</div>`;
   if (sub) html += `<div class="status-sub">${sub}</div>`;
-  if (game.info) html += `<div class="status-sub">${game.info(st)}</div>`;
+  const extra = game.info?.(st);
+  if (extra) html += `<div class="status-sub">${extra}</div>`;
   return html;
 }
 

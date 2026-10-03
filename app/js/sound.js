@@ -8,22 +8,23 @@
 //   turn   512 / Pause Sounds / sfx_sounds_pause1_in   correct interface-sounds / confirmation_002   wrong interface-sounds / error_002
 //   question interface-sounds / question_002         hit    interface-sounds / glass_001
 //   win    interface-sounds / confirmation_004       lose   digital-audio / phaserDown1
-//   draw_game music-jingles / jingles_PIZZI08        riichi impact-sounds / impactBell_heavy_000
+//   draw_game music-jingles / jingles_PIZZI08
 //   call   interface-sounds / maximize_006
 //   smack  impact-sounds / impactPlate_light_000      wall   impact-sounds / impactSoft_medium_000   goal 512 / Coins / sfx_coin_cluster3
 // 勝ち・負け・正解・不正解・番が来た・ゴール・和了は、本人が試聴ページで聞いて選んだ（2026-10-03）。
 // 和了は音のファイルではなく、ブラウザの読み上げで「ロン！」「ツモ！」と言う（SAY。日本語の声で CC0 の素材が無かったため）。
+// リーチも読み上げで「リーチ！」と言う（2026-10-04 本人の決定。前は鐘の音 impact-sounds / impactBell_heavy_000）。
 //
 // 鳴らすのは Web Audio（ブラウザの音の仕組み）。スマホは画面に触れるまで音を出せないので、最初に触れたときに準備する。
 // iPhone はマナーモード（消音スイッチ）のときは鳴らない。オン・オフはこの端末に覚える（localStorage）。
 
 const NAMES = ['place', 'card', 'draw', 'shuffle', 'chip', 'pop', 'punch', 'stone', 'turn', 'correct', 'wrong', 'question', 'hit',
-  'win', 'lose', 'draw_game', 'riichi', 'call', 'smack', 'wall', 'goal'];
+  'win', 'lose', 'draw_game', 'call', 'smack', 'wall', 'goal'];
 // 読み上げで出す音（名前 → 言う言葉）。声は端末ごとに違う
-const SAY = { ron: 'ロン！', tsumo: 'ツモ！' };
+const SAY = { ron: 'ロン！', tsumo: 'ツモ！', riichi: 'リーチ！' };
 export const isVoice = (name) => name in SAY;
 // 音ごとの大きさ（素材の最大音量はそろえてあるので、耳ざわりなものを下げる）
-const GAIN = { pop: 0.5, stone: 0.6, wall: 0.4, turn: 0.6, question: 0.6, hit: 0.6, wrong: 0.6, shuffle: 0.7, riichi: 0.6 };
+const GAIN = { pop: 0.5, stone: 0.6, wall: 0.4, turn: 0.6, question: 0.6, hit: 0.6, wrong: 0.6, shuffle: 0.7 };
 const MASTER = 0.6;
 const MUTE_KEY = 'bg-mute';
 const GAP_MS = 40; // 同じ音がこれより短い間に重なったら1回だけ鳴らす

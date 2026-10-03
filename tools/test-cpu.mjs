@@ -55,8 +55,14 @@ r = tally(T, 'strong', 'strong', 10);
 assert.equal(r.draw, 10, 'マルバツ: つよい同士は必ず引き分け');
 const results = { tictactoe: tally(T, 'normal', 'weak', 60) };
 
+// スーパーマルバツ: 反則を出さない・強さの順に勝ち越す・1手の時間
+const TS = { ...T, id: 'tictactoe9', init: () => T.init({ rules: { size: 'super' } }) };
+s = TS.init();
+s = { ...s, board: Object.assign(Array(81).fill(null), { 36: 0, 37: 0 }), next: 4 };
+for (let k = 0; k < 10; k++) assert.equal(TS.cpu(s, 0, lv('strong')), 38, 'スーパーマルバツ: 小さい盤を取れる手を打つ');
+
 // 強い方が勝ち越す
-for (const [g, n] of [[C, 20], [R, 12]]) {
+for (const [g, n] of [[C, 20], [R, 12], [TS, 12]]) {
   const sw = tally(g, 'strong', 'weak', n);
   const nw = tally(g, 'normal', 'weak', n);
   results[g.id] = { strongVsWeak: sw, normalVsWeak: nw };
