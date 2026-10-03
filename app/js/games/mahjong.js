@@ -1,7 +1,8 @@
 // 麻雀（リーチ麻雀）。4人または3人。役・符・点数・向聴数は mahjong-engine.js（本人が別に作っている麻雀アプリ＝元のアプリのエンジンを写したもの）。
 //
 // 決めごと（本人の判断・2026-10-03）: 元のアプリの通常ルールを流用し、作りはシンプルに。
-//   長さは東風戦・半荘戦を詳細設定で選ぶ。3人麻雀も詳細設定で選ぶ。鳴き・ロンはできる人だけに聞き、10秒で自動で見送る。
+//   長さは東風戦・半荘戦を詳細設定で選ぶ。3人麻雀も詳細設定で選ぶ。鳴き・ロンはできる人だけに聞き、答えるまで待つ
+//   （2026-10-04 本人の決定で、前の「10秒で自動で見送る」をやめた。古い手の一覧の timeout は当て直しのため受け付ける）。
 //   省いたもの: 途中流局（九種九牌・四風連打）・流し満貫・責任払い・延長戦・ウマとオカ・ダブロン（打った人に近い1人だけ和了）。
 // 元のアプリから写した決めごと: 喰いタン・後付けあり、一発・裏ドラ（リーチした人だけ）・カンドラ（カンしたその場でめくる）、
 //   赤ドラ（4人は五萬・五筒・五索を1枚ずつ、3人は五筒・五索）、喰い替え禁止（ポンは現物、チーは現物と筋）、
@@ -22,7 +23,6 @@ import * as E from './mahjong-engine.js';
 
 const RED_IDS = new Set([16, 52, 88]);
 const kindOf = (id) => id >> 2;
-const CLAIM_MS = 10000;
 const END_MS = 30000;
 const AUTO_MS = 1000;
 
@@ -608,6 +608,7 @@ const sortHand = (ids) => ids.slice().sort((a, b) => kindOf(a) - kindOf(b) || RE
 const tileText = (k) => (E.isHonor(k) ? HONOR_CHAR[k - E.EAST] : `${E.numberOf(k)}${SUIT_CHAR[E.suitOf(k)]}`);
 
 let ui = { key: null, sel: null, riichi: false };
+let keepH = { key: null, h: 0 }; // 1局の間の盤の一番高いところ（render の先頭のコメント）
 
 function meldsEl(h, p, small) {
   const box = document.createElement('div');
@@ -778,12 +779,21 @@ function render(root, s, o) {
   const me = o.me >= 0 ? o.me : 0;
   const watching = o.me < 0;
   doraKinds = new Set(Array.from({ length: 1 + h.kans }, (_, i) => E.doraKind(kindOf(doraInd(h, i)), s.n === 3)));
-  // 作り直す間にページが短くなって上へ戻されないよう、スクロールの位置を覚えて戻す（iPhone で牌を押すと上へ戻された）
-  const scrollY = window.scrollY;
-  root.style.minHeight = root.offsetHeight + 'px';
+  // 下へスクロールしているとき、ページが短くなると上へ引き戻される（iPhone で牌を押すと戻された）。
+  // 手牌の下のボタンや説明は出たり消えたりするので、1局の間は盤の高さを今までで一番高いところより縮めない
+  // （作り直しの途中で縮まないよう、前の高さは root の min-height に残したまま。測るのは作り終えてから）
   root.innerHTML = '';
   root.className = 'board mj';
-  queueMicrotask(() => { root.style.minHeight = ''; if (window.scrollY !== scrollY) window.scrollTo(0, scrollY); });
+  const handKey = `${o.me}:${handTitle(s)}:${window.innerWidth}`;
+  if (h.phase === 'end' || keepH.key !== handKey) keepH = { key: handKey, h: 0 };
+  queueMicrotask(() => {
+    if (h.phase === 'end') { root.style.minHeight = ''; return; }
+    // min-height を外して測ると、その瞬間にページが縮んで引き戻されるので、中身の下端から測る
+    const top = root.getBoundingClientRect().top;
+    const bottom = Math.max(0, ...[...root.children].map((c) => c.getBoundingClientRect().bottom - top));
+    keepH.h = Math.max(keepH.h, Math.ceil(bottom + parseFloat(getComputedStyle(root).paddingBottom || 0)));
+    root.style.minHeight = keepH.h + 'px';
+  });
   const key = `${s.seq}:${o.me}`;
   if (ui.key !== key) ui = { key, sel: null, riichi: false };
   const draw = () => render(root, s, o);
@@ -862,7 +872,6 @@ function render(root, s, o) {
       }
     }
     actions.append(button('見送る', 'ghost', () => o.onMove({ a: 'pass', n: s.seq })));
-    hint.textContent = '10秒たつと自動で見送ります';
   } else if (h.phase === 'claim') {
     hint.textContent = '鳴き・ロンの確認を待っています…';
   } else if (!watching && h.riichi[me]) {
@@ -928,7 +937,6 @@ export default {
   referee(s) {
     if (s.over) return null;
     const h = s.h;
-    if (h.phase === 'claim') return { key: `c${s.seq}`, ms: CLAIM_MS, move: { a: 'timeout', n: s.seq } };
     if (h.phase === 'end') return { key: `e${s.seq}`, ms: END_MS, move: { a: 'next', n: s.seq } };
     if (h.riichi[h.turn] && h.drawn !== null) {
       const o = turnOptions(s);

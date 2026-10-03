@@ -434,8 +434,16 @@ function renderHowto(game) {
 let controlsEl = null;
 const ctl = () => controlsEl;
 
+// 描き直しの間はページの長さを今のまま保つ。作り直しの途中でページが一瞬短くなると、下へスクロールしていた
+// 画面が上へ引き戻される（麻雀で牌を押すたびに起きた）
 function render() {
   if (!S) return;
+  const body = document.body;
+  body.style.minHeight = document.documentElement.scrollHeight + 'px';
+  try { renderPage(); } finally { body.style.minHeight = ''; }
+}
+
+function renderPage() {
   const focused = document.activeElement;
   const keepControls = focused?.tagName === 'SELECT' && el('controls').contains(focused);
   controlsEl = keepControls ? document.createElement('div') : el('controls');
