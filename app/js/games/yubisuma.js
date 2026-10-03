@@ -49,12 +49,14 @@ export default {
 
   turn() { return null; },
   canAct(s, p) { return !ended(s) && active(s, p) && s.picks[p] === null; },
+  // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
+  sound(a, b) { return b.round > a.round ? (b.last.hit ? 'correct' : 'question') : 'pop'; }, // 全員がそろって開いたら、親が当てたか
   result(s) {
     if (!ended(s)) return null;
     const rest = activeList(s);
     return { winner: s.out[0], ranking: [...s.out, ...rest], loser: s.rules.end === 'last' ? rest[0] ?? null : null };
   },
-  cpuDelay() { return 1500; },
+  cpuDelay() { return 1000; },
 
   resultText(res, me, pn) {
     const who = (p) => (p === me ? 'あなた' : pn(p));

@@ -23,15 +23,17 @@ import { GAMES, GAME_ORDER } from './games/index.js';
 import { connectRoom } from './net.js';
 import { esc } from './games/util.js';
 import { isOwner, unlockOwner, forgetOwner } from './owner.js';
+import { play, endSound, isMuted, setMuted, isVoice } from './sound.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 見間違えやすい I O 0 1 を除く
 const CODE_LEN = 5;
 const HEARTBEAT_MS = 5000;
 const LOST_MS = 20000;
 const MAX_MEMBERS = 10; // 部屋に入れる人数の上限（観戦を含む）
-const CPU_DELAY_MS = 900; // CPU が手を打つまでの間（速すぎると何が起きたか追えない）
+const CPU_DELAY_MS = 600; // CPU が手を打つまでの間（速すぎると何が起きたか追えない）
 const NAME_KEY = 'bg-name';
 const SPECTATOR = -1;
+const TURN_PING_MS = 5000; // これより長く待ったあとで自分の番が来たら、知らせる音を鳴らす（すぐ返ってきた番では鳴らさない）
 
 const el = (id) => document.getElementById(id);
 
@@ -365,11 +367,27 @@ function statusHtml(game, st, res) {
   return html;
 }
 
+// 「？遊び方」。ゲームが変わったら中身を差し替えて閉じる。開け閉めは描き直しても保つ
+let howtoFor = null;
+function renderHowto(game) {
+  const btn = el('btn-howto');
+  const box = el('howto');
+  btn.hidden = !game?.howto;
+  if (!game?.howto) { box.hidden = true; howtoFor = null; return; }
+  if (howtoFor !== game.id) {
+    howtoFor = game.id;
+    box.hidden = true;
+    box.replaceChildren(...game.howto.map((t) => { const p = document.createElement('p'); p.textContent = t; return p; }));
+  }
+  btn.setAttribute('aria-expanded', String(!box.hidden));
+}
+
 function render() {
   if (!S) return;
   renderRoomBar();
   const game = S.gameId ? GAMES[S.gameId] : null;
   el('play-title').textContent = game ? game.name : '部屋に参加';
+  renderHowto(game);
   el('screen-play').dataset.game = S.gameId ?? '';
   const status = el('status');
   const board = el('board');
@@ -404,7 +422,9 @@ function render() {
 
   // 新しく打たれた手だけ動きを付ける（接続表示の更新などで描き直したときは動かさない）
   const key = S.gameId + ':' + S.round;
-  const fresh = S.shownKey === key && S.moves.length > S.shownLen;
+  const prevLen = S.shownKey === key ? S.shownLen : null;
+  const fresh = prevLen !== null && S.moves.length > prevLen;
+  if (S.shownKey !== key && !S.moves.length && game.startSound) play(game.startSound);
   S.shownKey = key;
   S.shownLen = S.moves.length;
   const opts = { canMove: canMove(game, st, res), onMove: onBoardMove, fresh, me: myPlayer() };
@@ -416,6 +436,9 @@ function render() {
     });
   }
   game.render(board, st, opts);
+  if (fresh) moveSound(game, st, res, prevLen, opts.canMove);
+  if (!opts.canMove && S.couldMove !== false) S.waitFrom = Date.now();
+  S.couldMove = opts.canMove;
 
   if (res) {
     controls.append(makeButton('もう一回', rematch));
@@ -430,6 +453,27 @@ function render() {
   appendMemberPanel();
   scheduleCpu(game, st, res);
   scheduleReferee(game, st, res);
+}
+
+// 新しく打たれた手の音。何手かまとめて届いたときは最後の手の音だけ。対局が終わったら勝ち負けの音。
+// 音はゲームの sound(前の局面, 今の局面, 手, 自分の番号) が名前で返す（無ければ盤のゲームは place、カードゲームは card）
+function moveSound(game, st, res, prevLen, mine) {
+  const before = replay({ ...S, moves: S.moves.slice(0, prevLen) });
+  if (!before) return;
+  const me = myPlayer();
+  const m = S.moves[S.moves.length - 1];
+  if (res) {
+    if (game.result(before)) return;
+    let said = null; // 麻雀の最後の局の「ロン！」など
+    try { said = game.sound?.(before, st, m, me); } catch { /* 終局の手に音の決めごとが合わなくても、勝ち負けの音は鳴らす */ }
+    if (isVoice(said)) { play(said); setTimeout(() => play(endSound(res, me)), 700); } else play(endSound(res, me));
+    return;
+  }
+  const name = game.sound ? game.sound(before, st, m, me) : game.multi ? 'card' : 'place';
+  if (name) play(name);
+  if (mine && S.mode === 'online' && !game.realtime && !canMove(game, before, null) && Date.now() - S.waitFrom > TURN_PING_MS) {
+    setTimeout(() => play('turn'), 300);
+  }
 }
 
 function renderLobby(game) {
@@ -843,7 +887,7 @@ function enterPlay() {
   S.banned ??= [];
   Object.assign(S, {
     conn: S.mode === 'online' ? 'connecting' : 'local', seen: {}, full: false, hostLeft: false,
-    shownKey: null, shownLen: 0, lostKey: '', cpuKeys: {}, refKey: null,
+    shownKey: null, shownLen: 0, lostKey: '', cpuKeys: {}, refKey: null, couldMove: null, waitFrom: Date.now(),
   });
   showScreen('play');
   render();
@@ -1070,6 +1114,23 @@ el('join-form').addEventListener('submit', (e) => {
 });
 el('btn-leave').onclick = leave;
 el('btn-invite').onclick = invite;
+el('btn-howto').onclick = () => {
+  const box = el('howto');
+  box.hidden = !box.hidden;
+  el('btn-howto').setAttribute('aria-expanded', String(!box.hidden));
+};
+const soundBtn = el('btn-sound');
+function showSoundBtn() {
+  soundBtn.textContent = isMuted() ? '🔇' : '🔊';
+  soundBtn.title = isMuted() ? '効果音: オフ（押すとオン）' : '効果音: オン（押すとオフ）';
+  soundBtn.setAttribute('aria-label', soundBtn.title);
+}
+soundBtn.onclick = () => {
+  setMuted(!isMuted());
+  showSoundBtn();
+  if (!isMuted()) play('pop');
+};
+showSoundBtn();
 
 const roomParam = new URL(location.href).searchParams.get('room');
 if (!(roomParam && joinRoom(roomParam))) {

@@ -76,6 +76,9 @@ export default {
   turn() { return null; },
   canAct(s) { return s.winner === null && !s.draw; },
   result(s) { return s.winner !== null || s.draw ? { winner: s.winner, draw: s.draw } : null; },
+  startSound: 'shuffle',
+  // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
+  sound(a, b, m) { return m.t === 'flip' ? 'draw' : 'card'; },
   cpuDelay(s) { return stuck(s) ? 1200 : DELAYS[s.rules.cpu] ?? DELAYS.slow; },
 
   resultText(res, me, pn) {

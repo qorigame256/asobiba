@@ -591,17 +591,16 @@ function tileEl(id, { small = false, back = false, side = false } = {}) {
   const e = document.createElement('span');
   e.className = 'mj-tile' + (small ? ' small' : '') + (side ? ' side' : '');
   if (back) { e.classList.add('back'); return e; }
+  // 牌の絵は img/mj/（FluffyStuff の riichi-mahjong-tiles。CC0）。土台（Front）の上に模様を重ねる
   const k = kindOf(id);
-  if (E.isHonor(k)) {
-    e.classList.add('honor', ['', '', '', '', 'haku', 'hatsu', 'chun'][k - E.EAST] || 'wind');
-    e.textContent = HONOR_CHAR[k - E.EAST];
-  } else {
-    e.classList.add('s' + E.suitOf(k));
-    if (RED_IDS.has(id)) e.classList.add('red');
-    e.innerHTML = `<b>${E.numberOf(k)}</b><i>${SUIT_CHAR[E.suitOf(k)]}</i>`;
-  }
+  const face = E.isHonor(k) ? TILE_HONOR[k - E.EAST] : TILE_SUIT[E.suitOf(k)] + E.numberOf(k) + (RED_IDS.has(id) ? '-Dora' : '');
+  e.style.backgroundImage = `url(img/mj/${face}.svg), url(img/mj/Front.svg)`;
+  e.setAttribute('role', 'img');
+  e.setAttribute('aria-label', tileText(k) + (RED_IDS.has(id) ? '（赤）' : ''));
   return e;
 }
+const TILE_SUIT = ['Man', 'Pin', 'Sou'];
+const TILE_HONOR = ['Ton', 'Nan', 'Shaa', 'Pei', 'Haku', 'Hatsu', 'Chun'];
 const sortHand = (ids) => ids.slice().sort((a, b) => kindOf(a) - kindOf(b) || RED_IDS.has(b) - RED_IDS.has(a));
 const tileText = (k) => (E.isHonor(k) ? HONOR_CHAR[k - E.EAST] : `${E.numberOf(k)}${SUIT_CHAR[E.suitOf(k)]}`);
 
@@ -625,36 +624,78 @@ function meldsEl(h, p, small) {
   return box;
 }
 
+// 河。実際の卓と同じく6枚ごとに折り返し、自分の方へ段を重ねる
 function riverEl(h, p) {
   const box = document.createElement('div');
   box.className = 'mj-river';
-  for (const x of h.rivers[p]) {
-    const t = tileEl(x.id, { small: true, side: x.riichi });
+  let row = null;
+  h.rivers[p].forEach((x, i) => {
+    if (i % 6 === 0) { row = document.createElement('div'); row.className = 'mj-river-row'; box.append(row); }
+    const t = tileEl(x.id, { side: x.riichi });
     if (x.taken) t.classList.add('taken');
-    box.append(t);
-  }
-  if (h.claim && h.claim.from === p && h.claim.src === 'discard') box.lastChild?.classList.add('latest');
+    row.append(t);
+  });
+  if (h.claim && h.claim.from === p && h.claim.src === 'discard') row?.lastChild?.classList.add('latest');
   return box;
 }
 
-function seatHead(s, p, o, me) {
+// 卓。真ん中に場の情報と各人の風・点数、そのまわりに4人の河、いちばん外に手牌（自分以外は裏向き）と副露。
+// 各人の席は「自分の席（下）」と同じ形に作り、正方形ごと回して置く（下家は右・対面は上・上家は左）。
+// 自分の手牌は卓の下に大きく出すので、卓の中の自分の席には副露だけを置く
+function tableEl(s, o, me, watching) {
   const h = s.h;
-  const head = document.createElement('div');
-  head.className = 'mj-seat-head';
-  const wind = WIND_NAMES[(p - dealerOf(s) + s.n) % s.n];
-  const name = p === me ? 'あなた' : o.names[p];
-  head.innerHTML = `<span class="mj-wind${p === dealerOf(s) ? ' dealer' : ''}">${wind}</span>`;
-  const nm = document.createElement('span');
-  nm.className = 'mj-name';
-  nm.textContent = name + (o.cpu[p] ? '（CPU）' : '') + (o.away[p] ? '（応答なし）' : '');
-  head.append(nm);
-  const sc = document.createElement('span');
-  sc.className = 'mj-score';
-  sc.textContent = s.scores[p].toLocaleString();
-  head.append(sc);
-  if (h.riichi[p]) head.insertAdjacentHTML('beforeend', '<span class="mj-badge">リーチ</span>');
-  if (h.phase === 'turn' && h.turn === p) head.classList.add('active');
-  return head;
+  const table = document.createElement('div');
+  table.className = 'mj-table';
+  const turns = s.n === 3 ? [0, -90, 90] : [0, -90, 180, 90];
+  const center = document.createElement('div');
+  center.className = 'mj-center';
+  const mid = document.createElement('div');
+  mid.className = 'mj-center-mid';
+  mid.innerHTML = `<b></b><span></span>`;
+  mid.firstChild.textContent = handTitle(s);
+  mid.lastChild.textContent = `残り${Math.max(0, liveLeft(h))}${s.kyotaku ? `・供託${s.kyotaku}` : ''}`;
+  center.append(mid);
+  for (let i = 0; i < s.n; i++) {
+    const p = (me + i) % s.n;
+    const seat = document.createElement('div');
+    seat.className = 'mj-zone' + (i === 0 ? ' mine' : '');
+    seat.style.transform = `rotate(${turns[i]}deg)`;
+    seat.append(riverEl(h, p));
+    const edge = document.createElement('div');
+    edge.className = 'mj-edge';
+    const name = document.createElement('span');
+    name.className = 'mj-name';
+    name.textContent = (i === 0 && !watching ? 'あなた' : o.names[p]) + (o.cpu[p] ? '（CPU）' : '') + (o.away[p] ? '（応答なし）' : '');
+    if (i > 0 || watching) {
+      const hidden = document.createElement('span');
+      hidden.className = 'mj-hidden';
+      const drew = h.turn === p && h.drawn !== null && h.hands[p].includes(h.drawn);
+      h.hands[p].forEach((_, j) => {
+        const t = tileEl(0, { back: true });
+        if (drew && j === h.hands[p].length - 1) t.classList.add('drawn');
+        hidden.append(t);
+      });
+      edge.append(hidden);
+    }
+    edge.append(meldsEl(h, p, false));
+    seat.append(edge);
+    table.append(seat);
+    // 名前は回さずに、その人に近い卓の角へ（逆さや縦の文字にしない）
+    name.classList.add('mj-tag', ['bl', 'br', 'tr', 'tl'][[0, -90, 180, 90].indexOf(turns[i])]);
+    if (h.phase === 'turn' && h.turn === p) name.classList.add('active');
+    if (i > 0 || watching) table.append(name);
+
+    // 真ん中の、その人の側の風と点数（その人の方へ向ける）
+    const side = document.createElement('div');
+    side.className = 'mj-side' + (h.phase === 'turn' && h.turn === p ? ' active' : '');
+    side.style.transform = `rotate(${turns[i]}deg)`;
+    const wind = WIND_NAMES[(p - dealerOf(s) + s.n) % s.n];
+    side.innerHTML = `<span class="mj-wind${p === dealerOf(s) ? ' dealer' : ''}">${wind}</span><span class="mj-score">${s.scores[p].toLocaleString()}</span>`
+      + (h.riichi[p] ? '<span class="mj-stick" title="リーチ"></span>' : '');
+    center.append(side);
+  }
+  table.append(center);
+  return table;
 }
 
 function button(text, cls, fn) {
@@ -751,22 +792,7 @@ function render(root, s, o) {
   info.append(title, dora);
   root.append(info);
 
-  // ほかの人（下家・対面・上家の順）
-  for (let i = 1; i < s.n; i++) {
-    const p = (me + i) % s.n;
-    const seat = document.createElement('div');
-    seat.className = 'mj-seat';
-    const head = seatHead(s, p, o, me);
-    head.insertAdjacentHTML('afterbegin', `<small class="mj-rel">${s.n === 3 ? ['', '下家', '上家'][i] : ['', '下家', '対面', '上家'][i]}</small>`);
-    seat.append(head, meldsEl(h, p, true), riverEl(h, p));
-    root.append(seat);
-  }
-
-  // 自分
-  const mine = document.createElement('div');
-  mine.className = 'mj-seat mine';
-  mine.append(seatHead(s, me, o, watching ? -1 : me), riverEl(h, me), meldsEl(h, me, true));
-  root.append(mine);
+  root.append(tableEl(s, o, me, watching));
 
   if (h.phase === 'end') { info.after(endPanel(s, o, watching ? -1 : me)); return; } // 結果はスマホでもすぐ見えるよう上に出す
 
@@ -871,13 +897,22 @@ export default {
   },
   apply: applyMove,
   result(s) { return s.over ? { winner: s.ranking[0], ranking: s.ranking, scores: s.scores.slice() } : null; },
+  // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
+  sound(a, b, m) {
+    if (b.h.phase === 'end' && a.h.phase !== 'end') return b.h.end.type === 'draw' ? 'question' : b.h.end.type; // 流局か、和了（'ron' | 'tsumo'。読み上げ）
+    const melds = (s) => s.h.melds.reduce((n, x) => n + x.length, 0);
+    if (m.a === 'ok' || m.a === 'next') return null; // 局の結果の画面での「次の局へ」
+    if (melds(b) > melds(a) || m.a === 'nuki') return 'call';
+    if (m.a === 'd') return m.r ? 'riichi' : 'place';
+    return null; // 鳴きの見送りなど
+  },
   cpu(s, p) {
     const h = s.h;
     if (h.phase === 'end') return { a: 'ok', n: s.seq };
     if (h.phase === 'claim') return cpuClaim(s, p);
     return cpuTurn(s);
   },
-  cpuDelay(s) { return s.h.phase === 'claim' ? 500 : s.h.phase === 'end' ? 1500 : 700; },
+  cpuDelay(s) { return s.h.phase === 'claim' ? 350 : s.h.phase === 'end' ? 1000 : 450; },
   referee(s) {
     if (s.over) return null;
     const h = s.h;

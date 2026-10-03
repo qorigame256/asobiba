@@ -378,7 +378,7 @@ s = HB.init(3, 99, { rules: { digits: 4 } });
 assert.deepEqual(s, HB.init(3, 99, { rules: { digits: 4 } }), '同じ種なら同じ答え');
 assert.equal(new Set(s.answer).size, 4, '答えの数字は重ならない');
 assert.equal(HB.init(2, 99, { rules: { digits: 3 } }).answer.length, 3);
-s = { ...HB.init(3, 1, { rules: {} }), answer: '1234' };
+s = { ...HB.init(3, 1, { rules: { mode: 'race' } }), answer: '1234' };
 assert.equal(HB.apply(s, { p: 0, t: 'guess', g: '1123', r: 1 }), null, '同じ数字は使えない');
 assert.equal(HB.apply(s, { p: 0, t: 'guess', g: '123', r: 1 }), null, '桁数が違う');
 assert.equal(HB.apply(s, { p: 0, t: 'guess', g: '1243', r: 2 }), null, '回が違う');
@@ -396,10 +396,23 @@ assert.equal(HB.result(t), null);
 for (const [p, g] of [[0, '1234'], [1, '9870'], [2, '1234']]) t = HB.apply(t, { p, t: 'guess', g, r: 2 });
 assert.deepEqual(HB.result(t).winners, [0, 2], '同じ回に当てたら同着');
 assert.equal(HB.apply(t, { p: 1, t: 'guess', g: '1234', r: 3 }), null, '終わったら出せない');
+// 順番に当てる（最初の遊び方）
+s = { ...HB.init(3, 1, { rules: {} }), answer: '1234' };
+assert.equal(s.mode, 'turn', '最初は「順番に当てる」');
+assert.equal(HB.turn(s), 0);
+assert.equal(HB.apply(s, { p: 1, t: 'guess', g: '5678', r: 1 }), null, '番でない人は出せない');
+t = HB.apply(s, { p: 0, t: 'guess', g: '1243', r: 1 });
+assert.deepEqual(t.log, [{ p: 0, g: '1243', hit: 2, blow: 2 }], '結果はすぐ全員に見える');
+assert.equal(HB.turn(t), 1, '次の人の番');
+assert.equal(HB.apply(t, { p: 0, t: 'guess', g: '1243', r: 1 }), null, '同じ手が2回届いても2回目は弾く');
+t = HB.apply(t, { p: 1, t: 'guess', g: '5678', r: 2 });
+t = HB.apply(t, { p: 2, t: 'guess', g: '1234', r: 3 });
+assert.deepEqual(HB.result(t).winners, [2], '最初に当てた人だけの勝ち');
+assert.equal(HB.turn(t), null);
 let hbRounds = 0;
 for (let k = 0; k < 100; k++) {
   const n = 2 + (k % 4);
-  let st = HB.init(n, k * 13 + 5, { rules: { digits: k % 2 ? 3 : 4 } });
+  let st = HB.init(n, k * 13 + 5, { rules: { digits: k % 2 ? 3 : 4, mode: k % 4 < 2 ? 'race' : 'turn' } });
   while (!HB.result(st)) {
     const ps = Array.from({ length: n }, (_, p) => p).filter((p) => HB.canAct(st, p));
     const p = ps[Math.floor(Math.random() * ps.length)];
@@ -418,20 +431,20 @@ s = ssBase([[3, 1], [2, 1]]);
 assert.equal(SS.apply(s, { p: 1, t: 'atk', from: 0, to: 0, hand: 0 }), null, '手番でない人は動けない');
 assert.equal(SS.apply(s, { p: 0, t: 'atk', from: 0, to: 0, hand: 1 }), null, '自分の手はタッチできない');
 t = SS.apply(s, { p: 0, t: 'atk', from: 0, to: 1, hand: 0 });
-assert.deepEqual(t.hands[1], [0, 1], '3＋2 で5本 → 消える');
+assert.deepEqual(t.hands[1], [0, 1], '3＋2 でちょうど5本 → 消える');
 assert.equal(t.turn, 1);
 assert.equal(SS.apply(t, { p: 1, t: 'atk', from: 0, to: 0, hand: 0 }), null, '消えた手ではタッチできない');
-s = ssBase([[4, 1], [2, 1]], { rules: { over: 'wrap', split: true } });
-assert.deepEqual(SS.apply(s, { p: 0, t: 'atk', from: 0, to: 1, hand: 0 }).hands[1], [1, 1], '「5を引く」なら 4＋2 → 1本');
-s = ssBase([[3, 1], [2, 3]], { rules: { over: 'wrap', split: true } });
-assert.deepEqual(SS.apply(s, { p: 0, t: 'atk', from: 0, to: 1, hand: 0 }).hands[1], [0, 3], '「5を引く」でもちょうど5なら消える');
+s = ssBase([[4, 1], [2, 1]]);
+assert.deepEqual(SS.apply(s, { p: 0, t: 'atk', from: 0, to: 1, hand: 0 }).hands[1], [1, 1], '5を超えたら超えた分: 4＋2 → 1本');
+s = ssBase([[4, 1], [4, 1]]);
+assert.deepEqual(SS.apply(s, { p: 0, t: 'atk', from: 0, to: 1, hand: 0 }).hands[1], [3, 1], '5を超えたら超えた分: 4＋4 → 3本');
 s = ssBase([[1, 3], [1, 1]]);
 assert.equal(SS.apply(s, { p: 0, t: 'split', h: [3, 1] }), null, '入れ替えただけの形にはできない');
 assert.equal(SS.apply(s, { p: 0, t: 'split', h: [2, 3] }), null, '合計は変えられない');
 assert.deepEqual(SS.apply(s, { p: 0, t: 'split', h: [2, 2] }).hands[0], [2, 2]);
 assert.equal(SS.apply(s, { p: 0, t: 'split', h: [0, 4] }), null, '分けて手を0本にはできない');
 assert.deepEqual(SS.apply(ssBase([[0, 2], [1, 1]]), { p: 0, t: 'split', h: [1, 1] }).hands[0], [1, 1], '消えた手にも配れる');
-assert.equal(SS.apply(ssBase([[1, 3], [1, 1]], { rules: { over: 'dead', split: false } }), { p: 0, t: 'split', h: [2, 2] }), null, '「分ける」なしなら分けられない');
+assert.equal(SS.apply(ssBase([[1, 3], [1, 1]], { rules: { split: false } }), { p: 0, t: 'split', h: [2, 2] }), null, '「分ける」なしなら分けられない');
 // 3人: 1人が抜けると、その人の番は飛ばす。最後の1人で勝ち
 s = ssBase([[4, 0], [1, 0], [2, 2]]);
 t = SS.apply(s, { p: 0, t: 'atk', from: 0, to: 1, hand: 0 });
@@ -443,7 +456,7 @@ assert.deepEqual(SS.result(t).ranking, [2, 0, 1], '順位は抜けた順の逆')
 let ssDraws = 0;
 for (let k = 0; k < 300; k++) {
   const n = 2 + (k % 5);
-  const rules = { over: k % 2 ? 'wrap' : 'dead', split: k % 3 !== 0 };
+  const rules = { split: k % 3 !== 0 };
   let st = SS.init(n, 0, { rules });
   while (!SS.result(st)) {
     const m = SS.cpu(st, st.turn);
@@ -503,12 +516,16 @@ console.log('yubisuma games 200, avg rounds', (ysRounds / 200).toFixed(1));
 
 // ---------- 神経衰弱 ----------
 const MM = GAMES.memory;
-assert.equal(MM.init(2, 5, { rules: {} }).cards.length, 52);
-s = MM.init(2, 5, { rules: { size: 26 } });
-assert.equal(s.cards.length, 26);
-assert.ok(s.cards.every((c) => c[0] === 's' || c[0] === 'h'), '26枚は♠と♥');
-assert.deepEqual(s, MM.init(2, 5, { rules: { size: 26 } }), '同じ種なら同じ並び');
-s = { ...MM.init(2, 0, { rules: { size: 26 } }), cards: ['s1', 'h1', 's2', 'h2', 's3', 'h3'], taken: Array(6).fill(null), seen: Array(6).fill(false) };
+assert.equal(MM.init(2, 5, { rules: {} }).cards.length, 48, '最初は48枚');
+for (const [size, top] of [[48, 12], [36, 9], [24, 6]]) {
+  const m = MM.init(2, 5, { rules: { size } });
+  assert.equal(m.cards.length, size);
+  assert.equal(new Set(m.cards).size, size, '同じ札が2枚無い');
+  assert.ok(m.cards.every((c) => Number(c.slice(1)) <= top), `${size}枚は${top}まで`);
+}
+s = MM.init(2, 5, { rules: { size: 24 } });
+assert.deepEqual(s, MM.init(2, 5, { rules: { size: 24 } }), '同じ種なら同じ並び');
+s = { ...MM.init(2, 0, { rules: { size: 24 } }), cards: ['s1', 'h1', 's2', 'h2', 's3', 'h3'], taken: Array(6).fill(null), seen: Array(6).fill(false) };
 assert.equal(MM.apply(s, { p: 1, t: 'flip', i: 0 }), null, '手番でない人はめくれない');
 t = MM.apply(s, { p: 0, t: 'flip', i: 0 });
 assert.equal(MM.apply(t, { p: 0, t: 'flip', i: 0 }), null, '同じ札は2回めくれない');
@@ -522,7 +539,7 @@ assert.deepEqual(t.open, [2], '次の人がめくると、前の2枚は伏せる
 let mmGames = 0;
 for (let k = 0; k < 200; k++) {
   const n = 2 + (k % 7);
-  let st = MM.init(n, k * 31 + 1, { rules: { size: k % 2 ? 26 : 52 } });
+  let st = MM.init(n, k * 31 + 1, { rules: { size: [48, 36, 24][k % 3] } });
   let steps = 0;
   while (!MM.result(st)) {
     st = MM.apply(st, { ...MM.cpu(st, st.turn), p: st.turn });
@@ -536,32 +553,37 @@ console.log('memory games', mmGames);
 // ---------- 石取り ----------
 const NIM = GAMES.nim;
 const { goodMove } = await import('../app/js/games/nim.js');
+const nimMaxes = new Set();
 for (let k = 0; k < 200; k++) {
   const a = NIM.init(3, k, { rules: {} });
   assert.deepEqual(a, NIM.init(3, k, { rules: {} }), '石取りの山は seed から毎回同じ');
-  assert.ok(a.piles.length >= 3 && a.piles.length <= 5 && a.piles.every((v) => v >= 5 && v <= 15), '山3〜5つ・5〜15個');
-  const b = NIM.init(2, k, { rules: { mode: 'single' } });
-  assert.ok(b.piles.length === 1 && b.piles[0] >= 15 && b.piles[0] <= 30, '山1つは15〜30個');
+  assert.ok(a.piles.length === 1 && a.piles[0] >= 15 && a.piles[0] <= 30, '山1つ・15〜30個');
+  assert.ok(a.max >= 3 && a.max <= 5, '1回の最大は3〜5個');
+  nimMaxes.add(a.max);
 }
-const nimBase = (o) => ({ n: 3, rules: { mode: 'multi', last: 'lose' }, piles: [3, 1], start: [3, 1], turn: 0, ender: null, step: 0, last: null, ...o });
+assert.equal(nimMaxes.size, 3, '1回の最大が3・4・5のどれも出る');
+const nimBase = (o) => ({ n: 3, rules: { last: 'lose' }, piles: [9], start: [9], max: 3, turn: 0, ender: null, step: 0, last: null, ...o });
 s = nimBase();
 assert.equal(NIM.apply(s, { p: 1, t: 'take', pile: 0, k: 1 }), null, '手番でない人は取れない');
-assert.equal(NIM.apply(s, { p: 0, t: 'take', pile: 0, k: 4 }), null, '山より多くは取れない');
+assert.equal(NIM.apply(s, { p: 0, t: 'take', pile: 0, k: 4 }), null, '最大3個の対局では4個取れない');
 assert.equal(NIM.apply(s, { p: 0, t: 'take', pile: 0, k: 0 }), null, '0個は取れない');
-assert.equal(NIM.apply(nimBase({ rules: { mode: 'single', last: 'lose' }, piles: [9], start: [9] }), { p: 0, t: 'take', pile: 0, k: 4 }), null, '山1つは3個まで');
-t = NIM.apply(NIM.apply(s, { p: 0, t: 'take', pile: 0, k: 3 }), { p: 1, t: 'take', pile: 1, k: 1 });
+assert.ok(NIM.apply(nimBase({ max: 5 }), { p: 0, t: 'take', pile: 0, k: 5 }), '最大5個の対局では5個取れる');
+assert.equal(NIM.apply(nimBase({ max: 5 }), { p: 0, t: 'take', pile: 0, k: 6 }), null, '最大5個の対局では6個取れない');
+assert.equal(NIM.apply(nimBase({ piles: [2], start: [2] }), { p: 0, t: 'take', pile: 0, k: 3 }), null, '残りより多くは取れない');
+t = NIM.apply(NIM.apply(nimBase({ piles: [3] }), { p: 0, t: 'take', pile: 0, k: 2 }), { p: 1, t: 'take', pile: 0, k: 1 });
+assert.equal(t.max, 3, '最大数は対局の間変わらない');
 assert.equal(NIM.result(t).loser, 1, '最後の1個を取った人の負け');
 assert.equal(NIM.result(t).winner, null, '3人以上は負けが1人');
-t = NIM.apply(NIM.apply(nimBase({ rules: { mode: 'multi', last: 'win' } }), { p: 0, t: 'take', pile: 0, k: 3 }), { p: 1, t: 'take', pile: 1, k: 1 });
+t = NIM.apply(NIM.apply(nimBase({ rules: { last: 'win' }, piles: [3] }), { p: 0, t: 'take', pile: 0, k: 2 }), { p: 1, t: 'take', pile: 0, k: 1 });
 assert.equal(NIM.result(t).winner, 1, '「最後を取った人の勝ち」');
 assert.equal(t.turn, 1, '終わったら手番は進めない');
-// 筋の良い手: 最後を取ると負けのときは「1個の山を奇数個残す」、勝ちのときは xor を 0 に
-assert.deepEqual(goodMove(nimBase({ piles: [2, 1, 1] })), { pile: 0, k: 1 }, '負けルール: 1個の山を3つ残す');
-assert.deepEqual(goodMove(nimBase({ rules: { mode: 'multi', last: 'win' }, piles: [2, 1, 1] })), { pile: 0, k: 2 }, '勝ちルール: xor を 0 に');
-assert.deepEqual(goodMove(nimBase({ rules: { mode: 'single', last: 'lose' }, piles: [7] })), { pile: 0, k: 2 }, '山1つ・負け: 4の倍数+1を残す');
+// 筋の良い手: 残りを「最大数＋1」の倍数（負けルールは倍数＋1）にする
+assert.deepEqual(goodMove(nimBase({ piles: [7] })), { pile: 0, k: 2 }, '最大3・負け: 4の倍数+1を残す');
+assert.deepEqual(goodMove(nimBase({ max: 4, rules: { last: 'win' }, piles: [12] })), { pile: 0, k: 2 }, '最大4・勝ち: 5の倍数を残す');
+assert.equal(goodMove(nimBase({ max: 5, piles: [7] })), null, '最大5・負けで7個（6の倍数+1）は筋の良い手が無い');
 // CPU どうしで最後まで
 for (let k = 0; k < 300; k++) {
-  const rules = [{}, { mode: 'single' }, { last: 'win' }, { mode: 'single', last: 'win' }][k % 4];
+  const rules = [{}, { last: 'win' }][k % 2];
   const n = 2 + (k % 5);
   let st = NIM.init(n, k, { rules });
   let steps = 0;
@@ -614,9 +636,29 @@ s = ref(FL, ref(FL, s, 'next'), 'close');
 assert.deepEqual(s.scores, [3, 3], '動かさないのが正解なら全員1位');
 // 最後まで進む
 s = FL.init(2, 9, { rules: {} });
-for (let q = 0; q < 10; q++) s = ref(FL, ref(FL, s, 'next'), 'close');
+for (let q = 0; q < 15; q++) s = ref(FL, ref(FL, s, 'next'), 'close');
 s = ref(FL, s, 'next');
-assert.ok(FL.result(s), '10問で終わる');
+assert.ok(FL.result(s), '15問で終わる');
+// 後半ほど点が増え、長いお題は11問目から
+{
+  let longs = 0;
+  for (let k = 0; k < 200; k++) {
+    const st = FL.init(2, k, { rules: {} });
+    st.cmds.forEach((c, q) => {
+      if (c.long) { longs++; assert.ok(q >= 10, '長いお題は11問目から'); assert.equal(c.text.split('、').length, 3, '長いお題は命令3つ'); }
+    });
+  }
+  assert.ok(longs > 300, '長いお題がちゃんと出る');
+  const pointsAt = (q) => {
+    let st = FL.init(2, 3, { rules: {} });
+    st.cmds = st.cmds.map(() => ({ text: '赤上げて', pose: { r: 1, w: 0 } }));
+    for (let i = 0; i < q; i++) st = ref(FL, ref(FL, st, 'next'), 'close');
+    st = ref(FL, st, 'next');
+    st = FL.apply(st, { p: 0, t: 'pose', q, r: 1, w: 0, ms: 300, n: 1 });
+    return ref(FL, st, 'close').last[0].pt;
+  };
+  assert.deepEqual([pointsAt(0), pointsAt(5), pointsAt(10)], [3, 6, 9], '1位の点は 3・6・9');
+}
 
 // ---------- 難読漢字 ----------
 const KJ = GAMES.kanji;
@@ -709,5 +751,12 @@ assert.equal(UM.init(3, 2, { prev: [1, 0, 0] }).setter, 1, '次は出題者を�
 assert.equal(UM.result(UM.apply(UM.apply(UM.init(2, 3, {}), { p: 0, t: 'pick', idx: 0 }), { p: 0, t: 'reveal' })).winner, null, '答えを明かして終わる');
 assert.equal(UM.apply(UM.init(2, 3, {}), { p: 1, t: 'reveal' }), null, '出題者でない人は明かせない');
 console.log('party games OK');
+
+// 遊び方: どのゲームにもあり、長くしない（1つ4行まで）
+const { GAME_ORDER } = await import('../app/js/games/index.js');
+for (const id of GAME_ORDER) {
+  const h = GAMES[id].howto;
+  assert.ok(Array.isArray(h) && h.length >= 1 && h.length <= 4 && h.every((x) => typeof x === 'string' && x), `${id} の遊び方（1〜4行）`);
+}
 
 console.log('ALL OK');

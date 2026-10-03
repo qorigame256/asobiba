@@ -1,7 +1,9 @@
 // 旗揚げ。お題（「赤上げて」「白下げないで赤下げない」など）が出たら、全員同時に赤と白の旗を正しい形にする。
 // 毎問、旗は「前のお題の正しい形」から始まる（前の問題で間違えても引きずらない）。
 // 正解した人には、形を作り終えた（最後に旗を動かした）速さの順に 1位3点・2位2点・ほか1点。旗を動かさないのが正解なら全員同着。
-// 10問で点の多い人の勝ち。
+// 15問で点の多い人の勝ち。5問ごとに3段階で難しくなる（STAGES）:
+//   1〜5問目はそのまま / 6〜10問目は制限時間8割・点2倍 / 11〜15問目は制限時間65%・点3倍で、命令を3つつなげた長いお題も出る
+//   （長いお題は読む分として LONG_EXTRA だけ時間を足す）。
 //
 // 進行（ホストが時間を計って p = -1 の手を足す。main.js の scheduleReferee）:
 //   ready →(3秒)→ next → open（お題を出す）→(制限時間＋通信の待ち)→ close → shown（答え合わせ）→(2.6秒)→ next …
@@ -11,7 +13,13 @@
 import { mulberry32 } from './util.js';
 import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
 
-const TOTAL = 10;
+const TOTAL = 15;
+const STAGES = [ // 何問目から・制限時間の倍率・点の倍率・長いお題の出やすさ
+  { from: 0, time: 1, mul: 1, long: 0 },
+  { from: 5, time: 0.8, mul: 2, long: 0 },
+  { from: 10, time: 0.65, mul: 3, long: 0.5 },
+];
+const LONG_EXTRA = 800;
 const READY_MS = 3000;
 const SHOWN_MS = 2600;
 const GRACE_MS = 1200; // ゲストの答えが届くのを待つ分
@@ -20,8 +28,24 @@ const POINTS = [3, 2];
 const FLAG = { r: '赤', w: '白' };
 const VERB = { 1: '上げ', 0: '下げ' };
 
-// お題を1つ作る。pose = この問題を始める前の正しい形。返すのは { text, pose: 正しい形 }
-function makeCommand(rng, pose) {
+// 命令を3つつなげた長いお題（例「赤上げて、白下げないで、赤下げて」）。後ろの命令ほど後で効く
+function makeLong(rng, pose) {
+  const next = { ...pose };
+  let f = rng() < 0.5 ? 'r' : 'w';
+  const parts = [];
+  for (let i = 0; i < 3; i++) {
+    if (i > 0 && rng() < 0.6) f = f === 'r' ? 'w' : 'r';
+    const a = rng() < 0.5 ? 1 : 0;
+    const not = rng() < 0.35;
+    if (!not) next[f] = a;
+    parts.push(`${FLAG[f]}${VERB[a]}${not ? (i < 2 ? 'ないで' : 'ない') : 'て'}`);
+  }
+  return { text: parts.join('、'), pose: next, long: true };
+}
+
+// お題を1つ作る。pose = この問題を始める前の正しい形。返すのは { text, pose: 正しい形, long: 長いお題か }
+function makeCommand(rng, pose, stage) {
+  if (stage.long && rng() < stage.long) return makeLong(rng, pose);
   const f = rng() < 0.5 ? 'r' : 'w';
   const g = f === 'r' ? 'w' : 'r';
   const v = () => (rng() < 0.5 ? 1 : 0);
@@ -43,7 +67,8 @@ function makeCommand(rng, pose) {
 }
 
 const samePose = (a, b) => a.r === b.r && a.w === b.w;
-const limitOf = (s) => LIMITS[s.rules.speed] ?? LIMITS.normal;
+const stageOf = (q) => STAGES.findLast((x) => q >= x.from);
+const limitOf = (s, q = s.q) => Math.round((LIMITS[s.rules.speed] ?? LIMITS.normal) * stageOf(q).time) + (s.cmds[q]?.long ? LONG_EXTRA : 0);
 const qKey = (s, q = s.q) => `flags:${s.seed}:${q}`;
 const startPose = (s, q = s.q) => (q > 0 ? s.cmds[q - 1].pose : { r: 0, w: 0 });
 
@@ -92,7 +117,7 @@ export default {
     const cmds = [];
     let pose = { r: 0, w: 0 };
     for (let i = 0; i < TOTAL; i++) {
-      const c = makeCommand(rng, pose);
+      const c = makeCommand(rng, pose, stageOf(i));
       cmds.push(c);
       pose = c.pose;
     }
@@ -105,6 +130,12 @@ export default {
   turn() { return null; },
   canAct(s) { return s.phase === 'open'; },
   result(s) { return s.phase === 'end' ? { winners: leaders(s.scores), scores: s.scores } : null; },
+  // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
+  // ほかの人が旗を動かした音は鳴らさない（にぎやかすぎるため）
+  sound(a, b, m, me) {
+    if (m.p === -1) return m.t === 'next' ? 'question' : me >= 0 ? (b.last[me].ok ? 'correct' : 'wrong') : 'pop';
+    return m.p === me ? 'pop' : null;
+  },
   resultText(res, me, pn) { return winnersText(res.winners, me, pn); },
   phaseText(s) {
     if (s.phase === 'ready') return 'まもなく始まります…';
@@ -147,7 +178,7 @@ export default {
         s.last = res.map((r) => {
           if (!r.ok) return { ok: false, pt: 0 };
           const rank = 1 + times.filter((t) => t < r.ms).length;
-          return { ok: true, ms: r.ms, rank, pt: POINTS[rank - 1] ?? 1 };
+          return { ok: true, ms: r.ms, rank, pt: (POINTS[rank - 1] ?? 1) * stageOf(s.q).mul };
         });
         s.last.forEach((r, p) => { s.scores[p] += r.pt; });
         return s;
@@ -221,7 +252,9 @@ export default {
     if (local?.key !== key) local = { key, pose: { ...startPose(s) }, ms: 0, n: 0 };
     if (s.phase === 'open' && s.rules.voice && spoken !== key) { spoken = key; speak(cmd.text); }
 
-    card.innerHTML = `<div class="fl-num">第${s.q + 1}問 / ${TOTAL}</div><div class="fl-q"></div>`;
+    const mul = stageOf(s.q).mul;
+    card.innerHTML = `<div class="fl-num">第${s.q + 1}問 / ${TOTAL}${mul > 1 ? `<span class="fl-stage">点数×${mul}</span>` : ''}</div><div class="fl-q"></div>`;
+    if (cmd.long) card.querySelector('.fl-q').classList.add('long');
     card.querySelector('.fl-q').textContent = cmd.text;
     if (s.phase === 'open') card.append(timeBar(key, limit));
     else {

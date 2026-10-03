@@ -1,8 +1,8 @@
 // 戦争（両手の指で遊ぶもの。「割り箸」とも呼ばれる）。2〜6人。
 // 全員、両手とも指1本から始める。順番に、自分の手（指が1本以上）で、ほかの人の手（指が1本以上）をタッチする。
-// タッチされた手は、タッチした手の本数だけ指が増える。5本以上になったら（詳細設定で選ぶ）:
-//   over = 'dead' … その手は消える（0本）。最初はこれ
-//   over = 'wrap' … 5を引いた本数が残る（ちょうど5なら消える）
+// タッチされた手は、タッチした手の本数だけ指が増える。ちょうど5本になった手は消える（0本）。
+//   5本を超えたら、超えた分の本数になる（例: 4本に3本でタッチ → 2本）。
+//   （本人の決定・2026-10-03。前は詳細設定で「5本以上で消える」と選べたが、この形に固定した）
 // 「分ける」（詳細設定でオン・オフ）: 自分の番に、両手の合計を変えずに左右へ配り直す。消えた手にも配れる。
 //   左右を入れ替えただけの形や、今と同じ形にはできない。1本の手は4本まで。分けて手を0本にはできない（自分で消すのは不可。Claude の判断）。
 // 両手とも消えた人は負けて抜ける。最後に残った1人の勝ち。順位は抜けた順の逆。
@@ -16,10 +16,7 @@ const HAND_NAME = ['左手', '右手'];
 const aliveP = (s, p) => s.hands[p][0] + s.hands[p][1] > 0;
 const clone = (s) => ({ ...s, hands: s.hands.map((h) => h.slice()), out: s.out.slice() });
 
-function hitValue(rules, v) {
-  if (v < 5) return v;
-  return rules.over === 'wrap' ? v - 5 : 0;
-}
+const hitValue = (v) => (v < 5 ? v : v - 5);
 
 // p が選べる「分ける」の形
 function splitsOf(s, p) {
@@ -65,31 +62,32 @@ export default {
   id: 'sensou',
   name: '戦争',
   icon: '✌️',
-  desc: '両手の指の本数で戦う。相手の手をタッチして指を増やし、5本になった手は消える',
+  desc: '両手の指の本数で戦う。相手の手をタッチして指を増やし、ちょうど5本になった手は消える',
   ready: true,
   multi: true,
   minPlayers: 2,
   maxPlayers: 6,
   settings: [
-    { key: 'over', label: '5本以上になった手', desc: '地域でルールが違う所', def: 'dead', choices: [['dead', '消える'], ['wrap', '5を引いた分が残る（ちょうど5なら消える）']] },
     { key: 'split', label: '分ける', desc: '自分の番に、両手の指の合計を変えずに左右へ配り直せる（消えた手にも配れる。分けて0本にはできない）', def: true },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     return {
-      n, rules: { over: 'dead', split: true, ...rules }, hands: Array.from({ length: n }, () => [1, 1]),
+      n, rules: { split: true, ...rules }, hands: Array.from({ length: n }, () => [1, 1]),
       turn: 0, out: [], count: 0, winner: null, draw: false, step: 0, last: null,
     };
   },
 
   turn(s) { return s.winner === null && !s.draw ? s.turn : null; },
   canAct(s, p) { return s.winner === null && !s.draw && s.turn === p; },
+  // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
+  sound(a, b, m) { return m.t === 'atk' ? 'punch' : 'pop'; },
   result(s) {
     if (s.winner === null && !s.draw) return null;
     const alive = Array.from({ length: s.n }, (_, p) => p).filter((p) => aliveP(s, p));
     return { winner: s.winner, draw: s.draw, ranking: [...alive, ...s.out.slice().reverse()] };
   },
-  cpuDelay() { return 1100; },
+  cpuDelay() { return 700; },
   info(s) { return `手数 ${s.count} / ${s.n * LIMIT_PER_PLAYER}（ここまでで決着しなければ引き分け）`; },
 
   resultText(res, me, pn) {
@@ -107,7 +105,7 @@ export default {
       if (![0, 1].includes(from) || ![0, 1].includes(hand) || !Number.isInteger(to) || to < 0 || to >= s.n || to === p) return null;
       if (!s.hands[p][from] || !s.hands[to][hand]) return null;
       const before = s.hands[to][hand];
-      s.hands[to][hand] = hitValue(s.rules, before + s.hands[p][from]);
+      s.hands[to][hand] = hitValue(before + s.hands[p][from]);
       s.last = { p, t: 'atk', from, to, hand, before, after: s.hands[to][hand], add: s.hands[p][from] };
       if (!aliveP(s, to)) { s.out.push(to); s.last.out = true; }
     } else if (m.t === 'split') {
@@ -149,7 +147,7 @@ export default {
         let danger = false;
         for (let q = 0; q < t.n; q++) {
           if (q === p || !aliveP(t, q)) continue;
-          if (t.hands[q].some((x) => x && hitValue(t.rules, v + x) === 0)) danger = true;
+          if (t.hands[q].some((x) => x && hitValue(v + x) === 0)) danger = true;
         }
         if (danger) sc -= 4;
       }

@@ -20,18 +20,22 @@ export function makeDeck(jokers = 0) {
 
 export const cardLabel = (c) => (c === JOKER ? 'ジョーカー' : SUIT_MARK[c[0]] + rankLabel(rankOf(c)));
 
-// 札の見た目。tag を 'button' にすると押せる札になる
+// 札の見た目。tag を 'button' にすると押せる札になる。
+// 絵は img/cards/<札>.webp（Byron Knoll の Vector Playing Cards。パブリックドメイン。PNG を幅240の WebP に縮めた。
+// ♠A は飾りの無い版。飾りのある版は別の作者の絵で、自由に使えるとの表明が見つからなかったため使わない）。
+// 小さく出すと絵の隅の数字が読めないので、左上に大きめの数字とマークを重ねる
 export function cardEl(c, tag = 'div') {
   const e = document.createElement(tag);
   if (tag === 'button') e.type = 'button';
   if (c === JOKER) {
     e.className = 'pcard joker';
-    e.innerHTML = '<span class="pc-r">JO<br>KER</span><span class="pc-s">🃏</span>';
+    e.innerHTML = '<span class="pc-idx">JO<br>KER</span>';
   } else {
     const s = suitOf(c);
     e.className = 'pcard' + (s === 'h' || s === 'd' ? ' red' : '');
-    e.innerHTML = `<span class="pc-r">${rankLabel(rankOf(c))}</span><span class="pc-s">${SUIT_MARK[s]}</span>`;
+    e.innerHTML = `<span class="pc-idx">${rankLabel(rankOf(c))}<br>${SUIT_MARK[s]}</span>`;
   }
+  e.style.backgroundImage = `url(img/cards/${c === JOKER ? 'joker' : c}.webp)`;
   e.setAttribute('aria-label', cardLabel(c));
   return e;
 }

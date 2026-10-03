@@ -317,7 +317,14 @@ export default {
     return s.h.toAct === p;
   },
   result(s) { return s.over ? { winner: s.ranking[0], ranking: s.ranking } : null; },
-  cpuDelay(s) { return s.h?.phase === 'end' ? 4000 : 900; }, // 勝負の結果は少し長めに見せる
+  startSound: 'shuffle',
+  // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
+  sound(a, b, m) {
+    if (m.t === 'next') return 'shuffle';
+    if (b.h.phase === 'end' && a.h.phase !== 'end') return 'chip'; // 勝負が付いてチップを集める
+    return m.t === 'draw' ? 'card' : m.t === 'call' || m.t === 'raise' ? 'chip' : 'pop';
+  },
+  cpuDelay(s) { return s.h?.phase === 'end' ? 3000 : 600; }, // 勝負の結果は少し長めに見せる
 
   resultText(res, me, pn) {
     if (me >= 0) {

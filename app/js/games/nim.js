@@ -1,45 +1,24 @@
-// 石取りゲーム。2〜6人が順番に石を取る。
-// 「山いくつか」: 山は3〜5つ、1つの山に5〜15個（毎回ばらばら）。自分の番に、1つの山から好きな数だけ取る。
-// 「山1つ」: 山は1つで15〜30個（毎回ばらばら）。1回に1〜3個取る。
+// 石取りゲーム。2〜6人が順番に、1つの山から石を取る。
+// 山は1つで15〜30個。1回に取れるのは1個から最大数まで。最大数は3〜5個のどれかを対局の始めに決め、その対局の間は変わらない
+// （どちらも seed から作るので全員同じ。本人の決定・2026-10-03。前は「山いくつか」も選べたが、山1つだけにした）。
 // 最後の1個を取った人の負け（詳細設定で「勝ち」にもできる）。3人以上のときも負けは1人だけ。
-// 手: { p, t: 'take', pile: 山の番号, k: 取る数 }
+// 手: { p, t: 'take', pile: 0, k: 取る数 }（pile は山の番号。山は1つなので常に 0）
 
 import { mulberry32 } from './util.js';
 
-const MAX_SINGLE = 3;
-
 function int(rng, lo, hi) { return lo + Math.floor(rng() * (hi - lo + 1)); }
 
+const maxOf = (s) => Math.min(s.max, s.piles[0]);
+
 function legalMoves(s) {
-  const list = [];
-  s.piles.forEach((size, pile) => {
-    const max = s.rules.mode === 'single' ? Math.min(MAX_SINGLE, size) : size;
-    for (let k = 1; k <= max; k++) list.push({ pile, k });
-  });
-  return list;
+  return Array.from({ length: maxOf(s) }, (_, i) => ({ pile: 0, k: i + 1 }));
 }
 
-// 筋の良い手（2人のときの必勝法。3人以上でも同じ考えで打つ）。見つからなければ null
+// 筋の良い手（2人のときの必勝法。3人以上でも同じ考えで打つ）。残りを「最大数＋1」の倍数（負けルールは倍数＋1）にする。無ければ null
 export function goodMove(s) {
-  const lose = s.rules.last === 'lose';
-  if (s.rules.mode === 'single') {
-    const size = s.piles[0];
-    const k = lose ? (size - 1) % (MAX_SINGLE + 1) : size % (MAX_SINGLE + 1);
-    return k >= 1 && k <= Math.min(MAX_SINGLE, size) ? { pile: 0, k } : null;
-  }
-  // ニム: 取ったあとの山の大きさの xor（排他的論理和）を 0 にする。最後を取ると負けのときは、
-  // 2個以上の山が無くなる場面だけ「1個の山を奇数個残す」に変える
-  for (const { pile, k } of legalMoves(s)) {
-    const after = s.piles.map((v, i) => (i === pile ? v - k : v));
-    const big = after.filter((v) => v > 1).length;
-    const ones = after.filter((v) => v === 1).length;
-    if (lose && big === 0) {
-      if (ones % 2 === 1) return { pile, k };
-    } else if (after.reduce((a, v) => a ^ v, 0) === 0) {
-      return { pile, k };
-    }
-  }
-  return null;
+  const size = s.piles[0];
+  const k = s.rules.last === 'lose' ? (size - 1) % (s.max + 1) : size % (s.max + 1);
+  return k >= 1 && k <= maxOf(s) ? { pile: 0, k } : null;
 }
 
 const clone = (s) => ({ ...s, piles: s.piles.slice() });
@@ -50,28 +29,28 @@ export default {
   id: 'nim',
   name: '石取りゲーム',
   icon: '🪨',
-  desc: '順番に山から石を取る。最後の1個を取らされた人の負け',
+  desc: '順番に山から石を取る（1回に取れる数は毎回3〜5個のどれかまで）。最後の1個を取らされた人の負け',
   ready: true,
   multi: true,
   minPlayers: 2,
   maxPlayers: 6,
   settings: [
-    { key: 'mode', label: '山の形', desc: '山の数と石の数は毎回ばらばら', def: 'multi', choices: [['multi', '山いくつか・1つの山から好きな数'], ['single', '山1つ・1回に1〜3個']] },
     { key: 'last', label: '最後の1個', desc: '最後の1個を取った人が', def: 'lose', choices: [['lose', '負け'], ['win', '勝ち']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const rng = mulberry32(seed);
-    const r = { mode: 'multi', last: 'lose', ...rules };
-    const piles = r.mode === 'single'
-      ? [int(rng, 15, 30)]
-      : Array.from({ length: int(rng, 3, 5) }, () => int(rng, 5, 15));
-    return { n, rules: r, piles, start: piles.slice(), turn: 0, ender: null, step: 0, last: null };
+    const r = { last: 'lose', ...rules };
+    const piles = [int(rng, 15, 30)];
+    const max = int(rng, 3, 5);
+    return { n, rules: r, piles, start: piles.slice(), max, turn: 0, ender: null, step: 0, last: null };
   },
 
   turn(s) { return s.ender === null ? s.turn : null; },
   canAct(s, p) { return s.ender === null && s.turn === p; },
 
+  // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
+  sound() { return 'stone'; },
   result(s) {
     if (s.ender === null) return null;
     const lose = s.rules.last === 'lose';
@@ -88,14 +67,12 @@ export default {
   },
 
   info(s) {
-    return s.rules.mode === 'single' ? '1回に1〜3個まで取れます' : '1つの山から好きな数だけ取れます';
+    return `この対局は1回に1〜${s.max}個まで取れます`;
   },
 
   apply(s0, m) {
     if (!m || m.t !== 'take' || !this.canAct(s0, m.p)) return null;
-    const size = s0.piles[m.pile];
-    const max = s0.rules.mode === 'single' ? Math.min(MAX_SINGLE, size) : size;
-    if (!Number.isInteger(m.pile) || size === undefined || !Number.isInteger(m.k) || m.k < 1 || m.k > max) return null;
+    if (m.pile !== 0 || !Number.isInteger(m.k) || m.k < 1 || m.k > maxOf(s0)) return null;
     const s = clone(s0);
     s.piles[m.pile] -= m.k;
     s.step += 1;
@@ -160,7 +137,7 @@ export default {
       label.textContent = s.piles.length > 1 ? `山${pile + 1}・${size}個` : `残り${size}個`;
       const stones = document.createElement('div');
       stones.className = 'nim-stones';
-      const max = s.rules.mode === 'single' ? Math.min(MAX_SINGLE, size) : size;
+      const max = maxOf(s);
       for (let j = 0; j < s.start[pile]; j++) {
         const gone = j >= size;
         const k = size - j; // この石を押すと、ここから右端までを取る
@@ -168,10 +145,10 @@ export default {
         const st = document.createElement(ok ? 'button' : 'span');
         st.className = 'nim-stone' + (gone ? ' gone' : '') + (ok ? ' playable' : '')
           + (picked?.pile === pile && !gone && k <= picked.k ? ' sel' : '')
-          + (o.fresh && s.last?.pile === pile && gone && j < size + s.last.k ? ' taken' : '');
+          + (s.last?.pile === pile && gone && j < size + s.last.k ? ' taken' + (o.fresh ? ' pop' : '') : '');
         if (ok) {
           st.type = 'button';
-          st.setAttribute('aria-label', `山${pile + 1}から${k}個取る`);
+          st.setAttribute('aria-label', `${k}個取る`);
           st.onclick = () => { picked = { step: s.step, pile, k }; draw(); };
         }
         stones.append(st);

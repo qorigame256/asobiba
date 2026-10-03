@@ -151,6 +151,13 @@ export default {
 
   turn() { return null; },
   canAct(s) { return s.phase === 'play'; },
+  // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
+  // ほかの人が押した音は鳴らさない（にぎやかすぎるため）
+  sound(a, b, m, me) {
+    if (m.p === -1) return 'question';
+    if (m.p !== me) return null;
+    return m.t === 'miss' || b.targets[m.id].kind === 'bomb' ? 'wrong' : 'hit';
+  },
   result(s) {
     if (s.phase !== 'end') return null;
     const scores = scoresOf(s);

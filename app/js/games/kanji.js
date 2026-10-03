@@ -56,6 +56,12 @@ export default {
   turn() { return null; },
   canAct(s) { return s.phase === 'open'; },
   result(s) { return s.phase === 'end' ? { winners: leaders(s.scores), scores: s.scores } : null; },
+  // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
+  sound(a, b, m, me) {
+    if (m.p === -1) return m.t === 'next' ? 'question' : b.last.winners.includes(me) ? 'correct' : 'pop';
+    if (m.p === me) return b.solved[me] !== null ? 'correct' : 'wrong';
+    return b.solved[m.p] !== null ? 'pop' : null; // ほかの人が正解したときだけ
+  },
   resultText(res, me, pn) { return winnersText(res.winners, me, pn); },
   phaseText(s) {
     if (s.phase === 'ready') return 'まもなく始まります…';

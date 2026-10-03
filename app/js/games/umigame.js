@@ -78,6 +78,8 @@ export default {
     return p === s.setter || (s.phase === 'ask' && p === s.turn);
   },
   result(s) { return s.phase === 'end' ? { winner: s.winner } : null; },
+  // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
+  sound(a, b, m) { return m.t === 'pick' || m.t === 'custom' ? 'question' : m.t === 'judge' && !m.ok ? 'wrong' : 'pop'; },
   resultText(res, me, pn) {
     if (res.winner === null) return '出題者が答えを明かしました';
     return res.winner === me ? 'あなたが真相を当てた！🎉' : `${pn(res.winner)}が真相を当てた！`;
@@ -137,7 +139,7 @@ export default {
   },
 
   // CPU は入らないので、ここに来るのは部屋を出た人の席だけ
-  cpuDelay() { return 1500; },
+  cpuDelay() { return 1000; },
   cpu(s, p) { return p === s.setter ? { t: 'reveal' } : { t: 'pass' }; },
 
   render(root, s, o) {

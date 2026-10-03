@@ -1,11 +1,14 @@
 // 神経衰弱。2〜8人。トランプを裏向きに並べ、順番に2枚ずつめくる。
 // 同じ数字の2枚ならもらえて、続けてもう1回めくれる。違えば次の人へ（その2枚は次の人が1枚めくるまで表のまま見える）。
 // 全部取り終わったとき、組の数が一番多い人の勝ち（同数なら同着）。
-// 枚数（詳細設定）: 52 … トランプ全部（ジョーカーなし） / 26 … ♠と♥だけ（同じ数字はちょうど1組ずつ）
+// 枚数（詳細設定）: 48 … A〜Q / 36 … A〜9 / 24 … A〜6（どれも4マーク分。ジョーカーなし）。
+//   すき間のない長方形に並べるため、並べやすい枚数にした（本人の決定・2026-10-03。前は 52枚・26枚）。並べ方は SIZES の cols 列。
 // 手: { p, t: 'flip', i: 何枚目の札か }。めくった札がもう表なら反則なので、同じ手が2回来ても2回目は弾かれる。
 
 import { mulberry32, shuffle } from './util.js';
 import { makeDeck, rankOf, cardEl, backEl, cardLabel } from './cards.js';
+
+const SIZES = { 48: { top: 12, cols: 8 }, 36: { top: 9, cols: 6 }, 24: { top: 6, cols: 6 } };
 
 const clone = (s) => ({ ...s, taken: s.taken.slice(), open: s.open.slice(), scores: s.scores.slice(), seen: s.seen.slice() });
 
@@ -21,12 +24,12 @@ export default {
   minPlayers: 2,
   maxPlayers: 8,
   settings: [
-    { key: 'size', label: '枚数', desc: 'スマホの小さい画面なら 26枚が見やすい', def: 52, choices: [[52, '52枚（全部）'], [26, '26枚（♠と♥だけ）']] },
+    { key: 'size', label: '枚数', desc: 'すき間のない長方形に並べる', def: 48, choices: [[48, '48枚（A〜Q・8×6）'], [36, '36枚（A〜9・6×6）'], [24, '24枚（A〜6・6×4）']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const size = rules.size === 26 ? 26 : 52;
-    const deck = size === 26 ? makeDeck().filter((c) => c[0] === 's' || c[0] === 'h') : makeDeck();
+    const { top } = SIZES[rules.size] ?? SIZES[48];
+    const deck = makeDeck().filter((c) => rankOf(c) <= top);
     const cards = shuffle(deck, mulberry32(seed));
     return {
       n, cards, taken: Array(cards.length).fill(null), open: [], turn: 0, scores: Array(n).fill(0),
@@ -36,6 +39,9 @@ export default {
 
   turn(s) { return s.done ? null : s.turn; },
   canAct(s, p) { return !s.done && s.turn === p; },
+  startSound: 'shuffle',
+  // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
+  sound(a, b) { return b.last?.t === 'pair' ? (b.last.match ? 'correct' : 'wrong') : 'card'; },
   result(s) {
     if (!s.done) return null;
     const best = Math.max(...s.scores);
@@ -44,7 +50,7 @@ export default {
     return { winner: winners[0], winners, ranking };
   },
   // はずれた2枚を見せる間は少し長く待つ
-  cpuDelay(s) { return s.open.length === 2 ? 1800 : 1000; },
+  cpuDelay(s) { return s.open.length === 2 ? 1300 : 650; },
 
   resultText(res, me, pn) {
     if (res.winners.includes(me)) {
@@ -137,7 +143,10 @@ export default {
     root.append(log);
 
     const grid = document.createElement('div');
-    grid.className = 'mm-grid' + (s.cards.length > 26 ? ' many' : '');
+    const cols = SIZES[s.cards.length]?.cols ?? 8;
+    grid.className = 'mm-grid' + (cols > 6 ? ' many' : '');
+    grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    grid.style.maxWidth = `${cols * 60}px`;
     const fresh = s.open.length === 2 ? [] : s.open;
     s.cards.forEach((card, i) => {
       let e;

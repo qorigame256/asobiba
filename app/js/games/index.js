@@ -27,6 +27,11 @@
 //     realtime: true（全員が同時に動くゲーム。手がぶつかったらホストが後ろに足し直すので、手は「どの札を」で表し、
 //     同じ手が2回来ても2回目は反則になるように作る）
 //
+// 効果音（盤のゲーム・カードゲームとも任意。名前は sound.js の先頭の一覧）:
+//   sound(前の局面, 今の局面, 手, 自分の番号) → 新しい手が届いたときに鳴らす音の名前 | null（鳴らさない）。
+//     無ければ盤のゲームは place、カードゲームは card。対局が終わった手では呼ばれず、勝ち負けの音が鳴る（main.js の moveSound）,
+//   startSound（対局の始めに鳴らす音の名前。カードゲームの shuffle）
+//
 // 毎フレーム動くゲーム（live: true。エアホッケー）が持つもの: id / name / icon / desc / ready / players（2人の呼び名）/ settings,
 //   mount(要素, { mode: 'cpu' | 'two' | 'online', status: 状態表示の要素, me（オンライン: 0 / 1、観戦は -1）, names, rules,
 //     send(中身, 大事か) }) → { receive(中身, 送った人の番号), destroy() }。
@@ -52,6 +57,7 @@ import umigame from './umigame.js';
 import shogi from './shogi.js';
 import mahjong from './mahjong.js';
 import hockey from './hockey.js';
+import { HOWTO } from './howto.js';
 
 // 準備中のゲームを一覧に出すとき: soon('id', '名前', '絵文字')
 export const soon = (id, name, icon) => ({ id, name, icon, desc: 'じゅんび中', ready: false });
@@ -60,3 +66,5 @@ export const GAME_ORDER = ['tictactoe', 'connect4', 'reversi', 'colors', 'daifug
 export const GAMES = {
   tictactoe, connect4, reversi, colors, daifugo, poker, speed, hitblow, sensou, yubisuma, memory, nim, flags, kanji, targets, umigame, shogi, mahjong, hockey,
 };
+// 遊び方（howto.js）。対局画面の「？遊び方」で出す（main.js の renderHowto）
+for (const [id, lines] of Object.entries(HOWTO)) if (GAMES[id]) GAMES[id].howto = lines;

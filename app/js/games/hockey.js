@@ -11,6 +11,8 @@
 //   パックが中央の線を越えたら持ち主を相手に渡す。自分の陣地では自分の端末で当たりを計算するので、打った感触に遅れが出ない。
 //   相手の陣地にあるパックは、届いた位置から通信の遅れの分だけ先へ進めて描く。ゴールは持ち主（＝決められた側）が判定して知らせる。
 
+import { play, endSound } from '../sound.js';
+
 const W = 1;
 const H = 1.6;
 const R_P = 0.042; // パックの半径
@@ -59,40 +61,51 @@ function moveMallet(m, p, target, maxV, dt) {
   m.y = ny;
 }
 
+// 当たったときの近づく速さを返す（重なっていない・離れていくときは 0）。効果音の大きさに使う
 function bounceCircle(puck, cx, cy, rad, vx = 0, vy = 0, e = E_HIT) {
   const dx = puck.x - cx;
   const dy = puck.y - cy;
   const d = Math.hypot(dx, dy);
-  if (d >= rad || d === 0) return false;
+  if (d >= rad || d === 0) return 0;
   const nx = dx / d;
   const ny = dy / d;
   puck.x = cx + nx * rad;
   puck.y = cy + ny * rad;
   const vn = (puck.vx - vx) * nx + (puck.vy - vy) * ny;
   if (vn < 0) { puck.vx -= (1 + e) * vn * nx; puck.vy -= (1 + e) * vn * ny; }
-  return true;
+  return vn < 0 ? -vn : 0;
 }
 
-// パックを dt 秒進める。ゴールに入ったら点を取った側（0 / 1）を返す。mallets は当たりを見るマレット
-export function stepPuck(puck, mallets, dt) {
+// パックを dt 秒進める。ゴールに入ったら点を取った側（0 / 1）を返す。mallets は当たりを見るマレット。
+// ev（任意）を渡すと、マレットに当たった強さ（ev.hit）と壁に当たった強さ（ev.wall）のいちばん大きいものを書き込む（効果音用）
+export function stepPuck(puck, mallets, dt, ev = null) {
   puck.x += puck.vx * dt;
   puck.y += puck.vy * dt;
   const f = Math.max(0, 1 - FRICTION * dt);
   puck.vx *= f;
   puck.vy *= f;
   // マレットに押されて壁へめり込むことがあるので、マレットの当たりを先に、壁を後に見る
-  for (const m of mallets) bounceCircle(puck, m.x, m.y, R_P + R_M, m.vx, m.vy);
-  if (puck.x < R_P) { puck.x = R_P; puck.vx = Math.abs(puck.vx) * E_WALL; }
-  if (puck.x > W - R_P) { puck.x = W - R_P; puck.vx = -Math.abs(puck.vx) * E_WALL; }
+  let hit = 0;
+  let wall = 0;
+  for (const m of mallets) hit = Math.max(hit, bounceCircle(puck, m.x, m.y, R_P + R_M, m.vx, m.vy));
+  if (puck.x < R_P) { wall = Math.max(wall, -puck.vx); puck.x = R_P; puck.vx = Math.abs(puck.vx) * E_WALL; }
+  if (puck.x > W - R_P) { wall = Math.max(wall, puck.vx); puck.x = W - R_P; puck.vx = -Math.abs(puck.vx) * E_WALL; }
   const mouth = Math.abs(puck.x - W / 2) < GOAL / 2;
-  if (puck.y < R_P && !mouth) { puck.y = R_P; puck.vy = Math.abs(puck.vy) * E_WALL; }
-  if (puck.y > H - R_P && !mouth) { puck.y = H - R_P; puck.vy = -Math.abs(puck.vy) * E_WALL; }
+  if (puck.y < R_P && !mouth) { wall = Math.max(wall, -puck.vy); puck.y = R_P; puck.vy = Math.abs(puck.vy) * E_WALL; }
+  if (puck.y > H - R_P && !mouth) { wall = Math.max(wall, puck.vy); puck.y = H - R_P; puck.vy = -Math.abs(puck.vy) * E_WALL; }
   if (puck.y < -R_P) return 0; // 上のゴール（青の陣地）に入った → 赤の点
   if (puck.y > H + R_P) return 1;
-  for (const px of [W / 2 - GOAL / 2, W / 2 + GOAL / 2]) for (const py of [0, H]) bounceCircle(puck, px, py, R_P, 0, 0, E_WALL);
+  for (const px of [W / 2 - GOAL / 2, W / 2 + GOAL / 2]) for (const py of [0, H]) wall = Math.max(wall, bounceCircle(puck, px, py, R_P, 0, 0, E_WALL));
+  if (ev) { ev.hit = Math.max(ev.hit, hit); ev.wall = Math.max(ev.wall, wall); }
   const v = Math.hypot(puck.vx, puck.vy);
   if (v > MAX_V) { puck.vx *= MAX_V / v; puck.vy *= MAX_V / v; }
   return null;
+}
+
+// 1回の描き替えの間にパックが当たった音。マレットの音を優先し、ゆっくり触れただけ・壁をこすっているだけでは鳴らさない
+function bumpSound(ev) {
+  if (ev.hit > 0.3) play('smack', ev.hit / 2.5);
+  else if (ev.wall > 0.4) play('wall', ev.wall / 3);
 }
 
 /* ---------- CPU（上側・プレイヤー1） ---------- */
@@ -319,8 +332,10 @@ function mount(root, opts) {
       st.over = { winner: scorer };
       st.banner = opts.mode === 'cpu' ? (scorer === 0 ? 'あなたの勝ち！' : 'CPU の勝ち') : `${scorer === 0 ? '赤' : '青'}の勝ち！`;
       playing = false;
+      play(endSound(st.over, opts.mode === 'cpu' ? 0 : null));
       showOver();
     } else {
+      play('goal');
       st.banner = 'ゴール！';
       st.pause = GOAL_PAUSE;
       st.puck = servePuck(1 - scorer); // 決められた側から
@@ -339,14 +354,16 @@ function mount(root, opts) {
       targets[1] = cpuGoal;
     }
     const n = Math.ceil(dt / STEP);
+    const ev = { hit: 0, wall: 0 };
     for (let i = 0; i < n; i++) {
       const h = dt / n;
       moveMallet(st.mallets[0], 0, targets[0], MALLET_V, h);
       moveMallet(st.mallets[1], 1, targets[1], opts.mode === 'cpu' ? level.speed : MALLET_V, h);
       if (!playing || st.pause > 0) continue;
-      const g = stepPuck(st.puck, st.mallets, h);
+      const g = stepPuck(st.puck, st.mallets, h, ev);
       if (g !== null) { localGoal(g); break; }
     }
+    bumpSound(ev);
   }
 
   function showSetup() {
@@ -486,8 +503,10 @@ function mount(root, opts) {
     if (st.score.some((x) => x >= target)) {
       st.over = { winner: st.score[0] >= target ? 0 : 1 };
       st.banner = st.over.winner === opts.me ? 'あなたの勝ち！' : opts.me < 0 ? `${st.over.winner === 0 ? '赤' : '青'}の勝ち` : 'あなたの負け';
+      play(endSound(st.over, opts.me));
       showOver();
     } else {
+      play('goal');
       st.banner = 'ゴール！';
       st.pause = GOAL_PAUSE;
     }
@@ -505,13 +524,14 @@ function mount(root, opts) {
     if (st.pause > 0) { st.pause -= dt; if (st.pause <= 0 && !st.over) st.banner = ''; }
     const mine = opts.me;
     const n = Math.ceil(dt / STEP);
+    const ev = { hit: 0, wall: 0 }; // 相手の陣地ではマレットの当たりを計算しないので、相手が打った音は鳴らない（壁の音だけ）
     for (let i = 0; i < n; i++) {
       const h = dt / n;
       if (mine >= 0) moveMallet(st.mallets[mine], mine, targets[mine], MALLET_V, h);
       for (const p of [0, 1]) if (p !== mine) moveMallet(st.mallets[p], p, targets[p], MALLET_V * 2, h); // 相手のマレットは届いた位置へなめらかに
       if (!net.started || st.over || st.pause > 0) continue;
       if (net.owner === mine) {
-        const g = stepPuck(st.puck, [st.mallets[mine]], h);
+        const g = stepPuck(st.puck, [st.mallets[mine]], h, ev);
         if (g !== null) { // 自分の陣地のゴールに入った（＝決められた）
           const sc = st.score.slice();
           sc[g]++;
@@ -522,10 +542,11 @@ function mount(root, opts) {
         }
         const crossed = mine === 0 ? st.puck.y < H / 2 : st.puck.y > H / 2;
         if (crossed) { net.owner = other; sendState(now, true); }
-      } else if (stepPuck(st.puck, [], h) !== null) {
+      } else if (stepPuck(st.puck, [], h, ev) !== null) {
         st.puck.vx = 0; st.puck.vy = 0; // 相手の陣地のゴールの判定は相手に任せる
       }
     }
+    bumpSound(ev);
     if (mine >= 0 && now - net.lastSend > SEND_MS) sendState(now, false);
   }
 

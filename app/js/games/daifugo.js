@@ -290,6 +290,9 @@ export default {
     return s.phase === 'play' && s.turn === p;
   },
   result(s) { return s.phase === 'done' ? { winner: s.ranking[0], ranking: s.ranking } : null; },
+  startSound: 'shuffle',
+  // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
+  sound(a, b, m) { return m.t === 'pass' ? 'pop' : m.t === 'play' && b.last?.effects?.length ? 'call' : 'card'; },
   carry(s, p) { return s.ranking.indexOf(p); },
 
   resultText(res, me, pn) {

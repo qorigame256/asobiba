@@ -136,6 +136,9 @@ export default {
   turn(s) { return s.winner === null ? s.turn : null; },
   canAct(s, p) { return s.winner === null && s.turn === p; },
   result(s) { return s.winner === null ? null : { winner: s.winner }; },
+  startSound: 'shuffle',
+  // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
+  sound(a, b, m) { return m.t === 'draw' ? 'draw' : m.t === 'pass' ? 'pop' : 'card'; },
 
   apply(s0, m) {
     if (!m || s0.winner !== null || m.p !== s0.turn) return null;
