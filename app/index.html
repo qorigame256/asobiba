@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <title>みんなの対戦ボードゲーム</title>
+  <link rel="stylesheet" href="css/style.css">
+  <script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+  <main>
+    <section id="screen-home" class="screen">
+      <header class="home-header">
+        <h1>みんなの対戦ボードゲーム</h1>
+        <p id="home-lead">部屋を作って、友だちに招待リンクを送れば対戦できます。</p>
+      </header>
+
+      <div class="join-form name-box">
+        <label for="my-name">あなたの名前</label>
+        <input id="my-name" maxlength="10" autocomplete="nickname" placeholder="例: たろう（部屋の人に表示されます）">
+      </div>
+
+      <form id="join-form" class="join-form">
+        <label for="join-code">部屋コードで参加</label>
+        <div class="join-row">
+          <input id="join-code" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="例: K7QX2">
+          <button class="btn primary" type="submit">参加する</button>
+        </div>
+      </form>
+
+      <h2 id="game-list-title">ゲームを選ぶ</h2>
+      <div id="game-list" class="game-list"></div>
+      <div id="owner-box" class="owner-box"></div>
+    </section>
+
+    <section id="screen-play" class="screen" hidden>
+      <div class="play-top">
+        <button id="btn-leave" class="btn ghost" type="button">← ホーム</button>
+        <h2 id="play-title"></h2>
+      </div>
+
+      <div id="room-bar" class="room-bar" hidden>
+        <div class="room-code-box">部屋コード <strong id="room-code"></strong></div>
+        <div class="presence"><span id="presence-dot" class="dot"></span><span id="presence-text"></span></div>
+        <button id="btn-invite" class="btn primary small" type="button">招待する</button>
+      </div>
+
+      <div id="status" class="status" aria-live="polite"></div>
+      <div id="board" class="board"></div>
+      <div id="controls" class="controls"></div>
+    </section>
+  </main>
+  <div id="toast" class="toast" role="status"></div>
+</body>
+</html>

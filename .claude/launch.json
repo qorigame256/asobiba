@@ -1,0 +1,24 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "game",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["tools/serve.js", "8080"],
+      "port": 8080
+    },
+    {
+      "name": "game-8081",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["tools/serve.js", "8081"],
+      "port": 8081
+    },
+    {
+      "name": "game-auto",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["tools/serve.js"],
+      "port": 8082,
+      "autoPort": true
+    }
+  ]
+}

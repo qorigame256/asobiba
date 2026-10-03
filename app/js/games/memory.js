@@ -1,0 +1,187 @@
+// 神経衰弱。2〜8人。トランプを裏向きに並べ、順番に2枚ずつめくる。
+// 同じ数字の2枚ならもらえて、続けてもう1回めくれる。違えば次の人へ（その2枚は次の人が1枚めくるまで表のまま見える）。
+// 全部取り終わったとき、組の数が一番多い人の勝ち（同数なら同着）。
+// 枚数（詳細設定）: 52 … トランプ全部（ジョーカーなし） / 26 … ♠と♥だけ（同じ数字はちょうど1組ずつ）
+// 手: { p, t: 'flip', i: 何枚目の札か }。めくった札がもう表なら反則なので、同じ手が2回来ても2回目は弾かれる。
+
+import { mulberry32, shuffle } from './util.js';
+import { makeDeck, rankOf, cardEl, backEl, cardLabel } from './cards.js';
+
+const clone = (s) => ({ ...s, taken: s.taken.slice(), open: s.open.slice(), scores: s.scores.slice(), seen: s.seen.slice() });
+
+/* ---------- 画面 ---------- */
+
+export default {
+  id: 'memory',
+  name: '神経衰弱',
+  icon: '🎴',
+  desc: '裏向きのトランプを2枚ずつめくり、同じ数字をそろえる。覚えた人が勝つ',
+  ready: true,
+  multi: true,
+  minPlayers: 2,
+  maxPlayers: 8,
+  settings: [
+    { key: 'size', label: '枚数', desc: 'スマホの小さい画面なら 26枚が見やすい', def: 52, choices: [[52, '52枚（全部）'], [26, '26枚（♠と♥だけ）']] },
+  ],
+
+  init(n, seed, { rules = {} } = {}) {
+    const size = rules.size === 26 ? 26 : 52;
+    const deck = size === 26 ? makeDeck().filter((c) => c[0] === 's' || c[0] === 'h') : makeDeck();
+    const cards = shuffle(deck, mulberry32(seed));
+    return {
+      n, cards, taken: Array(cards.length).fill(null), open: [], turn: 0, scores: Array(n).fill(0),
+      seen: Array(cards.length).fill(false), done: false, step: 0, last: null,
+    };
+  },
+
+  turn(s) { return s.done ? null : s.turn; },
+  canAct(s, p) { return !s.done && s.turn === p; },
+  result(s) {
+    if (!s.done) return null;
+    const best = Math.max(...s.scores);
+    const winners = s.scores.map((v, p) => (v === best ? p : -1)).filter((p) => p >= 0);
+    const ranking = Array.from({ length: s.n }, (_, p) => p).sort((a, b) => s.scores[b] - s.scores[a]);
+    return { winner: winners[0], winners, ranking };
+  },
+  // はずれた2枚を見せる間は少し長く待つ
+  cpuDelay(s) { return s.open.length === 2 ? 1800 : 1000; },
+
+  resultText(res, me, pn) {
+    if (res.winners.includes(me)) {
+      const others = res.winners.filter((p) => p !== me);
+      return `あなたの勝ち！🎉${others.length ? `（${others.map(pn).join('・')}と同点）` : ''}`;
+    }
+    return `${res.winners.map(pn).join('・')}の勝ち！`;
+  },
+
+  apply(s0, m) {
+    if (!m || m.t !== 'flip' || !this.canAct(s0, m.p)) return null;
+    const i = m.i;
+    if (!Number.isInteger(i) || i < 0 || i >= s0.cards.length || s0.taken[i] !== null) return null;
+    const s = clone(s0);
+    if (s.open.length === 2) s.open = []; // 前の人がはずした2枚を伏せる
+    if (s.open.includes(i)) return null;
+    s.step += 1;
+    s.open.push(i);
+    s.seen[i] = true;
+    s.last = { p: m.p, t: 'flip', i };
+    if (s.open.length === 2) {
+      const [a, b] = s.open;
+      const match = rankOf(s.cards[a]) === rankOf(s.cards[b]);
+      s.last = { p: m.p, t: 'pair', a, b, match };
+      if (match) {
+        s.taken[a] = m.p;
+        s.taken[b] = m.p;
+        s.scores[m.p] += 1;
+        s.open = [];
+        if (s.taken.every((x) => x !== null)) s.done = true;
+      } else {
+        s.turn = (s.turn + 1) % s.n;
+      }
+    }
+    return s;
+  },
+
+  // CPU: 見た札を覚えているが、1枚ごとに4割の見込みで忘れる（弱めるため）
+  cpu(s, p) {
+    const fresh = s.open.length === 2 ? [] : s.open; // この番にめくった札
+    const left = s.cards.map((_, i) => i).filter((i) => s.taken[i] === null && !fresh.includes(i));
+    const memory = left.filter((i) => s.seen[i] && Math.random() < 0.6);
+    const unseen = left.filter((i) => !s.seen[i]);
+    const pickAny = () => {
+      const pool = unseen.length ? unseen : left;
+      return pool[Math.floor(Math.random() * pool.length)];
+    };
+    if (fresh.length === 1) {
+      const r = rankOf(s.cards[fresh[0]]);
+      const j = memory.find((i) => rankOf(s.cards[i]) === r);
+      return { t: 'flip', i: j ?? pickAny() };
+    }
+    for (const i of memory) {
+      if (memory.some((j) => j !== i && rankOf(s.cards[j]) === rankOf(s.cards[i]))) return { t: 'flip', i };
+    }
+    return { t: 'flip', i: pickAny() };
+  },
+
+  render(root, s, o) {
+    const me = o.me >= 0 ? o.me : null;
+    const nameP = (p) => (p === me ? 'あなた' : o.names[p]);
+    const can = o.canMove;
+
+    root.innerHTML = '';
+    root.className = 'board mm';
+
+    const opps = document.createElement('div');
+    opps.className = 'cc-opps';
+    const seats = me === null ? Array.from({ length: s.n }, (_, p) => p) : Array.from({ length: s.n }, (_, k) => (me + k) % s.n);
+    const res = this.result(s);
+    for (const p of seats) {
+      const chip = document.createElement('div');
+      chip.className = 'cc-opp' + (!s.done && s.turn === p ? ' turn' : '') + (res?.winners.includes(p) ? ' won' : '');
+      const name = document.createElement('div');
+      name.className = 'cc-opp-name';
+      name.textContent = nameP(p);
+      const score = document.createElement('div');
+      score.className = 'mm-score';
+      score.textContent = `${s.scores[p]}組`;
+      chip.append(name, score);
+      if (o.away[p]) chip.append(tag('away', '応答なし'));
+      else if (o.cpu[p] && !o.names[p].startsWith('CPU')) chip.append(tag('away', 'CPU が代わりに'));
+      opps.append(chip);
+    }
+    root.append(opps);
+
+    const log = document.createElement('p');
+    log.className = 'cc-log';
+    log.textContent = logText(s, nameP);
+    root.append(log);
+
+    const grid = document.createElement('div');
+    grid.className = 'mm-grid' + (s.cards.length > 26 ? ' many' : '');
+    const fresh = s.open.length === 2 ? [] : s.open;
+    s.cards.forEach((card, i) => {
+      let e;
+      if (s.taken[i] !== null) {
+        e = cardEl(card);
+        e.classList.add('taken');
+      } else if (s.open.includes(i)) {
+        // 前の人がはずした2枚は、次の人がめくり直してもよい
+        const again = can && s.open.length === 2;
+        e = cardEl(card, again ? 'button' : 'div');
+        e.classList.add('open');
+        if (again) {
+          e.classList.add('usable');
+          e.onclick = () => o.onMove({ t: 'flip', i });
+        }
+        if (o.fresh && s.last && (s.last.i === i || s.last.b === i)) e.classList.add('pop');
+      } else if (can && !fresh.includes(i)) {
+        e = document.createElement('button');
+        e.type = 'button';
+        e.className = 'pcard back usable';
+        e.setAttribute('aria-label', `${i + 1}枚目をめくる`);
+        e.onclick = () => o.onMove({ t: 'flip', i });
+      } else {
+        e = backEl();
+      }
+      if (o.fresh && s.last?.t === 'pair' && s.last.match && (s.last.a === i || s.last.b === i)) e.classList.add('got');
+      grid.append(e);
+    });
+    root.append(grid);
+  },
+};
+
+function tag(cls, text) {
+  const t = document.createElement('span');
+  t.className = 'cc-tag ' + cls;
+  t.textContent = text;
+  return t;
+}
+
+function logText(s, nameP) {
+  const l = s.last;
+  if (!l) return '裏向きの札を2枚めくって、同じ数字ならもらえます';
+  if (l.t === 'flip') return `${nameP(l.p)}が ${cardLabel(s.cards[l.i])} をめくった。もう1枚…`;
+  const pair = `${cardLabel(s.cards[l.a])} と ${cardLabel(s.cards[l.b])}`;
+  if (l.match) return s.done ? `${nameP(l.p)}が ${pair} をそろえた！ これで全部です` : `${nameP(l.p)}が ${pair} をそろえた！ もう1回`;
+  return `${nameP(l.p)}は ${pair}… はずれ`;
+}

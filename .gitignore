@@ -1,0 +1,4 @@
+.claude/settings.local.json
+# 公開しない手元だけの書き置き（元のアプリの名前・場所など）
+CLAUDE.local.md
+tools/local-paths.json

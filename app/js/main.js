@@ -1,0 +1,1078 @@
+// 画面の切り替え・部屋の管理・対局の同期。
+//
+// 同期の考え方: 盤面そのものは送らず「これまでの手の一覧」を送る。受け取った側は最初の局面から
+// 手を順に当て直して盤面を作る。手の一覧は短いので毎回まるごと送り、取りこぼしがあっても次の送信で追いつく。
+// 部屋を作った人（ホスト）が正。食い違ったらホストの状態に合わせる。
+//
+// 部屋: members = いま部屋にいる人の id（先頭がホスト）。人数の上限は MAX_MEMBERS。names = id → 表示名。
+// 対局の参加者（ゲームの中のプレイヤー番号 → 人の id）:
+//   盤のゲーム（2人用）: 待合室でホストが先手と後手を選ぶ（pick。人か 'cpu'）。もう一回では先手と後手を入れ替える。
+//     ほかの人は観戦。手には p を付けない（どちらの番かは局面で決まる）。
+//   カードゲーム（multi）: 対局を始めるときにホストが order を決める。
+//   オンラインでは、どちらも order が null の間は待合室。
+//     'cpu1' のような id は CPU。シャッフルは seed（対局ごとにホストが決める数）から作るので全員同じ山になる。
+// CPU の手はホストの端末が考えて、ふつうの手と同じように手の一覧へ足す。部屋を出た人の席も CPU が代わる。
+// 時間で進むゲーム（referee を持つもの）は、ホストの端末が時間を計って「次の問題へ」「締め切り」などの手（p = -1）を足す。
+// (gameId, round) が同じなら order と seed も同じ。order や seed を変えるときは必ず round を進める。
+// rules = ゲームごとの詳細設定（待合室でホストだけが変えられる）。prev = 前の対局の順位（大富豪のカード交換など）。
+//   carry = 次の対局へ持ち越す前の結果（人の id → 順位）。ホストが対局を始めるときに prev へ並べ替える。
+// 部屋を作る・同じ画面で遊ぶのは持ち主の端末だけ（owner.js）。ほかの人は招待された部屋に入るだけ。
+// banned = ホストが退出させた人の id。あいさつが来ても入れず、もう一度「退出」を送る。
+
+import { GAMES, GAME_ORDER } from './games/index.js';
+import { connectRoom } from './net.js';
+import { esc } from './games/util.js';
+import { isOwner, unlockOwner, forgetOwner } from './owner.js';
+
+const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 見間違えやすい I O 0 1 を除く
+const CODE_LEN = 5;
+const HEARTBEAT_MS = 5000;
+const LOST_MS = 20000;
+const MAX_MEMBERS = 10; // 部屋に入れる人数の上限（観戦を含む）
+const CPU_DELAY_MS = 900; // CPU が手を打つまでの間（速すぎると何が起きたか追えない）
+const NAME_KEY = 'bg-name';
+const SPECTATOR = -1;
+
+const el = (id) => document.getElementById(id);
+
+let S = null; // いま遊んでいる部屋・対局の状態。ホーム画面では null
+
+function randomString(n, chars) {
+  const a = crypto.getRandomValues(new Uint32Array(n));
+  return Array.from(a, (x) => chars[x % chars.length]).join('');
+}
+const newId = () => randomString(12, 'abcdefghijklmnopqrstuvwxyz0123456789');
+const randomSeed = () => crypto.getRandomValues(new Uint32Array(1))[0];
+const sameMove = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const isPrefix = (a, b) => a.length <= b.length && a.every((m, i) => sameMove(m, b[i]));
+const cleanName = (t) => String(t ?? '').replace(/\s+/g, ' ').trim().slice(0, 10);
+
+function myName() {
+  try { return cleanName(localStorage.getItem(NAME_KEY)); } catch { return ''; }
+}
+
+/* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
+
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned'];
+const roomKey = (code) => 'bg2-room-' + code;
+function loadRoom(code) {
+  try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
+}
+function saveRoom() {
+  if (S?.mode !== 'online') return;
+  const data = Object.fromEntries(SAVED_FIELDS.map((k) => [k, S[k]]));
+  try { sessionStorage.setItem(roomKey(S.code), JSON.stringify(data)); } catch { /* 保存できなくても遊べる */ }
+}
+function forgetRoom(code) {
+  try { sessionStorage.removeItem(roomKey(code)); } catch { /* 無視 */ }
+}
+// 退出させられた部屋は、この端末（別のタブも）から入り直せないよう覚えておく
+const kickedKey = (code) => 'bg-kicked-' + code;
+function wasKicked(code) {
+  try { return localStorage.getItem(kickedKey(code)) === '1'; } catch { return false; }
+}
+function setUrlRoom(code) {
+  const url = new URL(location.href);
+  if (code) url.searchParams.set('room', code); else url.searchParams.delete('room');
+  history.replaceState(null, '', url);
+}
+
+/* ---------- 参加者と局面 ---------- */
+
+const isCpu = (id) => typeof id === 'string' && id.startsWith('cpu');
+
+function nameOf(id) {
+  if (!id) return '（空席）';
+  if (isCpu(id)) return 'CPU' + id.slice(3);
+  return S.names?.[id] || 'ゲスト';
+}
+
+// この対局のプレイヤー番号 → 人の id。盤のゲームで相手がまだいない席は undefined
+function roundOrder() {
+  return S.mode === 'online' ? S.order ?? [] : [];
+}
+
+// ゲームの詳細設定。決めていない項目・おかしな値は既定値。choices があれば選択肢、無ければ はい/いいえ
+function rulesOf(gameId, rules) {
+  return Object.fromEntries((GAMES[gameId]?.settings ?? []).map((x) => {
+    const v = rules?.[gameId]?.[x.key];
+    const ok = x.choices ? x.choices.some(([c]) => c === v) : typeof v === 'boolean';
+    return [x.key, ok ? v : x.def];
+  }));
+}
+
+// 盤のゲームの席の書き添え。呼び名に「先手」「後手」が入っているゲーム（将棋）では重ねて書かない
+const seatNote = (game, p) => (game.players[p].includes(p === 0 ? '先手' : '後手') ? '' : `（${p === 0 ? '先手' : '後手'}）`);
+
+// R = { gameId, seed, order, moves, rules, prev }（S でも、届いた state でもよい）
+function replay(R) {
+  const game = GAMES[R.gameId];
+  if (!game?.ready) return null;
+  if (game.live) return Array.isArray(R.order) && R.order.length === 2 ? {} : null; // 手の一覧を使わないゲーム（局面はゲームが持つ）
+  let st;
+  if (game.multi) {
+    if (!Array.isArray(R.order) || R.order.length < game.minPlayers || R.order.length > game.maxPlayers) return null;
+    st = game.init(R.order.length, R.seed, { rules: rulesOf(R.gameId, R.rules), prev: R.prev ?? null });
+  } else {
+    if (Array.isArray(R.order) && R.order.length !== 2) return null;
+    st = game.init({ rules: rulesOf(R.gameId, R.rules) });
+  }
+  for (const m of R.moves) {
+    st = game.apply(st, m);
+    if (!st) return null;
+  }
+  return st;
+}
+
+// オンラインで自分がこの対局の何番目のプレイヤーか。観戦なら SPECTATOR、ローカル対戦では null
+function myPlayer() {
+  if (S.mode !== 'online') return null;
+  const i = roundOrder().indexOf(S.myId);
+  return i < 0 ? SPECTATOR : i;
+}
+
+const alive = (id) => id === S.myId || Date.now() - (S.seen[id] ?? 0) < LOST_MS;
+const cpuControlled = (id) => isCpu(id) || !S.members.includes(id);
+
+function seatsFilled() {
+  const o = roundOrder();
+  return o.length === 2 && o.every(Boolean);
+}
+
+function canMove(game, st, res) {
+  if (res || S.full) return false;
+  if (S.mode === 'local') return true;
+  const me = myPlayer();
+  if (me === SPECTATOR) return false;
+  if (game.multi) return game.canAct(st, me);
+  return seatsFilled() && game.turn(st) === me;
+}
+
+// 盤のゲームの先手・後手。ホストが選んだもの（pick）が使えなければ、先に来た2人（1人なら CPU）
+function boardPick() {
+  const ok = (v) => (v === 'cpu' && !GAMES[S.gameId]?.live) || S.members.includes(v); // 毎フレーム動くゲームは CPU を選べない
+  const p = S.pick;
+  if (Array.isArray(p) && p.length === 2 && p.every(ok) && (p[0] === 'cpu' || p[0] !== p[1])) return p.slice();
+  return [S.members[0], S.members[1] ?? 'cpu'];
+}
+
+// 待合室で決まる顔ぶれ。人がゲームの上限より多ければ、あとから来た人は観戦。
+// seats(rules) を持つゲーム（麻雀）は詳細設定で人数が決まり、足りない分はすべて CPU
+function lineup(game) {
+  const seats = game.seats?.(rulesOf(S.gameId, S.rules)) ?? null;
+  const max = seats ?? game.maxPlayers;
+  const humans = S.members.slice(0, max);
+  const watchers = S.members.slice(max);
+  if (game.noCpu) return { humans, watchers, cpus: 0, seats, max };
+  const cpus = seats ? seats - humans.length
+    : Math.max(0, Math.min(Math.max(S.cpus, game.minPlayers - humans.length), game.maxPlayers - humans.length));
+  return { humans, watchers, cpus, seats, max };
+}
+
+/* ---------- 画面 ---------- */
+
+function showScreen(name) {
+  for (const s of document.querySelectorAll('.screen')) s.hidden = s.id !== 'screen-' + name;
+  window.scrollTo(0, 0);
+}
+
+function makeButton(text, onClick, variant = 'primary') {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'btn ' + variant;
+  b.textContent = text;
+  b.onclick = onClick;
+  return b;
+}
+
+function toast(text) {
+  const t = el('toast');
+  t.textContent = text;
+  t.classList.add('show');
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+const playersText = (g) => (g.minPlayers === g.maxPlayers ? `${g.minPlayers}人` : `${g.minPlayers}〜${g.maxPlayers}人`);
+
+function renderHome() {
+  const owner = isOwner();
+  el('home-lead').textContent = owner
+    ? '部屋を作って、友だちに招待リンクを送れば対戦できます。'
+    : '招待された部屋コードを入れて参加してください。部屋を作れるのは、このサイトの持ち主だけです。';
+  el('game-list-title').hidden = !owner;
+  renderOwnerBox(owner);
+  const list = el('game-list');
+  list.innerHTML = '';
+  if (!owner) return;
+  for (const id of GAME_ORDER) {
+    const g = GAMES[id];
+    const card = document.createElement('article');
+    card.className = 'game-card' + (g.ready ? '' : ' not-ready');
+    card.innerHTML = `<div class="game-icon" aria-hidden="true">${g.icon}</div><h3>${g.name}</h3><p>${g.desc}</p>`;
+    if (g.ready) {
+      if (g.multi) {
+        const tag = document.createElement('span');
+        tag.className = 'tag';
+        tag.textContent = `${playersText(g)}・オンライン（${g.noCpu ? 'CPU なし' : '足りない分は CPU'}）`;
+        card.append(tag);
+      }
+      const actions = document.createElement('div');
+      actions.className = 'card-actions';
+      if (g.live) {
+        // 毎フレーム動くゲーム（エアホッケー）: CPU 戦・同じ画面の2人（指で触れる端末だけ）・オンライン（試作）
+        actions.append(makeButton('CPU と対戦', () => startLive(id, 'cpu')));
+        if (navigator.maxTouchPoints > 0) actions.append(makeButton('この画面で2人で', () => startLive(id, 'two'), 'secondary'));
+        actions.append(makeButton('部屋を作る（試作）', () => createRoom(id), 'secondary'));
+      } else {
+        actions.append(makeButton('部屋を作る', () => createRoom(id)));
+        if (!g.multi) actions.append(makeButton('この画面で2人で', () => startLocal(id), 'secondary'));
+      }
+      card.append(actions);
+    } else {
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = 'じゅんび中';
+      card.append(tag);
+    }
+    list.append(card);
+  }
+}
+
+// 持ち主の合言葉を入れる所。持ち主の端末では「登録を外す」だけ出す（友だちの端末で入れたときに外せるように）
+function renderOwnerBox(owner) {
+  const box = el('owner-box');
+  box.innerHTML = '';
+  if (owner) {
+    const p = document.createElement('p');
+    p.className = 'owner-note';
+    p.textContent = 'この端末は持ち主として登録されています。';
+    const off = makeButton('この端末の登録を外す', () => {
+      if (!confirm('この端末では部屋を作れなくなります。外しますか？（合言葉を入れれば戻せます）')) return;
+      forgetOwner();
+      renderHome();
+    }, 'ghost small');
+    p.append(' ', off);
+    box.append(p);
+    return;
+  }
+  const det = document.createElement('details');
+  det.className = 'owner-unlock';
+  const sum = document.createElement('summary');
+  sum.textContent = '持ち主の方はこちら';
+  const form = document.createElement('form');
+  form.className = 'join-row';
+  const input = document.createElement('input');
+  // パスワード欄は日本語入力が切られ、ひらがなの合言葉が入れられないので、ふつうの欄にする
+  input.type = 'text';
+  input.autocomplete = 'off';
+  input.autocapitalize = 'off';
+  input.spellcheck = false;
+  input.placeholder = '合言葉';
+  input.setAttribute('aria-label', '合言葉');
+  const ok = document.createElement('button');
+  ok.className = 'btn primary';
+  ok.type = 'submit';
+  ok.textContent = '確かめる';
+  form.append(input, ok);
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    ok.disabled = true;
+    let good = false;
+    try { good = await unlockOwner(input.value); } catch { /* 古いブラウザなど */ }
+    ok.disabled = false;
+    if (!good) { toast('合言葉が違います'); input.select(); return; }
+    toast('この端末を持ち主として登録しました');
+    renderHome();
+  };
+  det.append(sum, form);
+  box.append(det);
+}
+
+function renderRoomBar() {
+  const bar = el('room-bar');
+  if (!S || S.mode !== 'online') { bar.hidden = true; return; }
+  bar.hidden = false;
+  el('room-code').textContent = S.code;
+
+  const others = S.members.filter((id) => id !== S.myId);
+  const lost = others.filter((id) => !alive(id)).length;
+  let cls = 'off';
+  let text;
+  if (S.conn !== 'ready') {
+    text = S.conn === 'error' ? '通信できません' : '通信サーバーに接続中…';
+  } else if (!S.isHost && S.hostLeft) {
+    text = '部屋を作った人が出ました';
+  } else if (!others.length) {
+    cls = 'wait'; text = S.isHost ? '友だちを待っています' : '部屋の情報を待っています';
+  } else if (lost) {
+    cls = 'wait'; text = others.length === 1 ? '相手の応答がありません' : `${lost}人の応答がありません`;
+  } else {
+    cls = 'on'; text = others.length === 1 ? '相手と接続中' : `あなたを入れて${others.length + 1}人が接続中`;
+  }
+  el('presence-dot').className = 'dot ' + cls;
+  el('presence-text').textContent = text;
+}
+
+function statusHtml(game, st, res) {
+  const me = myPlayer();
+  let main;
+  let sub = '';
+  if (game.multi) {
+    const pn = (p) => `<b>${esc(p === me ? 'あなた' : nameOf(S.order[p]))}</b>`;
+    if (res) {
+      if (game.resultText) main = game.resultText(res, me, pn);
+      else main = res.winner === me ? 'あなたの勝ち！🎉' : `${pn(res.winner)}の勝ち！`;
+    } else {
+      const t = game.turn(st);
+      if (t === null) main = game.phaseText?.(st, me, pn) ?? '';
+      else if (t === me) main = 'あなたの番です';
+      else main = `${pn(t)}の番です…`;
+    }
+    if (me === SPECTATOR) sub = '観戦中です（次の対局から参加できます）';
+  } else {
+    const name = (p) => `<b class="pl p${p}">${game.players[p]}</b>`;
+    // 部屋を出た人の席は CPU が打っているので、そう書き添える
+    const who = (p) => {
+      const id = roundOrder()[p];
+      return esc(nameOf(id)) + (!isCpu(id) && !S.members.includes(id) ? '・CPU が代わりに' : '');
+    };
+    if (res) {
+      if (res.winner === null) main = '引き分け！';
+      else if (S.mode === 'local') main = `${name(res.winner)}の勝ち！🎉`;
+      else if (me === SPECTATOR) main = `${name(res.winner)}（${who(res.winner)}）の勝ち！`;
+      else main = res.winner === me ? 'あなたの勝ち！🎉' : 'あなたの負け…';
+    } else if (S.mode === 'local') {
+      main = `${name(game.turn(st))}の番です`;
+    } else if (!seatsFilled()) {
+      main = '友だちの参加を待っています。<br>上の「招待する」で部屋のリンクを送ってください。';
+    } else if (me === SPECTATOR) {
+      main = `${name(game.turn(st))}（${who(game.turn(st))}）の番です`;
+    } else {
+      main = game.turn(st) === me ? 'あなたの番です' : '相手の番です…';
+    }
+    if (S.mode === 'online') {
+      if (me === SPECTATOR) {
+        sub = `観戦中: ${name(0)} ${who(0)} ／ ${name(1)} ${who(1)}`;
+      } else {
+        sub = `あなたは ${name(me)}${seatNote(game, me)}・相手は ${who(1 - me)}`;
+      }
+    }
+  }
+  let html = `<div class="status-main">${main}</div>`;
+  if (sub) html += `<div class="status-sub">${sub}</div>`;
+  if (game.info) html += `<div class="status-sub">${game.info(st)}</div>`;
+  return html;
+}
+
+function render() {
+  if (!S) return;
+  renderRoomBar();
+  const game = S.gameId ? GAMES[S.gameId] : null;
+  el('play-title').textContent = game ? game.name : '部屋に参加';
+  el('screen-play').dataset.game = S.gameId ?? '';
+  const status = el('status');
+  const board = el('board');
+  const controls = el('controls');
+  controls.innerHTML = '';
+
+  let waiting = null;
+  if (S.mode === 'online') {
+    if (S.full) waiting = `この部屋は満員です（${MAX_MEMBERS}人まで）。`;
+    else if (S.conn === 'error') waiting = '通信サーバーにつながりませんでした。ネットにつながっているか確かめて、ページを読み込み直してください。';
+    else if (!game && S.conn !== 'ready') waiting = '通信サーバーにつないでいます…';
+    else if (!game) waiting = '部屋の情報を待っています…<br>しばらく待っても変わらないときは、部屋コードが合っているか確かめてください。';
+  }
+  if (!waiting && game?.live && (S.mode === 'local' || S.order)) { renderLive(game); return; }
+  stopLive();
+  if (!waiting && S.mode === 'online' && !S.order) {
+    if (game.multi) renderLobby(game); else renderBoardLobby(game);
+    appendMemberPanel();
+    return;
+  }
+  const st = waiting ? null : replay(S);
+  if (!waiting && !st) waiting = '対局のデータを読み直しています…';
+  if (waiting) {
+    status.innerHTML = `<div class="status-main small">${waiting}</div>`;
+    board.innerHTML = '';
+    board.className = 'board';
+    return;
+  }
+
+  const res = game.result(st);
+  status.innerHTML = statusHtml(game, st, res);
+
+  // 新しく打たれた手だけ動きを付ける（接続表示の更新などで描き直したときは動かさない）
+  const key = S.gameId + ':' + S.round;
+  const fresh = S.shownKey === key && S.moves.length > S.shownLen;
+  S.shownKey = key;
+  S.shownLen = S.moves.length;
+  const opts = { canMove: canMove(game, st, res), onMove: onBoardMove, fresh, me: myPlayer() };
+  if (game.multi) {
+    Object.assign(opts, {
+      names: S.order.map(nameOf),
+      cpu: S.order.map(cpuControlled),
+      away: S.order.map((id) => !isCpu(id) && S.members.includes(id) && !alive(id)),
+    });
+  }
+  game.render(board, st, opts);
+
+  if (res) {
+    controls.append(makeButton('もう一回', rematch));
+    if (S.mode === 'online' && S.isHost) controls.append(makeButton('メンバーを変える', () => newRound(S.gameId, { lobby: true }), 'secondary'));
+  } else if (S.mode === 'local' && S.moves.length) {
+    controls.append(
+      makeButton('1手戻す', () => { S.moves.pop(); render(); }, 'secondary'),
+      makeButton('最初から', () => { if (confirm('最初からやり直しますか？')) rematch(); }, 'secondary'),
+    );
+  }
+  if (S.mode === 'online' && S.isHost) controls.append(gameSelect());
+  appendMemberPanel();
+  scheduleCpu(game, st, res);
+  scheduleReferee(game, st, res);
+}
+
+function renderLobby(game) {
+  const status = el('status');
+  const board = el('board');
+  const controls = el('controls');
+  status.innerHTML = S.isHost
+    ? '<div class="status-main">待合室</div><div class="status-sub">友だちがそろったら「始める」を押してください。<br>上の「招待する」で部屋のリンクを送れます。</div>'
+    : '<div class="status-main">待合室</div><div class="status-sub">部屋を作った人が始めるのを待っています…</div>';
+
+  const { humans, watchers, cpus, seats, max } = lineup(game);
+  const row = (text, cls = '') => `<li class="${cls}">${text}</li>`;
+  const short = game.noCpu && humans.length < game.minPlayers;
+  let html = `<p class="lobby-note">${seats ? `${seats}人` : playersText(game)}で遊べます。${game.noCpu ? 'CPU は入れません。' : '足りない分は CPU が入ります。'}</p><ul class="lobby-list">`;
+  for (const id of humans) {
+    const marks = [id === S.myId ? 'あなた' : '', id === S.members[0] ? '部屋を作った人' : ''].filter(Boolean).join('・');
+    html += row(`${esc(nameOf(id))}${marks ? ` <small>（${marks}）</small>` : ''}`);
+  }
+  for (let i = 1; i <= cpus; i++) html += row(`CPU${i}`, 'cpu');
+  html += '</ul>';
+  if (watchers.length) html += `<p class="lobby-note">観戦: ${watchers.map((id) => esc(nameOf(id))).join('、')}（${max}人までのため）</p>`;
+  html += short
+    ? `<p class="lobby-total">あと${game.minPlayers - humans.length}人そろうと始められます</p>`
+    : `<p class="lobby-total">${humans.length + cpus}人で遊びます</p>`;
+  board.className = 'board lobby';
+  board.innerHTML = html;
+  if (game.settings) board.append(rulesPanel(game));
+
+  if (!S.isHost) return;
+  const start = makeButton('始める', startRound);
+  start.disabled = short;
+  if (game.noCpu || seats) { controls.append(start, gameSelect()); return; }
+  const setCpus = (n) => { S.cpus = n; saveRoom(); sendState(); render(); };
+  const minus = makeButton('CPU を減らす', () => setCpus(cpus - 1), 'secondary');
+  minus.disabled = humans.length + cpus <= game.minPlayers || cpus === 0;
+  const plus = makeButton('CPU を増やす', () => setCpus(cpus + 1), 'secondary');
+  plus.disabled = humans.length + cpus >= game.maxPlayers;
+  controls.append(minus, plus, start, gameSelect());
+}
+
+function renderBoardLobby(game) {
+  const status = el('status');
+  const board = el('board');
+  const controls = el('controls');
+  status.innerHTML = S.isHost
+    ? (game.live
+      ? '<div class="status-main">待合室</div><div class="status-sub">対戦する2人を選んで「始める」を押してください。<br>オンラインは試作です。</div>'
+      : '<div class="status-main">待合室</div><div class="status-sub">先手と後手を選んで「始める」を押してください。<br>相手がいなければ CPU と対局できます。</div>')
+    : '<div class="status-main">待合室</div><div class="status-sub">部屋を作った人が始めるのを待っています…</div>';
+  board.className = 'board lobby';
+  board.innerHTML = '<p class="lobby-note">2人で対局します。ほかの人は観戦します。</p>';
+  const pick = boardPick();
+  const label = (v) => (v === 'cpu' ? 'CPU' : nameOf(v) + (v === S.myId ? '（あなた）' : ''));
+  const list = document.createElement('div');
+  list.className = 'lobby-pick';
+  [0, 1].forEach((i) => {
+    const row = document.createElement('label');
+    const head = document.createElement('span');
+    head.innerHTML = `<b class="pl p${i}">${esc(game.players[i])}</b>${game.live ? '' : seatNote(game, i)}`;
+    row.append(head);
+    if (S.isHost) {
+      const sel = document.createElement('select');
+      for (const v of game.live ? S.members : [...S.members, 'cpu']) {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = label(v);
+        opt.selected = v === pick[i];
+        sel.append(opt);
+      }
+      sel.onchange = () => {
+        const next = pick.slice();
+        next[i] = sel.value;
+        if (sel.value !== 'cpu' && next[1 - i] === sel.value) next[1 - i] = pick[i]; // 同じ人を両方に選んだら入れ替える
+        S.pick = next;
+        saveRoom();
+        sendState();
+        render();
+      };
+      row.append(sel);
+    } else {
+      const name = document.createElement('b');
+      name.textContent = label(pick[i]);
+      row.append(name);
+    }
+    list.append(row);
+  });
+  board.append(list);
+  const watchers = S.members.filter((id) => !pick.includes(id));
+  if (watchers.length) {
+    const w = document.createElement('p');
+    w.className = 'lobby-note';
+    w.textContent = '観戦: ' + watchers.map(nameOf).join('、');
+    board.append(w);
+  }
+  if (game.settings) board.append(rulesPanel(game));
+  if (!S.isHost) return;
+  const start = makeButton('始める', startRound);
+  if (game.live && (pick.includes('cpu') || pick[0] === pick[1])) { // CPU を選べないゲームは2人そろうまで始められない
+    start.disabled = true;
+    board.insertAdjacentHTML('beforeend', '<p class="lobby-total">友だちが部屋に入ると始められます</p>');
+  }
+  controls.append(start, gameSelect());
+}
+
+function rulesPanel(game) {
+  const det = document.createElement('details');
+  det.className = 'lobby-rules';
+  det.open = !!S.rulesOpen;
+  det.ontoggle = () => { S.rulesOpen = det.open; };
+  const sum = document.createElement('summary');
+  sum.textContent = S.isHost ? '詳細設定（ルールを選ぶ）' : '詳細設定（部屋を作った人が選びます）';
+  det.append(sum);
+  const cur = rulesOf(S.gameId, S.rules);
+  const set = (key, value) => {
+    S.rules = { ...S.rules, [S.gameId]: { ...cur, [key]: value } };
+    saveRoom();
+    sendState();
+    render();
+  };
+  for (const x of game.settings) {
+    const label = document.createElement('label');
+    const text = document.createElement('span');
+    text.innerHTML = `<b>${esc(x.label)}</b> <small>${esc(x.desc)}</small>`;
+    if (x.choices) {
+      const sel = document.createElement('select');
+      x.choices.forEach(([value, name], i) => {
+        const opt = document.createElement('option');
+        opt.value = String(i);
+        opt.textContent = name;
+        opt.selected = value === cur[x.key];
+        sel.append(opt);
+      });
+      sel.disabled = !S.isHost;
+      sel.onchange = () => set(x.key, x.choices[Number(sel.value)][0]);
+      label.className = 'choice';
+      label.append(text, sel);
+    } else {
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = cur[x.key];
+      cb.disabled = !S.isHost;
+      cb.onchange = () => set(x.key, cb.checked);
+      label.append(cb, text);
+    }
+    det.append(label);
+  }
+  return det;
+}
+
+// ホストだけに出す「部屋の人」。知らない人が入ってきたら退出させられる
+function appendMemberPanel() {
+  if (S.mode !== 'online' || !S.isHost) return;
+  const others = S.members.filter((id) => id !== S.myId);
+  if (!others.length) return;
+  const det = document.createElement('details');
+  det.className = 'member-panel';
+  det.open = !!S.membersOpen;
+  det.ontoggle = () => { S.membersOpen = det.open; };
+  const sum = document.createElement('summary');
+  sum.textContent = `部屋の人（あなたのほか${others.length}人）`;
+  det.append(sum);
+  for (const id of others) {
+    const row = document.createElement('div');
+    row.className = 'member-row';
+    const name = document.createElement('span');
+    name.textContent = nameOf(id);
+    row.append(name, makeButton('退出させる', () => kick(id), 'ghost small'));
+    det.append(row);
+  }
+  el('controls').append(det);
+}
+
+function kick(id) {
+  if (!confirm(`${nameOf(id)} を部屋から退出させますか？（この部屋には戻れなくなります）`)) return;
+  S.banned = [...(S.banned ?? []), id];
+  S.members = S.members.filter((m) => m !== id);
+  send({ type: 'kick', to: id });
+  saveRoom();
+  sendState();
+  render();
+}
+
+// 自分が退出させられたとき
+function onKicked() {
+  try { localStorage.setItem(kickedKey(S.code), '1'); } catch { /* 無視 */ }
+  forgetRoom(S.code);
+  const net = S.net;
+  setTimeout(() => net?.close(), 300);
+  S = null;
+  setUrlRoom(null);
+  showScreen('home');
+  alert('部屋を作った人によって、部屋から退出させられました。');
+}
+
+function gameSelect() {
+  const label = document.createElement('label');
+  label.className = 'game-select';
+  label.textContent = 'ゲームを変える ';
+  const sel = document.createElement('select');
+  for (const id of GAME_ORDER) {
+    if (!GAMES[id].ready) continue;
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = GAMES[id].name;
+    opt.selected = id === S.gameId;
+    sel.append(opt);
+  }
+  sel.onchange = () => {
+    const st = replay(S);
+    const playing = st && S.moves.length && !GAMES[S.gameId].result(st);
+    if (playing && !confirm('対局の途中です。ゲームを変えますか？')) { sel.value = S.gameId; return; }
+    newRound(sel.value, { lobby: true });
+  };
+  label.append(sel);
+  return label;
+}
+
+/* ---------- 操作 ---------- */
+
+function pushMove(move) {
+  S.moves.push(move);
+  saveRoom();
+  if (S.mode === 'online') sendMoves();
+  render();
+}
+
+function onBoardMove(move) {
+  const game = GAMES[S.gameId];
+  const st = replay(S);
+  if (!st || !canMove(game, st, game.result(st))) return;
+  if (game.multi) move = { ...move, p: myPlayer() };
+  if (!game.apply(st, move)) return;
+  pushMove(move);
+}
+
+// ホストの端末だけが CPU（と部屋を出た人の席）の手を考える
+function scheduleCpu(game, st, res) {
+  if (!S.isHost || S.mode !== 'online' || !S.order || res) return;
+  const canAct = (s, i) => (game.multi ? game.canAct(s, i) : game.turn(s) === i);
+  // 同時に動くゲーム（realtime）は CPU ごとに別々に予約し、相手が動いても取り消さない
+  // （取り消すと相手が速いと CPU が永久に動けない。1人ずつだと、待っている CPU の後ろの CPU が動けない）
+  const ps = S.order.map((id, i) => i).filter((i) => cpuControlled(S.order[i]) && canAct(st, i));
+  for (const p of game.realtime ? ps : ps.slice(0, 1)) {
+    const key = game.realtime ? `${S.gameId}:${S.round}:rt:${p}` : `${S.gameId}:${S.round}:${S.moves.length}:${p}`;
+    if (S.cpuKeys[p] === key) continue; // もう予約してある
+    S.cpuKeys[p] = key;
+    const session = S;
+    const len = S.moves.length;
+    setTimeout(() => {
+      if (S !== session || S.cpuKeys[p] !== key || (!game.realtime && S.moves.length !== len)) return;
+      S.cpuKeys[p] = null;
+      const now = replay(S);
+      const m = now && !game.result(now) && canAct(now, p) ? game.cpu(now, p, rulesOf(S.gameId, S.rules)) : null; // null = いまは何もしない
+      const move = game.multi && m ? { ...m, p } : m; // 盤のゲームの手には p を付けない（手が 0 のこともある）
+      if (move !== null && game.apply(now, move)) pushMove(move);
+      else render(); // 打てなかったら予約し直す
+    }, game.cpuDelay?.(st, p) ?? CPU_DELAY_MS);
+  }
+}
+
+// 時間で進むゲームの進行役。ホストの端末だけが時間を計り、referee(局面) が返す手を ms 後に足す。
+// 同じ key のうちは計り直さない（ほかの人が動くたびに締め切りが延びないように）
+function scheduleReferee(game, st, res) {
+  if (!S.isHost || S.mode !== 'online' || !game.referee || res) return;
+  const r = game.referee(st);
+  if (!r) return;
+  const key = `${S.gameId}:${S.round}:${r.key}`;
+  if (S.refKey === key) return;
+  S.refKey = key;
+  const session = S;
+  setTimeout(() => {
+    if (S !== session || S.refKey !== key) return;
+    S.refKey = null;
+    const now = replay(S);
+    const r2 = now && !game.result(now) ? game.referee(now) : null;
+    const move = r2 && `${S.gameId}:${S.round}:${r2.key}` === key ? { ...r2.move, p: -1 } : null;
+    if (move && game.apply(now, move)) pushMove(move);
+    else render();
+  }, r.ms);
+}
+
+// 新しい対局へ。カードゲームは lobby なら待合室へ、そうでなければ今の顔ぶれですぐ始める
+function newRound(gameId, { lobby = false } = {}) {
+  const prevGame = GAMES[S.gameId];
+  // 盤のゲームのもう一回は、同じ2人で先手と後手を入れ替える
+  if (gameId === S.gameId && !prevGame?.multi && S.order?.length === 2) S.pick = S.order.map((id) => (isCpu(id) ? 'cpu' : id)).reverse();
+  if (gameId !== S.gameId) S.carry = null;
+  else if (prevGame?.carry && S.order) {
+    const st = replay(S);
+    if (st && prevGame.result(st)) S.carry = Object.fromEntries(S.order.map((id, i) => [id, prevGame.carry(st, i)]));
+  }
+  S.gameId = gameId;
+  S.round += 1;
+  S.first = 1 - S.first;
+  S.moves = [];
+  S.order = null;
+  S.seed = 0;
+  S.prev = null;
+  if (!lobby && S.mode === 'online') { startRound(); return; }
+  saveRoom();
+  if (S.mode === 'online') sendState();
+  render();
+}
+
+function startRound() {
+  const game = GAMES[S.gameId];
+  let order;
+  if (game.multi) {
+    const { humans, cpus } = lineup(game);
+    order = [...humans, ...Array.from({ length: cpus }, (_, i) => 'cpu' + (i + 1))];
+    const r = crypto.getRandomValues(new Uint32Array(order.length));
+    for (let i = order.length - 1; i > 0; i--) { // 席順は毎回まぜる
+      const j = r[i] % (i + 1);
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+  } else {
+    S.pick = boardPick();
+    let n = 0;
+    order = S.pick.map((v) => (v === 'cpu' ? 'cpu' + ++n : v));
+  }
+  S.round += 1;
+  S.order = order;
+  S.seed = randomSeed();
+  // 前の対局と同じ顔ぶれのときだけ、前の順位を引き継ぐ
+  const prev = S.carry ? order.map((id) => S.carry[id]) : null;
+  S.prev = prev?.every(Number.isInteger) ? prev : null;
+  S.moves = [];
+  saveRoom();
+  sendState();
+  render();
+}
+
+function rematch() {
+  if (S.mode === 'local') { S.moves = []; render(); return; }
+  if (S.isHost) newRound(S.gameId);
+  else send({ type: 'rematch' }); // ホストが受け取って新しい対局を始める
+}
+
+function startLocal(gameId) {
+  if (!isOwner()) return;
+  S = { mode: 'local', gameId, round: 1, first: 0, seed: 0, order: null, cpus: 0, moves: [], members: [], names: {}, rules: {}, prev: null, carry: null, pick: null };
+  enterPlay();
+}
+
+// 毎フレーム動くゲームを同じ画面で（mode = 'cpu' | 'two'）
+function startLive(gameId, mode) {
+  if (!isOwner()) return;
+  S = { mode: 'local', live: mode, gameId, round: 1, first: 0, seed: 0, order: null, cpus: 0, moves: [], members: [], names: {}, rules: {}, prev: null, carry: null, pick: null };
+  enterPlay();
+}
+
+// 毎フレーム動くゲームの画面。対局ごと（round）に1回だけ作り、描き直しでは作り直さない
+function renderLive(game) {
+  const key = `${S.gameId}:${S.round}:${S.mode}:${S.live ?? ''}`;
+  if (S.liveKey !== key) {
+    stopLive();
+    const online = S.mode === 'online';
+    const board = el('board');
+    el('status').innerHTML = '';
+    S.liveKey = key;
+    S.liveHandle = game.mount(board, {
+      mode: online ? 'online' : S.live, status: el('status'), me: online ? myPlayer() : null,
+      names: online ? S.order.map(nameOf) : null, rules: rulesOf(S.gameId, S.rules),
+      send: (d, important) => send({ type: 'live', gameId: S.gameId, round: S.round, d }, important ? 1 : 0),
+    });
+  }
+  if (S.mode === 'online' && S.isHost) el('controls').append(gameSelect());
+  if (S.mode === 'online') appendMemberPanel();
+}
+
+function stopLive() {
+  if (!S?.liveHandle) return;
+  S.liveHandle.destroy();
+  S.liveHandle = null;
+  S.liveKey = null;
+}
+
+function createRoom(gameId) {
+  if (!isOwner()) return;
+  const myId = newId();
+  S = {
+    mode: 'online', code: randomString(CODE_LEN, CODE_CHARS), myId, isHost: true,
+    gameId, round: 1, first: crypto.getRandomValues(new Uint8Array(1))[0] & 1, seed: 0, order: null, cpus: 0, moves: [],
+    members: [myId], names: { [myId]: myName() || 'プレイヤー1' }, rules: {}, prev: null, carry: null, pick: null, banned: [],
+  };
+  saveRoom();
+  setUrlRoom(S.code);
+  enterPlay();
+  openNet();
+}
+
+function joinRoom(raw) {
+  const code = String(raw).toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (code.length !== CODE_LEN) { toast(`部屋コードは${CODE_LEN}文字です`); return false; }
+  if (wasKicked(code)) { toast('この部屋には入れません'); return false; }
+  const saved = loadRoom(code);
+  S = saved
+    ? { ...saved, mode: 'online', code }
+    : {
+      mode: 'online', code, myId: newId(), isHost: false,
+      gameId: null, round: 0, first: 0, seed: 0, order: null, cpus: 0, moves: [], members: [], names: {}, rules: {}, prev: null, carry: null, pick: null,
+    };
+  saveRoom();
+  setUrlRoom(code);
+  enterPlay();
+  openNet();
+  return true;
+}
+
+function enterPlay() {
+  S.banned ??= [];
+  Object.assign(S, {
+    conn: S.mode === 'online' ? 'connecting' : 'local', seen: {}, full: false, hostLeft: false,
+    shownKey: null, shownLen: 0, lostKey: '', cpuKeys: {}, refKey: null,
+  });
+  showScreen('play');
+  render();
+}
+
+function leave() {
+  stopLive();
+  if (S?.mode === 'online') {
+    if (!confirm('部屋を出ますか？')) return;
+    send({ type: 'bye' });
+    forgetRoom(S.code);
+    const net = S.net;
+    setTimeout(() => net?.close(), 500);
+  }
+  S = null;
+  setUrlRoom(null);
+  showScreen('home');
+}
+
+async function invite() {
+  const url = new URL(location.href);
+  url.search = '?room=' + S.code;
+  url.hash = '';
+  const text = `${GAMES[S.gameId]?.name ?? 'ボードゲーム'}で対戦しよう！ 部屋コード: ${S.code}`;
+  if (navigator.share) {
+    try { await navigator.share({ title: '対戦しよう', text, url: url.href }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  try {
+    await navigator.clipboard.writeText(`${text}\n${url.href}`);
+    toast('招待リンクをコピーしました');
+  } catch {
+    prompt('このリンクを友だちに送ってください', url.href);
+  }
+}
+
+/* ---------- 通信 ---------- */
+
+function openNet() {
+  const session = S;
+  try {
+    S.net = connectRoom(
+      S.code, S.myId,
+      (msg) => { if (S === session) onMessage(msg); },
+      (status) => { if (S === session) onConn(status); },
+    );
+  } catch {
+    S.conn = 'error';
+    render();
+  }
+}
+
+function send(msg, qos) { S?.net?.send(msg, qos); }
+function sendState() {
+  const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick } = S;
+  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick });
+}
+function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves }); }
+function askState() { send({ type: 'hello', isHost: false, name: myName() }); }
+
+function onConn(status) {
+  S.conn = status;
+  if (status === 'ready') {
+    send({ type: 'hello', isHost: S.isHost, name: myName() });
+    if (S.isHost) sendState();
+  }
+  render();
+}
+
+function onMessage(msg) {
+  if (msg.to && msg.to !== S.myId) return;
+  const wasAlive = alive(msg.from);
+  S.seen[msg.from] = Date.now();
+  if (msg.type === 'live') {
+    if (msg.gameId === S.gameId && msg.round === S.round) S.liveHandle?.receive(msg.d, S.order?.indexOf(msg.from) ?? -1);
+    if (!wasAlive) render();
+    return;
+  }
+  switch (msg.type) {
+    case 'hello':
+      if (S.isHost && !msg.isHost) acceptMember(msg);
+      else if (!S.isHost && msg.isHost) { S.hostLeft = false; askState(); } // ホストが入り直した
+      break;
+    case 'state':
+      if (!S.isHost) adoptState(msg);
+      break;
+    case 'full':
+      S.full = true;
+      break;
+    case 'kick':
+      // ホストから（まだ部屋に入れてもらう前なら、届いたもの）だけ受け付ける
+      if (!S.isHost && (!S.members.length || msg.from === S.members[0])) { onKicked(); return; }
+      break;
+    case 'move':
+      onMoves(msg);
+      break;
+    case 'rematch':
+      if (S.isHost) {
+        const st = replay(S);
+        if (st && GAMES[S.gameId].result(st)) newRound(S.gameId);
+      }
+      break;
+    case 'bye':
+      if (S.isHost && S.members.includes(msg.from)) {
+        S.members = S.members.filter((id) => id !== msg.from);
+        saveRoom();
+        sendState();
+      } else if (!S.isHost && msg.from === S.members[0]) {
+        S.hostLeft = true;
+      }
+      break;
+    case 'ping':
+      if (wasAlive) { renderRoomBar(); return; } // 何も変わらないので盤は描き直さない
+      break;
+    default:
+      break;
+  }
+  render();
+}
+
+function acceptMember(msg) {
+  if (S.banned.includes(msg.from)) { send({ type: 'kick', to: msg.from }); return; }
+  const name = cleanName(msg.name);
+  if (S.members.includes(msg.from)) {
+    if (name && S.names[msg.from] !== name) S.names[msg.from] = name;
+  } else if (S.members.length < MAX_MEMBERS) {
+    S.members.push(msg.from);
+    S.names[msg.from] = name || 'プレイヤー' + (Object.keys(S.names).length + 1);
+  } else {
+    send({ type: 'full', to: msg.from });
+    return;
+  }
+  saveRoom();
+  sendState();
+}
+
+function adoptState(msg) {
+  const game = GAMES[msg.gameId];
+  if (!game?.ready || !Array.isArray(msg.moves) || !Array.isArray(msg.members)) return;
+  if (!msg.members.includes(S.myId)) return; // まだ部屋に入れてもらっていない（hello を送り続ける）
+  S.full = false;
+  S.hostLeft = false;
+  S.members = msg.members.slice();
+  S.names = { ...msg.names };
+  S.rules = msg.rules && typeof msg.rules === 'object' ? msg.rules : {};
+  for (const id of S.members) S.seen[id] ??= Date.now();
+  const sameRound = S.gameId === msg.gameId && S.round === msg.round;
+  if (sameRound && S.moves.length > msg.moves.length && isPrefix(msg.moves, S.moves)) {
+    sendMoves(); // こちらの方が進んでいる（ホストが取りこぼした）ので教える
+  } else if (msg.order === null || replay(msg)) {
+    S.gameId = msg.gameId;
+    S.round = msg.round;
+    S.first = msg.first;
+    S.seed = msg.seed;
+    S.order = msg.order ? msg.order.slice() : null;
+    S.cpus = msg.cpus;
+    S.pick = Array.isArray(msg.pick) ? msg.pick.slice() : null;
+    S.prev = Array.isArray(msg.prev) ? msg.prev.slice() : null;
+    S.moves = msg.moves.slice();
+  }
+  saveRoom();
+}
+
+function onMoves(msg) {
+  if (!Array.isArray(msg.moves)) return;
+  if (msg.gameId !== S.gameId || msg.round !== S.round) {
+    if (S.isHost) sendState(); else askState();
+    return;
+  }
+  if (msg.moves.length > S.moves.length && isPrefix(S.moves, msg.moves) && replay({ ...S, moves: msg.moves })) {
+    S.moves = msg.moves.slice();
+    saveRoom();
+  } else if (msg.moves.length < S.moves.length && isPrefix(msg.moves, S.moves)) {
+    sendMoves(); // 相手が遅れている
+  } else if (!isPrefix(msg.moves, S.moves)) {
+    // 食い違い。ホストに合わせる
+    if (!S.isHost && msg.from === S.members[0] && replay({ ...S, moves: msg.moves })) {
+      S.moves = msg.moves.slice();
+      saveRoom();
+    } else if (S.isHost && GAMES[S.gameId].realtime) {
+      rebase(msg);
+    } else if (S.isHost) sendState(); else askState();
+  }
+}
+
+// 同時に動くゲームで、ゲストの手とホスト側の手がぶつかったとき。ゲストの手がまだ打てるなら後ろに足す
+// （手は「どの札を」で表すので、同じ手を2回足しても2回目は反則として弾かれる）
+function rebase(msg) {
+  const game = GAMES[S.gameId];
+  let k = 0;
+  while (k < msg.moves.length && k < S.moves.length && sameMove(msg.moves[k], S.moves[k])) k++;
+  const sender = S.order?.indexOf(msg.from) ?? -1;
+  let st = replay(S);
+  for (const m of msg.moves.slice(k)) {
+    if (!st || m?.p !== sender) continue;
+    const next = game.apply(st, m);
+    if (!next) continue;
+    st = next;
+    S.moves.push(m);
+  }
+  saveRoom();
+  sendMoves();
+}
+
+// 生存確認。まだ部屋に入れていないゲストは、ホストに届くまで参加のあいさつを送り続ける
+setInterval(() => {
+  if (S?.mode !== 'online' || S.conn !== 'ready') return;
+  if (!S.isHost && !S.members.includes(S.myId) && !S.full) askState();
+  else send({ type: 'ping' });
+  const lostKey = S.members.filter((id) => !alive(id)).join();
+  if (lostKey !== S.lostKey) { S.lostKey = lostKey; render(); } else renderRoomBar();
+}, HEARTBEAT_MS);
+
+/* ---------- 起動 ---------- */
+
+renderHome();
+const nameInput = el('my-name');
+nameInput.value = myName();
+nameInput.addEventListener('input', () => {
+  try { localStorage.setItem(NAME_KEY, cleanName(nameInput.value)); } catch { /* 無視 */ }
+});
+el('join-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  joinRoom(el('join-code').value);
+});
+el('btn-leave').onclick = leave;
+el('btn-invite').onclick = invite;
+
+const roomParam = new URL(location.href).searchParams.get('room');
+if (!(roomParam && joinRoom(roomParam))) {
+  setUrlRoom(null);
+  showScreen('home');
+}

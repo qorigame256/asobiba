@@ -1,0 +1,62 @@
+// 遊べるゲームの一覧。新しいゲームはここに足す。
+//
+// 盤のゲーム（2人用）が持つもの: id / name / icon / desc / ready / players（[先手の呼び名, 後手の呼び名]）
+//   init({ rules }) → 最初の局面（rules = 詳細設定の値。使わないゲームは無視してよい）, turn(局面) → 0|1, apply(局面, 手) → 次の局面（反則なら null）,
+//   result(局面) → null（続行中）| { winner: 0|1|null(引き分け), cells: [光らせるマス] },
+//   render(要素, 局面, { canMove, onMove, fresh, me: 自分のプレイヤー番号（観戦は -1、同じ画面の対局は null） }),
+//   info(局面)（任意。状態表示に足す HTML）
+//
+// カードゲーム（multi: true。オンラインのみ・足りない席は CPU）が持つもの: id / name / icon / desc / ready /
+//   minPlayers / maxPlayers,
+//   init(人数, seed, { rules, prev }) → 最初の局面（シャッフルは seed から作る。Math.random を使わない）。
+//     rules = 詳細設定の値、prev = 前の対局の carry をこの対局のプレイヤー番号順に並べたもの（無ければ null）,
+//   turn(局面) → 手番のプレイヤー番号（同時に動けるゲームなどで決まらないときは null）,
+//   canAct(局面, p) → p がいま手を打てるか,
+//   apply(局面, 手) → 次の局面 | null。手には打った人の番号 p が入っている（本体が足す）,
+//   result(局面) → null | { winner: p, …ゲームが使う情報 },
+//   cpu(局面, p) → p の手（p は付けなくてよい。いまは何もしないなら null）。ホストの端末だけで動く,
+//   render(要素, 局面, { me: 自分の番号（観戦は -1）, names: 各プレイヤーの名前, cpu: CPU が操作中か,
+//     away: 応答が無いか, canMove, onMove, fresh })。names は外から来た文字なので textContent で出すか esc() を通す。
+//   任意: settings（詳細設定 [{ key, label, desc, def, choices?: [[値, 表示名]…] }]。choices が無ければ はい/いいえ）, carry(局面, p)（次の対局へ持ち越す値。終局後に呼ばれる）,
+//     resultText(result, 自分の番号, 名前→HTML) / phaseText(局面, 自分の番号, 名前→HTML)（手番が null のときの状態表示）,
+//     cpuDelay(局面, p)（CPU が打つまでの待ち時間 ms。結果を見せたいときに長くする）,
+//     seats(rules) → 人数（詳細設定で人数が決まるゲーム。待合室の足りない席はすべて CPU）,
+//     noCpu: true（CPU を入れないゲーム。人が minPlayers そろうまで始められない。部屋を出た人の席だけ cpu() が動く）,
+//     referee(局面) → null | { key, ms, move }（時間で進むゲーム。ホストが key ごとに ms 計って move を p = -1 として足す。
+//     締め切りや次の問題へ進むのに使う。apply は p = -1 の手をこの進行役の手として受け付ける）,
+//     realtime: true（全員が同時に動くゲーム。手がぶつかったらホストが後ろに足し直すので、手は「どの札を」で表し、
+//     同じ手が2回来ても2回目は反則になるように作る）
+//
+// 毎フレーム動くゲーム（live: true。エアホッケー）が持つもの: id / name / icon / desc / ready / players（2人の呼び名）/ settings,
+//   mount(要素, { mode: 'cpu' | 'two' | 'online', status: 状態表示の要素, me（オンライン: 0 / 1、観戦は -1）, names, rules,
+//     send(中身, 大事か) }) → { receive(中身, 送った人の番号), destroy() }。
+//   手の一覧は使わず、ゲームが自分で描いて自分で進める。オンラインでは send で送った中身が相手の receive に届く
+//   （大事でないものは届いたか確かめずに送る）。待合室は盤のゲームと同じで、CPU は選べない。
+
+import tictactoe from './tictactoe.js';
+import connect4 from './connect4.js';
+import reversi from './reversi.js';
+import colors from './colors.js';
+import daifugo from './daifugo.js';
+import poker from './poker.js';
+import speed from './speed.js';
+import hitblow from './hitblow.js';
+import sensou from './sensou.js';
+import yubisuma from './yubisuma.js';
+import memory from './memory.js';
+import nim from './nim.js';
+import flags from './flags.js';
+import kanji from './kanji.js';
+import targets from './targets.js';
+import umigame from './umigame.js';
+import shogi from './shogi.js';
+import mahjong from './mahjong.js';
+import hockey from './hockey.js';
+
+// 準備中のゲームを一覧に出すとき: soon('id', '名前', '絵文字')
+export const soon = (id, name, icon) => ({ id, name, icon, desc: 'じゅんび中', ready: false });
+
+export const GAME_ORDER = ['tictactoe', 'connect4', 'reversi', 'colors', 'daifugo', 'poker', 'speed', 'hitblow', 'sensou', 'yubisuma', 'memory', 'nim', 'flags', 'kanji', 'targets', 'umigame', 'hockey', 'shogi', 'mahjong'];
+export const GAMES = {
+  tictactoe, connect4, reversi, colors, daifugo, poker, speed, hitblow, sensou, yubisuma, memory, nim, flags, kanji, targets, umigame, shogi, mahjong, hockey,
+};
