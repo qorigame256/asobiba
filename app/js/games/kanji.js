@@ -222,7 +222,8 @@ export default {
     wrap.append(note);
     root.append(wrap);
     this.note(s, me);
-    if (ui.input && !matchMedia('(pointer: coarse)').matches) ui.input.focus(); // スマホは勝手にキーボードを出さない
+    // スマホは勝手にキーボードを出さない。「ゲームを変える」の一覧を開いているときも取り上げない（一覧が閉じる）
+    if (ui.input && !matchMedia('(pointer: coarse)').matches && document.activeElement?.tagName !== 'SELECT') ui.input.focus();
   },
 
   // 入力欄の下の案内

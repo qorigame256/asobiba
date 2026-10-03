@@ -143,6 +143,7 @@ p { margin: 0; }
 .status-main { font-size: 1.25rem; font-weight: 700; }
 .status-main.small { font-size: 1rem; font-weight: 400; }
 .status-sub { color: var(--muted); font-size: .92rem; }
+.status-sub.think { font-size: .85rem; font-variant-numeric: tabular-nums; }
 .pl.p0 { color: var(--p0); }
 .pl.p1 { color: var(--p1); }
 
@@ -371,10 +372,12 @@ p { margin: 0; }
 .mj-tile.latest { outline: 2px solid var(--accent); outline-offset: 1px; }
 .mj-tile.win { outline: 2px solid var(--win); outline-offset: 1px; margin-left: 6px; }
 
-.mj-hand { display: flex; justify-content: center; gap: 2px; padding-top: 10px; }
-.mj-hand > * { flex: 1 1 0; max-width: 40px; min-width: 0; display: block; transition: transform .1s; }
+/* 手牌: 1枚の幅は「横幅 ÷ 13」。PC では卓より広く使う。ツモった牌（.drawn）は右端の上の段に浮かせ、その段の高さは常に空けておく（出たり消えたりで手牌が上下に動かないように） */
+.mj-hand { align-self: center; width: max(100%, min(calc(100vw - 48px), 728px)); container-type: inline-size; display: flex; justify-content: center; }
+.mj-hand-row { --hw: calc((100cqw - 24px) / 13); position: relative; display: flex; gap: 2px; margin-top: calc(var(--hw) * 4 / 3 + 8px); max-width: 100%; }
+.mj-hand-row > * { flex: 0 1 auto; width: var(--hw); min-width: 0; display: block; transition: transform .1s; }
 .mj-hand .mj-tile { --tw: 100%; width: 100%; height: auto; aspect-ratio: 3 / 4; }
-.mj .mj-hand-tile.drawn { margin-left: 8px; }
+.mj .mj-hand-tile.drawn { position: absolute; right: 0; bottom: calc(100% + 6px); width: var(--hw); }
 .mj .mj-hand-tile.selected { transform: translateY(-10px); }
 .mj .mj-hand-tile.dim { opacity: .45; }
 .mj button.mj-hand-tile { cursor: pointer; }
@@ -742,9 +745,9 @@ p { margin: 0; }
 .hb-slots { display: flex; justify-content: center; gap: 8px; }
 .hb-slot { width: 46px; height: 56px; border: 2px solid var(--line); border-radius: 10px; background: #fff; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; font-weight: 800; }
 .hb-slot.cur { border-color: var(--accent); }
-.hb-pad { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; max-width: 360px; margin: 0 auto; width: 100%; }
+.hb-pad { display: grid; grid-template-columns: repeat(5, 1fr) 1.3fr; grid-template-rows: auto auto; gap: 6px; max-width: 360px; margin: 0 auto; width: 100%; }
 .board button.hb-key { background: #fff; border: 1.5px solid var(--line); border-radius: 10px; font-size: 1.3rem; font-weight: 800; padding: 10px 0; cursor: pointer; }
-.board button.hb-key.del { font-size: .9rem; grid-column: span 2; }
+.board button.hb-key.del { font-size: .9rem; grid-column: 6; grid-row: 1 / span 2; }
 .board button.hb-key:disabled { opacity: .35; cursor: default; }
 .hb .cc-actions .btn:disabled { opacity: .4; cursor: default; }
 
@@ -883,9 +886,20 @@ p { margin: 0; }
 [data-game="targets"] .board { width: min(100%, 560px); }
 .tg { display: flex; flex-direction: column; gap: 10px; }
 .tg-top { display: flex; flex-direction: column; gap: 6px; }
+/* 人数が増えても高さが変わらないよう、点数の札は1行（名前と点を横に並べ、入りきらなければ札の列だけ横に動かせる） */
+.tg .cc-opps { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; scrollbar-width: none; touch-action: pan-x; padding: 2px; }
+.tg .cc-opps::-webkit-scrollbar { display: none; }
+.tg .cc-opp { flex: none; display: flex; align-items: baseline; gap: 6px; min-width: 0; padding: 2px 8px; }
+.tg .cc-opp:first-child { margin-left: auto; }
+.tg .cc-opp:last-child { margin-right: auto; }
+.tg .cc-opp-name { max-width: 6em; }
+.tg .pt-score { font-size: 1rem; }
+/* 的が出ている間はページを動かさない（的の大きさは画面の高さに収まるよう targets.js の fit が決める） */
+html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; overscroll-behavior: none; }
+#screen-play:has(.tg-field.live) { touch-action: none; }
 .tg-clock { text-align: center; font-weight: 700; min-height: 1.6em; }
 .tg-field {
-  position: relative; width: min(100%, 58vh); aspect-ratio: 1; margin: 0 auto;
+  position: relative; width: 100%; aspect-ratio: 1; margin: 0 auto;
   background: #2e6b47; border-radius: var(--radius); overflow: hidden;
   touch-action: none; user-select: none; -webkit-user-select: none;
 }

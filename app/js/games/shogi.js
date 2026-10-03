@@ -258,7 +258,7 @@ function searchRoot(board, hands, side, moves, depth, deadline) {
 }
 
 function cpuMove(s, rules) {
-  const level = { weak: 1, normal: 1, strong: 1 }[rules?.cpu] ? rules.cpu : 'normal';
+  const level = { weak: 1, normal: 1, strong: 1 }[rules?.cpu] ? rules.cpu : 'weak';
   const moves = legalMoves(s.board, s.hands, s.turn);
   const mistake = { weak: 0.3, normal: 0.08, strong: 0 }[level];
   if (Math.random() < mistake) return moves[Math.floor(Math.random() * moves.length)];

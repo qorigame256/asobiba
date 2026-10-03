@@ -278,7 +278,7 @@ function mount(root, opts) {
   const targets = [{ ...homeMallet(0) }, { ...homeMallet(1) }];
   const pointers = new Map(); // 指（ポインター）→ どちらのマレットか
   let target = opts.mode === 'online' ? Number(opts.rules?.points) || 7 : 7;
-  let level = CPU_LEVELS.normal;
+  let level = CPU_LEVELS.weak;
   let playing = false;
 
   const controlled = () => {
@@ -377,7 +377,7 @@ function mount(root, opts) {
     box.append(row1);
     let lv;
     if (opts.mode === 'cpu') {
-      lv = selectEl(Object.entries(CPU_LEVELS).map(([k, v]) => [k, v.name]), CPU_LEVELS[prefs.level] ? prefs.level : 'normal');
+      lv = selectEl(Object.entries(CPU_LEVELS).map(([k, v]) => [k, v.name]), CPU_LEVELS[prefs.level] ? prefs.level : 'weak');
       const row2 = el('label', 'hk-row');
       row2.append(el('span', '', 'CPU の強さ'), lv);
       box.append(row2);

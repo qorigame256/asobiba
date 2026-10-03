@@ -798,13 +798,17 @@ function render(root, s, o) {
 
   const myTurn = !watching && o.canMove && h.phase === 'turn' && h.turn === me;
   const opts = myTurn ? turnOptions(s) : null;
+  // 手牌は13枚で横幅いっぱい。ツモった牌は右端の上の段に出す（その分1枚ずつを大きくできる）
   const hand = document.createElement('div');
   hand.className = 'mj-hand';
+  const row = document.createElement('div');
+  row.className = 'mj-hand-row';
+  hand.append(row);
   const ids = sortHand(h.hands[me].filter((id) => !(h.turn === me && id === h.drawn)));
   if (h.turn === me && h.drawn !== null && h.hands[me].includes(h.drawn)) ids.push(h.drawn);
   ids.forEach((id) => {
     const isDrawn = h.turn === me && id === h.drawn;
-    if (watching) { hand.append(tileEl(id, { back: true })); return; }
+    if (watching) { row.append(tileEl(id, { back: true })); return; }
     const ok = myTurn && canDiscard(s, id) && (!ui.riichi || opts.riichi.includes(kindOf(id)));
     const b = document.createElement(ok ? 'button' : 'span');
     b.className = 'mj-hand-tile' + (isDrawn ? ' drawn' : '') + (ui.sel === id ? ' selected' : '') + (ok ? ' playable' : '') + (myTurn && !ok ? ' dim' : '');
@@ -817,7 +821,7 @@ function render(root, s, o) {
         draw();
       };
     }
-    hand.append(b);
+    row.append(b);
   });
   root.append(hand);
 

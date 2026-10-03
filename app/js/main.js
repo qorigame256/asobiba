@@ -55,7 +55,7 @@ function myName() {
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -363,10 +363,56 @@ function statusHtml(game, st, res) {
   }
   let html = `<div class="status-main">${main}</div>`;
   if (sub) html += `<div class="status-sub">${sub}</div>`;
+  if (!game.multi && S.clock) html += `<div id="think" class="status-sub think">${thinkHtml(game)}</div>`;
   const extra = game.info?.(st);
   if (extra) html += `<div class="status-sub">${extra}</div>`;
   return html;
 }
+
+/* ---------- 盤のゲームの考えた時間（制限はしない。見せるだけ） ---------- */
+// この端末で手を受け取った時刻から数える（手の一覧に時刻は入れない。apply は時刻を使わない決まりのため）。
+// 端末ごとに通信の遅れの分だけずれるが、見せるだけなので合わせない。
+// S.clock = { key: どの対局か, at: 最後に番が替わった時刻, len: 数え終えた手の数, turn: いまの番, res: 決着したか, log: [[打った人, かかった ms], …] }
+function tickClock(game, st, res) {
+  const key = S.gameId + ':' + S.round;
+  const now = Date.now();
+  let c = S.clock;
+  if (!c || c.key !== key) c = { key, at: now, len: 0, turn: game.turn(st), res: false, log: [] };
+  if (S.moves.length < c.len) { // 「1手戻す」
+    c = { ...c, len: S.moves.length, log: c.log.slice(0, S.moves.length), at: now };
+  }
+  if (S.moves.length > c.len) {
+    const log = c.log.slice();
+    log.push([c.turn, now - c.at]);
+    while (log.length < S.moves.length) log.push([null, 0]); // まとめて届いた手は最初の1手に時間を付ける
+    c = { ...c, len: S.moves.length, log, at: now };
+  }
+  c.turn = res ? null : game.turn(st);
+  c.res = !!res;
+  if (c !== S.clock) { S.clock = c; saveRoom(); }
+}
+
+const clockText = (ms) => {
+  const sec = Math.floor(ms / 1000);
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+};
+
+function thinkHtml(game) {
+  const c = S.clock;
+  const used = [0, 0];
+  for (const [p, ms] of c.log) if (p === 0 || p === 1) used[p] += ms;
+  const live = !c.res && (c.turn === 0 || c.turn === 1) ? Date.now() - c.at : 0;
+  if (live) used[c.turn] += live;
+  const tot = [0, 1].map((p) => `<b class="pl p${p}">${game.players[p]}</b> ${clockText(used[p])}`).join(' ／ ');
+  if (c.res) return `考えた時間 ${tot}`;
+  return `⏱ <b class="pl p${c.turn}">${game.players[c.turn]}</b>が考え中 <b>${clockText(live)}</b>　合計 ${tot}`;
+}
+
+setInterval(() => {
+  const box = el('think');
+  if (!S?.clock || !box?.isConnected || S.clock.res) return;
+  box.innerHTML = thinkHtml(GAMES[S.gameId]);
+}, 500);
 
 // 「？遊び方」。ゲームが変わったら中身を差し替えて閉じる。開け閉めは描き直しても保つ
 let howtoFor = null;
@@ -383,8 +429,16 @@ function renderHowto(game) {
   btn.setAttribute('aria-expanded', String(!box.hidden));
 }
 
+// 下の段（ボタンと「ゲームを変える」）を作る場所。「ゲームを変える」の一覧を開いている間は、作り直さず
+// 画面に出ない入れ物へ作って捨てる（作り直すと開いた一覧が閉じる。手が次々に届く難読漢字などで選べなかった）
+let controlsEl = null;
+const ctl = () => controlsEl;
+
 function render() {
   if (!S) return;
+  const focused = document.activeElement;
+  const keepControls = focused?.tagName === 'SELECT' && el('controls').contains(focused);
+  controlsEl = keepControls ? document.createElement('div') : el('controls');
   renderRoomBar();
   const game = S.gameId ? GAMES[S.gameId] : null;
   el('play-title').textContent = game ? game.name : '部屋に参加';
@@ -392,7 +446,7 @@ function render() {
   el('screen-play').dataset.game = S.gameId ?? '';
   const status = el('status');
   const board = el('board');
-  const controls = el('controls');
+  const controls = ctl();
   controls.innerHTML = '';
 
   let waiting = null;
@@ -419,6 +473,7 @@ function render() {
   }
 
   const res = game.result(st);
+  if (!game.multi) tickClock(game, st, res);
   status.innerHTML = statusHtml(game, st, res);
 
   // 新しく打たれた手だけ動きを付ける（接続表示の更新などで描き直したときは動かさない）
@@ -480,7 +535,7 @@ function moveSound(game, st, res, prevLen, mine) {
 function renderLobby(game) {
   const status = el('status');
   const board = el('board');
-  const controls = el('controls');
+  const controls = ctl();
   status.innerHTML = S.isHost
     ? '<div class="status-main">待合室</div><div class="status-sub">友だちがそろったら「始める」を押してください。<br>上の「招待する」で部屋のリンクを送れます。</div>'
     : '<div class="status-main">待合室</div><div class="status-sub">部屋を作った人が始めるのを待っています…</div>';
@@ -518,7 +573,7 @@ function renderLobby(game) {
 function renderBoardLobby(game) {
   const status = el('status');
   const board = el('board');
-  const controls = el('controls');
+  const controls = ctl();
   status.innerHTML = S.isHost
     ? (game.live
       ? '<div class="status-main">待合室</div><div class="status-sub">対戦する2人を選んで「始める」を押してください。<br>オンラインは試作です。</div>'
@@ -644,7 +699,7 @@ function appendMemberPanel() {
     row.append(name, makeButton('退出させる', () => kick(id), 'ghost small'));
     det.append(row);
   }
-  el('controls').append(det);
+  ctl().append(det);
 }
 
 function kick(id) {
@@ -682,10 +737,13 @@ function gameSelect() {
     opt.selected = id === S.gameId;
     sel.append(opt);
   }
+  sel.onblur = () => render(); // 開いている間に止めていた描き直しを追いつかせる
   sel.onchange = () => {
+    sel.onblur = null;
+    sel.blur();
     const st = replay(S);
     const playing = st && S.moves.length && !GAMES[S.gameId].result(st);
-    if (playing && !confirm('対局の途中です。ゲームを変えますか？')) { sel.value = S.gameId; return; }
+    if (playing && !confirm('対局の途中です。ゲームを変えますか？')) { sel.value = S.gameId; render(); return; }
     newRound(sel.value, { lobby: true });
   };
   label.append(sel);
@@ -841,7 +899,7 @@ function renderLive(game) {
       send: (d, important) => send({ type: 'live', gameId: S.gameId, round: S.round, d }, important ? 1 : 0),
     });
   }
-  if (S.mode === 'online' && S.isHost) el('controls').append(gameSelect());
+  if (S.mode === 'online' && S.isHost) ctl().append(gameSelect());
   if (S.mode === 'online') appendMemberPanel();
 }
 

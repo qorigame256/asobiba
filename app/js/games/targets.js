@@ -77,6 +77,17 @@ function float(field, x, y, text, cls) {
   setTimeout(() => f.remove(), 700);
 }
 
+// 的の場を、ページを動かさずに全部見える大きさにする（上の表示と下の説明を除いた高さに収める）
+function fit() {
+  const field = ui?.field;
+  if (!field?.isConnected) return;
+  const legend = field.nextElementSibling;
+  const top = field.getBoundingClientRect().top + window.scrollY;
+  const room = window.innerHeight - top - (legend?.offsetHeight ?? 0) - 20;
+  field.style.width = `min(100%, ${Math.max(220, Math.floor(room))}px)`;
+}
+if (typeof window !== 'undefined') window.addEventListener('resize', fit);
+
 function loop(token) {
   if (ui !== token || !ui.field.isConnected) return; // 描き直しで作り直したら古い繰り返しは止める
   const { s, o } = ui.cur;
@@ -235,6 +246,7 @@ export default {
     const mount = `${s.seed}:${s.phase}:${me}`;
 
     if (ui?.mount === mount && root.contains(ui.field)) {
+      chips.scrollLeft = ui.chips.scrollLeft;
       ui.chips.replaceWith(chips);
       ui.chips = chips;
       ui.cur = { s, o };
@@ -257,6 +269,8 @@ export default {
     ui = { mount, field, chips, clock, els: new Map(), tapped: new Set(), n: 0, visible: 0, cur: { s, o } };
     top.append(chips, clock);
     root.append(top, field, legend);
+    if (s.phase !== 'end') window.scrollTo(0, 0); // 始まる前に上へ戻す（遊んでいる間はページを動かさない）
+    fit();
 
     if (s.phase === 'ready') {
       const key = `targets:${s.seed}:ready`;

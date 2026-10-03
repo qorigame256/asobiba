@@ -228,7 +228,7 @@ export default {
 
     const pad = document.createElement('div');
     pad.className = 'hb-pad';
-    for (const d of ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']) {
+    for (const d of ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']) { // 0〜4 を1段目、5〜9 を2段目。右端に縦長の「消す」
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'hb-key';
@@ -273,7 +273,7 @@ export default {
   },
 };
 
-// 順番に当てる遊び方の、全員の予想の表（新しい予想を上に）
+// 順番に当てる遊び方の、全員の予想の表（1回目から下へ並べる）
 function logTable(s, nameOf, me) {
   const box = document.createElement('div');
   box.className = 'hb-hist';
@@ -297,7 +297,7 @@ function logTable(s, nameOf, me) {
     else if (h.p === me) tr.className = 'mine';
     tr.innerHTML = `<td>${i + 1}</td><td class="hb-who"></td><td class="hb-g">${h.g}</td><td>${h.hit}</td><td>${h.blow}</td>`;
     tr.querySelector('.hb-who').textContent = nameOf(h.p);
-    body.prepend(tr);
+    body.append(tr);
   });
   t.append(body);
   box.append(t);
@@ -325,7 +325,7 @@ function table(s, p, title, small = false) {
     const tr = document.createElement('tr');
     if (h.hit === s.digits) tr.className = 'hit-all';
     tr.innerHTML = `<td>${i + 1}</td><td class="hb-g">${h.g}</td><td>${h.hit}</td><td>${h.blow}</td>`;
-    body.prepend(tr); // 新しい予想を上に
+    body.append(tr); // 1回目から下へ並べる
   });
   t.append(body);
   box.append(t);

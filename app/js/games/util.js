@@ -27,7 +27,7 @@ export function shuffle(arr, rng) {
 
 // 盤のゲームの詳細設定「CPU の強さ」
 export const CPU_SETTING = {
-  key: 'cpu', label: 'CPU の強さ', desc: 'CPU と対局するときの強さ', def: 'normal',
+  key: 'cpu', label: 'CPU の強さ', desc: 'CPU と対局するときの強さ', def: 'weak',
   choices: [['weak', 'よわい'], ['normal', 'ふつう'], ['strong', 'つよい']],
 };
 
@@ -36,7 +36,7 @@ export const CPU_SETTING = {
 // opts = { depth: { weak, normal, strong }, mistake: { weak, normal, strong } }。mistake は適当に打つ割合。
 // CPU はホストの端末だけで動くので Math.random を使ってよい。
 export function boardCpu(game, st, rules, legal, score, opts) {
-  const level = opts.depth[rules?.cpu] !== undefined ? rules.cpu : 'normal';
+  const level = opts.depth[rules?.cpu] !== undefined ? rules.cpu : 'weak';
   const moves = legal(st);
   if (moves.length === 1) return moves[0];
   if (Math.random() < opts.mistake[level]) return moves[Math.floor(Math.random() * moves.length)];
