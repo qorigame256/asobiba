@@ -851,6 +851,254 @@ assert.equal(UM.result(UM.apply(UM.apply(UM.init(2, 3, {}), { p: 0, t: 'pick', i
 assert.equal(UM.apply(UM.init(2, 3, {}), { p: 1, t: 'reveal' }), null, '出題者でない人は明かせない');
 console.log('party games OK');
 
+// ---------- 五目並べ ----------
+const GM = GAMES.gomoku;
+s = GM.init();
+assert.equal(s.size, 15, '最初は15路');
+assert.equal(GM.init({ rules: { size: 13 } }).grid.length, 169);
+// 黒が 7段目に横へ 5つ（列 3〜7）。白はその下の段
+for (const m of [7 * 15 + 3, 8 * 15 + 3, 7 * 15 + 4, 8 * 15 + 4, 7 * 15 + 5, 8 * 15 + 5, 7 * 15 + 6, 8 * 15 + 6]) s = GM.apply(s, m);
+assert.equal(GM.result(s), null, '4つではまだ');
+assert.equal(GM.apply(s, 7 * 15 + 3), null, '石のある点には置けない');
+s = GM.apply(s, 7 * 15 + 7);
+assert.deepEqual([GM.result(s).winner, GM.result(s).cells.slice().sort((a, b) => a - b)], [0, [108, 109, 110, 111, 112]], '横に5つで勝ち');
+assert.equal(GM.apply(s, 0), null, '決着後は置けない');
+// ななめ（右上から左下）に白が5つ。黒は離れた所
+s = GM.init();
+for (let k = 0; k < 5; k++) { s = GM.apply(s, 14 * 15 + k * 2); s = GM.apply(s, (2 + k) * 15 + (10 - k)); }
+assert.equal(GM.result(s).winner, 1, 'ななめに5つで白の勝ち');
+// 6つ並んでも勝ち: 黒が 0〜2 と 4〜5 を持っていて 3 に置く
+s = GM.init();
+for (const m of [0, 30, 1, 31, 2, 32, 4, 33, 5, 60]) s = GM.apply(s, m);
+s = GM.apply(s, 3);
+assert.equal(GM.result(s).cells.length, 6, '6つ並んでも勝ち（禁じ手なし）');
+
+// ---------- 点と線 ----------
+const DT = GAMES.dots;
+const { scoresOf: dotScores } = await import('../app/js/games/dots.js');
+s = DT.init();
+assert.equal(s.w, 4, '2人のおまかせは 4×4');
+assert.equal(s.lines.length, 5 * 4 + 4 * 5, '線の数');
+assert.equal(DT.init({ rules: { players: 4 } }).w, 6, '4人のおまかせは 6×6');
+assert.equal(DT.init({ rules: { players: 3, size: 3 } }).w, 3, '盤の大きさを選べる');
+assert.equal(DT.seatCount({ players: 3 }), 3);
+// 左上の四角（上 0・下 4・左 20・右 21）。赤 0、青 4、赤 20 と引き、青が 21 で四角を取って続けて青の番
+s = DT.init();
+for (const m of [0, 4, 20]) s = DT.apply(s, m);
+assert.equal(DT.turn(s), 1);
+s = DT.apply(s, 21);
+assert.deepEqual([s.boxes[0], DT.turn(s)], [1, 1], '4辺目を引いたら四角をもらい、もう1本');
+assert.equal(DT.apply(s, 21), null, '引いた線には引けない');
+s = DT.apply(s, 9);
+assert.equal(DT.turn(s), 0, '四角を取らなければ次の人');
+// 2つの四角を一度に閉じる: 四角0と1の間の線（22）を最後に引く
+s = DT.init();
+for (const m of [0, 1, 4, 5, 20, 22]) s = DT.apply(s, m);
+const who = DT.turn(s);
+s = DT.apply(s, 21);
+assert.deepEqual([s.boxes[0], s.boxes[1]], [who, who], '1本で2つの四角を閉じる');
+// 全部引いたら四角の多い人の勝ち。3人でも回る
+s = DT.init({ rules: { players: 3, size: 3 } });
+while (!DT.result(s)) s = DT.apply(s, s.lines.indexOf(null));
+assert.equal(dotScores(s).reduce((a, b) => a + b), 9, '四角は全部だれかのもの');
+const top = Math.max(...dotScores(s));
+assert.equal(DT.result(s).winner, dotScores(s).filter((v) => v === top).length === 1 ? dotScores(s).indexOf(top) : null);
+console.log('gomoku / dots OK');
+
+// ---------- ババ抜き ----------
+const BB = GAMES.babanuki;
+const { rankOf: rk } = await import('../app/js/games/cards.js');
+for (const n of [2, 3, 5, 10]) {
+  for (const mode of ['baba', 'jiji']) {
+    let st = BB.init(n, n * 7 + 1, { rules: { mode } });
+    assert.deepEqual(st, BB.init(n, n * 7 + 1, { rules: { mode } }), '同じ種なら同じ配り');
+    const all = st.hands.flat();
+    assert.equal(all.filter((c) => c === 'JK').length, mode === 'baba' ? 1 : 0, mode + ' のジョーカー');
+    for (const h of st.hands) {
+      const ranks = h.filter((c) => c !== 'JK').map(rk);
+      assert.equal(new Set(ranks).size, ranks.length, '最初にそろった2枚は捨ててある');
+    }
+    let guard = 0;
+    while (!BB.result(st)) {
+      const p = BB.turn(st);
+      assert.ok(st.hands[p].length > 0, '上がった人の番は来ない');
+      const from = BB.victim(st);
+      assert.ok(from !== p && st.hands[from].length > 0, '引く相手は手札のある別の人');
+      st = BB.apply(st, { p, ...BB.cpu(st, p) });
+      assert.ok(st);
+      assert.ok(++guard < 2000, '終わる');
+    }
+    const res = BB.result(st);
+    assert.equal(res.ranking.length, n, '全員に順位');
+    if (mode === 'baba') assert.deepEqual(st.hands[res.loser], ['JK'], '負けた人はジョーカーを持っている');
+    else assert.equal(rk(st.hands[res.loser][0]), rk(st.hidden), 'ジジ抜きの負けの札は抜いた札と同じ数字');
+  }
+}
+s = BB.init(3, 5, {});
+assert.equal(BB.apply(s, { p: 1, t: 'draw', i: 0 }), null, '番でない人は引けない');
+assert.equal(BB.apply(s, { p: 0, t: 'draw', i: 99 }), null, '無い位置は引けない');
+
+// ---------- ダウト ----------
+const DB = GAMES.doubt;
+s = DB.init(3, 11, {});
+assert.equal(s.hands.flat().length, 52);
+assert.ok(DB.realtime);
+const num1 = (st) => st.hands[st.turn].filter((c) => rk(c) === (st.plays % 13) + 1);
+const lie1 = (st) => st.hands[st.turn].filter((c) => rk(c) !== (st.plays % 13) + 1);
+assert.equal(DB.apply(s, { p: 1, t: 'play', cards: [s.hands[1][0]] }), null, '番でない人は出せない');
+assert.equal(DB.apply(s, { p: 0, t: 'play', cards: s.hands[0].slice(0, 5) }), null, '5枚は出せない');
+assert.equal(DB.apply(s, { p: 0, t: 'play', cards: [s.hands[1][0]] }), null, '持っていない札は出せない');
+// うそを出してダウトされる → 出した人が引き取る
+let lie = lie1(s)[0];
+s = DB.apply(s, { p: 0, t: 'play', cards: [lie] });
+assert.equal(DB.turn(s), null, '受付の間は番が無い');
+assert.equal(DB.apply(s, { p: 0, t: 'doubt', w: 0, ms: 100 }), null, '出した人はダウトできない');
+assert.equal(DB.referee(s).ms, s.limit, '最初は受付の秒数');
+s = DB.apply(s, { p: 1, t: 'doubt', w: 0, ms: 900 });
+assert.equal(DB.apply(s, { p: 1, t: 'doubt', w: 0, ms: 800 }), null, '同じ人は2回押せない');
+assert.equal(DB.referee(s).ms, 1000, 'ダウトが出たら1秒で締め切る');
+s = DB.apply(s, { p: 2, t: 'doubt', w: 0, ms: 400 }); // あとから届いたが速い（番号も大きい）
+assert.equal(DB.referee(s).ms, 300, '全員決めたらすぐ締め切る');
+assert.equal(DB.apply(s, { p: 1, t: 'close', w: 0 }), null, '締め切りはホストだけ');
+let before = s.hands[0].length;
+s = DB.apply(s, { p: -1, t: 'close', w: 0 });
+assert.deepEqual([s.reveal.by, s.reveal.lie, s.reveal.taker], [2, true, 0], '届いた順でなく速い人のダウト・うそなら出した人が引き取る');
+assert.equal(s.hands[0].length, before + 1);
+assert.equal(DB.apply(s, { p: -1, t: 'close', w: 0 }), null, '締め切りは1回だけ');
+assert.deepEqual([DB.turn(s), s.plays], [1, 1], '次の人が次の数字（2）');
+// 本当の札でダウトされる → ダウトした人が引き取る
+s = DB.init(3, 12, {});
+while (!num1(s).length) s = DB.apply(DB.apply(s, { p: s.turn, t: 'play', cards: [lie1(s)[0]] }), { p: -1, t: 'close', w: s.plays });
+const prevPlays = s.plays;
+const pl = s.turn;
+s = DB.apply(s, { p: pl, t: 'play', cards: num1(s) });
+const dbr = (pl + 1) % 3;
+const pile = s.pile.length;
+before = s.hands[dbr].length;
+s = DB.apply(s, { p: dbr, t: 'doubt', w: prevPlays, ms: 500 });
+s = DB.apply(s, { p: -1, t: 'close', w: prevPlays });
+assert.equal(s.reveal.lie, false);
+assert.equal(s.hands[dbr].length, before + pile, '本当ならダウトした人が場の札を全部引き取る');
+assert.equal(s.pile.length, 0);
+// 最後の札が通れば上がり
+s = DB.init(3, 13, {});
+s = { ...s, hands: [[s.hands[0][0]], s.hands[1], s.hands[2]] };
+s = DB.apply(s, { p: 0, t: 'play', cards: s.hands[0] });
+s = DB.apply(s, { p: 1, t: 'pass', w: 0 });
+s = DB.apply(s, { p: 2, t: 'pass', w: 0 });
+s = DB.apply(s, { p: -1, t: 'close', w: 0 });
+assert.equal(DB.result(s).winner, 0, '最後の札が通れば上がり');
+// CPU どうしで最後まで（反則を出さない・必ず終わる）
+for (let g = 0; g < 30; g++) {
+  let st = DB.init(3 + (g % 6), g, {});
+  let guard = 0;
+  while (!DB.result(st)) {
+    let moved = false;
+    for (let p = 0; p < st.n; p++) {
+      if (!DB.canAct(st, p)) continue;
+      st = DB.apply(st, { p, ...DB.cpu(st, p) });
+      assert.ok(st, 'ダウトの CPU が反則を出した');
+      moved = true;
+    }
+    if (!moved) { const r = DB.referee(st); st = DB.apply(st, { ...r.move, p: -1 }); }
+    assert.ok(++guard < 5000, 'ダウトが終わらない');
+    assert.equal(st.hands.flat().length + st.pile.length, 52, '札の数は52のまま');
+  }
+}
+
+// ---------- ヨット ----------
+const YT = GAMES.yacht;
+const { scoreOf, totalOf } = await import('../app/js/games/yacht.js');
+assert.equal(scoreOf(0, [1, 1, 3, 4, 1]), 3, '1の目の合計');
+assert.equal(scoreOf(5, [6, 6, 6, 2, 1]), 18);
+assert.equal(scoreOf(6, [1, 2, 3, 4, 6]), 16, 'チョイス');
+assert.equal(scoreOf(7, [5, 5, 5, 5, 2]), 22, 'フォーダイスは5個の合計');
+assert.equal(scoreOf(7, [5, 5, 5, 2, 2]), 0);
+assert.equal(scoreOf(8, [3, 3, 3, 2, 2]), 13, 'フルハウス');
+assert.equal(scoreOf(8, [4, 4, 4, 4, 4]), 20, '5個同じもフルハウス');
+assert.equal(scoreOf(8, [3, 3, 3, 3, 2]), 0);
+assert.equal(scoreOf(9, [3, 4, 5, 6, 6]), 15, 'Sストレート');
+assert.equal(scoreOf(9, [1, 2, 3, 5, 6]), 0);
+assert.equal(scoreOf(10, [2, 3, 4, 5, 6]), 30, 'Bストレート');
+assert.equal(scoreOf(10, [1, 2, 3, 4, 6]), 0);
+assert.equal(scoreOf(11, [2, 2, 2, 2, 2]), 50, 'ヨット');
+assert.deepEqual(totalOf([3, 6, 9, 12, 15, 18, null, null, null, null, null, 50]), { upper: 63, bonus: 35, total: 148 }, '63点でボーナス');
+assert.equal(totalOf([3, 6, 9, 12, 15, 17, 0, 0, 0, 0, 0, 0]).bonus, 0);
+s = YT.init(3, 21);
+assert.equal(YT.apply(s, { p: 0, t: 'score', r: 0, cat: 0 }), null, '振る前は書けない');
+assert.equal(YT.apply(s, { p: 0, t: 'roll', r: 0, k: 1, keep: [true, false, false, false, false] }), null, '1振り目は残せない');
+s = YT.apply(s, { p: 0, t: 'roll', r: 0, k: 1, keep: [false, false, false, false, false] });
+assert.equal(YT.apply(s, { p: 0, t: 'roll', r: 0, k: 1, keep: [false, false, false, false, false] }), null, '同じ振りは2回届いても1回');
+const d1 = s.pl[0].dice.slice();
+s = YT.apply(s, { p: 0, t: 'roll', r: 0, k: 2, keep: [true, true, false, false, false] });
+assert.deepEqual(s.pl[0].dice.slice(0, 2), d1.slice(0, 2), '残したサイコロはそのまま');
+s = YT.apply(s, { p: 0, t: 'roll', r: 0, k: 3, keep: [true, true, true, false, false] });
+assert.equal(YT.apply(s, { p: 0, t: 'roll', r: 0, k: 4, keep: [true, true, true, true, false] }), null, '4回目は振れない');
+s = YT.apply(s, { p: 0, t: 'score', r: 0, cat: 6 });
+assert.equal(s.pl[0].sheet[6], s.pl[0].dice.reduce((a, b) => a + b), 'チョイスを書いた');
+assert.equal(YT.canAct(s, 0), false, '書いたらほかの人を待つ');
+assert.equal(s.round, 0, '全員が書くまで次の回へ進まない');
+for (const p of [1, 2]) { s = YT.apply(s, { p, t: 'roll', r: 0, k: 1, keep: [false, false, false, false, false] }); s = YT.apply(s, { p, t: 'score', r: 0, cat: 6 }); }
+assert.equal(s.round, 1, '全員書いたら次の回');
+assert.equal(YT.apply(s, { p: 0, t: 'roll', r: 0, k: 1, keep: [false, false, false, false, false] }), null, '前の回の手は弾く');
+s = YT.apply(s, { p: 0, t: 'roll', r: 1, k: 1, keep: [false, false, false, false, false] });
+assert.equal(YT.apply(s, { p: 0, t: 'score', r: 1, cat: 6 }), null, '書いた役には書けない');
+assert.deepEqual(YT.init(3, 21), YT.init(3, 21));
+// CPU どうしで最後まで
+for (let g = 0; g < 20; g++) {
+  let st = YT.init(2 + (g % 4), 100 + g);
+  let guard = 0;
+  while (!YT.result(st)) {
+    for (let p = 0; p < st.n; p++) if (YT.canAct(st, p)) { st = YT.apply(st, { p, ...YT.cpu(st, p) }); assert.ok(st, 'ヨットの CPU が反則を出した'); }
+    assert.ok(++guard < 200);
+  }
+  assert.ok(st.pl.every((x) => x.sheet.every((v) => v !== null)), '全部の役が埋まる');
+  const tot = st.pl.map((x) => totalOf(x.sheet).total);
+  assert.ok(tot.every((v) => v > 60 && v < 400), 'CPU の点がふつうの範囲 ' + tot);
+}
+
+// ---------- ワードウルフ ----------
+const WW = GAMES.wordwolf;
+const { PAIRS } = await import('../app/js/games/wordwolf-data.js');
+assert.ok(WW.noCpu && WW.minPlayers === 3);
+assert.ok(PAIRS.every((x) => x.length === 2 && x[0] !== x[1]), 'お題は違う2つの言葉');
+assert.equal(new Set(PAIRS.flat()).size, PAIRS.length * 2, 'お題の言葉が重ならない');
+s = WW.init(4, 31, {});
+const wolf = s.wolf;
+const town = [0, 1, 2, 3].filter((p) => p !== wolf);
+assert.notEqual(WW.wordOf(s, wolf), WW.wordOf(s, town[0]), 'ウルフだけ違うお題');
+assert.equal(WW.wordOf(s, town[0]), WW.wordOf(s, town[1]));
+assert.equal(WW.referee(s).ms, 3 * 60000, '話し合いは最初3分');
+assert.equal(WW.apply(s, { p: 0, t: 'vote', to: 1, v: 1 }), null, '話し合いの間は投票できない');
+s = WW.apply(s, { p: -1, t: 'tovote' });
+assert.equal(s.phase, 'vote', '時間が来たら投票');
+assert.equal(WW.apply(s, { p: 0, t: 'vote', to: 0, v: 1 }), null, '自分には投票できない');
+const voteAll = (st, to) => { for (let p = 0; p < st.n; p++) st = WW.apply(st, { p, t: 'vote', to: to(p), v: st.vote }); return st; };
+let t1 = voteAll(s, (p) => (p === wolf ? town[0] : wolf));
+assert.equal(t1.phase, 'guess', 'ウルフが選ばれたらお題を当てる番');
+assert.equal(WW.apply(t1, { p: town[0], t: 'guess', text: 'x' }), null, 'ウルフ以外は答えられない');
+let t2 = WW.apply(t1, { p: wolf, t: 'guess', text: ` ${WW.wordOf(s, town[0])} ` });
+assert.deepEqual(WW.result(t2).winners, [wolf], '同じ言葉なら自動で逆転');
+t2 = WW.apply(t1, { p: wolf, t: 'guess', text: 'ぜんぜんちがう' });
+assert.equal(t2.phase, 'judge', '違う言葉なら多数派が判定');
+assert.equal(WW.apply(t2, { p: wolf, t: 'judge', ok: true }), null, 'ウルフは判定できない');
+assert.deepEqual(WW.result(WW.apply(t2, { p: town[1], t: 'judge', ok: false })).winners, town, 'はずれならウルフ以外の勝ち');
+assert.deepEqual(WW.result(WW.apply(t2, { p: town[1], t: 'judge', ok: true })).winners, [wolf], '正解ならウルフの勝ち');
+t1 = voteAll(s, (p) => (p === town[0] ? town[1] : town[0]));
+assert.deepEqual(WW.result(t1).winners, [wolf], 'ウルフ以外が選ばれたらウルフの勝ち');
+// 2対2で並ぶ → 並んだ2人でやり直し → また並べばウルフの勝ち
+// 0 と 1 が2票ずつ → 2人だけでやり直し。1回目の投票（v: 1）はもう受け付けない
+t1 = voteAll(s, (p) => [1, 0, 0, 1][p]);
+assert.deepEqual([t1.vote, t1.cands], [2, [0, 1]], '並んだ人だけでやり直し');
+assert.equal(WW.apply(t1, { p: 2, t: 'vote', to: 3, v: 2 }), null, '候補でない人には入れられない');
+assert.equal(WW.apply(t1, { p: 2, t: 'vote', to: 0, v: 1 }), null, '前の投票の手は弾く');
+let tie = WW.apply(WW.init(4, 31, {}), { p: 0, t: 'tovote' });
+tie = voteAll(tie, (p) => (p < 2 ? (p === 0 ? 1 : 0) : (p === 2 ? 3 : 2)));
+assert.deepEqual([tie.vote, tie.cands.length], [2, 4], '4人が1票ずつで並んだらやり直し');
+tie = voteAll(tie, (p) => (p < 2 ? (p === 0 ? 1 : 0) : (p === 2 ? 3 : 2)));
+assert.deepEqual([tie.phase, WW.result(tie).winners], ['end', [tie.wolf]], 'やり直しでも並んだらウルフの勝ち');
+console.log('babanuki / doubt / yacht / wordwolf OK');
+
 // 遊び方: どのゲームにもあり、長くしない（1つ4行まで）
 const { GAME_ORDER } = await import('../app/js/games/index.js');
 for (const id of GAME_ORDER) {

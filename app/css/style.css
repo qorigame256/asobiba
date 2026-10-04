@@ -319,6 +319,74 @@ p { margin: 0; }
 .rv-mini.p2 { background: #c62828; }
 .rv-mini.p3 { background: #1f4fb8; }
 
+/* ---------- 五目並べ（--n = 路数。点ごとに縦横の線を半分ずつ描いて、盤の線にする） ---------- */
+.gm {
+  display: grid;
+  grid-template-columns: repeat(var(--n), 1fr);
+  padding: 6px;
+  background: #e2b86b;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .15);
+  touch-action: manipulation;
+}
+.gm .gm-pt { aspect-ratio: 1; position: relative; display: grid; place-items: center; }
+.gm .gm-pt::before, .gm .gm-pt::after { content: ""; position: absolute; background: #5a4020; pointer-events: none; }
+.gm .gm-pt::before { left: 0; right: 0; top: calc(50% - .5px); height: 1px; }
+.gm .gm-pt::after { top: 0; bottom: 0; left: calc(50% - .5px); width: 1px; }
+.gm .gm-pt.l::before { left: 50%; }
+.gm .gm-pt.r::before { right: 50%; }
+.gm .gm-pt.t::after { top: 50%; }
+.gm .gm-pt.b::after { bottom: 50%; }
+.gm .gm-pt.star { background: radial-gradient(circle, #5a4020 0 2.5px, transparent 3px); }
+.gm-stone { width: 88%; height: 88%; border-radius: 50%; position: relative; z-index: 1; box-shadow: 0 1px 2px rgba(0, 0, 0, .4); }
+.gm-stone.p0 { background: radial-gradient(circle at 35% 30%, #555, #111 70%); }
+.gm-stone.p1 { background: radial-gradient(circle at 35% 30%, #fff, #d8d8d8 70%); }
+.gm-stone.last::after { content: ""; position: absolute; inset: 36%; border-radius: 50%; background: #e04b3c; }
+.gm-stone.win { box-shadow: 0 0 0 2px var(--win), 0 1px 2px rgba(0, 0, 0, .4); }
+.gm-stone.pop { animation: pop .2s ease-out; }
+.gm .gm-pt.playable:hover { background: radial-gradient(circle, rgba(0, 0, 0, .25) 0 30%, transparent 32%); }
+.gm .gm-pt.playable.p1:hover { background: radial-gradient(circle, rgba(255, 255, 255, .6) 0 30%, transparent 32%); }
+[data-game="gomoku"] { --p0: #111; --p1: #8a8a8a; }
+
+/* ---------- 点と線（点・線・四角を1つの格子に並べる。--w・--h = 四角の数） ---------- */
+.dt {
+  display: grid;
+  grid-template-columns: repeat(var(--w), 14px 1fr) 14px;
+  grid-template-rows: repeat(var(--h), 14px 1fr) 14px;
+  aspect-ratio: 1;
+  width: min(92vw, 420px);
+  padding: 8px;
+  background: var(--panel);
+  border: 1.5px solid var(--line);
+  border-radius: var(--radius);
+  touch-action: manipulation;
+}
+[data-game="dots"] { --p0: #e2493b; }
+.dt-dot { background: var(--ink); border-radius: 50%; margin: 2px; position: relative; z-index: 2; pointer-events: none; }
+.dt .dt-line { position: relative; border-radius: 4px; }
+.dt .dt-line::before { content: ""; position: absolute; border-radius: 4px; background: transparent; }
+.dt .dt-line.h::before { left: 0; right: 0; top: 4px; bottom: 4px; }
+.dt .dt-line.v::before { top: 0; bottom: 0; left: 4px; right: 4px; }
+/* 押せる範囲を四角の側へ広げる（線は細くて指で押しにくいため） */
+.dt .dt-line.playable { z-index: 1; }
+.dt .dt-line.playable.h { margin: -12px 4px; }
+.dt .dt-line.playable.v { margin: 4px -12px; }
+.dt .dt-line.playable.h::before { top: 16px; bottom: 16px; background: #ece5d9; }
+.dt .dt-line.playable.v::before { left: 16px; right: 16px; background: #ece5d9; }
+.dt .dt-line.playable:hover::before { background: #cfc5b5; }
+.dt .dt-line.on.p0::before { background: var(--p0); }
+.dt .dt-line.on.p1::before { background: var(--p1); }
+.dt .dt-line.on.p2::before { background: var(--p2); }
+.dt .dt-line.on.p3::before { background: var(--p3); }
+.dt .dt-line.last::before { box-shadow: 0 0 0 2px var(--win); }
+.dt-box { display: grid; place-items: center; font-weight: 800; color: #fff; border-radius: 4px; margin: 2px; font-size: clamp(.8rem, 4vw, 1.2rem); }
+.dt-box.p0 { background: var(--p0); }
+.dt-box.p1 { background: var(--p1); }
+.dt-box.p2 { background: var(--p2); }
+.dt-box.p3 { background: var(--p3); }
+.dt-box.win { box-shadow: 0 0 0 2px var(--win); }
+.dt-box.pop { animation: pop .25s ease-out; }
+
 /* ---------- 将棋 ---------- */
 .board.sg { width: min(100%, 500px, max(300px, calc((100dvh - 250px) * .85))); display: flex; flex-direction: column; gap: 8px; }
 .sg-wrap { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto 1fr; gap: 2px 4px; }
@@ -1008,3 +1076,73 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .member-panel { flex-basis: 100%; margin-top: 8px; color: var(--muted); font-size: .9rem; }
 .member-panel summary { cursor: pointer; }
 .member-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); color: var(--ink); }
+
+/* ---------- ババ抜き・ダウト ---------- */
+[data-game="babanuki"] .board, [data-game="doubt"] .board { width: min(100%, 680px); }
+.bb, .db { display: flex; flex-direction: column; gap: 10px; }
+.bb-count { font-weight: 800; font-size: 1rem; }
+.bb-field { background: #2e6b47; border-radius: var(--radius); padding: 10px; text-align: center; }
+.bb-head { color: #fff; font-weight: 700; font-size: .92rem; margin-bottom: 8px; }
+.bb-backs { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; }
+.bb-backs .pcard { width: 40px; }
+.board .bb-backs button.pcard.back.usable:hover { transform: translateY(-6px); }
+.bb-hand, .db-hand { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; }
+.bb-hand .pcard { width: 48px; }
+.bb-hand .pcard.pop { animation: pop .3s ease-out; box-shadow: 0 0 0 3px var(--accent); }
+.db-field { background: #2e6b47; color: #fff; border-radius: var(--radius); padding: 12px; text-align: center; min-height: 96px; display: flex; flex-direction: column; justify-content: center; gap: 8px; }
+.db-info small { color: #d7eadc; }
+.db-num { display: inline-block; min-width: 1.6em; font-size: 1.6rem; font-weight: 800; color: #ffe28a; }
+.db-cards { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.db-cards .pcard { width: 52px; }
+.db-cards.pop .pcard { animation: pop .22s ease-out; }
+.db-cards .pcard.lie { box-shadow: 0 0 0 3px #e04b3c; }
+.db-actions { gap: 10px; }
+.board button.btn.db-call { font-size: 1.25rem; padding: 14px 34px; background: #e04b3c; color: #fff; }
+.db-hand .pcard { width: 48px; }
+.db .pcard.usable { box-shadow: 0 0 0 2px var(--win); }
+.db.board .pcard.selected { transform: translateY(-10px); box-shadow: 0 0 0 3px var(--accent), 0 6px 10px rgba(0, 0, 0, .25); }
+.db .cc-actions .btn:disabled { opacity: .4; cursor: default; }
+
+/* ---------- ヨット ---------- */
+[data-game="yacht"] .board { width: min(100%, 680px); }
+.yt { display: flex; flex-direction: column; gap: 12px; }
+.yt-box { background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 10px; text-align: center; }
+.yt-head { font-weight: 700; font-size: .92rem; margin-bottom: 8px; }
+.yt-dice { display: flex; justify-content: center; gap: 8px; margin-bottom: 8px; }
+.yt-die {
+  width: min(15vw, 58px); aspect-ratio: 1; border-radius: 14%; background: #fff; border: 2px solid #cfc6b8;
+  display: grid; grid-template-columns: repeat(3, 1fr); align-content: space-between; padding: 7px; gap: 2px;
+  box-shadow: 0 2px 3px rgba(0, 0, 0, .15);
+}
+.board button.yt-die { border: 2px solid #cfc6b8; padding: 7px; background: #fff; cursor: pointer; }
+.yt-die.blank { background: #f2ece2; }
+.yt-die i { aspect-ratio: 1; border-radius: 50%; } /* 目の位置は3×3のマス（yacht.js の PIPS） */
+.yt-die i.on { background: #2d2a26; }
+.board button.yt-die.kept, .yt-die.kept { border-color: var(--accent); background: #fff1ea; transform: translateY(-6px); box-shadow: 0 0 0 2px var(--accent); }
+.yt-die.roll { animation: roll .35s ease-out; }
+@keyframes roll { 0% { transform: rotate(-200deg) scale(.6); } 100% { transform: none; } }
+.yt-table { overflow-x: auto; background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); }
+.yt-table table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: .9rem; }
+.yt-table th, .yt-table td { padding: 3px 6px; border-bottom: 1px solid var(--line); text-align: center; white-space: nowrap; }
+.yt-table tr > th:first-child { text-align: left; font-weight: 700; position: sticky; left: 0; background: var(--panel); }
+.yt-table tr:first-child th { font-size: .78rem; vertical-align: bottom; }
+.yt-table th small { display: block; color: var(--muted); font-weight: 400; }
+.yt-name { display: inline-block; max-width: 6em; overflow: hidden; text-overflow: ellipsis; }
+.yt-table .mine { background: #fff7ef; }
+.yt-table th.won { background: #fff1c2; }
+.yt-table tr.sep td, .yt-table tr.sep th { border-bottom: 2px solid #cfc6b8; }
+.yt-table tr.bonus td, .yt-table tr.bonus th { font-size: .78rem; color: var(--muted); }
+.yt-table tr.total td, .yt-table tr.total th { font-weight: 800; font-size: 1.05rem; border-top: 2px solid #cfc6b8; }
+.yt-table td.just { background: #fff1c2; font-weight: 700; }
+.board button.yt-pick { min-width: 40px; padding: 2px 6px; border-radius: 8px; border: 1.5px solid var(--accent); background: #fff; color: var(--accent); font-weight: 800; cursor: pointer; }
+.board button.yt-pick.zero { border-color: var(--line); color: var(--muted); font-weight: 400; }
+
+/* ---------- ワードウルフ ---------- */
+[data-game="wordwolf"] .board { width: min(100%, 600px); }
+.ww { display: flex; flex-direction: column; gap: 12px; }
+.ww-card { background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 12px; text-align: center; }
+.ww-card small { color: var(--muted); }
+.ww-word { font-size: 2rem; font-weight: 800; margin: 4px 0; }
+.ww-left { text-align: center; font-size: 1.4rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.ww-guess { display: flex; justify-content: center; }
+.ww-guess input { width: min(100%, 320px); font-size: 1.1rem; }

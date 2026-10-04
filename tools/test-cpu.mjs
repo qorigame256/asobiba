@@ -164,7 +164,56 @@ for (const [g, n] of [[C, 20], [R, 12], [TS, 12]]) {
   }
 }
 
-assert.ok(slowest.ms < 2000, `CPU の1手が遅すぎる（${slowest.id} ${Math.round(slowest.ms)}ms）`);
+// 五目並べ・点と線: 反則を出さない・強さの順に勝ち越す（rules を渡せる版の duel。席ごとの強さ）
+{
+  const { gomoku: G, dots: D } = GAMES;
+  const play = (g, rules, levels) => {
+    let x = g.init({ rules });
+    let guard = 0;
+    while (!g.result(x)) {
+      const p = g.turn(x);
+      const t0 = performance.now();
+      const m = g.cpu(x, p, { ...rules, cpu: levels[p] });
+      const ms = performance.now() - t0;
+      if (ms > slowest.ms) slowest = { ms, id: `${g.id}:${levels[p]}` };
+      x = g.apply(x, m);
+      assert.ok(x, `${g.id} の CPU（${levels[p]}）が反則の手 ${m} を出した`);
+      assert.ok(++guard <= 400, g.id + ' が終わらない');
+    }
+    return g.result(x).winner;
+  };
+  // 五目並べ: 4つ並んだら止める・5つ目を置けるなら置く
+  let x = G.init();
+  for (const m of [112, 0, 113, 1, 114, 2, 115]) x = G.apply(x, m); // 黒が 7段目の列7〜10に4つ（両端が空いている）。白の番
+  for (let k = 0; k < 10; k++) assert.ok([111, 116].includes(G.cpu(x, 1, lv('weak'))), '五目並べ: よわいでも五をふさぐ');
+  x = G.apply(x, 111);
+  for (let k = 0; k < 10; k++) assert.equal(G.cpu(x, 0, lv('weak')), 116, '五目並べ: 5つ目を置ける所に置く');
+  // 点と線: 取れる四角は取る（つよい）・3辺目を渡さない
+  let y = D.init();
+  for (const m of [0, 4, 20]) y = D.apply(y, m); // 左上の四角が3辺。青の番
+  for (let k = 0; k < 10; k++) assert.equal(D.cpu(y, 1, lv('strong')), 21, '点と線: 4辺目を引いて四角を取る');
+  y = D.init();
+  for (const m of [0, 4]) y = D.apply(y, m); // 左上の四角が2辺。20・21を引くと3辺目になる
+  for (let k = 0; k < 20; k++) assert.ok(![20, 21].includes(D.cpu(y, 0, lv('strong'))), '点と線: 3辺目を引かない');
+
+  for (const [g, rules, n, games, id] of [[G, {}, 2, 80, 'gomoku'], [D, {}, 2, 100, 'dots'], [D, { players: 3 }, 3, 90, 'dots-3'], [D, { players: 4 }, 4, 80, 'dots-4']]) {
+    // 3人以上の点と線は、つよいとふつうの差が小さい（適当に引く1割だけ）ので、よわいとの差だけを見る
+    for (const [a, b] of n === 2 ? [['normal', 'weak'], ['strong', 'normal']] : [['normal', 'weak'], ['strong', 'weak']]) {
+      let aw = 0;
+      let bw = 0;
+      for (let k = 0; k < games; k++) {
+        const seat = k % n; // 強い方の席を回す
+        const levels = Array.from({ length: n }, (_, p) => (p === seat ? a : b));
+        const w = play(g, rules, levels);
+        if (w === seat) aw++; else if (w !== null) bw++;
+      }
+      results[`${id} ${a}-${b}`] = { win: aw, lose: bw, games };
+      assert.ok(aw > (bw / (n - 1)) * 1.1, `${id}: ${a} が ${b} に勝ち越す（${aw} 対 ${bw}）`);
+    }
+  }
+}
+
+assert.ok(slowest.ms < 2000,`CPU の1手が遅すぎる（${slowest.id} ${Math.round(slowest.ms)}ms）`);
 console.log('results', JSON.stringify(results));
 console.log('slowest move', slowest.id, Math.round(slowest.ms) + 'ms');
 console.log('ALL OK');
