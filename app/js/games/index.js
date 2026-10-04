@@ -1,11 +1,11 @@
 // 遊べるゲームの一覧。新しいゲームはここに足す。
 //
-// 盤のゲーム（2人用。マルバツだけ詳細設定で3〜4人）が持つもの: id / name / icon / desc / ready / players（[先手の呼び名, 後手の呼び名]）
+// 盤のゲーム（2人用。マルバツ・コネクトフォー・リバーシは詳細設定で3〜4人）が持つもの: id / name / icon / desc / ready / players（[先手の呼び名, 後手の呼び名]）
 //   init({ rules }) → 最初の局面（rules = 詳細設定の値。使わないゲームは無視してよい）, turn(局面) → 0|1, apply(局面, 手) → 次の局面（反則なら null）,
 //   result(局面) → null（続行中）| { winner: 0|1|null(引き分け), cells: [光らせるマス] },
 //   render(要素, 局面, { canMove, onMove, fresh, me: 自分のプレイヤー番号（観戦は -1、同じ画面の対局は null） }),
 //   info(局面)（任意。状態表示に足す HTML）,
-//   seatCount(rules)（任意。詳細設定で人数が決まる盤のゲーム（マルバツの3〜4人）。待合室の席の数・turn と winner の番号が 0〜人数-1 になる。
+//   seatCount(rules)（任意。詳細設定で人数が決まる盤のゲーム（マルバツ・コネクトフォー・リバーシの3〜4人）。待合室の席の数・turn と winner の番号が 0〜人数-1 になる。
 //     players はその人数ぶんの呼び名を持つ。無ければ2人）
 //
 // カードゲーム（multi: true。オンラインのみ・足りない席は CPU）が持つもの: id / name / icon / desc / ready /

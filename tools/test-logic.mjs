@@ -107,6 +107,31 @@ assert.ok(s);
 assert.equal(s.board[27], 0);
 assert.equal(s.turn, 1);
 assert.deepEqual(s.flipped, [27]);
+// 3〜4人のリバーシ
+assert.equal(R.seatCount({ players: 3 }), 3);
+let rv;
+s = R.init({ rules: { players: 3 } });
+assert.deepEqual([s.board[27], s.board[28], s.board[35], s.board[36]], [0, 1, 2, 2], '3人の最初の石');
+assert.equal(R.init({ rules: { players: 4 } }).board.filter((v) => v !== null).length, 4, '4人の最初の石');
+// 黒が 0 に置くと、白(1)と赤(2)をまとめて挟む
+s = { ...R.init({ rules: { players: 3 } }), board: Object.assign(Array(64).fill(null), { 1: 1, 2: 2, 3: 0, 20: 1 }), turn: 0 };
+rv = R.apply(s, 0);
+assert.ok(rv, '白と赤が混ざっていても挟める');
+assert.deepEqual([rv.board[1], rv.board[2], rv.turn], [0, 0, 1], '挟んだ石は全部自分の色・次は白');
+assert.equal(R.apply(s, 21), null, '挟める所があるときは、となりでも挟めない所には置けない');
+// 黒が挟める所が無い: 石のとなりならどこでも置ける（パスにしない）
+s = { ...s, board: Object.assign(Array(64).fill(null), { 27: 1, 28: 2 }), turn: 0 };
+assert.ok(R.apply(s, 19), '挟めないときは石のとなりに置ける');
+assert.equal(R.apply(s, 0), null, '石から離れた所には置けない');
+assert.equal(R.apply(s, 19).turn, 1, 'パスにならず次の人へ');
+assert.equal(R.apply({ ...s, turn: 1 }, 29).turn, 2, '白の次は赤（3人で回る）');
+// 赤が最後の1マスを埋めて終局。いちばん多い人の勝ち・同点は引き分け
+s = { ...R.init({ rules: { players: 3 } }), board: Array.from({ length: 64 }, (_, i) => (i === 63 ? null : i < 30 ? 0 : i < 45 ? 1 : 2)), turn: 2 };
+rv = R.apply(s, 63);
+assert.ok(rv.over, '盤が埋まったら終わり');
+assert.equal(R.result(rv).winner, 0, 'いちばん多い人の勝ち');
+s = { ...s, board: Array.from({ length: 64 }, (_, i) => (i === 63 ? null : i < 24 ? 0 : i < 48 ? 1 : 2)), turn: 2 };
+assert.equal(R.result(R.apply(s, 63)).winner, null, 'いちばん多い人が2人なら引き分け');
 
 // ランダム対局で落ちないこと・必ず終わること
 function randomGame(g, legalOf) {

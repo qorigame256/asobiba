@@ -131,6 +131,38 @@ for (const [g, n] of [[C, 20], [R, 12], [TS, 12]]) {
     assert.ok(strongWins / G > 1.5 / n, `${n}人コネクトフォー: つよいが よわい より多く勝つ ${strongWins}/${G}`);
   }
 }
+// 3〜4人のリバーシ: 隅を取る・次の人に隅を渡さない・つよい1人が よわい2人より多く勝つ
+{
+  const base = R.init({ rules: { players: 3 } });
+  const at = (o) => ({ ...base, board: Object.assign(Array(64).fill(null), o), turn: 0 });
+  // 黒は 0（隅）・12・34 で白を挟める。隅を取る
+  let w = at({ 9: 1, 18: 0, 27: 1, 28: 2, 35: 2, 36: 0, 20: 1 });
+  for (let k = 0; k < 10; k++) assert.equal(R.cpu(w, 0, lv('strong')), 0, '3人リバーシ: 隅を取る');
+  // 置いた後の石の点数だけなら 43 を選ぶが、43 に置くと次の白が隅を取れるようになる局面（機械で探した）
+  w = at({ 11: 0, 20: 0, 21: 1, 27: 0, 28: 2, 29: 1, 35: 2, 36: 1, 37: 1, 42: 2, 44: 2, 45: 0, 49: 2 });
+  for (let k = 0; k < 20; k++) assert.notEqual(R.cpu(w, 0, lv('strong')), 43, '3人リバーシ: 次の人に隅を渡さない');
+  for (const n of [3, 4]) {
+    const G = 150;
+    let strongWins = 0;
+    for (let g = 0; g < G; g++) {
+      const seat = g % n;
+      let x = R.init({ rules: { players: n } });
+      let guard = 0;
+      while (!R.result(x)) {
+        const t0 = performance.now();
+        const m = R.cpu(x, x.turn, { players: n, cpu: x.turn === seat ? 'strong' : 'weak' });
+        const ms = performance.now() - t0;
+        if (ms > slowest.ms) slowest = { ms, id: 'reversi-' + n };
+        x = R.apply(x, m);
+        assert.ok(x, n + '人リバーシ: 反則を出さない');
+        assert.ok(++guard <= 64);
+      }
+      if (R.result(x).winner === seat) strongWins++;
+    }
+    results['reversi-' + n] = { strongWinRate: Math.round(strongWins / G * 100) + '%' };
+    assert.ok(strongWins / G > 1.5 / n, `${n}人リバーシ: つよいが よわい より多く勝つ ${strongWins}/${G}`);
+  }
+}
 
 assert.ok(slowest.ms < 2000, `CPU の1手が遅すぎる（${slowest.id} ${Math.round(slowest.ms)}ms）`);
 console.log('results', JSON.stringify(results));
