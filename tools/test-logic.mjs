@@ -38,6 +38,37 @@ s = T.apply(big({ board: Array(81).fill(null), owner: [null, 'd', ...Array(7).fi
 assert.equal(s.next, null, '引き分けの盤へ送られたらどこでも置ける');
 assert.deepEqual(T.result(big({ owner: [0, 0, 0, 1, 1, null, null, null, null] })), { winner: 0, cells: [0, 1, 2] }, '取った盤が3つ並んだら勝ち');
 assert.equal(T.result(big({ owner: [0, 1, 0, 'd', 1, 0, 1, 0, 1] })).winner, null, '置ける盤が無くなったら引き分け');
+
+// 3〜4人のマルバツ（詳細設定「人数」）
+const wide = (rules, moves) => { let x = T.init({ rules }); for (const m of moves) { x = T.apply(x, m); assert.ok(x, 'illegal ' + m); } return x; };
+s = T.init({ rules: { players: 3 } });
+assert.equal(s.w * 100 + s.k, 503, '3人のおまかせは 5×5 で3つ');
+assert.equal(T.init({ rules: { players: 4 } }).w, 8, '4人のおまかせは 8×8');
+assert.equal(T.init({ rules: { players: 3, wide: '7-3' } }).w, 7, '盤の大きさを選べる');
+assert.equal(T.init({ rules: { players: 2, wide: '7-3' } }).board.length, 9, '2人なら3人以上の盤の設定は見ない');
+assert.equal(T.init({ rules: { players: 3, size: 'super' } }).big, undefined, '3人ではスーパーにならない');
+assert.equal(T.seatCount({ players: 4 }), 4);
+s = wide({ players: 3 }, [0, 1, 2]);
+assert.equal(T.turn(s), 0, '3人目の次は1人目');
+assert.equal(s.board[2], 2, '3人目の印');
+// ○ が右上から左下へ ななめ（4・8・12）に並べる。× と △ はほかへ
+s = wide({ players: 3 }, [4, 0, 1, 8, 5, 6]);
+assert.equal(T.result(s), null);
+s = T.apply(s, 12);
+assert.deepEqual([T.result(s).winner, T.result(s).cells.slice().sort((a, b) => a - b)], [0, [4, 8, 12]], '右上から左下へのななめ');
+assert.equal(T.apply(s, 20), null, '決着後は打てない');
+s = wide({ players: 4 }, [0, 10, 20, 30, 1, 11, 21, 31, 40, 12]);
+assert.deepEqual(T.result(s), { winner: 1, cells: [10, 11, 12] }, '4人で2人目が横に3つ');
+assert.equal(T.apply(wide({ players: 3 }, [7]), 7), null, '埋まったマス');
+assert.equal(T.apply(T.init({ rules: { players: 3 } }), 25), null, '盤の外');
+// 5×5 を誰も3つ並べずに埋める（○9・×8・△8 個。並ばない埋め方を機械で探したもの）
+const fill = [0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 1, 2, 1, 1, 2, 1, 2, 1, 2, 2, 2, 0, 2, 2];
+const order = [[], [], []];
+fill.forEach((p, i) => order[p].push(i));
+const seq = [];
+for (let k = 0; seq.length < 25; k++) for (const p of [0, 1, 2]) if (order[p][k] !== undefined) seq.push(order[p][k]);
+s = wide({ players: 3 }, seq);
+assert.deepEqual(T.result(s), { winner: null, cells: [] }, '3人で埋まったら引き分け');
 assert.equal(T.result(big({ owner: [0, 1, 0, 'd', null, 0, 1, 0, 1] })), null, 'まだ置ける盤があれば続く');
 
 // コネクトフォー

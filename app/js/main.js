@@ -6,7 +6,8 @@
 //
 // 部屋: members = いま部屋にいる人の id（先頭がホスト）。人数の上限は MAX_MEMBERS。names = id → 表示名。
 // 対局の参加者（ゲームの中のプレイヤー番号 → 人の id）:
-//   盤のゲーム（2人用）: 待合室でホストが先手と後手を選ぶ（pick。人か 'cpu'）。もう一回では先手と後手を入れ替える。
+//   盤のゲーム: 待合室でホストが先手と後手を選ぶ（pick。人か 'cpu'）。もう一回では先手と後手を入れ替える。
+//     席は2つ。詳細設定で人数が決まるゲーム（seatCount を持つマルバツ）は人数ぶん選び、もう一回では打つ順番を1つずつ回す。
 //     ほかの人は観戦。手には p を付けない（どちらの番かは局面で決まる）。
 //   カードゲーム（multi）: 対局を始めるときにホストが order を決める。
 //   オンラインでは、どちらも order が null の間は待合室。
@@ -103,8 +104,14 @@ function rulesOf(gameId, rules) {
   }));
 }
 
-// 盤のゲームの席の書き添え。呼び名に「先手」「後手」が入っているゲーム（将棋）では重ねて書かない
-const seatNote = (game, p) => (game.players[p].includes(p === 0 ? '先手' : '後手') ? '' : `（${p === 0 ? '先手' : '後手'}）`);
+// 盤のゲームの席の数（詳細設定で人数が決まるマルバツは 2〜4。ほかは2）
+const boardSeats = (gameId, rules) => GAMES[gameId]?.seatCount?.(rulesOf(gameId, rules)) ?? 2;
+
+// 盤のゲームの席の書き添え。呼び名に「先手」「後手」が入っているゲーム（将棋）では重ねて書かない。3人以上は「◯番目」
+const seatNote = (game, p, n = 2) => {
+  if (n > 2) return `（${p + 1}番目）`;
+  return game.players[p].includes(p === 0 ? '先手' : '後手') ? '' : `（${p === 0 ? '先手' : '後手'}）`;
+};
 
 // R = { gameId, seed, order, moves, rules, prev }（S でも、届いた state でもよい）
 function replay(R) {
@@ -116,7 +123,7 @@ function replay(R) {
     if (!Array.isArray(R.order) || R.order.length < game.minPlayers || R.order.length > game.maxPlayers) return null;
     st = game.init(R.order.length, R.seed, { rules: rulesOf(R.gameId, R.rules), prev: R.prev ?? null });
   } else {
-    if (Array.isArray(R.order) && R.order.length !== 2) return null;
+    if (Array.isArray(R.order) && R.order.length !== boardSeats(R.gameId, R.rules)) return null;
     st = game.init({ rules: rulesOf(R.gameId, R.rules) });
   }
   for (const m of R.moves) {
@@ -138,7 +145,7 @@ const cpuControlled = (id) => isCpu(id) || !S.members.includes(id);
 
 function seatsFilled() {
   const o = roundOrder();
-  return o.length === 2 && o.every(Boolean);
+  return o.length === boardSeats(S.gameId, S.rules) && o.every(Boolean);
 }
 
 function canMove(game, st, res) {
@@ -150,12 +157,17 @@ function canMove(game, st, res) {
   return seatsFilled() && game.turn(st) === me;
 }
 
-// 盤のゲームの先手・後手。ホストが選んだもの（pick）が使えなければ、先に来た2人（1人なら CPU）
+// 盤のゲームの先手・後手（3人以上は打つ順番）。ホストが選んだもの（pick）が使えなければ、先に来た人から（足りなければ CPU）。
+// 人数を変えたときは、選んであった席を残して、足りない席に まだ選ばれていない人 → CPU の順で入れる
 function boardPick() {
+  const n = boardSeats(S.gameId, S.rules);
   const ok = (v) => (v === 'cpu' && !GAMES[S.gameId]?.live) || S.members.includes(v); // 毎フレーム動くゲームは CPU を選べない
   const p = S.pick;
-  if (Array.isArray(p) && p.length === 2 && p.every(ok) && (p[0] === 'cpu' || p[0] !== p[1])) return p.slice();
-  return [S.members[0], S.members[1] ?? 'cpu'];
+  const people = Array.isArray(p) ? p.filter((v) => v !== 'cpu') : [];
+  const q = Array.isArray(p) && p.every(ok) && new Set(people).size === people.length ? p.slice(0, n) : [];
+  for (const id of S.members) if (q.length < n && !q.includes(id)) q.push(id);
+  while (q.length < n) q.push('cpu');
+  return q;
 }
 
 // 待合室で決まる顔ぶれ。人がゲームの上限より多ければ、あとから来た人は観戦。
@@ -333,6 +345,7 @@ function statusHtml(game, st, res) {
     }
     if (me === SPECTATOR) sub = '観戦中です（次の対局から参加できます）';
   } else {
+    const n = roundOrder().length || 2;
     const name = (p) => `<b class="pl p${p}">${game.players[p]}</b>`;
     // 部屋を出た人の席は CPU が打っているので、そう書き添える
     const who = (p) => {
@@ -343,7 +356,8 @@ function statusHtml(game, st, res) {
       if (res.winner === null) main = '引き分け！';
       else if (S.mode === 'local') main = `${name(res.winner)}の勝ち！🎉`;
       else if (me === SPECTATOR) main = `${name(res.winner)}（${who(res.winner)}）の勝ち！`;
-      else main = res.winner === me ? 'あなたの勝ち！🎉' : 'あなたの負け…';
+      else if (res.winner === me) main = 'あなたの勝ち！🎉';
+      else main = n > 2 ? `${name(res.winner)}（${who(res.winner)}）の勝ち…` : 'あなたの負け…';
     } else if (S.mode === 'local') {
       main = `${name(game.turn(st))}の番です`;
     } else if (!seatsFilled()) {
@@ -351,11 +365,15 @@ function statusHtml(game, st, res) {
     } else if (me === SPECTATOR) {
       main = `${name(game.turn(st))}（${who(game.turn(st))}）の番です`;
     } else {
-      main = game.turn(st) === me ? 'あなたの番です' : '相手の番です…';
+      const t = game.turn(st);
+      main = t === me ? 'あなたの番です' : n > 2 ? `${name(t)}（${who(t)}）の番です…` : '相手の番です…';
     }
     if (S.mode === 'online') {
       if (me === SPECTATOR) {
-        sub = `観戦中: ${name(0)} ${who(0)} ／ ${name(1)} ${who(1)}`;
+        sub = '観戦中: ' + roundOrder().map((_, p) => `${name(p)} ${who(p)}`).join(' ／ ');
+      } else if (n > 2) {
+        const others = roundOrder().map((_, p) => p).filter((p) => p !== me);
+        sub = `あなたは ${name(me)}${seatNote(game, me, n)}・ほかは ${others.map((p) => `${name(p)} ${who(p)}`).join('、')}`;
       } else {
         sub = `あなたは ${name(me)}${seatNote(game, me)}・相手は ${who(1 - me)}`;
       }
@@ -399,11 +417,12 @@ const clockText = (ms) => {
 
 function thinkHtml(game) {
   const c = S.clock;
-  const used = [0, 0];
-  for (const [p, ms] of c.log) if (p === 0 || p === 1) used[p] += ms;
-  const live = !c.res && (c.turn === 0 || c.turn === 1) ? Date.now() - c.at : 0;
+  const used = Array(Math.max(2, roundOrder().length)).fill(0);
+  const seat = (p) => Number.isInteger(p) && p >= 0 && p < used.length;
+  for (const [p, ms] of c.log) if (seat(p)) used[p] += ms;
+  const live = !c.res && seat(c.turn) ? Date.now() - c.at : 0;
   if (live) used[c.turn] += live;
-  const tot = [0, 1].map((p) => `<b class="pl p${p}">${game.players[p]}</b> ${clockText(used[p])}`).join(' ／ ');
+  const tot = used.map((_, p) => p).map((p) => `<b class="pl p${p}">${game.players[p]}</b> ${clockText(used[p])}`).join(' ／ ');
   if (c.res) return `考えた時間 ${tot}`;
   return `⏱ <b class="pl p${c.turn}">${game.players[c.turn]}</b>が考え中 <b>${clockText(live)}</b>　合計 ${tot}`;
 }
@@ -579,24 +598,25 @@ function renderLobby(game) {
 }
 
 function renderBoardLobby(game) {
+  const n = boardSeats(S.gameId, S.rules);
   const status = el('status');
   const board = el('board');
   const controls = ctl();
   status.innerHTML = S.isHost
     ? (game.live
       ? '<div class="status-main">待合室</div><div class="status-sub">対戦する2人を選んで「始める」を押してください。<br>オンラインは試作です。</div>'
-      : '<div class="status-main">待合室</div><div class="status-sub">先手と後手を選んで「始める」を押してください。<br>相手がいなければ CPU と対局できます。</div>')
+      : `<div class="status-main">待合室</div><div class="status-sub">${n > 2 ? '打つ順番に人を選んで' : '先手と後手を選んで'}「始める」を押してください。<br>相手がいなければ CPU と対局できます。</div>`)
     : '<div class="status-main">待合室</div><div class="status-sub">部屋を作った人が始めるのを待っています…</div>';
   board.className = 'board lobby';
-  board.innerHTML = '<p class="lobby-note">2人で対局します。ほかの人は観戦します。</p>';
+  board.innerHTML = `<p class="lobby-note">${n}人で対局します。ほかの人は観戦します。</p>`;
   const pick = boardPick();
   const label = (v) => (v === 'cpu' ? 'CPU' : nameOf(v) + (v === S.myId ? '（あなた）' : ''));
   const list = document.createElement('div');
   list.className = 'lobby-pick';
-  [0, 1].forEach((i) => {
+  pick.forEach((_, i) => {
     const row = document.createElement('label');
     const head = document.createElement('span');
-    head.innerHTML = `<b class="pl p${i}">${esc(game.players[i])}</b>${game.live ? '' : seatNote(game, i)}`;
+    head.innerHTML = `<b class="pl p${i}">${esc(game.players[i])}</b>${game.live ? '' : seatNote(game, i, n)}`;
     row.append(head);
     if (S.isHost) {
       const sel = document.createElement('select');
@@ -610,7 +630,8 @@ function renderBoardLobby(game) {
       sel.onchange = () => {
         const next = pick.slice();
         next[i] = sel.value;
-        if (sel.value !== 'cpu' && next[1 - i] === sel.value) next[1 - i] = pick[i]; // 同じ人を両方に選んだら入れ替える
+        const j = next.findIndex((v, k) => k !== i && v === sel.value);
+        if (sel.value !== 'cpu' && j >= 0) next[j] = pick[i]; // 同じ人をほかの席にも選んだら入れ替える
         S.pick = next;
         saveRoom();
         sendState();
@@ -825,8 +846,11 @@ function scheduleReferee(game, st, res) {
 // 新しい対局へ。カードゲームは lobby なら待合室へ、そうでなければ今の顔ぶれですぐ始める
 function newRound(gameId, { lobby = false } = {}) {
   const prevGame = GAMES[S.gameId];
-  // 盤のゲームのもう一回は、同じ2人で先手と後手を入れ替える
-  if (gameId === S.gameId && !prevGame?.multi && S.order?.length === 2) S.pick = S.order.map((id) => (isCpu(id) ? 'cpu' : id)).reverse();
+  // 盤のゲームのもう一回は、同じ顔ぶれで先手と後手を入れ替える（3人以上は打つ順番を1つずつ回す）
+  if (gameId === S.gameId && !prevGame?.multi && S.order?.length >= 2) {
+    const ids = S.order.map((id) => (isCpu(id) ? 'cpu' : id));
+    S.pick = [...ids.slice(1), ids[0]];
+  }
   if (gameId !== S.gameId) S.carry = null;
   else if (prevGame?.carry && S.order) {
     const st = replay(S);
