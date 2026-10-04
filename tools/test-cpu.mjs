@@ -97,6 +97,40 @@ for (const [g, n] of [[C, 20], [R, 12], [TS, 12]]) {
     assert.ok(strongWins / G > 1.5 / n, `${n}人マルバツ(${wide}): つよいが よわい より多く勝つ ${strongWins}/${G}`);
   }
 }
+// 3〜4人のコネクトフォー: 勝てる手を打つ・次の人の4つ目をふさぐ・上に乗せられて負ける所へ落とさない・つよい1人が よわい2人より多く勝つ
+{
+  const base = C.init({ rules: { players: 3 } }); // 9列×7段。下の段はマス 54〜62
+  const at = (o) => ({ ...base, grid: Object.assign(Array(63).fill(null), o), turn: 0 });
+  let w = at({ 54: 0, 55: 0, 56: 0, 60: 1, 61: 2 });
+  for (let k = 0; k < 10; k++) assert.equal(C.cpu(w, 0, lv('strong')), 3, '3人コネクトフォー: 並べられる所に落とす');
+  // 次の人（黄）が 3列目、その次（緑）が 8列目で並べられる。先に番が来る黄をふさぐ
+  w = at({ 54: 1, 55: 1, 56: 1, 62: 2, 53: 2, 44: 2, 58: 0, 59: 0 });
+  for (let k = 0; k < 10; k++) assert.equal(C.cpu(w, 0, lv('strong')), 3, '3人コネクトフォー: 次の人の4つ目をふさぐ');
+  // 5列目に落とすと、その上に黄が乗せて並ぶ。点数の計算だけでは5列目を選ぶ局面（機械で探した）
+  w = at({ 39: 0, 40: 1, 43: 2, 48: 1, 49: 0, 50: 2, 52: 1, 53: 2, 54: 1, 56: 1, 57: 0, 58: 2, 59: 2, 61: 0, 62: 0 });
+  for (let k = 0; k < 20; k++) assert.notEqual(C.cpu(w, 0, lv('strong')), 5, '3人コネクトフォー: 上に乗せられて負ける所へ落とさない');
+  for (const n of [3, 4]) {
+    const G = 150;
+    let strongWins = 0;
+    for (let g = 0; g < G; g++) {
+      const seat = g % n; // つよいの席を回す
+      let x = C.init({ rules: { players: n } });
+      let guard = 0;
+      while (!C.result(x)) {
+        const t0 = performance.now();
+        const m = C.cpu(x, x.turn, { players: n, cpu: x.turn === seat ? 'strong' : 'weak' });
+        const ms = performance.now() - t0;
+        if (ms > slowest.ms) slowest = { ms, id: 'connect4-' + n };
+        x = C.apply(x, m);
+        assert.ok(x, n + '人コネクトフォー: 反則を出さない');
+        assert.ok(++guard <= 99);
+      }
+      if (C.result(x).winner === seat) strongWins++;
+    }
+    results['connect4-' + n] = { strongWinRate: Math.round(strongWins / G * 100) + '%' };
+    assert.ok(strongWins / G > 1.5 / n, `${n}人コネクトフォー: つよいが よわい より多く勝つ ${strongWins}/${G}`);
+  }
+}
 
 assert.ok(slowest.ms < 2000, `CPU の1手が遅すぎる（${slowest.id} ${Math.round(slowest.ms)}ms）`);
 console.log('results', JSON.stringify(results));

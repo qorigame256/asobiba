@@ -81,6 +81,23 @@ s = play(C, [0, 1, 1, 2, 2, 3, 2, 3, 3, 6, 3]);
 assert.equal(C.result(s)?.winner, 0, 'ななめ');
 assert.equal(C.apply(play(C, [0, 0, 0, 0, 0, 0]), 0), null, '満杯の列');
 assert.equal(C.apply(C.init(), 7), null);
+// 3〜4人のコネクトフォー
+const c4 = (rules, moves) => { let x = C.init({ rules }); for (const m of moves) { x = C.apply(x, m); assert.ok(x, 'illegal ' + m); } return x; };
+assert.deepEqual([C.init({ rules: { players: 3 } }).w, C.init({ rules: { players: 3 } }).h], [9, 7], '3人のおまかせは 9×7');
+assert.equal(C.init({ rules: { players: 4 } }).w, 11, '4人のおまかせは 11×9');
+assert.equal(C.init({ rules: { players: 3, wide: '8-7' } }).w, 8, '盤の大きさを選べる');
+assert.equal(C.init({ rules: { players: 2, wide: '11-9' } }).grid.length, 42, '2人なら3人以上の盤の設定は見ない');
+assert.equal(C.seatCount({ players: 3 }), 3);
+s = c4({ players: 3 }, [0, 1, 2]);
+assert.deepEqual([s.grid[54], s.grid[55], s.grid[56], s.turn], [0, 1, 2, 0], '3人で順番に回る');
+s = c4({ players: 3 }, [0, 1, 2, 0, 1, 2, 0, 1, 2, 0]);
+assert.equal(C.result(s)?.winner, 0, '3人で たて4');
+assert.equal(C.apply(s, 3), null, '決着後は打てない');
+// 4人目（紫）が下の段に よこ4。ほかの3人は並ばない所に置く
+s = c4({ players: 4 }, [6, 8, 10, 1, 7, 9, 10, 2, 6, 8, 10, 3, 7, 9, 0, 4]);
+assert.deepEqual(C.result(s), { winner: 3, cells: [89, 90, 91, 92] }, '4人目の よこ4');
+assert.equal(C.apply(c4({ players: 3 }, [8, 8, 8, 8, 8, 8, 8]), 8), null, '満杯の列（7段）');
+assert.equal(C.apply(C.init({ rules: { players: 3 } }), 9), null, '盤の外');
 
 // リバーシ
 s = R.init();
