@@ -34,11 +34,11 @@
 //     無ければ盤のゲームは place、カードゲームは card。対局が終わった手では呼ばれず、勝ち負けの音が鳴る（main.js の moveSound）,
 //   startSound（対局の始めに鳴らす音の名前。カードゲームの shuffle）
 //
-// 毎フレーム動くゲーム（live: true。エアホッケー）が持つもの: id / name / icon / desc / ready / players（2人の呼び名）/ settings,
-//   mount(要素, { mode: 'cpu' | 'two' | 'online', status: 状態表示の要素, me（オンライン: 0 / 1、観戦は -1）, names, rules,
-//     send(中身, 大事か) }) → { receive(中身, 送った人の番号), destroy() }。
+// 毎フレーム動くゲーム（live: true。エアホッケー）が持つもの: id / name / icon / desc / ready / players（席の呼び名）/ settings / seatCount（任意。上と同じ）,
+//   mount(要素, { mode: 'cpu' | 'two' | 'online', status: 状態表示の要素, me（オンライン: 席の番号、観戦は -1）, names, rules,
+//     send(中身, 大事か), isHost, cpuSeats()（CPU が動かす席の番号。部屋を出た人の席も入る） }) → { receive(中身, 送った人の番号), destroy() }。
 //   手の一覧は使わず、ゲームが自分で描いて自分で進める。オンラインでは send で送った中身が相手の receive に届く
-//   （大事でないものは届いたか確かめずに送る）。待合室は盤のゲームと同じで、CPU は選べない。
+//   （大事でないものは届いたか確かめずに送る）。待合室は盤のゲームと同じで、CPU は liveCpu(rules) が true のとき（エアホッケーの3人）だけ選べる。
 
 import tictactoe from './tictactoe.js';
 import connect4 from './connect4.js';

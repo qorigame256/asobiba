@@ -7,7 +7,7 @@
 // 部屋: members = いま部屋にいる人の id（先頭がホスト）。人数の上限は MAX_MEMBERS。names = id → 表示名。
 // 対局の参加者（ゲームの中のプレイヤー番号 → 人の id）:
 //   盤のゲーム: 待合室でホストが先手と後手を選ぶ（pick。人か 'cpu'）。もう一回では先手と後手を入れ替える。
-//     席は2つ。詳細設定で人数が決まるゲーム（seatCount を持つマルバツ・コネクトフォー・リバーシ）は人数ぶん選び、もう一回では打つ順番を1つずつ回す。
+//     席は2つ。詳細設定で人数が決まるゲーム（seatCount を持つマルバツ・コネクトフォー・リバーシ・点と線・エアホッケー）は人数ぶん選び、もう一回では打つ順番を1つずつ回す。
 //     ほかの人は観戦。手には p を付けない（どちらの番かは局面で決まる）。
 //   カードゲーム（multi）: 対局を始めるときにホストが order を決める。
 //   オンラインでは、どちらも order が null の間は待合室。
@@ -104,7 +104,7 @@ function rulesOf(gameId, rules) {
   }));
 }
 
-// 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシは 2〜4。ほかは2）
+// 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、エアホッケーは 2〜3。ほかは2）
 const boardSeats = (gameId, rules) => GAMES[gameId]?.seatCount?.(rulesOf(gameId, rules)) ?? 2;
 
 // 盤のゲームの席の書き添え。呼び名に「先手」「後手」が入っているゲーム（将棋）では重ねて書かない。3人以上は「◯番目」
@@ -117,7 +117,7 @@ const seatNote = (game, p, n = 2) => {
 function replay(R) {
   const game = GAMES[R.gameId];
   if (!game?.ready) return null;
-  if (game.live) return Array.isArray(R.order) && R.order.length === 2 ? {} : null; // 手の一覧を使わないゲーム（局面はゲームが持つ）
+  if (game.live) return Array.isArray(R.order) && R.order.length === boardSeats(R.gameId, R.rules) ? {} : null; // 手の一覧を使わないゲーム（局面はゲームが持つ）
   let st;
   if (game.multi) {
     if (!Array.isArray(R.order) || R.order.length < game.minPlayers || R.order.length > game.maxPlayers) return null;
@@ -142,6 +142,8 @@ function myPlayer() {
 
 const alive = (id) => id === S.myId || Date.now() - (S.seen[id] ?? 0) < LOST_MS;
 const cpuControlled = (id) => isCpu(id) || !S.members.includes(id);
+// 待合室で CPU を選べるか。毎フレーム動くゲーム（エアホッケー）は、liveCpu が認めたとき（3人）だけ
+const cpuPickable = (game) => !game?.live || !!game.liveCpu?.(rulesOf(S.gameId, S.rules));
 
 function seatsFilled() {
   const o = roundOrder();
@@ -161,7 +163,7 @@ function canMove(game, st, res) {
 // 人数を変えたときは、選んであった席を残して、足りない席に まだ選ばれていない人 → CPU の順で入れる
 function boardPick() {
   const n = boardSeats(S.gameId, S.rules);
-  const ok = (v) => (v === 'cpu' && !GAMES[S.gameId]?.live) || S.members.includes(v); // 毎フレーム動くゲームは CPU を選べない
+  const ok = (v) => (v === 'cpu' && cpuPickable(GAMES[S.gameId])) || S.members.includes(v);
   const p = S.pick;
   const people = Array.isArray(p) ? p.filter((v) => v !== 'cpu') : [];
   const q = Array.isArray(p) && p.every(ok) && new Set(people).size === people.length ? p.slice(0, n) : [];
@@ -604,7 +606,7 @@ function renderBoardLobby(game) {
   const controls = ctl();
   status.innerHTML = S.isHost
     ? (game.live
-      ? '<div class="status-main">待合室</div><div class="status-sub">対戦する2人を選んで「始める」を押してください。<br>オンラインは試作です。</div>'
+      ? `<div class="status-main">待合室</div><div class="status-sub">対戦する${n}人を選んで「始める」を押してください。${cpuPickable(game) ? '人が足りなければ CPU を選べます。' : ''}<br>オンラインは試作です。</div>`
       : `<div class="status-main">待合室</div><div class="status-sub">${n > 2 ? '打つ順番に人を選んで' : '先手と後手を選んで'}「始める」を押してください。<br>相手がいなければ CPU と対局できます。</div>`)
     : '<div class="status-main">待合室</div><div class="status-sub">部屋を作った人が始めるのを待っています…</div>';
   board.className = 'board lobby';
@@ -620,7 +622,7 @@ function renderBoardLobby(game) {
     row.append(head);
     if (S.isHost) {
       const sel = document.createElement('select');
-      for (const v of game.live ? S.members : [...S.members, 'cpu']) {
+      for (const v of cpuPickable(game) ? [...S.members, 'cpu'] : S.members) {
         const opt = document.createElement('option');
         opt.value = v;
         opt.textContent = label(v);
@@ -656,7 +658,8 @@ function renderBoardLobby(game) {
   if (game.settings) board.append(rulesPanel(game));
   if (!S.isHost) return;
   const start = makeButton('始める', startRound);
-  if (game.live && (pick.includes('cpu') || pick[0] === pick[1])) { // CPU を選べないゲームは2人そろうまで始められない
+  const people = pick.filter((v) => v !== 'cpu');
+  if (game.live && ((pick.includes('cpu') && !cpuPickable(game)) || new Set(people).size !== people.length)) { // CPU を選べないときは人がそろうまで始められない
     start.disabled = true;
     board.insertAdjacentHTML('beforeend', '<p class="lobby-total">友だちが部屋に入ると始められます</p>');
   }
@@ -927,7 +930,9 @@ function renderLive(game) {
     S.liveKey = key;
     S.liveHandle = game.mount(board, {
       mode: online ? 'online' : S.live, status: el('status'), me: online ? myPlayer() : null,
-      names: online ? S.order.map(nameOf) : null, rules: rulesOf(S.gameId, S.rules),
+      names: online ? S.order.map(nameOf) : null, rules: rulesOf(S.gameId, S.rules), isHost: online && S.isHost,
+      // CPU が動かす席（部屋を出た人の席も）。ホストの端末が動かし、ほかの端末はその席を待たない
+      cpuSeats: () => (S.order ?? []).flatMap((id, i) => (cpuControlled(id) ? [i] : [])),
       send: (d, important) => send({ type: 'live', gameId: S.gameId, round: S.round, d }, important ? 1 : 0),
     });
   }

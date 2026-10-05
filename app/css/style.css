@@ -515,6 +515,7 @@ p { margin: 0; }
 /* ---------- エアホッケー ---------- */
 .board.hk { display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .hk-canvas { display: block; touch-action: none; border-radius: 14px; border: 6px solid #5b7f99; box-shadow: 0 4px 14px rgba(0, 0, 0, .15); user-select: none; -webkit-user-select: none; }
+.hk-canvas.hex { border: none; border-radius: 0; box-shadow: none; filter: drop-shadow(0 4px 8px rgba(0, 0, 0, .15)); }
 .hk-panel { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .hk-panel:empty { display: none; }
 .hk-setup { display: flex; flex-direction: column; gap: 10px; align-items: stretch; background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 12px 14px; width: min(100%, 360px); }
