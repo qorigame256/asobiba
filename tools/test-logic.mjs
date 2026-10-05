@@ -1212,6 +1212,35 @@ for (let g = 0; g < 20; g++) {
   }
   assert.equal(st.pits[6] + st.pits[13], total, '石の数が崩れない');
 }
+// 3人
+s = MC.init({ rules: { players: 3 } });
+assert.equal(MC.seatCount({ players: 3 }), 3);
+assert.equal(s.pits.length, 21);
+const mc3 = { n: 3, pits: [], turn: 0, last: null, over: false, count: 0 };
+const p3 = (a) => { const x = Array(21).fill(0); for (const [i, v] of Object.entries(a)) x[i] = v; return x; };
+const sk3 = MC.apply({ ...mc3, turn: 1, pits: p3({ 12: 16, 0: 1, 7: 1, 14: 1 }) }, 5);
+assert.ok(sk3.pits[20] === 0 && sk3.pits[6] === 0 && sk3.pits[9] === 0 && sk3.last.capture?.got === 3, '3人: ほかの2人のゴールは飛ばす（1周近く配る）');
+assert.equal(sk3.turn, 2, '3人: 次の人へ');
+assert.equal(MC.apply({ ...mc3, pits: p3({ 0: 1, 1: 1, 8: 3, 15: 4, 7: 1, 14: 1 }) }, 0).last.capture, null, '3人: 石のある穴で止まったらとらない');
+const cap3b = MC.apply({ ...mc3, pits: p3({ 1: 1, 4: 1, 9: 3, 16: 4, 7: 1, 14: 1 }) }, 1).pits;
+assert.ok(cap3b[6] === 8 && cap3b[9] === 0 && cap3b[16] === 0 && cap3b[2] === 0, '3人: ほかの2人の同じ番目の石を両方とる');
+const one3 = MC.apply({ ...mc3, pits: p3({ 0: 1, 4: 1, 8: 3, 7: 1, 14: 1 }) }, 0).last.capture;
+assert.ok(one3 && one3.got === 4, '3人: 片方だけに石があってもとる');
+const end3 = MC.apply({ ...mc3, pits: p3({ 5: 1, 7: 2, 15: 3, 20: 4 }) }, 5);
+assert.ok(end3.over && end3.pits[6] === 1 && end3.pits[13] === 2 && end3.pits[20] === 7, '3人: 誰かの側が空になったら全員終わり');
+assert.deepEqual(MC.result(end3), { winner: 2, cells: [] });
+assert.equal(MC.result({ ...end3, pits: p3({ 6: 5, 13: 5, 20: 1 }) }).winner, null, '3人: 一番が2人なら引き分け');
+for (let g = 0; g < 12; g++) {
+  let st = MC.init({ rules: { players: 3, stones: 3 + (g % 4) } });
+  const total = st.pits.reduce((a, b) => a + b, 0);
+  let guard = 0;
+  while (!MC.result(st)) {
+    st = MC.apply(st, MC.cpu(st, st.turn, { cpu: ['weak', 'normal', 'strong'][g % 3] }));
+    assert.ok(st, '3人のマンカラの CPU が反則を出した');
+    assert.ok(++guard < 600);
+  }
+  assert.equal(st.pits[6] + st.pits[13] + st.pits[20], total, '3人: 石の数が崩れない');
+}
 console.log('mancala OK');
 
 // ---------- せりあい ----------

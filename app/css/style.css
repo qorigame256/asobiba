@@ -1271,6 +1271,18 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .mc-pit.store { display: flex; flex-direction: column; justify-content: center; gap: 4px; }
 .mc-who { font-size: .7rem; font-weight: 700; color: #f3e3cf; writing-mode: vertical-rl; letter-spacing: .1em; }
 .mc-pit.store .mc-stones { display: none; }
+/* 3人のマンカラ（三角形の盤）。穴とゴールは mancala.js が % で置く */
+.mc-tri { position: relative; width: 100%; aspect-ratio: 100 / 90; touch-action: manipulation; }
+.mc-tri svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.mc-tri polygon { fill: #8a5a35; stroke: #8a5a35; stroke-width: 15; stroke-linejoin: round; }
+.mc-tri .mc-pit { position: absolute; border: 2px solid transparent; }
+.mc-tri .mc-pit.store { aspect-ratio: 1; border-radius: 50%; gap: 0; }
+.mc-tri .mc-who { writing-mode: horizontal-tb; letter-spacing: 0; font-size: .62rem; }
+.mc-tri .mc-pit.p0 { border-color: color-mix(in srgb, var(--p0) 75%, transparent); }
+.mc-tri .mc-pit.p1 { border-color: color-mix(in srgb, var(--p1) 75%, transparent); }
+.mc-tri .mc-pit.p2 { border-color: color-mix(in srgb, var(--p2) 75%, transparent); }
+.mc-tri .mc-num { font-size: .7rem; }
+.mc-pit.store.p2 .mc-num { color: var(--p2); }
 
 /* ---------- 海戦ゲーム ---------- */
 .board.ks { width: min(100%, 460px, max(280px, calc((100dvh - 230px) / 1.75))); display: flex; /* 2つの海が画面の高さに収まるように */ flex-direction: column; gap: 10px; }
