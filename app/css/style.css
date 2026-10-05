@@ -805,6 +805,13 @@ p { margin: 0; }
 .sp.board .sp-pile.target { box-shadow: 0 0 0 4px var(--win); cursor: pointer; }
 .sp-pile.pop { animation: pop .18s ease-out; }
 .board button.btn.sp-flip { font-size: 1.3rem; padding: 14px 36px; }
+/* 3人: 相手の札は小さく、台札は3つ並べて下に持ち主の名前 */
+.sp-side.sp3:not(.mine) { padding: 6px 10px; }
+.sp-side.sp3:not(.mine) .sp-head { margin-bottom: 4px; }
+.sp-side.sp3:not(.mine) .pcard { width: min(13vw, 52px); }
+.sp-center:has(.sp-slot) { gap: 14px; }
+.sp-slot { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.sp-slot span { color: #fff; font-size: .75rem; font-weight: 700; max-width: min(22vw, 88px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* 状態表示の呼び名の色をゲームの駒の色に合わせる */
 [data-game="connect4"] { --p0: #e2493b; --p1: #c99500; }

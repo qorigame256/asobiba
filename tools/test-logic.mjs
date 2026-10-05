@@ -426,13 +426,13 @@ console.log('poker games', pgames, 'hands', hands);
 
 // ---------- スピード ----------
 const SP = GAMES.speed;
-const spCount = (st) => [0, 1].reduce((a, p) => a + st.decks[p].length + st.fields[p].filter(Boolean).length + st.piles[p].length, 0);
+const spCount = (st) => st.piles.map((_, i) => i).reduce((a, p) => a + st.decks[p].length + st.fields[p].filter(Boolean).length + st.piles[p].length, 0);
 s = SP.init(2, 42, { rules: {} });
 assert.deepEqual(s, SP.init(2, 42, { rules: {} }), '同じ種なら同じ配り方');
 assert.equal(spCount(s), 52);
 assert.ok([...s.decks[0], ...s.fields[0], ...s.piles[0]].every((c) => 'hd'.includes(c[0])), 'プレイヤー0は赤');
 assert.ok([...s.decks[1], ...s.fields[1], ...s.piles[1]].every((c) => 'sc'.includes(c[0])), 'プレイヤー1は黒');
-const spBase = (o) => ({ n: 2, rules: { cpu: 'slow' }, decks: [['h9'], ['s9']], fields: [['h5', 'h1', 'd12', null], ['s7', 's2', 'c3', 'c4']], piles: [['d6'], ['c13']], winner: null, draw: false, step: 0, last: null, flips: 0, ...o });
+const spBase = (o) => ({ n: 2, rules: { cpu: 'slow' }, decks: [['h9'], ['s9']], fields: [['h5', 'h1', 'd12', null], ['s7', 's2', 'c3', 'c4']], piles: [['d6'], ['c13']], aside: null, place: [null, null], step: 0, last: null, flips: 0, ...o });
 s = spBase();
 t = SP.apply(s, { p: 0, t: 'play', card: 'h5', pile: 0 });
 assert.ok(t, '6 の上に 5');
@@ -452,18 +452,48 @@ t = SP.apply(s, { p: 0, t: 'flip' });
 assert.equal(SP.result(t).winner, 0, '山が無ければ手元の札を出し、出し切ったら勝ち');
 s = spBase({ decks: [[], []], fields: [['h3', null, null, null], ['s9', null, null, null]], piles: [['d6'], ['c13']] });
 assert.equal(SP.result(SP.apply(s, { p: 0, t: 'flip' })).draw, true, '同時に出し切ったら引き分け');
-// CPU どうしで最後まで（どちらが先に動くかは毎回ばらばら）
+// 3人: 17枚ずつ・余り1枚・台札3つ
+s = SP.init(3, 42, { rules: {} });
+assert.equal(s.piles.length, 3);
+assert.deepEqual(s.decks.map((d, p) => d.length + s.fields[p].length + s.piles[p].length), [17, 17, 17], '17枚ずつ');
+assert.match(s.aside, /^[hdsc][0-9]+$/, '余りの1枚がある');
+assert.equal(new Set([...s.decks.flat(), ...s.fields.flat(), ...s.piles.flat(), s.aside]).size, 52, '余りの1枚と合わせて52枚・重なりなし');
+const sp3 = (o) => ({ n: 3, rules: { cpu: 'slow' }, decks: [[], [], []], aside: 'h1', place: [null, null, null], step: 0, last: null, flips: 0, ...o });
+s = sp3({ fields: [['h5', null, null, null], ['s9', 's2', null, null], ['c11', null, null, null]], piles: [['d1'], ['c13'], ['d6']] });
+assert.ok(SP.apply(s, { p: 1, t: 'play', card: 's2', pile: 0 }), '3つ目以外の台札にも出せる');
+assert.ok(SP.apply(s, { p: 0, t: 'play', card: 'h5', pile: 2 }), 'ほかの人の台札にも出せる');
+t = SP.apply(s, { p: 0, t: 'play', card: 'h5', pile: 2 });
+assert.equal(SP.result(t), null, '3人では1人上がっても続く');
+assert.deepEqual(t.place, [1, null, null], '出し切った人が1位');
+assert.equal(SP.apply(t, { p: 0, t: 'flip' }), null, '上がった人は手を打てない');
+assert.equal(SP.canAct(t, 0), false);
+assert.equal(SP.cpu(t, 0), null, '上がった CPU は何もしない');
+s = sp3({ decks: [[], ['h8'], ['c8']], fields: [[null, null, null, null], ['s9', null, null, null], ['c11', null, null, null]], piles: [['d1'], ['c13'], ['d6']], place: [1, null, null] });
+t = SP.apply(s, { p: 2, t: 'flip' });
+assert.ok(t, '残りの2人とも出せないとスピード！（上がった人の札は見ない）');
+assert.deepEqual(t.piles.map((pl) => pl[pl.length - 1]), ['d1', 'h8', 'c8'], '上がった人の台札はそのまま');
+t = SP.apply(t, { p: 1, t: 'play', card: 's9', pile: 1 });
+assert.deepEqual(SP.result(t).ranking, [0, 1, 2], '2人上がったら終わり・残りが3位');
+assert.equal(SP.result(t).winner, 0);
+s = sp3({ fields: [['h5', null, null, null], ['s9', null, null, null], ['c11', null, null, null]], piles: [['d1'], ['c13'], ['d1']] });
+t = SP.apply(s, { p: 0, t: 'flip' });
+assert.deepEqual(t.place, [1, 1, 1], '全員同時に出し切ったら同じ順位');
+assert.equal(SP.result(t).draw, true);
+assert.deepEqual(SP.result(sp3({ fields: [[null], [null], ['h2']], piles: [['d1'], ['c13'], ['d6']], place: [1, 1, 3] })).winners, [0, 1], '1位が同着なら2人とも勝ちの音');
+assert.equal(SP.result(sp3({ fields: [[null], ['h2'], [null]], piles: [['d1'], ['c13'], ['d6']], place: [1, 3, 2] })).winners, undefined, '同着が無ければ順位の音');
+// CPU どうしで最後まで（だれが先に動くかは毎回ばらばら）
 let spGames = 0;
-for (let k = 0; k < 300; k++) {
-  let st = SP.init(2, k * 7 + 3, { rules: {} });
+for (let k = 0; k < 600; k++) {
+  const np = k % 2 ? 3 : 2;
+  let st = SP.init(np, k * 7 + 3, { rules: {} });
   let steps = 0;
   while (!SP.result(st)) {
-    const p = Math.random() < 0.5 ? 0 : 1;
+    const p = Math.floor(Math.random() * np);
     const m = SP.cpu(st, p);
-    if (!m) { assert.ok(SP.cpu(st, 1 - p), '2人とも何もしないと止まる'); continue; }
+    if (!m) { assert.ok([...Array(np).keys()].some((q) => SP.cpu(st, q)), '全員何もしないと止まる'); continue; }
     const next = SP.apply(st, { ...m, p });
     assert.ok(next, 'スピードの CPU が反則の手を出した');
-    assert.equal(spCount(next), 52, '札の枚数が変わった');
+    assert.equal(spCount(next) + (np === 3 ? 1 : 0), 52, '札の枚数が変わった');
     st = next;
     if (++steps > 2000) throw new Error('スピードが終わらない');
   }
