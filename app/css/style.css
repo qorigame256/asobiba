@@ -1343,3 +1343,23 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .bj-player.mine .pcard { width: 56px; }
 .bj-cards .pcard.pop { animation: pop .3s ease-out; }
 .bj-acts { flex-wrap: wrap; gap: 8px; }
+
+/* ---------- アクションの4つ（弾幕回避・玉入れ・間違い探し・2色爆弾サバイバル） ---------- */
+.ac, .mg { display: flex; flex-direction: column; gap: 8px; }
+.ac .cc-opps, .mg .cc-opps { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; scrollbar-width: none; touch-action: pan-x; padding: 2px; }
+.ac .cc-opps::-webkit-scrollbar, .mg .cc-opps::-webkit-scrollbar { display: none; }
+.ac .cc-opp, .mg .cc-opp { flex: none; display: flex; align-items: baseline; gap: 6px; min-width: 0; padding: 2px 8px; }
+.ac .cc-opp:first-child, .mg .cc-opp:first-child { margin-left: auto; }
+.ac .cc-opp:last-child, .mg .cc-opp:last-child { margin-right: auto; }
+.ac .cc-opp-name, .mg .cc-opp-name { max-width: 6em; }
+.ac .pt-score, .mg .pt-score { font-size: 1rem; }
+.ac-field { display: flex; justify-content: center; }
+.ac-canvas { display: block; border-radius: 12px; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.ac-note { text-align: center; font-size: .82rem; color: var(--muted); margin: 0; }
+/* 遊んでいる間はページを動かさない（指でなぞるとページが動いてしまうため） */
+html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behavior: none; }
+#screen-play:has(.ac-live) { touch-action: none; }
+.mg-clock { text-align: center; font-weight: 700; min-height: 1.6em; }
+.mg-pics { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.mg-pic { flex: 1 1 300px; max-width: 520px; width: 100%; aspect-ratio: 4 / 3; border-radius: 10px; border: 2px solid #0002; touch-action: manipulation; user-select: none; -webkit-user-select: none; cursor: pointer; }
+.mg-wait { padding: 40px 16px; text-align: center; color: var(--muted); }

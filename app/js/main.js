@@ -180,8 +180,10 @@ function lineup(game) {
   const humans = S.members.slice(0, max);
   const watchers = S.members.slice(max);
   if (game.noCpu) return { humans, watchers, cpus: 0, seats, max };
-  const cpus = seats ? seats - humans.length
+  let cpus = seats ? seats - humans.length
     : Math.max(0, Math.min(Math.max(S.cpus, game.minPlayers - humans.length), game.maxPlayers - humans.length));
+  // チームで分かれるゲーム（玉入れ）は全員の数を偶数にする（足りなければ CPU を1人足す。上限なら1人減らす）
+  if (game.evenTeams && (humans.length + cpus) % 2) cpus += humans.length + cpus < game.maxPlayers ? 1 : -1;
   return { humans, watchers, cpus, seats, max };
 }
 
@@ -518,6 +520,8 @@ function renderPage() {
       names: S.order.map(nameOf),
       cpu: S.order.map(cpuControlled),
       away: S.order.map((id) => !isCpu(id) && S.members.includes(id) && !alive(id)),
+      // 見た目だけの中身（ほかの人の位置など）を送りっぱなしにする。届いた側ではゲームの onStream が受け取る
+      stream: (d) => { if (S.mode === 'online') send({ type: 'stream', gameId: S.gameId, round: S.round, d }, 0); },
     });
   }
   game.render(board, st, opts);
@@ -592,10 +596,11 @@ function renderLobby(game) {
   start.disabled = short;
   if (game.noCpu || seats) { controls.append(start, gameSelect()); return; }
   const setCpus = (n) => { S.cpus = n; saveRoom(); sendState(); render(); };
-  const minus = makeButton('CPU を減らす', () => setCpus(cpus - 1), 'secondary');
-  minus.disabled = humans.length + cpus <= game.minPlayers || cpus === 0;
-  const plus = makeButton('CPU を増やす', () => setCpus(cpus + 1), 'secondary');
-  plus.disabled = humans.length + cpus >= game.maxPlayers;
+  const step = game.evenTeams ? 2 : 1; // チームの人数をそろえるゲームは2人ずつ
+  const minus = makeButton('CPU を減らす', () => setCpus(cpus - step), 'secondary');
+  minus.disabled = humans.length + cpus - step < game.minPlayers || cpus < step;
+  const plus = makeButton('CPU を増やす', () => setCpus(cpus + step), 'secondary');
+  plus.disabled = humans.length + cpus + step > game.maxPlayers;
   controls.append(minus, plus, start, gameSelect());
 }
 
@@ -1056,6 +1061,11 @@ function onMessage(msg) {
   if (msg.to && msg.to !== S.myId) return;
   const wasAlive = alive(msg.from);
   S.seen[msg.from] = Date.now();
+  if (msg.type === 'stream') { // 見た目だけの中身。手の一覧には入れず、描き直しもしない
+    if (msg.gameId === S.gameId && msg.round === S.round) GAMES[S.gameId]?.onStream?.(msg.d, S.order?.indexOf(msg.from) ?? -1);
+    if (!wasAlive) render();
+    return;
+  }
   if (msg.type === 'live') {
     if (msg.gameId === S.gameId && msg.round === S.round) S.liveHandle?.receive(msg.d, S.order?.indexOf(msg.from) ?? -1);
     if (!wasAlive) render();

@@ -1588,6 +1588,105 @@ for (let g = 0; g < 12; g++) {
 }
 console.log('kaisen OK');
 
+// ---------- 弾幕回避 ----------
+{
+  const D = GAMES.danmaku;
+  const DM = await import('../app/js/games/danmaku.js');
+  assert.deepEqual(DM.makeBullets(7, 60), DM.makeBullets(7, 60), '弾の出方は種から同じに作る');
+  assert.notDeepEqual(DM.makeBullets(7, 60).slice(0, 5), DM.makeBullets(8, 60).slice(0, 5));
+  const run = (st, ms) => ms.reduce((x, m) => { const y = D.apply(x, m); assert.ok(y, JSON.stringify(m)); return y; }, st);
+  let d = run(D.init(3, 5, { rules: { time: '60' } }), [{ p: -1, t: 'go' }]);
+  assert.equal(D.apply(d, { p: 0, t: 'hit', ms: 61000 }), null, '時間より後には当たれない');
+  d = run(d, [{ p: 0, t: 'hit', ms: 12000 }]);
+  assert.equal(D.apply(d, { p: 0, t: 'hit', ms: 13000 }), null, '2回は脱落しない');
+  assert.equal(D.apply(d, { p: 1, t: 'last', ms: 20000 }), null, 'まだ2人残っているときは last を出せない');
+  d = run(d, [{ p: 2, t: 'hit', ms: 30000 }]);
+  assert.equal(D.apply(d, { p: 1, t: 'last', ms: 29000 }), null, 'ほかの人より短いうちは last を出せない');
+  d = run(d, [{ p: 1, t: 'last', ms: 30500 }]);
+  assert.deepEqual(D.result(d).winners, [1], '最後の1人が勝ち');
+  let e = run(D.init(2, 5), [{ p: -1, t: 'go' }, { p: 0, t: 'hit', ms: 5000 }, { p: 1, t: 'hit', ms: 9000 }]);
+  assert.deepEqual(D.result(e).winners, [1], '全員当たったら長くもった人の勝ち');
+  e = run(D.init(3, 5), [{ p: -1, t: 'go' }, { p: 0, t: 'hit', ms: 5000 }, { p: -1, t: 'end' }]);
+  assert.deepEqual(D.result(e).winners, [1, 2], '時間まで残った人は全員1位');
+}
+
+// ---------- 玉入れ ----------
+{
+  const T = GAMES.tamaire;
+  const run = (st, ms) => ms.reduce((x, m) => { const y = T.apply(x, m); assert.ok(y, JSON.stringify(m)); return y; }, st);
+  let t = run(T.init(4, 3), [{ p: -1, t: 'go' }, { p: 0, t: 'in', n: 3 }, { p: 1, t: 'in', n: 2 }, { p: 3, t: 'in', n: 2 }]);
+  assert.equal(T.apply(t, { p: 0, t: 'in', n: 3 }), null, '同じ合計は2回受け付けない');
+  assert.equal(T.apply(t, { p: 0, t: 'in', n: 2 }), null, '減らない');
+  assert.equal(T.apply(t, { p: 0, t: 'in', n: 40 }), null, '一度に増えすぎる数は弾く');
+  t = run(t, [{ p: 2, t: 'in', n: 2 }, { p: -1, t: 'end' }]);
+  assert.equal(T.apply(t, { p: 0, t: 'in', n: 9 }), null, '終わったあとは入らない');
+  const r = T.result(t);
+  assert.deepEqual(r.teams, [5, 4], '偶数の席が赤、奇数の席が白');
+  assert.deepEqual(r.winners, [0, 2], '赤チームの勝ち');
+  t = run(T.init(2, 3), [{ p: -1, t: 'go' }, { p: 0, t: 'in', n: 1 }, { p: 1, t: 'in', n: 1 }, { p: -1, t: 'end' }]);
+  assert.equal(T.result(t).draw, true, '同じ数なら引き分け');
+  const TM = await import('../app/js/games/tamaire.js');
+  const fly = (x, vx, vy) => { const b = { x, y: TM.H - 0.16, ...TM.launch(vx, vy) }; let q = null; for (let i = 0; i < 2400 && !q; i++) q = TM.stepBall(b, 1 / 240); return q; };
+  assert.equal(fly(0.15, 0.15, -3.85), 'in', '横から弧を描いて投げると入る');
+  assert.notEqual(fly(0.5, 0, -3.5), 'in', 'カゴの真下からは入らない');
+}
+
+// ---------- 間違い探し ----------
+{
+  const G = GAMES.machigai;
+  const MG = await import('../app/js/games/machigai.js');
+  const sc = MG.makeScene(11, 0, 5);
+  assert.deepEqual(sc, MG.makeScene(11, 0, 5), '絵は種から同じに作る');
+  assert.equal(sc.diffs.length, 5);
+  assert.equal(new Set(sc.diffs.map((x) => x.item)).size, 5, '違いは別々の部品');
+  for (const x of sc.diffs) assert.notDeepEqual(sc.left[x.item], sc.right[x.item], '違いの部品は右の絵で変わっている');
+  const same = sc.left.filter((_, i) => !sc.diffs.some((x) => x.item === i));
+  assert.ok(same.every((it) => sc.right.some((r) => JSON.stringify(r) === JSON.stringify(it))), 'ほかの部品は同じ');
+  const [hx, hy] = sc.diffs[2].hit[0];
+  assert.equal(MG.diffAt(sc, hx, hy), 2, '違いの場所を押すと当たる');
+  const run = (st, ms) => ms.reduce((x, m) => { const y = G.apply(x, m); assert.ok(y, JSON.stringify(m)); return y; }, st);
+  let g = run(G.init(2, 11, { rules: { rounds: '3', diffs: '3', time: '45' } }), [{ p: -1, t: 'go' }, { p: 0, t: 'find', r: 0, i: 1, ms: 5000 }]);
+  assert.equal(G.apply(g, { p: 0, t: 'find', r: 0, i: 1, ms: 4000 }), null, '同じ人が同じ違いを2回は押せない');
+  assert.equal(G.apply(g, { p: 1, t: 'find', r: 1, i: 0, ms: 4000 }), null, 'まだ出ていない絵は押せない');
+  g = run(g, [{ p: 1, t: 'find', r: 0, i: 1, ms: 4500 }]);
+  assert.deepEqual(MG.scoresOf(g), [0, 1], '同じ違いは速い人の点（届いた順ではない）');
+  const slow = G.apply(g, { p: 1, t: 'find', r: 0, i: 0, ms: 9000 });
+  assert.deepEqual(MG.scoresOf(G.apply(slow, { p: 0, t: 'find', r: 0, i: 0, ms: 9500 })), [0, 2], 'あとから遅い記録が届いても取られない');
+  assert.equal(G.referee(g).key, 'play0');
+  g = run(g, [{ p: 0, t: 'find', r: 0, i: 0, ms: 7000 }, { p: 0, t: 'find', r: 0, i: 2, ms: 8000 }]);
+  assert.equal(G.referee(g).key, 'all0', '全部見つかったら早めに次へ');
+  for (let r = 0; r < 3; r++) {
+    if (r > 0) g = run(g, [{ p: -1, t: 'next' }]);
+    else g = run(g, [{ p: -1, t: 'next' }]);
+    assert.equal(g.phase, 'show');
+    g = run(g, [{ p: -1, t: 'go' }]);
+  }
+  assert.equal(g.phase, 'end', '3枚目の答えのあとで終わる');
+  assert.deepEqual(G.result(g).winners, [0]);
+}
+
+// ---------- 2色爆弾サバイバル ----------
+{
+  const B = GAMES.bombs;
+  const BM = await import('../app/js/games/bombs.js');
+  const run = (st, ms) => ms.reduce((x, m) => { const y = B.apply(x, m); assert.ok(y, JSON.stringify(m)); return y; }, st);
+  let b = run(B.init(3, 21), [{ p: -1, t: 'go' }, { p: 0, t: 'boom', n: 1 }]);
+  assert.equal(B.apply(b, { p: 0, t: 'boom', n: 1 }), null, '同じ爆発は2回数えない');
+  assert.equal(B.apply(b, { p: 0, t: 'send', n: 1, k: 7 }), null, '送れるのは5か10');
+  const to = BM.targetOf(b, 0);
+  b = run(b, [{ p: 0, t: 'send', n: 1, k: 10 }]);
+  assert.ok(to === 1 || to === 2, '自分には送らない');
+  assert.equal(b.inc[to], 10, '選ばれた相手に届く');
+  b = run(b, [{ p: 1, t: 'boom', n: 1 }, { p: 1, t: 'boom', n: 2 }, { p: 1, t: 'boom', n: 3 }]);
+  assert.equal(b.out[1], 0, '3回で脱落');
+  assert.equal(B.apply(b, { p: 1, t: 'send', n: 1, k: 5 }), null, '脱落した人は送れない');
+  for (let i = 0; i < 10; i++) assert.equal(BM.targetOf({ ...b, step: b.step + i }, 0), 2, '脱落した人には送らない');
+  assert.equal(B.result(b), null);
+  b = run(b, [{ p: 2, t: 'boom', n: 1 }, { p: 2, t: 'boom', n: 2 }, { p: 2, t: 'boom', n: 3 }]);
+  assert.deepEqual(B.result(b).winners, [0], '最後まで残った人の勝ち');
+  assert.deepEqual(B.result(b).ranking, [0, 2, 1], 'あとで脱落した人ほど上');
+}
+
 // 遊び方: どのゲームにもあり、長くしない（1つ4行まで）
 const { GAME_ORDER } = await import('../app/js/games/index.js');
 for (const id of GAME_ORDER) {

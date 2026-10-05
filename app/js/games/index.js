@@ -28,7 +28,10 @@
 //     referee(局面) → null | { key, ms, move }（時間で進むゲーム。ホストが key ごとに ms 計って move を p = -1 として足す。
 //     締め切りや次の問題へ進むのに使う。apply は p = -1 の手をこの進行役の手として受け付ける）,
 //     realtime: true（全員が同時に動くゲーム。手がぶつかったらホストが後ろに足し直すので、手は「どの札を」で表し、
-//     同じ手が2回来ても2回目は反則になるように作る）
+//     同じ手が2回来ても2回目は反則になるように作る）,
+//     onStream(中身, 送った人の番号)（見た目だけの中身を受け取る。render の opts.stream(中身) で送ったものが、手の一覧に入らずに届く。
+//     届いたか確かめずに送る。弾幕回避のほかの人の位置・玉入れの仲間の玉）,
+//     evenTeams: true（チームで分かれるゲーム。待合室で全員の数を偶数にそろえ、CPU を2人ずつ増減する。玉入れ）
 //
 // 効果音（盤のゲーム・カードゲームとも任意。名前は sound.js の先頭の一覧）:
 //   sound(前の局面, 今の局面, 手, 自分の番号) → 新しい手が届いたときに鳴らす音の名前 | null（鳴らさない）。
@@ -74,15 +77,19 @@ import blackjack from './blackjack.js';
 import kaisen from './kaisen.js';
 import pittari from './pittari.js';
 import typing from './typing.js';
+import danmaku from './danmaku.js';
+import tamaire from './tamaire.js';
+import machigai from './machigai.js';
+import bombs from './bombs.js';
 import { HOWTO } from './howto.js';
 
 // 準備中のゲームを一覧に出すとき: soon('id', '名前', '絵文字')
 export const soon = (id, name, icon) => ({ id, name, icon, desc: 'じゅんび中', ready: false });
 
-export const GAME_ORDER = ['tictactoe', 'connect4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'colors', 'daifugo', 'poker', 'speed', 'babanuki', 'doubt', 'sevens', 'blackjack', 'hitblow', 'sensou', 'yubisuma', 'memory', 'yacht', 'seri', 'nim', 'flags', 'kanji', 'targets', 'pittari', 'typing', 'umigame', 'wordwolf', 'oekaki', 'hockey', 'shogi', 'mahjong'];
+export const GAME_ORDER = ['tictactoe', 'connect4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'colors', 'daifugo', 'poker', 'speed', 'babanuki', 'doubt', 'sevens', 'blackjack', 'hitblow', 'sensou', 'yubisuma', 'memory', 'yacht', 'seri', 'nim', 'flags', 'kanji', 'targets', 'pittari', 'typing', 'danmaku', 'tamaire', 'machigai', 'bombs', 'umigame', 'wordwolf', 'oekaki', 'hockey', 'shogi', 'mahjong'];
 export const GAMES = {
   tictactoe, connect4, reversi, colors, daifugo, poker, speed, hitblow, sensou, yubisuma, memory, nim, flags, kanji, targets, umigame, shogi, mahjong, hockey,
-  gomoku, dots, babanuki, doubt, yacht, wordwolf, sevens, mancala, oekaki, seri, blackjack, kaisen, pittari, typing,
+  gomoku, dots, babanuki, doubt, yacht, wordwolf, sevens, mancala, oekaki, seri, blackjack, kaisen, pittari, typing, danmaku, tamaire, machigai, bombs,
 };
 // 遊び方（howto.js）。対局画面の「？遊び方」で出す（main.js の renderHowto）
 for (const [id, lines] of Object.entries(HOWTO)) if (GAMES[id]) GAMES[id].howto = lines;
