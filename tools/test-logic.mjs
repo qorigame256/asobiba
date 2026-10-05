@@ -818,6 +818,68 @@ for (const level of ['easy', 'hard', 'expert', 'mix']) {
   assert.equal(new Set(st.qs.map(([w]) => w)).size, 10, '10問とも違う漢字: ' + level);
 }
 
+// ---------- ぴったりストップ ----------
+const PZ = GAMES.pittari;
+const { pointsOf: pzPoints } = await import('../app/js/games/pittari.js');
+assert.deepEqual(pzPoints([300, 100, Infinity, 100, 900]), [1, 3, 0, 3, 0], '近い順に 3・2・1点、同じずれは同じ点、押さないと0点');
+for (let k = 0; k < 50; k++) {
+  const st = PZ.init(2, k, { rules: {} });
+  assert.ok(st.targets.length === 5 && st.targets.every((x) => Number.isInteger(x) && x >= 5 && x <= 15), '秒数は5〜15');
+  assert.deepEqual(st.targets, PZ.init(2, k, { rules: {} }).targets, '秒数は seed から毎回同じ');
+}
+assert.ok(PZ.init(2, 1, { rules: { fixed: true } }).targets.every((x) => x === 10), 'いつも10秒の設定');
+s = PZ.init(3, 5, { rules: {} });
+assert.equal(PZ.apply(s, { p: 0, t: 'stop', q: 0, ms: 5000 }), null, '始まる前は押せない');
+s = ref(PZ, s, 'next');
+const pzT = s.targets[0] * 1000;
+s = PZ.apply(s, { p: 0, t: 'stop', q: 0, ms: pzT + 400 });
+assert.equal(PZ.apply(s, { p: 0, t: 'stop', q: 0, ms: pzT }), null, '1回に1度だけ');
+assert.equal(PZ.apply(s, { p: 1, t: 'stop', q: 0, ms: pzT + 6000 }), null, '時間切れのあとは押せない');
+s = PZ.apply(s, { p: 1, t: 'stop', q: 0, ms: pzT - 100 });
+assert.equal(PZ.referee(s).key, 'open0', 'まだ押していない人がいれば待つ');
+s = PZ.apply(s, { p: 2, t: 'stop', q: 0, ms: pzT + 100 });
+assert.equal(PZ.referee(s).key, 'all0', '全員押したらすぐ締め切る');
+s = ref(PZ, s, 'close');
+assert.deepEqual(s.scores, [1, 3, 3], '前後どちらにずれても、近い順');
+for (let i = 1; i < 5; i++) s = ref(PZ, ref(PZ, s, 'next'), 'close');
+s = ref(PZ, s, 'next');
+assert.ok(PZ.result(s), '5回で終わる');
+console.log('pittari OK');
+
+// ---------- タイピング早打ち ----------
+const TY = GAMES.typing;
+const { TYPING } = await import('../app/js/games/typing-data.js');
+const { isRight: tyRight, pointsOf: tyPoints, limitOf: tyLimit } = await import('../app/js/games/typing.js');
+const tyAll = [...TYPING.short, ...TYPING.mid, ...TYPING.long];
+assert.ok(tyAll.length >= 90, 'お題は90個以上');
+assert.equal(new Set(tyAll.map(([w]) => w)).size, tyAll.length, '同じお題が2回入っている');
+for (const [w, ys] of tyAll) for (const y of ys) assert.match(y, /^[ぁ-ゖー]+$/, '読みはひらがなだけ: ' + w);
+assert.ok(tyRight(['花より団子', ['はなよりだんご']], 'ハナヨリダンゴ'), 'カタカナでも正解');
+assert.ok(tyRight(['花より団子', ['はなよりだんご']], '花より団子'), '表示どおりの漢字でも正解');
+assert.ok(tyRight(['花より団子', ['はなよりだんご']], 'はなより だんご'), '空白は無視');
+assert.ok(!tyRight(['花より団子', ['はなよりだんご']], 'はなよりだんごう'), '多すぎるのは不正解');
+assert.ok(!tyRight(['花より団子', ['はなよりだんご']], ''), '空は不正解');
+assert.deepEqual(tyPoints([5000, null, 3000, 3000, 9000]), [1, 0, 3, 3, 0], '速い順に 3・2・1点');
+for (let k = 0; k < 30; k++) {
+  const st = TY.init(2, k, { rules: {} });
+  assert.equal(new Set(st.qs.map(([w]) => w)).size, 10, '10問とも違うお題');
+  assert.ok(st.qs.slice(0, 3).every((x) => TYPING.short.includes(x)) && st.qs.slice(7).every((x) => TYPING.long.includes(x)), '後半ほど長い');
+}
+s = TY.init(4, 3, { rules: {} });
+s = ref(TY, s, 'next');
+const tyYomi = s.qs[0][1][0];
+assert.equal(TY.apply(s, { p: 0, t: 'type', q: 0, text: 'ちがう', ms: 3000 }), null, 'まちがいは送れない');
+s = TY.apply(s, { p: 0, t: 'type', q: 0, text: tyYomi, ms: 4000 });
+assert.equal(TY.apply(s, { p: 0, t: 'type', q: 0, text: tyYomi, ms: 3000 }), null, '正解は1人1度だけ');
+assert.equal(TY.apply(s, { p: 1, t: 'type', q: 0, text: tyYomi, ms: tyLimit(s) + 1000 }), null, '時間切れのあとは送れない');
+s = TY.apply(s, { p: 3, t: 'type', q: 0, text: tyYomi, ms: 2500 });
+assert.equal(TY.referee(s).key, 'open0', '2人ではまだ締め切らない');
+s = TY.apply(s, { p: 2, t: 'type', q: 0, text: s.qs[0][0], ms: 6000 });
+assert.equal(TY.referee(s).key, 'done0', '3人正解したら締め切る');
+s = ref(TY, s, 'close');
+assert.deepEqual(s.scores, [2, 0, 1, 3], '届いた順ではなく速い順');
+console.log('typing OK');
+
 // ---------- 的の早押し ----------
 const TG = GAMES.targets;
 const { scoresOf, KINDS } = await import('../app/js/games/targets.js');

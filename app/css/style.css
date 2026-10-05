@@ -1032,6 +1032,17 @@ p { margin: 0; }
 .kj-form input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .board .kj-form .btn { flex: none; }
 
+/* ---------- ぴったりストップ・タイピング早打ち ---------- */
+.pz-target { font-size: 1.3rem; font-weight: 700; margin-top: 4px; }
+.pz-target b { font-size: 2.4rem; margin-right: 2px; }
+.pz-clock { font-size: clamp(2.6rem, 14vw, 4rem); font-weight: 800; font-variant-numeric: tabular-nums; min-height: 1.3em; line-height: 1.3; }
+.pz-clock.hidden { color: var(--muted); }
+.pz-clock.done { color: #2f8a4a; }
+.board .btn.pz-stop { font-size: 1.6rem; padding: 22px 0; width: 100%; touch-action: manipulation; }
+.ty-word { font-size: clamp(1.5rem, 7vw, 2.2rem); font-weight: 800; line-height: 1.4; word-break: break-all; margin-top: 4px; }
+.ty-yomi { font-size: 1rem; color: var(--muted); word-break: break-all; margin-top: 4px; }
+.ty-ok { color: #2f8a4a; font-weight: 700; }
+
 /* ---------- 的の早押し ---------- */
 [data-game="targets"] .board { width: min(100%, 560px); }
 .tg { display: flex; flex-direction: column; gap: 10px; }
