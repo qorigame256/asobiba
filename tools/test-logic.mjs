@@ -1301,6 +1301,110 @@ assert.ok(OE.result(oe), '全員が1回ずつ描いたら終わり');
 assert.deepEqual(OE.result(oe).winners, [2]);
 console.log('oekaki OK');
 
+// ---------- ブラックジャック ----------
+const BJ = GAMES.blackjack;
+const { total: bjTotal } = await import('../app/js/games/blackjack.js');
+assert.deepEqual(bjTotal(['s1', 'h13']), { v: 21, soft: true }, 'A と K で21');
+assert.deepEqual(bjTotal(['s1', 'h1', 'd9']), { v: 21, soft: true }, 'A は1つだけ11');
+assert.deepEqual(bjTotal(['s1', 'h5', 'd9']), { v: 15, soft: false }, '超えるなら A は1');
+assert.equal(bjTotal(['s12', 'h11', 'd2']).v, 22);
+// 札を決めた局面を作る（山は deck の pos から引く）
+const bjState = (hands, dealer, rest) => ({ ...BJ.init(hands.length, 1), hands, dealer, deck: rest, pos: 0, done: hands.map(() => false), bets: hands.map(() => 10), phase: 'play', out: null });
+s = bjState([['s10', 'h6'], ['d9', 'c9']], ['s9', 'h7'], ['c5', 's2', 'h10', 'd10']);
+assert.equal(BJ.apply(s, { p: 0, t: 'hit', r: 1, k: 2 }), null, '前の回の手は弾く');
+let bj = BJ.apply(s, { p: 0, t: 'hit', r: 0, k: 2 });
+assert.deepEqual([bj.hands[0].length, bj.done[0]], [3, true], '21になったら自動で終わり');
+bj = BJ.apply(bj, { p: 1, t: 'stand', r: 0 });
+assert.equal(bj.phase, 'result', '全員終えたら親が引いて結果');
+assert.deepEqual(bj.dealer, ['s9', 'h7', 's2'], '親は17以上まで引く');
+assert.deepEqual(bj.out, [10, 0], '21は勝ち・18どうしは引き分け');
+assert.deepEqual(bj.points, [110, 100]);
+s = bjState([['s10', 'h2']], ['s10', 'h5'], ['c10']); // ちょうど22
+bj = BJ.apply(s, { p: 0, t: 'hit', r: 0, k: 2 });
+assert.deepEqual([bj.phase, bj.dealer.length, bj.out[0]], ['result', 2, -10], 'バーストは負け・全員バーストなら親は引かない');
+{
+  const h1 = BJ.apply(bjState([['s2', 'h3']], ['s10', 'h7'], ['c4', 'd5']), { p: 0, t: 'hit', r: 0, k: 2 });
+  assert.equal(BJ.apply(h1, { p: 0, t: 'hit', r: 0, k: 2 }), null, '同じヒットが2回届いても2回目は弾く');
+  assert.equal(BJ.apply(h1, { p: 0, t: 'hit', r: 0, k: 3 }).hands[0].length, 4, '次のヒットは引ける');
+}
+s = bjState([['s5', 'h6']], ['s10', 'h6'], ['c10', 'd10']);
+bj = BJ.apply(s, { p: 0, t: 'double', r: 0 });
+assert.deepEqual([bj.hands[0].length, bj.bets[0], bj.out[0]], [3, 20, 20], 'ダブルは1枚だけ引いて賭けが倍（親はバースト）');
+assert.equal(BJ.apply(BJ.apply(bjState([['s5', 'h6']], ['s10', 'h7'], ['c2', 'c3']), { p: 0, t: 'hit', r: 0, k: 2 }), { p: 0, t: 'double', r: 0 }), null, '3枚目からはダブルできない');
+// 配った時点のブラックジャック
+let found = 0;
+for (let seed = 1; seed < 400 && found < 2; seed++) {
+  const t = BJ.init(1, seed);
+  if (bjTotal(t.hands[0]).v === 21 && bjTotal(t.dealer).v !== 21) { found++; assert.deepEqual([t.phase, t.out[0], t.points[0]], ['result', 15, 115], 'ブラックジャックは1.5倍'); }
+}
+assert.ok(found, 'ブラックジャックの配りを見つけた');
+let dealerBJ = 0;
+for (let seed = 1; seed < 600 && !dealerBJ; seed++) {
+  const t = BJ.init(2, seed);
+  if (bjTotal(t.dealer).v === 21 && t.dealer.length === 2) { dealerBJ++; assert.equal(t.phase, 'result', '親がブラックジャックならすぐ終わり'); }
+}
+assert.ok(dealerBJ);
+// CPU どうしで最後まで（進行役の「次へ」も足す）
+for (let g = 0; g < 20; g++) {
+  let st = BJ.init(1 + (g % 6), 300 + g, { rules: { rounds: [3, 5, 10][g % 3] } });
+  let guard = 0;
+  while (!BJ.result(st)) {
+    const ref = BJ.referee(st);
+    if (ref) st = BJ.apply(st, { p: -1, ...ref.move });
+    else for (let p = 0; p < st.n; p++) if (BJ.canAct(st, p)) { st = BJ.apply(st, { p, ...BJ.cpu(st, p) }); assert.ok(st, 'ブラックジャックの CPU が反則を出した'); }
+    assert.ok(++guard < 300);
+  }
+  assert.equal(st.round, st.rounds);
+}
+console.log('blackjack OK');
+
+// ---------- 海戦ゲーム ----------
+const KS = GAMES.kaisen;
+const { layout, randomShips, SHIPS: KSHIPS } = await import('../app/js/games/kaisen.js');
+const fleet = [[0, 0, false], [2, 0, false], [4, 0, false], [6, 0, false], [8, 0, true]];
+assert.ok(layout(fleet), '並べられる');
+assert.equal(layout([[0, 6, false], ...fleet.slice(1)]), null, '盤からはみ出す');
+assert.equal(layout([[0, 0, false], [0, 2, true], ...fleet.slice(2)]), null, '重なる');
+assert.equal(layout(fleet.slice(1)), null, '5隻ぜんぶ');
+for (let k = 0; k < 50; k++) assert.ok(layout(randomShips()), 'おまかせは必ず並べられる');
+assert.ok(KS.noLocal, '同じ画面の2人は出さない');
+s = KS.init();
+assert.equal(KS.apply(s, 0), null, '並べる前は撃てない');
+s = KS.apply(s, { t: 'place', ships: fleet });
+assert.deepEqual([s.phase, s.turn], ['place', 1], '先手が並べたら後手');
+s = KS.apply(s, { t: 'place', ships: fleet });
+assert.deepEqual([s.phase, s.turn], ['fire', 0], '両方並べたら先手から撃つ');
+s = KS.apply(s, 0);
+assert.deepEqual([s.last.hit, s.turn], [true, 1], '当たっても相手の番');
+assert.equal(KS.apply(s, 0) === null, false, '相手は同じマスを撃てる（自分の海とは別）');
+s = KS.apply(s, 99);
+assert.equal(KS.apply(s, 0), null, '同じマスは2回撃てない');
+// 先手が後手の船を全部沈める（後手は外れのマスを撃ち続ける）
+const shipCells = [];
+layout(fleet).forEach((k, i) => { if (k >= 0) shipCells.push(i); });
+let miss = 98;
+let sunkSeen = 0;
+for (const i of shipCells.slice(1)) {
+  s = KS.apply(s, i);
+  assert.ok(s, '撃てる');
+  if (s.last.sunk !== null) sunkSeen++;
+  if (!KS.result(s)) { while (layout(fleet)[miss] >= 0) miss--; s = KS.apply(s, miss--); }
+}
+assert.equal(sunkSeen, KSHIPS.length, '5隻とも沈めたことが分かる');
+assert.deepEqual(KS.result(s), { winner: 0, cells: [] }, '全部沈めたら勝ち');
+// CPU どうしで最後まで
+for (let g = 0; g < 12; g++) {
+  let st = KS.init();
+  let guard = 0;
+  const lv = ['weak', 'normal', 'strong'];
+  while (!KS.result(st)) {
+    st = KS.apply(st, KS.cpu(st, st.turn, { cpu: lv[(g + st.turn) % 3] }));
+    assert.ok(st, '海戦ゲームの CPU が反則を出した');
+    assert.ok(++guard < 210);
+  }
+}
+console.log('kaisen OK');
+
 // 遊び方: どのゲームにもあり、長くしない（1つ4行まで）
 const { GAME_ORDER } = await import('../app/js/games/index.js');
 for (const id of GAME_ORDER) {

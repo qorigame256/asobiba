@@ -1271,3 +1271,47 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .mc-pit.store { display: flex; flex-direction: column; justify-content: center; gap: 4px; }
 .mc-who { font-size: .7rem; font-weight: 700; color: #f3e3cf; writing-mode: vertical-rl; letter-spacing: .1em; }
 .mc-pit.store .mc-stones { display: none; }
+
+/* ---------- 海戦ゲーム ---------- */
+.board.ks { width: min(100%, 460px, max(280px, calc((100dvh - 230px) / 1.75))); display: flex; /* 2つの海が画面の高さに収まるように */ flex-direction: column; gap: 10px; }
+.ks-sea.small { width: 72%; margin: 0 auto; }
+.ks-title { font-weight: 700; font-size: .9rem; text-align: center; margin-bottom: 4px; }
+.ks-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px; background: #2f6fb3; padding: 4px; border-radius: 10px; }
+.ks-cell { aspect-ratio: 1; background: #cfe3f5; border-radius: 3px; position: relative; display: grid; place-items: center; }
+.board button.ks-cell { background: #cfe3f5; cursor: default; }
+.board button.ks-cell.playable { cursor: pointer; }
+.board button.ks-cell.playable:hover { background: #fff6c8; }
+.ks-cell.ship, .board button.ks-cell.ship { background: #7d8a96; }
+.ks-cell.ship.on, .board button.ks-cell.ship.on { background: var(--accent); }
+.ks-cell.miss::after { content: ''; width: 26%; aspect-ratio: 1; border-radius: 50%; background: #5d7f9e; }
+.ks-cell.hit { background: #f3b4a8; }
+.ks-cell.hit::after { content: '✕'; color: #c0392b; font-weight: 900; font-size: clamp(.7rem, 3.4vw, 1.1rem); line-height: 1; }
+.ks-cell.ship.hit { background: #e7a093; }
+.ks-cell.sunk, .ks-cell.ship.sunk.hit { background: #6b2d26; }
+.ks-cell.sunk::after { color: #ffd1c9; }
+.ks-cell.last { box-shadow: 0 0 0 2px var(--win); z-index: 1; }
+.ks-ships { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.board button.ks-ship { display: flex; gap: 2px; padding: 5px; border-radius: 8px; border: 2px solid var(--line); background: #fff; cursor: pointer; }
+.ks-ship i { width: 14px; height: 14px; border-radius: 3px; background: #7d8a96; }
+.board button.ks-ship.on { border-color: var(--accent); }
+.ks-ship.on i { background: var(--accent); }
+.ks-ship.done { opacity: .45; }
+.ks-acts { flex-wrap: wrap; gap: 8px; }
+.ks-acts .btn:disabled { opacity: .4; cursor: default; }
+
+/* ---------- ブラックジャック ---------- */
+[data-game="blackjack"] .board { width: min(100%, 620px); }
+.bj { display: flex; flex-direction: column; gap: 10px; }
+.bj-table { background: #2e6b47; border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 10px; color: #fff; }
+.bj-dealer { text-align: center; padding-bottom: 8px; border-bottom: 1px dashed rgba(255, 255, 255, .3); }
+.bj-head { font-size: .9rem; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: center; gap: 2px 8px; }
+.bj-head small { color: #d7eadc; }
+.bj-head .pt-ok { color: #a8f0bd; }
+.bj-head .pt-ng { color: #ffb3a8; }
+.bj-name { max-width: 8em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.bj-cards { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; margin-top: 4px; }
+.bj-cards .pcard { width: 40px; }
+.bj-player.mine { background: rgba(255, 255, 255, .1); border-radius: 10px; padding: 8px 4px; }
+.bj-player.mine .pcard { width: 56px; }
+.bj-cards .pcard.pop { animation: pop .3s ease-out; }
+.bj-acts { flex-wrap: wrap; gap: 8px; }

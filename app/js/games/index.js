@@ -5,6 +5,7 @@
 //   result(局面) → null（続行中）| { winner: 0|1|null(引き分け), cells: [光らせるマス] },
 //   render(要素, 局面, { canMove, onMove, fresh, me: 自分のプレイヤー番号（観戦は -1、同じ画面の対局は null） }),
 //   info(局面)（任意。状態表示に足す HTML）,
+//   noLocal: true（任意。相手に見せない情報があるので「この画面で2人で」を出さない。海戦ゲーム）,
 //   seatCount(rules)（任意。詳細設定で人数が決まる盤のゲーム（マルバツ・コネクトフォー・リバーシ・点と線の3〜4人、将棋の3人）。待合室の席の数・turn と winner の番号が 0〜人数-1 になる。
 //     players はその人数ぶんの呼び名を持つ。無ければ2人）
 //
@@ -69,15 +70,17 @@ import sevens from './sevens.js';
 import mancala from './mancala.js';
 import oekaki from './oekaki.js';
 import seri from './seri.js';
+import blackjack from './blackjack.js';
+import kaisen from './kaisen.js';
 import { HOWTO } from './howto.js';
 
 // 準備中のゲームを一覧に出すとき: soon('id', '名前', '絵文字')
 export const soon = (id, name, icon) => ({ id, name, icon, desc: 'じゅんび中', ready: false });
 
-export const GAME_ORDER = ['tictactoe', 'connect4', 'reversi', 'gomoku', 'dots', 'mancala', 'colors', 'daifugo', 'poker', 'speed', 'babanuki', 'doubt', 'sevens', 'hitblow', 'sensou', 'yubisuma', 'memory', 'yacht', 'seri', 'nim', 'flags', 'kanji', 'targets', 'umigame', 'wordwolf', 'oekaki', 'hockey', 'shogi', 'mahjong'];
+export const GAME_ORDER = ['tictactoe', 'connect4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'colors', 'daifugo', 'poker', 'speed', 'babanuki', 'doubt', 'sevens', 'blackjack', 'hitblow', 'sensou', 'yubisuma', 'memory', 'yacht', 'seri', 'nim', 'flags', 'kanji', 'targets', 'umigame', 'wordwolf', 'oekaki', 'hockey', 'shogi', 'mahjong'];
 export const GAMES = {
   tictactoe, connect4, reversi, colors, daifugo, poker, speed, hitblow, sensou, yubisuma, memory, nim, flags, kanji, targets, umigame, shogi, mahjong, hockey,
-  gomoku, dots, babanuki, doubt, yacht, wordwolf, sevens, mancala, oekaki, seri,
+  gomoku, dots, babanuki, doubt, yacht, wordwolf, sevens, mancala, oekaki, seri, blackjack, kaisen,
 };
 // 遊び方（howto.js）。対局画面の「？遊び方」で出す（main.js の renderHowto）
 for (const [id, lines] of Object.entries(HOWTO)) if (GAMES[id]) GAMES[id].howto = lines;

@@ -242,7 +242,7 @@ function renderHome() {
         actions.append(makeButton('部屋を作る（試作）', () => createRoom(id), 'secondary'));
       } else {
         actions.append(makeButton('部屋を作る', () => createRoom(id)));
-        if (!g.multi) actions.append(makeButton('この画面で2人で', () => startLocal(id), 'secondary'));
+        if (!g.multi && !g.noLocal) actions.append(makeButton('この画面で2人で', () => startLocal(id), 'secondary')); // noLocal = 隠す情報があるゲーム（海戦ゲーム）
       }
       card.append(actions);
     } else {
