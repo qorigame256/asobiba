@@ -48,6 +48,15 @@ function play(n, length, seed, style) {
     const prevPhase = s.h.phase;
     const next = mahjong.apply(s, { ...m, p });
     if (!next) return { error: `手が反則になった ${JSON.stringify(m)} p=${p} phase=${s.h.phase}` };
+    if (next.h.phase === 'claim' && prevPhase !== 'claim') {
+      const c = next.h.claim;
+      const bad = Object.keys(c.options).map(Number).find((q) => c.options[q].includes('chi') && q !== (c.from + 1) % n);
+      if (bad !== undefined) return { error: `上家でない人がチーできる ${bad}` };
+    }
+    if (next.h.phase === 'end' && prevPhase !== 'end' && next.h.end.type === 'tsumo') {
+      const d = next.h.end.deltas;
+      if (d.filter((x) => x < 0).length !== n - 1) return { error: `ツモで払った人数が ${n - 1} 人でない ${JSON.stringify(d)}` };
+    }
     if (m.a === 'ron') stats.ron++;
     if (m.a === 'tsumo') stats.tsumo++;
     if (['pon', 'chi', 'kan'].includes(m.a)) stats.calls++;
@@ -94,7 +103,7 @@ function randomMove(s, p, rng) {
 const sum = { ron: 0, tsumo: 0, draw: 0, calls: 0, riichi: 0, kans: 0, nuki: 0, hands: 0 };
 let worstReplay = 0;
 let games = 0;
-for (const n of [4, 3]) {
+for (const n of [4, 3, 5]) {
   for (const length of ['east', 'south']) {
     for (let seed = 1; seed <= 4; seed++) {
       for (const style of ['cpu', 'random']) {
@@ -127,6 +136,13 @@ for (const n of [4, 3]) {
       }
     }
   }
+}
+// 5人麻雀の自風: 親から数えて東南西北、5人目は無し（-1）
+{
+  const s = mahjong.init(5, 1, { rules: { players: 5 } });
+  const winds = [0, 1, 2].map((kyoku) => [...Array(5).keys()].map((p) => _test.seatWind({ ...s, kyoku }, p)));
+  check('5人麻雀: 親から数えて東南西北、5人目は自風なし', JSON.stringify(winds) === JSON.stringify([[27, 28, 29, 30, -1], [-1, 27, 28, 29, 30], [30, -1, 27, 28, 29]]), JSON.stringify(winds));
+  check('5人麻雀: 東風戦は東1〜東5局、持ち点25000点', s.scores.every((x) => x === 25000) && s.scores.length === 5);
 }
 check(`${games}局を最後まで進めて決まりごとが崩れない`, failed === 0, JSON.stringify(sum));
 check('ロン・ツモ・流局・鳴き・リーチ・カン・抜きがどれも起きた', Object.values(sum).every((v) => v > 0));

@@ -1,4 +1,4 @@
-// 麻雀（リーチ麻雀）。4人または3人。役・符・点数・向聴数は mahjong-engine.js（本人が別に作っている麻雀アプリ＝元のアプリのエンジンを写したもの）。
+// 麻雀（リーチ麻雀）。4人・3人・5人。役・符・点数・向聴数は mahjong-engine.js（本人が別に作っている麻雀アプリ＝元のアプリのエンジンを写したもの）。
 //
 // 決めごと（本人の判断・2026-10-03）: 元のアプリの通常ルールを流用し、作りはシンプルに。
 //   長さは東風戦・半荘戦を詳細設定で選ぶ。3人麻雀も詳細設定で選ぶ。鳴き・ロンはできる人だけに聞き、答えるまで待つ
@@ -12,6 +12,9 @@
 //   本場は1本300点（3人は200点）、持ち点は4人25000点・3人35000点。
 //   3人麻雀: 二萬〜八萬を抜いた108枚、チーなし、北は抜きドラ（抜いた北1枚で1翻）と役牌、ツモ損（いない北家の分は誰も払わない）、
 //   ドラ表示牌が一萬なら九萬・九萬なら一萬がドラ。
+// 5人麻雀（2026-10-05 本人の決定）: 5人が同時に1つの卓を囲む。親から数えて5人目は自風なし。ツモは4人麻雀と同じ1人あたりの額を
+//   ほかの4人が払う。卓は五角形（5人を72度ずつ回して置く）。Claude の推奨を本人が承認したもの: 持ち点25000点・東風戦は5局・
+//   チーは上家からだけ・ノーテン罰符3000点・136枚で王牌14枚。
 // Claude の判断: 暗槓への国士無双のロンは作らない（ごくまれなため）。抜いた北へのロンはできる（槍槓は付かない）。
 //   リーチ中で和了れない・カンできないときは1秒で自動でツモ切りする。局の結果は全員が「次へ」を押すか30秒で次の局へ。
 //
@@ -112,7 +115,8 @@ function waitsOf(s, p) {
 
 const roundWind = (s) => E.EAST + Math.floor(s.kyoku / s.n);
 const dealerOf = (s) => s.kyoku % s.n;
-const seatWind = (s, p) => E.EAST + ((p - dealerOf(s) + s.n) % s.n);
+// 5人麻雀の5人目は自風なし（-1 はどの牌の種類とも一致しないので、自風の役も雀頭の符も付かない）
+const seatWind = (s, p) => { const i = (p - dealerOf(s) + s.n) % s.n; return i < 4 ? E.EAST + i : -1; };
 
 // 和了れるなら点数の結果、和了れないなら null。tile = ロンの牌（ツモなら null。手にもう入っている）
 function winResult(s, p, tile, { tsumo = false, chankan = false } = {}) {
@@ -225,7 +229,7 @@ function claimOptions(s, from, id, src) {
       const c = countsOf(h.hands[q]);
       if (c[k] >= 2) acts.push('pon');
       if (c[k] >= 3 && h.kans < 4) acts.push('kan');
-      if (s.n === 4 && i === 1 && chiOptions(s, q, id).length) acts.push('chi');
+      if (s.n !== 3 && i === 1 && chiOptions(s, q, id).length) acts.push('chi');
     }
     if (acts.length) out[q] = acts;
   }
@@ -433,7 +437,7 @@ function proceed(s) {
   startHand(s);
 }
 
-const WIND_NAMES = ['東', '南', '西', '北'];
+const WIND_NAMES = ['東', '南', '西', '北', '－']; // 最後は5人麻雀の5人目（自風なし）
 const handTitle = (s) => `${WIND_NAMES[Math.floor(s.kyoku / s.n)]}${(s.kyoku % s.n) + 1}局${s.honba ? ` ${s.honba}本場` : ''}`;
 
 /* ---------- 手を受け付ける ---------- */
@@ -649,8 +653,8 @@ function riverEl(h, p) {
 function tableEl(s, o, me, watching) {
   const h = s.h;
   const table = document.createElement('div');
-  table.className = 'mj-table';
-  const turns = s.n === 3 ? [0, -90, 90] : [0, -90, 180, 90];
+  table.className = 'mj-table' + (s.n === 5 ? ' five' : '');
+  const turns = s.n === 3 ? [0, -90, 90] : s.n === 5 ? [0, -72, -144, 144, 72] : [0, -90, 180, 90];
   const center = document.createElement('div');
   center.className = 'mj-center';
   const mid = document.createElement('div');
@@ -685,7 +689,9 @@ function tableEl(s, o, me, watching) {
     seat.append(edge);
     table.append(seat);
     // 名前は回さずに、その人に近い卓の角へ（逆さや縦の文字にしない）
-    name.classList.add('mj-tag', ['bl', 'br', 'tr', 'tl'][[0, -90, 180, 90].indexOf(turns[i])]);
+    // 5人は 右下・右上・左上・左下 の角へ順に。観戦で自分の席の名前も左下に出すときは、左の人を少し上へずらす
+    const tag = s.n === 5 ? ['bl', 'br', 'tr', 'tl', watching ? 'bl2' : 'bl'][i] : ['bl', 'br', 'tr', 'tl'][[0, -90, 180, 90].indexOf(turns[i])];
+    name.classList.add('mj-tag', tag);
     if (h.phase === 'turn' && h.turn === p) name.classList.add('active');
     if (i > 0 || watching) table.append(name);
 
@@ -887,17 +893,17 @@ export default {
   id: 'mahjong',
   name: '麻雀',
   icon: '🀄',
-  desc: 'リーチ麻雀。4人か3人、足りない席は CPU',
+  desc: 'リーチ麻雀。4人・3人・5人、足りない席は CPU',
   ready: true,
   multi: true,
   realtime: true,
   minPlayers: 3,
-  maxPlayers: 4,
+  maxPlayers: 5,
   settings: [
     { key: 'length', label: '長さ', desc: '東風戦は親が1周（4人なら4局ほど）、半荘戦は2周', def: 'east', choices: [['east', '東風戦'], ['south', '半荘戦']] },
-    { key: 'players', label: '人数', desc: '3人麻雀は二萬〜八萬を抜いた108枚・チーなし・北は抜きドラ', def: 4, choices: [[4, '4人'], [3, '3人（三人麻雀）']] },
+    { key: 'players', label: '人数', desc: '3人麻雀は二萬〜八萬を抜いた108枚・チーなし・北は抜きドラ。5人麻雀は5人目に自風がなく、ツモは4人から受け取る', def: 4, choices: [[4, '4人'], [3, '3人（三人麻雀）'], [5, '5人（五人麻雀）']] },
   ],
-  seats(rules) { return rules.players === 3 ? 3 : 4; },
+  seats(rules) { return rules.players === 3 ? 3 : rules.players === 5 ? 5 : 4; },
 
   init(n, seed, { rules = {} } = {}) {
     const s = {
@@ -958,4 +964,4 @@ export default {
 };
 
 // テスト用
-export const _test = { turnOptions, claimOptions, winResult, waitsOf, liveLeft, kindOf, chiOptions };
+export const _test = { turnOptions, claimOptions, winResult, waitsOf, liveLeft, kindOf, chiOptions, seatWind };
