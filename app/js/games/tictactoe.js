@@ -8,6 +8,9 @@
 // 詳細設定「人数」で3人・4人にもできる（2026-10-04 本人の決定。盤の大きさは詳細設定で選ぶ）:
 //   ○×△□ で順番に、広い盤（5×5〜9×9）に置く。3つ並べたら勝ち。手 = マスの番号（左上から右へ）。
 //   スーパーは2人のときだけ（3人以上では「盤」の設定を見ない）。待合室では人数ぶんの席に人か CPU を選ぶ。
+// 詳細設定「盤」で消えるマルバツにもできる（2026-10-05 本人の決定。決まりは Claude の推奨を本人が承認）:
+//   3×3・2人だけ。自分の印は3つまで。4つ目を置くと、自分の一番古い印が消える（消える印は薄く見せる）。60手で引き分け。
+//   置けるのは空いているマスだけ（Claude の判断: 消える印のマスにはその手では置けない。置いたあとで古い印が消える）。
 
 import { CPU_SETTING, boardCpu } from './util.js';
 
@@ -92,6 +95,48 @@ function bigScore(s, p) {
   }
   // 相手をどこにでも置ける形にするのは損
   if (s.next === null) v += s.turn === p ? 6 : -6;
+  return v;
+}
+
+/* ---------- 消えるマルバツ ---------- */
+
+const VANISH_KEEP = 3;
+const VANISH_LIMIT = 60;
+
+function vanishApply(s, m) {
+  if (!Number.isInteger(m) || m < 0 || m > 8 || s.board[m] !== null || vanishResult(s)) return null;
+  const board = s.board.slice();
+  const hist = s.hist.map((h) => h.slice());
+  const mine = hist[s.turn];
+  mine.push(m);
+  board[m] = s.turn;
+  if (mine.length > VANISH_KEEP) board[mine.shift()] = null;
+  const line = lineOf(board);
+  return { ...s, board, hist, turn: 1 - s.turn, last: m, n: s.n + 1, won: line ? { winner: s.turn, cells: line } : null };
+}
+
+function vanishResult(s) {
+  if (s.won) return s.won;
+  if (s.n >= VANISH_LIMIT) return { winner: null, cells: [] };
+  return null;
+}
+
+// 次に消える印（印が3つある人の一番古い印）
+const fading = (s) => s.hist.filter((h) => h.length >= VANISH_KEEP).map((h) => h[0]);
+
+// CPU の形勢の見積もり: 2つ並んで残り1マスが空いている列。ただし次に消える印を含む列は数えない
+function vanishScore(s, p) {
+  const fade = new Set(fading(s));
+  let v = 0;
+  for (const line of LINES) {
+    const o = line.map((i) => s.board[i]);
+    if (line.some((i) => fade.has(i))) continue;
+    const mine = o.filter((x) => x === p).length;
+    const theirs = o.filter((x) => x === 1 - p).length;
+    if (mine === 2 && theirs === 0) v += 10;
+    if (theirs === 2 && mine === 0) v -= 10;
+  }
+  if (s.board[4] === p) v += 3; else if (s.board[4] === 1 - p) v -= 3;
   return v;
 }
 
@@ -277,7 +322,7 @@ export default {
   id: 'tictactoe',
   name: 'マルバツ',
   icon: '⭕',
-  desc: 'たて・よこ・ななめに3つ並べたら勝ち。オンラインでは 9×9 のスーパーマルバツや、3〜4人で広い盤も選べる',
+  desc: 'たて・よこ・ななめに3つ並べたら勝ち。オンラインでは 9×9 のスーパーマルバツ・印が消えるマルバツや、3〜4人で広い盤も選べる',
   ready: true,
   players: ['○', '×', '△', '□'],
   // 詳細設定の人数（2〜4人）。待合室の席の数になる
@@ -285,8 +330,8 @@ export default {
   settings: [
     {
       key: 'size', label: '盤', def: 'normal',
-      desc: 'スーパーは小さい盤（3×3）が9つ並んだ 9×9。置いたマスの位置で、次の人が置く小さい盤が決まる',
-      choices: [['normal', 'ふつう（3×3）'], ['super', 'スーパー（9×9）']],
+      desc: 'スーパーは小さい盤（3×3）が9つ並んだ 9×9。置いたマスの位置で、次の人が置く小さい盤が決まる。消えるは自分の印が3つまで（4つ目を置くと一番古い印が消える）。どちらも2人のときだけ',
+      choices: [['normal', 'ふつう（3×3）'], ['super', 'スーパー（9×9）'], ['vanish', '消える（3×3）']],
     },
     {
       key: 'players', label: '人数', def: 2,
@@ -305,6 +350,12 @@ export default {
   // スーパー: よわい＝1手先・4割は適当、ふつう＝2手先・1割は適当、つよい＝4手先（どこにでも置ける局面は3手先。重くなるため）
   cpu(s, p, rules) {
     if (s.wide) return wideCpu(s, rules);
+    if (s.vanish) {
+      const legal = (x) => x.board.map((v, i) => (v === null ? i : -1)).filter((i) => i >= 0);
+      return boardCpu(this, s, rules, legal, vanishScore, {
+        depth: { weak: 1, normal: 3, strong: 7 }, mistake: { weak: 0.45, normal: 0.12, strong: 0 },
+      });
+    }
     if (s.big) {
       const free = s.next === null;
       return boardCpu(this, s, rules, bigLegal, bigScore, {
@@ -323,6 +374,7 @@ export default {
       const [w, k] = wideSize(rules.wide, n);
       return { wide: true, n, w, k, board: Array(w * w).fill(null), turn: 0, last: null, won: null };
     }
+    if (rules.size === 'vanish') return { vanish: true, board: Array(9).fill(null), hist: [[], []], turn: 0, last: null, n: 0, won: null };
     if (rules.size === 'super') return { big: true, board: Array(81).fill(null), owner: Array(9).fill(null), next: 4, turn: 0, last: null };
     return { board: Array(9).fill(null), turn: 0, last: null };
   },
@@ -332,6 +384,7 @@ export default {
   apply(s, m) {
     if (s.big) return bigApply(s, m);
     if (s.wide) return wideApply(s, m);
+    if (s.vanish) return vanishApply(s, m);
     if (!Number.isInteger(m) || m < 0 || m > 8 || s.board[m] !== null || this.result(s)) return null;
     const board = s.board.slice();
     board[m] = s.turn;
@@ -341,6 +394,7 @@ export default {
   result(s) {
     if (s.big) return bigResult(s);
     if (s.wide) return wideResult(s);
+    if (s.vanish) return vanishResult(s);
     const line = lineOf(s.board);
     if (line) return { winner: s.board[line[0]], cells: line };
     if (s.board.every((v) => v !== null)) return { winner: null, cells: [] };
@@ -348,6 +402,11 @@ export default {
   },
 
   info(s) {
+    if (s.vanish) {
+      if (vanishResult(s)) return '';
+      const left = VANISH_LIMIT - s.n;
+      return '印は3つまで（薄い印が次に消える）' + (left <= 10 ? `・あと${left}手で引き分け` : '');
+    }
     if (!s.big || bigResult(s)) return '';
     return s.next === null ? 'どの盤にでも置けます' : '光っている盤に置きます';
   },
@@ -356,11 +415,13 @@ export default {
     if (s.big) { renderBig(root, s, o); return; }
     if (s.wide) { renderWide(root, s, o); return; }
     const res = this.result(s);
+    const fade = s.vanish && !res ? fading(s) : [];
     root.innerHTML = '';
     root.className = 'board ttt';
     s.board.forEach((v, i) => {
       const cell = cellButton(v, i, s, o, v === null && o.canMove);
       cell.classList.remove('last');
+      if (fade.includes(i)) cell.classList.add('fade');
       if (res?.cells.includes(i)) cell.classList.add('win');
       root.append(cell);
     });

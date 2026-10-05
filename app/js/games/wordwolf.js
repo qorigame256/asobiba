@@ -5,6 +5,11 @@
 //   外せばほかの全員の勝ち。言葉の答え合わせは、ひらがなにそろえて同じなら自動で正解、違えば多数派の人が「正解／ちがう」を押す。
 // 決まりごと（Claude の判断）: ウルフは1人。同じ票数で並んだら、並んだ人だけで1回やり直し、それでも並んだらウルフの勝ち。
 // CPU は入れられない（話せないため）。部屋を出た人の票は適当に入れ、出たウルフは言葉を当てずに負け。
+// 詳細設定「ウルフの数」で2人にもできる（2026-10-05 本人の決定。決まりは Claude の推奨を本人が承認）:
+//   2人になるのは7人以上のときだけ（6人以下では1人）。2人のウルフは同じお題で、お互いがウルフだとは知らない。
+//   いちばん票の多い人がどちらかのウルフなら、そのウルフがみんなのお題を当てれば逆転（当てられなければウルフ以外の勝ち）。
+//   ウルフ側が勝てば2人とも勝ち。答え合わせはウルフ以外の人がする。
+const WOLF2_MIN = 7; // ウルフ2人になる最少の人数
 // 手: { p, t: 'tovote' }（p = -1 はホストの時間切れ）/ { p, t: 'vote', to, v: 何回目の投票か } / { p, t: 'guess', text } / { p, t: 'giveup' } / { p, t: 'judge', ok }
 
 import { mulberry32, esc } from './util.js';
@@ -13,6 +18,7 @@ import { PAIRS } from './wordwolf-data.js';
 
 const MAX_TEXT = 30;
 const clone = (s) => ({ ...s, votes: { ...s.votes }, history: s.history.slice() });
+const isWolf = (s, p) => s.wolves.includes(p);
 
 export default {
   id: 'wordwolf',
@@ -26,6 +32,7 @@ export default {
   minPlayers: 3,
   maxPlayers: 10,
   settings: [
+    { key: 'wolves', label: 'ウルフの数', desc: '2人は7人以上のときだけ（6人以下では1人）。2人のウルフは同じお題で、お互いがウルフだとは知らない', def: 1, choices: [[1, '1人'], [2, '2人（7人以上）']] },
     { key: 'time', label: '話し合いの時間', desc: '時間が来たら投票に進む（その前に「投票へ」を押してもよい）', def: 3, choices: [[2, '2分'], [3, '3分'], [5, '5分']] },
   ],
 
@@ -33,30 +40,34 @@ export default {
     const rng = mulberry32(seed);
     const pair = PAIRS[Math.floor(rng() * PAIRS.length)];
     const flip = rng() < 0.5;
-    const wolf = Math.floor(rng() * n);
+    const wolves = [Math.floor(rng() * n)];
+    if (rules.wolves === 2 && n >= WOLF2_MIN) {
+      const k = Math.floor(rng() * (n - 1));
+      wolves.push(k >= wolves[0] ? k + 1 : k);
+    }
     return {
-      n, seed, words: flip ? [pair[1], pair[0]] : [pair[0], pair[1]], wolf, // words[0] = 多数派、words[1] = ウルフ
+      n, seed, words: flip ? [pair[1], pair[0]] : [pair[0], pair[1]], wolves, // words[0] = 多数派、words[1] = ウルフ
       phase: 'talk', minutes: [2, 3, 5].includes(rules.time) ? rules.time : 3,
       vote: 1, cands: Array.from({ length: n }, (_, p) => p), votes: {}, history: [],
       accused: null, guess: null, winSide: null, step: 0,
     };
   },
 
-  wordOf(s, p) { return s.words[p === s.wolf ? 1 : 0]; },
+  wordOf(s, p) { return s.words[isWolf(s, p) ? 1 : 0]; },
   turn() { return null; },
   canAct(s, p) {
     if (p < 0 || p >= s.n) return false;
     if (s.phase === 'talk') return true;
     if (s.phase === 'vote') return !(p in s.votes);
-    if (s.phase === 'guess') return p === s.wolf;
-    if (s.phase === 'judge') return p !== s.wolf;
+    if (s.phase === 'guess') return p === s.accused;
+    if (s.phase === 'judge') return !isWolf(s, p);
     return false;
   },
   phaseText(s, me) {
     if (s.phase === 'talk') return '話し合いの時間です';
     if (s.phase === 'vote') return me in s.votes || me < 0 ? 'みんなの投票を待っています…' : 'ウルフだと思う人に投票してください';
-    if (s.phase === 'guess') return me === s.wolf ? 'ばれました！ みんなのお題を当てれば逆転です' : 'ウルフがみんなのお題を考えています…';
-    if (s.phase === 'judge') return me === s.wolf ? '答え合わせを待っています…' : 'ウルフの答えは合っていますか？';
+    if (s.phase === 'guess') return me === s.accused ? 'ばれました！ みんなのお題を当てれば逆転です' : 'ウルフがみんなのお題を考えています…';
+    if (s.phase === 'judge') return isWolf(s, me) ? '答え合わせを待っています…' : 'ウルフの答えは合っていますか？';
     return '';
   },
   referee(s) {
@@ -70,7 +81,8 @@ export default {
 
   result(s) {
     if (s.phase !== 'end') return null;
-    const winners = s.winSide === 'wolf' ? [s.wolf] : Array.from({ length: s.n }, (_, p) => p).filter((p) => p !== s.wolf);
+    const all = Array.from({ length: s.n }, (_, p) => p);
+    const winners = s.winSide === 'wolf' ? s.wolves.slice() : all.filter((p) => !isWolf(s, p));
     return { winner: winners[0], winners, side: s.winSide };
   },
   resultText(res, me) {
@@ -134,7 +146,7 @@ export default {
     const me = o.me >= 0 ? o.me : null;
     const nameP = (p) => (p === me ? 'あなた' : o.names[p]);
     const b = (p) => `<b>${esc(nameP(p))}</b>`;
-    const keepInput = s.phase === 'guess' && me === s.wolf && root.querySelector('.ww-guess input');
+    const keepInput = s.phase === 'guess' && me === s.accused && root.querySelector('.ww-guess input');
     if (keepInput && ui.key === `${s.seed}:guess`) return; // 打っている途中の入力欄を作り直さない（スマホのキーボードが閉じるため）
     ui.key = `${s.seed}:${s.phase}`;
     root.innerHTML = '';
@@ -153,7 +165,7 @@ export default {
       const extra = document.createElement('div');
       extra.className = 'pt-extra';
       if (s.phase === 'vote') extra.textContent = p in s.votes ? '投票ずみ' : '考え中';
-      else if (s.phase === 'end') extra.textContent = p === s.wolf ? `ウルフ（${s.words[1]}）` : s.words[0];
+      else if (s.phase === 'end') extra.textContent = isWolf(s, p) ? `ウルフ（${s.words[1]}）` : s.words[0];
       if (extra.textContent) chip.append(extra);
       if (o.away[p] || (o.cpu[p] && !o.names[p].startsWith('CPU'))) {
         const t = document.createElement('span');
@@ -170,7 +182,7 @@ export default {
       const card = document.createElement('div');
       card.className = 'ww-card';
       card.innerHTML = `<div class="um-label">あなたのお題</div><div class="ww-word">${esc(this.wordOf(s, me))}</div>`
-        + '<small>みんなと同じお題か、1人だけ違うお題（ウルフ）かは分かりません</small>';
+        + `<small>みんなと同じお題か、${s.wolves.length > 1 ? '2人だけ' : '1人だけ'}違うお題（ウルフ）かは分かりません</small>`;
       root.append(card);
     }
 
@@ -194,7 +206,7 @@ export default {
     } else if (s.phase === 'vote') {
       if (s.vote === 2) note(`票が並んだので、${s.cands.map(b).join('・')}の中からもう一度投票します`);
       if (me !== null && o.canMove) {
-        note('ウルフ（1人だけ違うお題の人）だと思う人は？');
+        note(s.wolves.length > 1 ? 'ウルフ（2人だけ違うお題の人）のどちらかだと思う人は？' : 'ウルフ（1人だけ違うお題の人）だと思う人は？');
         row(...s.cands.filter((p) => p !== me).map((p) => button(nameP(p), 'primary', () => o.onMove({ t: 'vote', to: p, v: s.vote }))));
       } else if (me !== null) {
         note(`${b(s.votes[me])}に投票しました。みんなを待っています…`);
@@ -202,7 +214,7 @@ export default {
     } else if (s.phase === 'guess' || s.phase === 'judge') {
       note(`いちばん票が多かったのは ${b(s.accused)}… ウルフでした！`);
       if (s.phase === 'guess') {
-        if (me === s.wolf) {
+        if (me === s.accused) {
           note(`あなたのお題は「${esc(s.words[1])}」でした。みんなのお題は何だと思いますか？ 当てれば逆転勝ち`);
           const wrap = document.createElement('div');
           wrap.className = 'ww-guess';
@@ -220,7 +232,7 @@ export default {
         }
       } else {
         note(`ウルフの答え: 「<b>${esc(s.guess)}</b>」（みんなのお題は「${esc(s.words[0])}」）`);
-        if (me !== null && me !== s.wolf) {
+        if (me !== null && !isWolf(s, me)) {
           note('意味が同じなら「正解」にしてください（先に押した人の判定になります）');
           row(button('ちがう', 'secondary', () => o.onMove({ t: 'judge', ok: false })), button('正解', 'primary', () => o.onMove({ t: 'judge', ok: true })));
         }
@@ -228,10 +240,10 @@ export default {
     } else if (s.phase === 'end') {
       const box = document.createElement('div');
       box.className = 'ww-card';
-      box.innerHTML = `<div class="um-label">お題</div><div>みんな: <b>${esc(s.words[0])}</b>　ウルフ（${b(s.wolf)}）: <b>${esc(s.words[1])}</b></div>`;
+      box.innerHTML = `<div class="um-label">お題</div><div>みんな: <b>${esc(s.words[0])}</b>　ウルフ（${s.wolves.map(b).join('・')}）: <b>${esc(s.words[1])}</b></div>`;
       root.append(box);
       if (s.accused === null) note(s.history.length ? '票が並んで決まらず、ウルフが逃げ切りました' : '');
-      else if (s.accused !== s.wolf) note(`いちばん票が多かったのは ${b(s.accused)}… ウルフではありませんでした`);
+      else if (!isWolf(s, s.accused)) note(`いちばん票が多かったのは ${b(s.accused)}… ウルフではありませんでした`);
       else if (s.guess === null) note(`${b(s.accused)}がウルフでした！ みんなのお題は当てられませんでした`);
       else note(`ウルフの答え「${esc(s.guess)}」は${s.winSide === 'wolf' ? '<span class="pt-ok">正解</span>。逆転です！' : '<span class="pt-ng">はずれ</span>でした'}`);
       for (const h of s.history) {
@@ -257,7 +269,7 @@ function tally(s) {
     return s;
   }
   s.accused = tied[0];
-  if (s.accused === s.wolf) s.phase = 'guess';
+  if (isWolf(s, s.accused)) s.phase = 'guess';
   else { s.phase = 'end'; s.winSide = 'wolf'; }
   return s;
 }

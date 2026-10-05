@@ -162,6 +162,57 @@ function perft(board, hands, side, d) {
   }
 }
 
+// 8b. 5五将棋（マス = 段 * 5 + 列。列0 が 5筋）
+{
+  const M = { size: 'mini' };
+  const s = shogi.init({ rules: M });
+  const b = s.board;
+  check('5五将棋の並べ方（先手 5五飛 4五角 3五銀 2五金 1五玉 1四歩・後手は点対称）',
+    b.slice(20).join() === '7,6,4,5,8' && b[19] === 1 && b.slice(0, 5).join() === '-8,-5,-4,-6,-7' && b[5] === -1 && b.filter((v) => v).length === 12);
+  check('最初に指せる手は14通り', legalMoves(b, s.hands, 0).length === 14);
+  check('5五将棋では駒落ちを使わない', shogi.init({ rules: { ...M, handicap: 'two' } }).board.filter((v) => v > 0).length === 6);
+  check('3人のときは5五将棋にならない', shogi.init({ rules: { ...M, players: 3 } }).n === 3);
+  const mini = (pieces, { hands = emptyHands(), turn = 0 } = {}) => {
+    const board = Array(25).fill(0);
+    for (const [r, c, v] of pieces) board[r * 5 + c] = v;
+    return { ...s, board, hands, turn, ply: 0, keys: [`${board.join(',')}|${hands[0].join('')}|${hands[1].join('')}|${turn}`], checks: [false] };
+  };
+  // 銀を2段目へ進めても成れない（敵陣は奥の1段だけ）。1段目へ入ると成れる
+  let p = mini([[4, 4, 8], [0, 0, -8], [2, 2, 4]]);
+  const silver = legalMoves(p.board, p.hands, 0).filter((m) => m.f === 12);
+  check('2段目へ進んでも成れない', silver.filter((m) => m.t < 10 && m.t >= 5).every((m) => !m.pr));
+  p = mini([[4, 4, 8], [0, 0, -8], [1, 2, 4]]);
+  check('1段目へ入ると成れる', legalMoves(p.board, p.hands, 0).some((m) => m.f === 7 && m.t < 5 && m.pr));
+  // 歩は1段目に打てない・二歩・歩が1段目へ進むなら必ず成る
+  const h = emptyHands(); h[0][1] = 1;
+  p = mini([[4, 4, 8], [0, 0, -8], [3, 1, 1]], { hands: h });
+  const drops = legalMoves(p.board, p.hands, 0).filter((m) => m.d === 1);
+  check('歩は1段目に打てず、二歩も打てない', drops.every((m) => m.t >= 5 && m.t % 5 !== 1) && drops.length > 0);
+  p = mini([[4, 4, 8], [0, 0, -8], [1, 2, 1]]);
+  check('歩が1段目へ進むなら必ず成る', legalMoves(p.board, p.hands, 0).filter((m) => m.f === 7).every((m) => m.pr));
+  // 棋譜の書き方: 1四歩 → 1三歩
+  const after = shogi.apply(s, { f: 19, t: 14, pr: false });
+  check('棋譜の書き方（5五将棋の筋と段）', after?.last.note === '▲１三歩', after?.last.note);
+  // 200手で引き分け（玉だけを行き来させると千日手になるので、198手目の局面から2手指す）
+  p = { ...mini([[4, 4, 8], [0, 0, -8], [2, 2, 7]]), ply: 198 };
+  const end = play(p, [{ f: 24, t: 23 }, { f: 0, t: 1 }]);
+  check('200手で引き分け', end?.result?.winner === null && end.result.reason === '200手に達した', end?.result?.reason);
+  for (const level of ['weak', 'normal', 'strong']) {
+    let x = shogi.init({ rules: M });
+    let worst = 0;
+    let bad = 0;
+    for (let i = 0; i < 200 && !x.result; i++) {
+      const t0 = Date.now();
+      const mv = shogi.cpu(x, x.turn, { cpu: level });
+      worst = Math.max(worst, Date.now() - t0);
+      const n = shogi.apply(x, mv);
+      if (!n) { bad++; break; }
+      x = n;
+    }
+    check(`5五将棋: CPU（${level}）はいつも指せる手を返し、1手2秒以内`, bad === 0 && worst < 2000, `最長 ${(worst / 1000).toFixed(2)}秒・${x.ply}手${x.result ? '・' + x.result.reason : ''}`);
+  }
+}
+
 // 9. 3人将棋（三人チェス式の盤。マス = 陣地 * 40 + 段 * 8 + 筋）
 {
   const T = _test3;

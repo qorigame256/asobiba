@@ -8,6 +8,10 @@
 //   王手を続けていた側の負け）、入玉の点数宣言は作らず 300手で引き分け。
 // Claude の判断: 駒落ちでは駒を落とす側（上手）を先手（下側）として先に指す。香落ちで落とすのは 1筋の香。
 //   投了は自分の番のときだけ押せる。
+// 詳細設定「盤」で5五将棋にもできる（2026-10-05 本人の決定。決まりは Claude の推奨を本人が承認）:
+//   5×5 の盤に 王・金・銀・角・飛・歩 を1枚ずつ（公式の並べ方）。成れるのは相手側の一番奥の1段だけ。二歩・打ち歩詰めは禁止。
+//   千日手は本将棋と同じ。200手で引き分け。駒落ち・3人とは組み合わせない。マスの番号は 段 * 5 + 列（列0 が 5筋）。
+//   盤の大きさ N は盤の長さから決める（sizeOf）。
 
 import { CPU_SETTING } from './util.js';
 import * as three from './shogi3.js';
@@ -18,6 +22,8 @@ const KNIGHT = 3;
 const GOLD = 5;
 const KING = 8;
 const MAX_PLY = 300;
+const MINI_MAX_PLY = 200;
+const sizeOf = (board) => (board.length === 25 ? 5 : 9);
 
 const KANJI = { 1: '歩', 2: '香', 3: '桂', 4: '銀', 5: '金', 6: '角', 7: '飛', 8: '玉', 9: 'と', 10: '杏', 11: '圭', 12: '全', 14: '馬', 15: '龍' };
 const NOTE_NAME = { ...KANJI, 10: '成香', 11: '成桂', 12: '成銀' };
@@ -40,10 +46,11 @@ const SLIDE_SET = Object.fromEntries(Object.entries(SLIDES).map(([k, v]) => [k, 
 const sgnOf = (side) => (side === 0 ? 1 : -1);
 const base = (t) => (t > 8 ? t - 8 : t);
 const canPromote = (t) => t <= 7 && t !== GOLD;
-const inZone = (side, r) => (side === 0 ? r <= 2 : r >= 6);
+// 敵陣（本将棋は奥3段、5五将棋は奥1段）
+const inZone = (side, r, N) => { const z = N === 9 ? 3 : 1; return side === 0 ? r < z : r >= N - z; };
 // 成らないと動けなくなるところ（歩・香の最奥、桂の奥2段）
-function mustPromote(t, side, r) {
-  const far = side === 0 ? r : 8 - r;
+function mustPromote(t, side, r, N) {
+  const far = side === 0 ? r : N - 1 - r;
   return ((t === PAWN || t === LANCE) && far === 0) || (t === KNIGHT && far <= 1);
 }
 
@@ -67,21 +74,31 @@ function initialBoard(handicap) {
   return b;
 }
 
+// 5五将棋の並べ方。先手（下）: 5五飛 4五角 3五銀 2五金 1五玉 1四歩。後手はその点対称
+function miniBoard() {
+  const b = Array(25).fill(0);
+  [7, 6, 4, 5, 8].forEach((v, c) => { b[20 + c] = v; b[4 - c] = -v; });
+  b[15 + 4] = PAWN;
+  b[5] = -PAWN;
+  return b;
+}
+
 /* ---------- 盤の上の計算（CPU の先読みでも使うので軽く作る） ---------- */
 
 // side の駒が sq に利いているか
 function attacked(board, sq, side) {
+  const N = sizeOf(board);
   const sgn = sgnOf(side);
-  const r = Math.floor(sq / 9);
-  const c = sq % 9;
+  const r = Math.floor(sq / N);
+  const c = sq % N;
   for (const [dr, dc] of [...ORTHO, ...DIAG]) {
     // 攻める駒から sq への向き（先手の向きに直したもの）
     const rel = [-dr * sgn, -dc * sgn].join();
     let rr = r + dr;
     let cc = c + dc;
     let dist = 1;
-    while (rr >= 0 && rr < 9 && cc >= 0 && cc < 9) {
-      const v = board[rr * 9 + cc];
+    while (rr >= 0 && rr < N && cc >= 0 && cc < N) {
+      const v = board[rr * N + cc];
       if (v !== 0) {
         if (v * sgn > 0) {
           const t = Math.abs(v);
@@ -99,51 +116,52 @@ function attacked(board, sq, side) {
   for (const dc of [-1, 1]) {
     const rr = r + 2 * sgn;
     const cc = c + dc;
-    if (rr >= 0 && rr < 9 && cc >= 0 && cc < 9 && board[rr * 9 + cc] === KNIGHT * sgn) return true;
+    if (rr >= 0 && rr < N && cc >= 0 && cc < N && board[rr * N + cc] === KNIGHT * sgn) return true;
   }
   return false;
 }
 
 const kingSq = (board, side) => board.indexOf(KING * sgnOf(side));
 
-function pawnOnFile(board, side, c) {
+function pawnOnFile(board, side, c, N) {
   const v = PAWN * sgnOf(side);
-  for (let r = 0; r < 9; r++) if (board[r * 9 + c] === v) return true;
+  for (let r = 0; r < N; r++) if (board[r * N + c] === v) return true;
   return false;
 }
 
 // 王を取る手も含めた、駒の動ける手（王手の放置は調べない）
 function pseudoMoves(board, hands, side) {
+  const N = sizeOf(board);
   const out = [];
   const sgn = sgnOf(side);
   const add = (f, t, piece, rTo, rFrom) => {
-    if (canPromote(piece) && (inZone(side, rFrom) || inZone(side, rTo))) {
+    if (canPromote(piece) && (inZone(side, rFrom, N) || inZone(side, rTo, N))) {
       out.push({ f, t, pr: true });
-      if (!mustPromote(piece, side, rTo)) out.push({ f, t, pr: false });
+      if (!mustPromote(piece, side, rTo, N)) out.push({ f, t, pr: false });
     } else {
       out.push({ f, t, pr: false });
     }
   };
-  for (let i = 0; i < 81; i++) {
+  for (let i = 0; i < N * N; i++) {
     const v = board[i];
     if (v * sgn <= 0) continue;
     const t = Math.abs(v);
-    const r = Math.floor(i / 9);
-    const c = i % 9;
+    const r = Math.floor(i / N);
+    const c = i % N;
     for (const [dr, dc] of STEPS[t] ?? []) {
       const rr = r + dr * sgn;
       const cc = c + dc * sgn;
-      if (rr < 0 || rr > 8 || cc < 0 || cc > 8) continue;
-      if (board[rr * 9 + cc] * sgn > 0) continue;
-      add(i, rr * 9 + cc, t, rr, r);
+      if (rr < 0 || rr >= N || cc < 0 || cc >= N) continue;
+      if (board[rr * N + cc] * sgn > 0) continue;
+      add(i, rr * N + cc, t, rr, r);
     }
     for (const [dr, dc] of SLIDES[t] ?? []) {
       let rr = r + dr * sgn;
       let cc = c + dc * sgn;
-      while (rr >= 0 && rr < 9 && cc >= 0 && cc < 9) {
-        const x = board[rr * 9 + cc];
+      while (rr >= 0 && rr < N && cc >= 0 && cc < N) {
+        const x = board[rr * N + cc];
         if (x * sgn > 0) break;
-        add(i, rr * 9 + cc, t, rr, r);
+        add(i, rr * N + cc, t, rr, r);
         if (x !== 0) break;
         rr += dr * sgn;
         cc += dc * sgn;
@@ -152,11 +170,11 @@ function pseudoMoves(board, hands, side) {
   }
   for (let d = 1; d <= 7; d++) {
     if (!hands[side][d]) continue;
-    for (let j = 0; j < 81; j++) {
+    for (let j = 0; j < N * N; j++) {
       if (board[j] !== 0) continue;
-      const r = Math.floor(j / 9);
-      if (mustPromote(d, side, r)) continue; // 行き所のない駒
-      if (d === PAWN && pawnOnFile(board, side, j % 9)) continue; // 二歩
+      const r = Math.floor(j / N);
+      if (mustPromote(d, side, r, N)) continue; // 行き所のない駒
+      if (d === PAWN && pawnOnFile(board, side, j % N, N)) continue; // 二歩
       out.push({ d, t: j });
     }
   }
@@ -208,15 +226,17 @@ const MATE = 1e6;
 
 // side から見た形勢: 駒の点数（持ち駒は少し高め）＋歩と銀を前へ進めると少し加点
 function evaluate(board, hands, side) {
+  const N = sizeOf(board);
+  const home = N - 3; // 先手の歩の段（後手は N - 1 - home）
   let v = 0;
-  for (let i = 0; i < 81; i++) {
+  for (let i = 0; i < N * N; i++) {
     const x = board[i];
     if (!x) continue;
     const t = Math.abs(x);
     let s = VALUE[t];
     if (t === PAWN || t === 4) {
-      const r = Math.floor(i / 9);
-      s += (x > 0 ? 6 - r : r - 2) * 4;
+      const r = Math.floor(i / N);
+      s += (x > 0 ? home - r : r - (N - 1 - home)) * 4;
     }
     v += x > 0 ? s : -s;
   }
@@ -263,7 +283,7 @@ function cpuMove(s, rules) {
   const moves = legalMoves(s.board, s.hands, s.turn);
   const mistake = { weak: 0.3, normal: 0.08, strong: 0 }[level];
   if (Math.random() < mistake) return moves[Math.floor(Math.random() * moves.length)];
-  const maxDepth = { weak: 1, normal: 2, strong: 3 }[level];
+  const maxDepth = (sizeOf(s.board) === 5 ? { weak: 1, normal: 2, strong: 4 } : { weak: 1, normal: 2, strong: 3 })[level];
   const deadline = Date.now() + 1500;
   let scores = null;
   for (let d = 1; d <= maxDepth; d++) { // 浅い読みから順に。時間切れならひとつ前の結果を使う
@@ -279,15 +299,16 @@ function cpuMove(s, rules) {
 /* ---------- 棋譜の書き方 ---------- */
 
 function notation(s, m, prevTo) {
+  const N = sizeOf(s.board);
   const mark = s.turn === 0 ? '▲' : '△';
-  const sq = m.t === prevTo ? '同' : FILES[m.t % 9] + RANKS[Math.floor(m.t / 9)];
+  const sq = m.t === prevTo ? '同' : FILES[9 - N + m.t % N] + RANKS[Math.floor(m.t / N)];
   if (m.d) return `${mark}${sq}${KANJI[m.d]}打`;
   const t = Math.abs(s.board[m.f]);
-  const r1 = Math.floor(m.f / 9);
-  const r2 = Math.floor(m.t / 9);
+  const r1 = Math.floor(m.f / N);
+  const r2 = Math.floor(m.t / N);
   let suffix = '';
   if (m.pr) suffix = '成';
-  else if (canPromote(t) && (inZone(s.turn, r1) || inZone(s.turn, r2))) suffix = '不成';
+  else if (canPromote(t) && (inZone(s.turn, r1, N) || inZone(s.turn, r2, N))) suffix = '不成';
   return `${mark}${sq}${NOTE_NAME[t]}${suffix}`;
 }
 
@@ -299,21 +320,23 @@ export default {
   id: 'shogi',
   name: '将棋',
   icon: '☗',
-  desc: '本将棋。駒落ちのハンデも選べる。オンラインでは3人（六角形の盤）も選べる',
+  desc: '本将棋。駒落ちのハンデも選べる。オンラインでは小さい盤の5五将棋や、3人（六角形の盤）も選べる',
   ready: true,
   players: three.NAMES, // 3人目は3人将棋だけ
   // 詳細設定の人数。3人は shogi3.js が受け持つ（局面に n: 3 を持つ）
   seatCount(rules) { return rules?.players === 3 ? 3 : 2; },
   settings: [
     { key: 'players', label: '人数', desc: '3人では六角形の盤で3人が向き合う。王を取られた人は脱落（駒落ちは使わない）', def: 2, choices: [[2, '2人'], [3, '3人']] },
+    { key: 'size', label: '盤', desc: '5五将棋は 5×5 の盤に 王・金・銀・角・飛・歩 が1枚ずつ。成れるのは一番奥の1段だけ（2人のときだけ。駒落ちは使わない）', def: 'full', choices: [['full', '本将棋（9×9）'], ['mini', '5五将棋（5×5）']] },
     { key: 'handicap', label: '駒落ち', desc: '先手（上手）が駒を落として先に指す。腕の差があるときに', def: 'none', choices: Object.entries(HANDICAPS) },
     CPU_SETTING,
   ],
 
   init({ rules = {} } = {}) {
     if (rules.players === 3) return three.init();
-    const handicap = HANDICAPS[rules.handicap] ? rules.handicap : 'none';
-    const board = initialBoard(handicap);
+    const mini = rules.size === 'mini';
+    const handicap = !mini && HANDICAPS[rules.handicap] ? rules.handicap : 'none';
+    const board = mini ? miniBoard() : initialBoard(handicap);
     const hands = [Array(8).fill(0), Array(8).fill(0)];
     return { board, hands, turn: 0, ply: 0, handicap, last: null, keys: [posKey(board, hands, 0)], checks: [false], result: null };
   },
@@ -351,8 +374,8 @@ export default {
       n.result = perpetual === undefined
         ? { winner: null, cells: [], reason: '千日手' }
         : { winner: 1 - perpetual, cells: [], reason: '連続王手の千日手' };
-    } else if (ply >= MAX_PLY) {
-      n.result = { winner: null, cells: [], reason: `${MAX_PLY}手に達した` };
+    } else if (ply >= (b.length === 25 ? MINI_MAX_PLY : MAX_PLY)) {
+      n.result = { winner: null, cells: [], reason: `${ply}手に達した` };
     }
     return n;
   },
@@ -363,6 +386,7 @@ export default {
   info(s) {
     if (s.n === 3) return three.info(s);
     const parts = [];
+    if (s.board.length === 25) parts.push('5五将棋');
     if (s.handicap !== 'none') parts.push(`${HANDICAPS[s.handicap]}（☗先手が上手）`);
     if (s.last?.note) parts.push(`${s.ply}手目 ${s.last.note}`);
     if (s.result) parts.push(s.result.reason);
@@ -373,6 +397,8 @@ export default {
   render(root, s, o) {
     if (s.n === 3) { three.render(root, s, o); return; }
     const draw = () => this.render(root, s, o);
+    const N = sizeOf(s.board);
+    const last = N * N - 1;
     // 自分の駒が下に来るように。観戦と同じ画面の対局では先手が下
     const bottom = o.me === 1 ? 1 : 0;
     const key = `${s.ply}:${o.me}`;
@@ -388,7 +414,8 @@ export default {
     const checkedKing = inCheck ? kingSq(s.board, s.turn) : -1;
 
     root.innerHTML = '';
-    root.className = 'board sg';
+    root.className = 'board sg' + (N === 5 ? ' sg5' : '');
+    root.style.setProperty('--n', N);
 
     const pick = (t) => {
       const opts = legal.filter((m) => m.t === t && (ui.drop !== null ? m.d === ui.drop : m.f === ui.from));
@@ -437,15 +464,15 @@ export default {
     wrap.className = 'sg-wrap';
     const files = document.createElement('div');
     files.className = 'sg-files';
-    for (let k = 0; k < 9; k++) {
+    for (let k = 0; k < N; k++) {
       const span = document.createElement('span');
-      span.textContent = bottom === 0 ? 9 - k : k + 1;
+      span.textContent = bottom === 0 ? N - k : k + 1;
       files.append(span);
     }
     const grid = document.createElement('div');
     grid.className = 'sg-grid';
-    for (let k = 0; k < 81; k++) {
-      const i = bottom === 0 ? k : 80 - k;
+    for (let k = 0; k < N * N; k++) {
+      const i = bottom === 0 ? k : last - k;
       const v = s.board[i];
       const mine = v !== 0 && (v > 0 ? 0 : 1) === s.turn;
       const isTarget = targets.has(i);
@@ -476,9 +503,9 @@ export default {
     }
     const ranks = document.createElement('div');
     ranks.className = 'sg-ranks';
-    for (let k = 0; k < 9; k++) {
+    for (let k = 0; k < N; k++) {
       const span = document.createElement('span');
-      span.textContent = RANKS[bottom === 0 ? k : 8 - k];
+      span.textContent = RANKS[bottom === 0 ? k : N - 1 - k];
       ranks.append(span);
     }
     wrap.append(files, grid, ranks);
@@ -521,4 +548,4 @@ export default {
 };
 
 // テスト用
-export const _test = { legalMoves, attacked, kingSq, initialBoard, evaluate };
+export const _test = { legalMoves, attacked, kingSq, initialBoard, miniBoard, evaluate };

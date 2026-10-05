@@ -61,8 +61,15 @@ s = TS.init();
 s = { ...s, board: Object.assign(Array(81).fill(null), { 36: 0, 37: 0 }), next: 4 };
 for (let k = 0; k < 10; k++) assert.equal(TS.cpu(s, 0, lv('strong')), 38, 'スーパーマルバツ: 小さい盤を取れる手を打つ');
 
+// 消えるマルバツ・ポップアウト
+const TV = { ...T, id: 'tictactoe-vanish', init: () => T.init({ rules: { size: 'vanish' } }) };
+const CP = { ...C, id: 'connect4-pop', init: () => C.init({ rules: { pop: 'on' } }) };
+s = TV.init();
+for (const m of [0, 3, 1, 4]) s = TV.apply(s, m); // ○ が 0・1、× が 3・4。○ の番
+for (let k = 0; k < 10; k++) assert.equal(TV.cpu(s, 0, lv('strong')), 2, '消えるマルバツ: 勝てる手があれば打つ');
+
 // 強い方が勝ち越す
-for (const [g, n] of [[C, 20], [R, 12], [TS, 12]]) {
+for (const [g, n] of [[C, 20], [R, 12], [TS, 12], [TV, 20], [CP, 12]]) {
   const sw = tally(g, 'strong', 'weak', n);
   const nw = tally(g, 'normal', 'weak', n);
   results[g.id] = { strongVsWeak: sw, normalVsWeak: nw };

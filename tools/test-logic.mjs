@@ -99,6 +99,75 @@ assert.deepEqual(C.result(s), { winner: 3, cells: [89, 90, 91, 92] }, '4人目�
 assert.equal(C.apply(c4({ players: 3 }, [8, 8, 8, 8, 8, 8, 8]), 8), null, '満杯の列（7段）');
 assert.equal(C.apply(C.init({ rules: { players: 3 } }), 9), null, '盤の外');
 
+// 消えるマルバツ: 4つ目で一番古い印が消える・消えたマスにまた置ける・60手で引き分け・2人のときだけ
+{
+  const V = (moves) => { let x = T.init({ rules: { size: 'vanish' } }); for (const m of moves) { x = T.apply(x, m); assert.ok(x, 'illegal ' + m); } return x; };
+  assert.equal(T.init({ rules: { size: 'vanish', players: 3 } }).vanish, undefined, '3人では消えるにならない');
+  s = V([0, 3, 1, 4, 8, 6]); // ○ 0・1・8、× 3・4・6
+  assert.equal(T.result(s), null);
+  assert.equal(T.apply(s, 0), null, 'まだ消えていない印のマスには置けない');
+  s = T.apply(s, 2); // ○ の4つ目: 一番古い 0 が消える。○ は 1・8・2 で並ばない
+  assert.deepEqual([s.board[0], s.board[2], T.result(s)], [null, 0, null], '4つ目で一番古い印が消え、消えた印では並ばない');
+  assert.deepEqual(s.hist, [[1, 8, 2], [3, 4, 6]]);
+  s = T.apply(s, 5); // × の4つ目: 3 が消え、× は 4・6・5
+  assert.equal(s.board[3], null);
+  assert.equal(T.result(s), null, '× の 4・5 と消えた 3 では並ばない');
+  s = T.apply(s, 0); // ○ 8・2・0 → 1 が消える
+  assert.deepEqual([s.board[1], s.board[0]], [null, 0], '消えたマスにまた置ける');
+  s = V([0, 3, 1, 4, 2]);
+  assert.deepEqual(T.result(s), { winner: 0, cells: [0, 1, 2] }, '3つ並べたら勝ち');
+  assert.equal(T.apply(s, 5), null, '決着後は打てない');
+  // 並ばないように60手打つと引き分け（○ と × が 0〜8 を順に回るだけの手順は並んでしまうので、局面ごとに並ばない手を選ぶ）
+  let x = T.init({ rules: { size: 'vanish' } });
+  let n = 0;
+  while (!T.result(x)) {
+    const ok = x.board.map((v, i) => i).filter((i) => x.board[i] === null).find((i) => { const y = T.apply(x, i); return !T.result(y) || T.result(y).winner === null; });
+    assert.ok(ok !== undefined, '並ばない手が見つかる');
+    x = T.apply(x, ok);
+    n++;
+  }
+  assert.deepEqual([n, T.result(x)], [60, { winner: null, cells: [] }], '60手で引き分け');
+}
+
+// ポップアウト: 自分のコマだけ抜ける・抜くと上が下がる・相手の並びができたら相手の勝ち・同じ盤面3回で引き分け
+{
+  const P = () => C.init({ rules: { pop: 'on' } });
+  assert.equal(C.init({ rules: { pop: 'on', players: 3 } }).pop, undefined, '3人ではポップアウトにならない');
+  s = play(C, [0, 1]);
+  assert.equal(s.pop, undefined, '最初はポップアウトなし');
+  let x = P();
+  for (const m of [0, 0]) x = C.apply(x, m); // 赤が 0列の一番下、黄がその上。赤の番
+  assert.ok(C.apply(x, { pop: 0 }), '一番下が自分のコマなら抜ける');
+  const y = C.apply(x, { pop: 0 });
+  assert.deepEqual([y.grid[35], y.grid[28], y.turn], [1, null, 1], '抜くと上のコマが1段下がり、番が替わる');
+  assert.equal(C.apply(C.apply(y, 3), { pop: 0 }), null, '一番下が相手のコマなら抜けない');
+  assert.equal(C.apply(y, { pop: 1 }), null, '空の列は抜けない');
+  assert.equal(C.apply(y, { pop: 9 }), null, '盤の外');
+  // 抜いて相手（黄）の よこ4 ができる。自分（赤）の並びは無い → 黄の勝ち
+  const g = Array(42).fill(null);
+  Object.assign(g, { 35: 0, 28: 1, 36: 1, 37: 1, 38: 1, 39: 0, 40: 0, 29: 0, 30: 0 });
+  x = { ...P(), grid: g, turn: 0 };
+  assert.deepEqual(C.result(C.apply(x, { pop: 0 })), { winner: 1, cells: [35, 36, 37, 38] }, '抜いて相手の4つ並びができたら相手の勝ち');
+  // 抜いて自分と相手の両方が並ぶ → 相手の勝ち
+  const g2 = Array(42).fill(null);
+  // 0列: 下から 赤・黄・赤。1〜3列の下の段に黄、2段目に赤。抜くと 0列の黄が下の段へ（黄の よこ4）、赤が2段目へ（赤の よこ4）
+  Object.assign(g2, { 35: 0, 28: 1, 21: 0, 36: 1, 37: 1, 38: 1, 29: 0, 30: 0, 31: 0 });
+  x = { ...P(), grid: g2, turn: 0 };
+  assert.equal(C.result(C.apply(x, { pop: 0 })).winner, 1, '両方並んでも、抜いた側の相手の勝ち');
+  // 抜いて自分だけ並ぶ → 自分の勝ち
+  const g3 = Array(42).fill(null);
+  Object.assign(g3, { 35: 0, 28: 0, 36: 0, 37: 0, 38: 0, 29: 1, 39: 1 });
+  x = { ...P(), grid: g3, turn: 0 };
+  assert.equal(C.result(C.apply(x, { pop: 0 }))?.winner, 0, '抜いて自分だけ並べば自分の勝ち');
+  // 同じ盤面が3回: 赤が落とす→黄が落とす→赤が抜く→黄が抜く で、赤 0列・黄 6列の1枚ずつの盤面（赤の番）に4手ごとに戻る
+  x = P();
+  for (const m of [0, 6]) x = C.apply(x, m);
+  const loop = [0, 6, { pop: 0 }, { pop: 6 }];
+  let steps = 0;
+  while (!C.result(x) && steps < 20) { x = C.apply(x, loop[steps % 4]); assert.ok(x, 'くり返しの手順が打てる'); steps++; }
+  assert.deepEqual([C.result(x), steps], [{ winner: null, cells: [] }, 8], '同じ盤面（次の番も同じ）が3回出たら引き分け');
+}
+
 // リバーシ
 s = R.init();
 assert.equal(R.apply(s, 0), null);
@@ -1156,7 +1225,8 @@ assert.ok(WW.noCpu && WW.minPlayers === 3);
 assert.ok(PAIRS.every((x) => x.length === 2 && x[0] !== x[1]), 'お題は違う2つの言葉');
 assert.equal(new Set(PAIRS.flat()).size, PAIRS.length * 2, 'お題の言葉が重ならない');
 s = WW.init(4, 31, {});
-const wolf = s.wolf;
+const wolf = s.wolves[0];
+assert.equal(s.wolves.length, 1, 'ウルフは最初1人');
 const town = [0, 1, 2, 3].filter((p) => p !== wolf);
 assert.notEqual(WW.wordOf(s, wolf), WW.wordOf(s, town[0]), 'ウルフだけ違うお題');
 assert.equal(WW.wordOf(s, town[0]), WW.wordOf(s, town[1]));
@@ -1188,7 +1258,29 @@ let tie = WW.apply(WW.init(4, 31, {}), { p: 0, t: 'tovote' });
 tie = voteAll(tie, (p) => (p < 2 ? (p === 0 ? 1 : 0) : (p === 2 ? 3 : 2)));
 assert.deepEqual([tie.vote, tie.cands.length], [2, 4], '4人が1票ずつで並んだらやり直し');
 tie = voteAll(tie, (p) => (p < 2 ? (p === 0 ? 1 : 0) : (p === 2 ? 3 : 2)));
-assert.deepEqual([tie.phase, WW.result(tie).winners], ['end', [tie.wolf]], 'やり直しでも並んだらウルフの勝ち');
+assert.deepEqual([tie.phase, WW.result(tie).winners], ['end', tie.wolves], 'やり直しでも並んだらウルフの勝ち');
+// ウルフ2人: 7人以上のときだけ。2人は同じお題。どちらかが選ばれたら、そのウルフが答える。勝てば2人とも勝ち
+assert.equal(WW.init(6, 5, { rules: { wolves: 2 } }).wolves.length, 1, '6人ではウルフ2人を選んでも1人');
+for (let seed = 1; seed <= 30; seed++) {
+  const w = WW.init(7, seed, { rules: { wolves: 2 } });
+  assert.ok(w.wolves.length === 2 && w.wolves[0] !== w.wolves[1], '7人ならウルフは別々の2人');
+}
+{
+  let w = WW.init(8, 9, { rules: { wolves: 2 } });
+  const [a, b] = w.wolves;
+  const town2 = [...Array(8).keys()].filter((p) => !w.wolves.includes(p));
+  assert.equal(WW.wordOf(w, a), WW.wordOf(w, b), '2人のウルフは同じお題');
+  assert.notEqual(WW.wordOf(w, a), WW.wordOf(w, town2[0]));
+  w = WW.apply(w, { p: -1, t: 'tovote' });
+  const v = voteAll(w, (p) => (p === b ? town2[0] : b));
+  assert.equal(v.phase, 'guess', '2人目のウルフが選ばれても答える番');
+  assert.equal(WW.apply(v, { p: a, t: 'guess', text: 'x' }), null, '選ばれていないウルフは答えられない');
+  const j = WW.apply(v, { p: b, t: 'guess', text: 'ぜんぜんちがう' });
+  assert.equal(WW.apply(j, { p: a, t: 'judge', ok: true }), null, 'もう1人のウルフも判定できない');
+  assert.deepEqual(WW.result(WW.apply(j, { p: town2[0], t: 'judge', ok: true })).winners, w.wolves, '逆転したらウルフ2人とも勝ち');
+  assert.deepEqual(WW.result(WW.apply(j, { p: town2[0], t: 'judge', ok: false })).winners, town2, 'はずれならウルフ以外の勝ち');
+  assert.deepEqual(WW.result(voteAll(w, (p) => (p === town2[0] ? town2[1] : town2[0]))).winners, w.wolves, 'ウルフ以外が選ばれたらウルフ2人の勝ち');
+}
 console.log('babanuki / doubt / yacht / wordwolf OK');
 
 // ---------- 七並べ ----------

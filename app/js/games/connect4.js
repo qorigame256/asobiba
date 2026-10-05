@@ -3,6 +3,11 @@
 // 詳細設定「人数」で3人・4人にもできる（2026-10-04 本人の決定。決まりは Claude の推奨を本人が承認）:
 //   赤・黄・緑・紫で順番に、広い盤に落とす。並べるのは4つのまま。盤の大きさは詳細設定「3人以上の盤」で選ぶ。
 //   待合室では人数ぶんの席に人か CPU を選び、もう一回では打つ順番を1つずつ回す（マルバツと同じ）。
+// 詳細設定「ポップアウト」（2026-10-05 本人の決定。決まりは Claude の推奨を本人が承認）: 2人のときだけ。
+//   落とす代わりに、一番下の段にある自分のコマを1つ抜いてもよい（上のコマが1段ずつ下がる）。手 = { pop: 列の番号 }。
+//   抜いて相手の4つ並びができたら相手の勝ち（自分も同時に並んでも相手の勝ち）。同じ盤面（次の番も同じ）が3回出たら引き分け。
+//   盤が埋まっても抜ける手があれば続き、打てる手が無くなったら引き分け。
+//   Claude の判断: 終わらないのを防ぐため、200手でも引き分け（同じ盤面の3回で、ふつうはそれより先に終わる）。
 
 const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
 
@@ -62,6 +67,66 @@ const WIDE_CHOICES = [['auto', 'おまかせ（3人は 9×7・4人は 11×9）']
 function wideSize(v, n) {
   const key = WIDE_CHOICES.some(([c]) => c === v) && v !== 'auto' ? v : WIDE_AUTO[n];
   return key.split('-').map(Number);
+}
+
+/* ---------- ポップアウト ---------- */
+
+const POP_LIMIT = 200;
+
+// 盤面と次の番を表す文字（同じ盤面が何回出たか数えるため）
+const posKey = (grid, turn) => grid.map((v) => (v === null ? '.' : v)).join('') + turn;
+
+// 打てる手（落とす列と、抜ける列）
+function popLegal(s) {
+  const out = [3, 2, 4, 1, 5, 0, 6].filter((c) => s.grid[c] === null);
+  for (const c of [3, 2, 4, 1, 5, 0, 6]) if (s.grid[(s.h - 1) * s.w + c] === s.turn) out.push({ pop: c });
+  return out;
+}
+
+// 手を打ったあとの盤面で、決着や引き分けを決めて新しい局面を返す
+function popFinish(s, grid, last, popped) {
+  const { list } = windowsOf(s.w, s.h);
+  let won = null;
+  if (popped) {
+    // 抜いたときは列全体が動くので、盤全体で並びを探す。相手の並びを先に見る
+    const lineOf = (p) => list.find((win) => win.every((x) => grid[x] === p));
+    const theirs = lineOf(1 - s.turn);
+    const mine = theirs ? null : lineOf(s.turn);
+    if (theirs) won = { winner: 1 - s.turn, cells: theirs };
+    else if (mine) won = { winner: s.turn, cells: mine };
+  } else {
+    const { byCell } = windowsOf(s.w, s.h);
+    const line = byCell[last].map((wi) => list[wi]).find((win) => win.every((x) => grid[x] === s.turn));
+    if (line) won = { winner: s.turn, cells: line };
+  }
+  const turn = 1 - s.turn;
+  const key = posKey(grid, turn);
+  const hist = { key, prev: s.hist };
+  const moves = s.moves + 1;
+  if (!won) {
+    let seen = 0;
+    for (let h = hist; h; h = h.prev) if (h.key === key) seen++;
+    if (seen >= 3 || moves >= POP_LIMIT) won = { winner: null, cells: [] };
+  }
+  return { ...s, grid, turn, last, won, hist, moves };
+}
+
+function popApply(s, m) {
+  if (s.won) return null;
+  if (Number.isInteger(m)) {
+    if (m < 0 || m >= s.w) return null;
+    const i = landing(s, m);
+    if (i < 0) return null;
+    const grid = s.grid.slice();
+    grid[i] = s.turn;
+    return popFinish(s, grid, i, false);
+  }
+  const c = m?.pop;
+  if (!Number.isInteger(c) || c < 0 || c >= s.w || s.grid[(s.h - 1) * s.w + c] !== s.turn) return null;
+  const grid = s.grid.slice();
+  for (let r = s.h - 1; r > 0; r--) grid[r * s.w + c] = grid[(r - 1) * s.w + c];
+  grid[c] = null;
+  return popFinish(s, grid, null, true);
 }
 
 // 列 c に落としたときに入るマス（満杯なら -1）
@@ -143,7 +208,7 @@ export default {
   id: 'connect4',
   name: 'コネクトフォー',
   icon: '🔴',
-  desc: '上からコマを落として、4つ並べたら勝ち。オンラインでは3〜4人で広い盤も選べる',
+  desc: '上からコマを落として、4つ並べたら勝ち。オンラインでは自分のコマを下から抜けるポップアウトや、3〜4人で広い盤も選べる',
   ready: true,
   players: ['赤', '黄', '緑', '紫'],
   // 詳細設定の人数（2〜4人）。待合室の席の数になる
@@ -159,12 +224,22 @@ export default {
       desc: '3人・4人で遊ぶときの盤の大きさ。どれも4つ並べたら勝ち',
       choices: WIDE_CHOICES,
     },
+    {
+      key: 'pop', label: 'ポップアウト', def: 'off',
+      desc: '落とす代わりに、一番下の段にある自分のコマを抜いてもよい（2人のときだけ）。同じ盤面が3回出たら引き分け',
+      choices: [['off', 'なし'], ['on', 'あり']],
+    },
     CPU_SETTING,
   ],
 
   // CPU（2人）: 何手先まで読むかで強さを変える（よわい2・ふつう4・つよい6）。弱いほど適当に打つことがある
   cpu(s, p, rules) {
     if (s.n > 2) return wideCpu(s, rules);
+    if (s.pop) {
+      return boardCpu(this, s, rules, popLegal, score, {
+        depth: { weak: 2, normal: 4, strong: 5 }, mistake: { weak: 0.35, normal: 0.12, strong: 0 },
+      });
+    }
     const legal = (x) => [3, 2, 4, 1, 5, 0, 6].filter((c) => x.grid[c] === null);
     return boardCpu(this, s, rules, legal, score, {
       depth: { weak: 2, normal: 4, strong: 6 }, mistake: { weak: 0.35, normal: 0.12, strong: 0 },
@@ -174,12 +249,15 @@ export default {
   init({ rules = {} } = {}) {
     const n = rules.players ?? 2;
     const [w, h] = n >= 3 ? wideSize(rules.wide, n) : [7, 6];
-    return { n, w, h, grid: Array(w * h).fill(null), turn: 0, last: null, won: null };
+    const st = { n, w, h, grid: Array(w * h).fill(null), turn: 0, last: null, won: null };
+    if (n === 2 && rules.pop === 'on') Object.assign(st, { pop: true, moves: 0, hist: { key: posKey(st.grid, 0), prev: null } });
+    return st;
   },
 
   turn(s) { return s.turn; },
 
   apply(s, col) {
+    if (s.pop) return popApply(s, col);
     if (!Number.isInteger(col) || col < 0 || col >= s.w || s.won) return null;
     const i = landing(s, col);
     if (i < 0) return null;
@@ -192,8 +270,14 @@ export default {
 
   result(s) {
     if (s.won) return s.won;
+    if (s.pop) return popLegal(s).length ? null : { winner: null, cells: [] };
     if (s.grid.every((v) => v !== null)) return { winner: null, cells: [] };
     return null;
+  },
+
+  info(s) {
+    if (!s.pop || this.result(s)) return '';
+    return '盤の下の「抜く」で、一番下の自分のコマを抜けます';
   },
 
   render(root, s, o) {
@@ -234,6 +318,22 @@ export default {
         col.append(cell);
       }
       root.append(col);
+    }
+    if (!s.pop) return;
+    // ポップアウト: 盤の下に、列ごとの「抜く」ボタン（自分のコマが一番下にある列だけ押せる）
+    for (let c = 0; c < s.w; c++) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'c4-pop';
+      btn.textContent = '抜く';
+      btn.setAttribute('aria-label', `${c + 1}列目の一番下を抜く`);
+      if (o.canMove && s.grid[(s.h - 1) * s.w + c] === s.turn) {
+        btn.classList.add('playable');
+        btn.onclick = () => o.onMove({ pop: c });
+      } else {
+        btn.disabled = true;
+      }
+      root.append(btn);
     }
   },
 };
