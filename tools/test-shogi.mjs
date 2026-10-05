@@ -1,6 +1,7 @@
 // 将棋のルールと CPU の自動確認（node tools/test-shogi.mjs）。
 // 盤のマス番号 = 段 * 9 + 列（段0 が一段目、列0 が 9筋）。正の数が先手の駒、負の数が後手の駒。
 import shogi, { _test } from '../app/js/games/shogi.js';
+import { _test3 } from '../app/js/games/shogi3.js';
 
 const { legalMoves } = _test;
 let failed = 0;
@@ -158,6 +159,101 @@ function perft(board, hands, side, d) {
       x = n;
     }
     check(`CPU（${level}）はいつも指せる手を返し、1手2秒以内`, bad === 0 && worst < 2000, `最長 ${(worst / 1000).toFixed(2)}秒・${x.ply}手${x.result ? '・' + x.result.reason : ''}`);
+  }
+}
+
+// 9. 3人将棋（三人チェス式の盤。マス = 陣地 * 40 + 段 * 8 + 筋）
+{
+  const T = _test3;
+  const R3 = { players: 3 };
+  const q = (P, y, x) => P * 40 + y * 8 + x;
+  const v = (owner, t) => owner * 16 + t;
+  const s0 = shogi.init({ rules: R3 });
+  check('3人: 席は3つ・2人は2つ', shogi.seatCount(R3) === 3 && shogi.seatCount({}) === 2);
+  check('3人: 盤は120マスで各自18枚（香が1枚少ない8筋）', s0.board.length === 120 && [0, 1, 2].every((P) => s0.board.filter((x) => x && x >> 4 === P).length === 18));
+  // 線のつながり: 縦横に1つ動いて逆向きに1つ戻ると元のマス（線をまたぐと向きが反転する）
+  let bad = 0;
+  for (let i = 0; i < 120; i++) {
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1]]) {
+      const r = T.step(i, dx, dy);
+      if (!r) continue;
+      const k = r[1] ? -1 : 1;
+      const back = T.step(r[0], -dx * k, -dy * k);
+      if (!back || back[0] !== i) bad++;
+    }
+  }
+  check('3人: どのマスも1つ動いて戻ると元のマス', bad === 0, `食い違い ${bad}`);
+  check('3人: 段4の先は左半分が左どなり・右半分が右どなり', T.step(q(0, 4, 0), 0, 1)[0] === q(2, 4, 7) && T.step(q(0, 4, 7), 0, 1)[0] === q(1, 4, 0)
+    && T.step(q(1, 4, 3), 0, 1)[0] === q(0, 4, 4));
+  check('3人: 真ん中の点は斜めに通れない', T.step(q(0, 4, 3), 1, 1) === null && T.step(q(0, 4, 4), -1, 1) === null && T.step(q(0, 4, 3), -1, 1) !== null);
+  // 最初の局面の手の数（2026-10-05 に数えた値。動きを変えたら数え直す）
+  const first = T.legalMoves(s0.board, s0.hands, 0);
+  check('3人: 最初に指せる手は26手（☗先手）', first.length === 26, `${first.length}手`);
+  // 香: 自分の陣地から真ん中を越えて、となりの陣地の奥（1段目）まで進める。奥では成らないといけない
+  {
+    const b = Array(120).fill(0);
+    b[q(0, 0, 4)] = v(0, 8); b[q(1, 0, 4)] = v(1, 8); b[q(2, 0, 4)] = v(2, 8);
+    b[q(0, 2, 1)] = v(0, 2);
+    const to = T.reach(b, q(0, 2, 1));
+    check('3人: 香は線をまたいでとなりの陣地の奥まで進む', to.includes(q(2, 0, 6)) && to.length === 7, to.join());
+    const ms = T.legalMoves(b, [0, 1, 2].map(() => Array(8).fill(0)), 0).filter((m) => m.f === q(0, 2, 1) && m.t === q(2, 0, 6));
+    check('3人: 奥の段へ行く香は成らないといけない', ms.length === 1 && ms[0].pr === true);
+    // 二歩は線のつながりで数える（☗先手の筋1 は ☖後手…ではなく左どなり＝三番手の筋6 と同じ線）
+    const hands = [0, 1, 2].map(() => Array(8).fill(0));
+    hands[0][1] = 1;
+    const b2 = b.slice();
+    b2[q(0, 2, 1)] = v(0, 1);
+    const drops = T.legalMoves(b2, hands, 0).filter((m) => m.d === 1);
+    check('3人: 二歩は線のつながりで数える', !drops.some((m) => m.t === q(2, 3, 6)) && drops.some((m) => m.t === q(2, 3, 5)));
+    check('3人: 歩はほかの人の陣地の1段目に打てない', !drops.some((m) => m.t === q(1, 0, 2)) && drops.some((m) => m.t === q(1, 1, 2)));
+  }
+  // 王を取ると脱落して駒が消える。最後の1人が勝ち
+  {
+    const b = Array(120).fill(0);
+    b[q(0, 0, 4)] = v(0, 8); b[q(1, 0, 4)] = v(1, 8); b[q(2, 0, 4)] = v(2, 8);
+    b[q(1, 1, 4)] = v(0, 7); // ☗先手の飛が ☖後手の玉の前
+    b[q(1, 3, 0)] = v(1, 1); // ☖後手の歩
+    b[q(2, 1, 4)] = v(1, 7); // ☖後手の飛が 三番手の玉の前
+    const hands = [0, 1, 2].map(() => Array(8).fill(0));
+    hands[1][4] = 2;
+    const st = { ...s0, board: b, hands, keys: [] };
+    const a = shogi.apply(st, { f: q(1, 1, 4), t: q(1, 0, 4), pr: true });
+    check('3人: 王を取ると脱落し、その人の駒と持ち駒は消える', a && !a.alive[1] && a.board.every((x) => !x || x >> 4 !== 1) && a.hands[1].every((n) => n === 0) && a.turn === 2 && !a.result);
+    const b3 = a.board.slice();
+    b3[q(2, 2, 4)] = v(0, 7);
+    const c = shogi.apply({ ...a, board: b3, turn: 0 }, { f: q(2, 2, 4), t: q(2, 0, 4), pr: true });
+    check('3人: 最後の1人が勝ち・先に脱落した人が3位', c?.result?.winner === 0 && c.result.ranking.join() === '0,2,1', JSON.stringify(c?.result));
+    const r = shogi.apply(st, { resign: true });
+    check('3人: 投了すると脱落して続く', r && !r.alive[0] && r.turn === 1 && !r.result && r.board.every((x) => !x || x >> 4 !== 0));
+    check('3人: 他人の駒は動かせない', shogi.apply(st, { f: q(1, 3, 0), t: q(1, 4, 0), pr: false }) === null);
+  }
+  // CPU どうしで最後まで（脱落・引き分けを含め）指して、いつも指せる手を返すか・時間を測る
+  for (const level of ['weak', 'normal', 'strong']) {
+    let x = shogi.init({ rules: R3 });
+    let worst = 0;
+    let badMove = 0;
+    while (!x.result) {
+      const t0 = Date.now();
+      const mv = shogi.cpu(x, x.turn, { cpu: level });
+      worst = Math.max(worst, Date.now() - t0);
+      const n = shogi.apply(x, JSON.parse(JSON.stringify(mv)));
+      if (!n) { badMove++; break; }
+      x = n;
+    }
+    check(`3人: CPU（${level}）どうしで最後まで指せる・1手2秒以内`, badMove === 0 && worst < 2000, `最長 ${(worst / 1000).toFixed(2)}秒・${x.ply}手・${x.result?.reason}`);
+  }
+  // 手の一覧を当て直すと同じ局面
+  {
+    let x = shogi.init({ rules: R3 });
+    const moves = [];
+    for (let i = 0; i < 60 && !x.result; i++) {
+      const ms = T.legalMoves(x.board, x.hands, x.turn);
+      const m = ms[(i * 7919) % ms.length];
+      moves.push(m);
+      x = shogi.apply(x, m);
+    }
+    const again = JSON.parse(JSON.stringify(moves)).reduce((y, m) => (y ? shogi.apply(y, m) : null), shogi.init({ rules: R3 }));
+    check('3人: 手の一覧を当て直すと同じ局面', again && again.keys.at(-1) === x.keys.at(-1));
   }
 }
 

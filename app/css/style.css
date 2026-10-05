@@ -427,6 +427,25 @@ p { margin: 0; }
 .sg .sg-hand-piece.playable { box-shadow: 0 0 0 2px var(--line); }
 .sg .sg-hand-piece.selected { box-shadow: 0 0 0 3px var(--win); background: #fff3c9; }
 .sg-check-text { color: #c62d1f; }
+/* 3人将棋（六角形の盤。shogi3.js が SVG で描く） */
+.board.sg3 { width: min(100%, 560px, max(320px, calc((100dvh - 290px) * 1.1))); }
+.sg3-board { width: 100%; height: auto; display: block; touch-action: manipulation; }
+.sg3-frame { fill: #6b4a1f; stroke: #6b4a1f; stroke-width: .25; stroke-linejoin: round; }
+.sg3-cell { fill: #eacb8a; stroke: #6b4a1f; stroke-width: .035; }
+.sg3-cell.r0 { fill: #efcd8d; } .sg3-cell.r1 { fill: #e5c991; } .sg3-cell.r2 { fill: #e9c586; }
+.sg3-cell.last { fill: #f5b98e; }
+.sg3-cell.selected { fill: #f3c74b; }
+.sg3-cell.checked { fill: #f08a7a; }
+.sg3-border { stroke: #4a3212; stroke-width: .09; pointer-events: none; }
+.sg3-piece { pointer-events: none; }
+.sg3-piece polygon { fill: #fbe7b8; stroke-width: .09; stroke-linejoin: round; }
+.sg3-piece.o0 polygon { stroke: var(--p0); } .sg3-piece.o1 polygon { stroke: var(--p1); } .sg3-piece.o2 polygon { stroke: var(--p2); }
+.sg3-piece text { fill: #1d1a16; text-anchor: middle; dominant-baseline: central; font-family: "Yu Mincho", "Hiragino Mincho ProN", serif; font-weight: 700; }
+.sg3-piece.promoted text { fill: #c62d1f; }
+.sg3-target { fill: rgba(217, 100, 58, .75); pointer-events: none; }
+.sg3-target.take { fill: none; stroke: rgba(217, 100, 58, .9); stroke-width: .08; }
+.sg3-hit { fill: transparent; cursor: pointer; }
+.sg-hand.out { opacity: .55; }
 
 /* ---------- 麻雀 ---------- */
 .board.mj { width: min(100%, 560px); display: flex; flex-direction: column; gap: 6px; }

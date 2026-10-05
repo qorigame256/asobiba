@@ -10,6 +10,7 @@
 //   投了は自分の番のときだけ押せる。
 
 import { CPU_SETTING } from './util.js';
+import * as three from './shogi3.js';
 
 const PAWN = 1;
 const LANCE = 2;
@@ -298,15 +299,19 @@ export default {
   id: 'shogi',
   name: '将棋',
   icon: '☗',
-  desc: '本将棋。駒落ちのハンデも選べる',
+  desc: '本将棋。駒落ちのハンデも選べる。オンラインでは3人（六角形の盤）も選べる',
   ready: true,
-  players: ['☗先手', '☖後手'],
+  players: three.NAMES, // 3人目は3人将棋だけ
+  // 詳細設定の人数。3人は shogi3.js が受け持つ（局面に n: 3 を持つ）
+  seatCount(rules) { return rules?.players === 3 ? 3 : 2; },
   settings: [
+    { key: 'players', label: '人数', desc: '3人では六角形の盤で3人が向き合う。王を取られた人は脱落（駒落ちは使わない）', def: 2, choices: [[2, '2人'], [3, '3人']] },
     { key: 'handicap', label: '駒落ち', desc: '先手（上手）が駒を落として先に指す。腕の差があるときに', def: 'none', choices: Object.entries(HANDICAPS) },
     CPU_SETTING,
   ],
 
   init({ rules = {} } = {}) {
+    if (rules.players === 3) return three.init();
     const handicap = HANDICAPS[rules.handicap] ? rules.handicap : 'none';
     const board = initialBoard(handicap);
     const hands = [Array(8).fill(0), Array(8).fill(0)];
@@ -317,6 +322,7 @@ export default {
   result(s) { return s.result; },
 
   apply(s, m) {
+    if (s.n === 3) return three.apply(s, m);
     if (s.result || !m || typeof m !== 'object') return null;
     if (m.resign === true) {
       return { ...s, result: { winner: 1 - s.turn, cells: [], reason: `${s.turn === 0 ? '先手' : '後手'}の投了` }, last: { resign: true, side: s.turn } };
@@ -352,9 +358,10 @@ export default {
   },
 
   // CPU: 駒の損得で何手先まで読むか（よわい1・ふつう2・つよい3）。読みは1.5秒で打ち切る。弱いほど適当に指すことがある
-  cpu(s, p, rules) { return cpuMove(s, rules); },
+  cpu(s, p, rules) { return s.n === 3 ? three.cpuMove(s, rules) : cpuMove(s, rules); },
 
   info(s) {
+    if (s.n === 3) return three.info(s);
     const parts = [];
     if (s.handicap !== 'none') parts.push(`${HANDICAPS[s.handicap]}（☗先手が上手）`);
     if (s.last?.note) parts.push(`${s.ply}手目 ${s.last.note}`);
@@ -364,6 +371,7 @@ export default {
   },
 
   render(root, s, o) {
+    if (s.n === 3) { three.render(root, s, o); return; }
     const draw = () => this.render(root, s, o);
     // 自分の駒が下に来るように。観戦と同じ画面の対局では先手が下
     const bottom = o.me === 1 ? 1 : 0;
