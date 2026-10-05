@@ -23,11 +23,21 @@ const START = { x: 0.5, y: H - 0.12 };
 
 /* ---------- 弾の作り方（全員同じ） ---------- */
 
+// 詳細設定「難しさ」（2026-10-06 本人の決定。最初は ふつう＝前からの弾幕）。数字は Claude の判断:
+// n = 1回に出る弾の数、v = 弾の速さ、gap = 次の弾が出るまでの間（どれも ふつう に掛ける倍率）
+export const LEVELS = {
+  easy: { n: 0.65, v: 0.8, gap: 1.25 },
+  normal: { n: 1, v: 1, gap: 1 },
+  hard: { n: 1.3, v: 1.15, gap: 0.85 },
+};
+
 // 弾 = { t: 出る秒, x, y, vx, vy, r, c: 色, end: 盤の外へ出る秒 }。t の早い順に並ぶ
-export function makeBullets(seed, durSec) {
+export function makeBullets(seed, durSec, level = 'normal') {
+  const L = LEVELS[level] ?? LEVELS.normal;
   const rng = mulberry32(seed ^ 0x5bd1e995);
   const list = [];
-  const add = (t, x, y, vx, vy, r, c) => {
+  const add = (t, x, y, vx0, vy0, r, c) => {
+    const vx = vx0 * L.v; const vy = vy0 * L.v;
     // 盤の外（少し余白）へ出る時刻
     const out = (p, v, lo, hi) => (v > 0 ? (hi - p) / v : v < 0 ? (lo - p) / v : Infinity);
     const life = Math.min(out(x, vx, -0.05, 1.05), out(y, vy, -0.08, H + 0.05));
@@ -40,14 +50,14 @@ export function makeBullets(seed, durSec) {
     const w = rng();
     if (w < 0.24) { // 輪: 1点から全方向へ
       const cx = 0.15 + rng() * 0.7; const cy = 0.06 + rng() * 0.22;
-      const n = Math.round(10 + 12 * k); const sp = 0.16 + 0.12 * k; const a0 = rng() * Math.PI * 2;
+      const n = Math.round((10 + 12 * k) * L.n); const sp = 0.16 + 0.12 * k; const a0 = rng() * Math.PI * 2;
       for (let i = 0; i < n; i++) add(t, cx, cy, ...pol(a0 + (i / n) * Math.PI * 2, sp), 0.016, '#ff6b6b');
     } else if (w < 0.46) { // 雨: 上から
-      const n = Math.round(5 + 9 * k);
+      const n = Math.round((5 + 9 * k) * L.n);
       for (let i = 0; i < n; i++) add(t + i * 0.08, rng(), -0.03, (rng() - 0.5) * 0.08, 0.22 + 0.14 * k + rng() * 0.05, 0.013, '#5dade2');
     } else if (w < 0.64) { // うず巻き
       const cx = 0.3 + rng() * 0.4; const cy = 0.12; const dir = rng() < 0.5 ? 1 : -1;
-      const n = Math.round(14 + 16 * k); const sp = 0.19 + 0.1 * k; const a0 = rng() * Math.PI * 2;
+      const n = Math.round((14 + 16 * k) * L.n); const sp = 0.19 + 0.1 * k; const a0 = rng() * Math.PI * 2;
       const arms = k > 0.5 ? 2 : 1;
       for (let i = 0; i < n; i++) {
         for (let j = 0; j < arms; j++) add(t + i * 0.06, cx, cy, ...pol(a0 + dir * i * 0.45 + j * Math.PI, sp), 0.012, '#f7dc6f');
@@ -56,21 +66,21 @@ export function makeBullets(seed, durSec) {
       const ox = 0.1 + rng() * 0.8; const oy = 0.02;
       const tx = 0.1 + rng() * 0.8; const ty = H * 0.6 + rng() * H * 0.35;
       const base = Math.atan2(ty - oy, tx - ox);
-      const n = 5 + Math.round(4 * k); const sp = 0.27 + 0.12 * k;
+      const n = Math.max(3, Math.round((5 + Math.round(4 * k)) * L.n)); const sp = 0.27 + 0.12 * k;
       const bursts = k > 0.4 ? 2 : 1;
       for (let b = 0; b < bursts; b++) {
         for (let i = 0; i < n; i++) add(t + b * 0.3, ox, oy, ...pol(base + (i / (n - 1) - 0.5) * 0.6, sp), 0.014, '#bb8fce');
       }
     } else { // 横から: 横一列に並んだ弾。どこかにすき間がある
       const left = rng() < 0.5;
-      const n = 6 + Math.round(4 * k); const gap = Math.floor(rng() * n);
+      const n = Math.max(4, Math.round((6 + Math.round(4 * k)) * L.n)); const gap = Math.floor(rng() * n);
       const vx = (left ? 1 : -1) * (0.2 + 0.1 * k);
       for (let i = 0; i < n; i++) {
         if (i === gap) continue;
         add(t + i * 0.04, left ? -0.03 : 1.03, 0.3 + (i / n) * (H - 0.4), vx, 0, 0.015, '#58d68d');
       }
     }
-    t += (1.5 - 0.95 * k) * (0.8 + rng() * 0.4);
+    t += (1.5 - 0.95 * k) * (0.8 + rng() * 0.4) * L.gap;
   }
   list.sort((a, b) => a.t - b.t);
   return list;
@@ -134,9 +144,9 @@ const scoreOf = (s, p) => (s.dead[p] ?? durOf(s) * 1000 + 1);
 const sims = new Map(); // CPU のよける動き（ホストの端末だけ）。`${seed}:${p}` → { x, y, vx, vy, timer, sec, at, dead }
 const bulletCache = new Map();
 function bulletsOf(s) {
-  const key = `${s.seed}:${s.rules.time}`;
+  const key = `${s.seed}:${s.rules.time}:${s.rules.level}`;
   if (!bulletCache.has(key)) {
-    bulletCache.set(key, makeBullets(s.seed, durOf(s)));
+    bulletCache.set(key, makeBullets(s.seed, durOf(s), s.rules.level));
     if (bulletCache.size > 4) bulletCache.delete(bulletCache.keys().next().value);
   }
   return bulletCache.get(key);
@@ -300,10 +310,11 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'time', label: '時間', desc: 'この時間まで残った人は全員1位。後ほど弾が多く速くなる', def: '90', choices: [['60', '60秒'], ['90', '90秒'], ['120', '120秒']] },
+    { key: 'level', label: '難しさ', desc: '弾の数と速さ。やさしいは少なく遅く、むずかしいは多く速い', def: 'normal', choices: [['easy', 'やさしい'], ['normal', 'ふつう'], ['hard', 'むずかしい']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { time: '90', ...rules };
+    const r = { time: '90', level: 'normal', ...rules };
     return { n, seed, rules: r, phase: 'ready', dead: Array(n).fill(null), step: 0 };
   },
 

@@ -4,15 +4,18 @@
 // 札: 色1文字 + 中身。色 r赤 y黄 g緑 b青。中身 0〜9 / S（スキップ）/ R（リバース）/ D（ドロー2）。
 //     色の無い札は 'W'（ワイルド）と 'W4'（ワイルドドロー4）。全108枚。
 // 手: { p, t: 'play', i: 手札の何枚目か（手札は常に並べ替え済み）, c: ワイルドで選ぶ色 }
-//     { p, t: 'draw' }（山から1枚引く） / { p, t: 'pass' }（引いた札を出さずに次へ）
+//     { p, t: 'draw' }（山から1枚引く。重ね返しの途中なら、たまった枚数を全部引く） / { p, t: 'pass' }（引いた札を出さずに次へ）
 //
 // 公式ルールから変えた所（ネット対戦向けに簡単にした。変えるなら本人に確認）:
 //   - 最初にめくる札は、数字の札が出るまでめくり直す。
 //   - 出せる札があっても山から引いてよい。引いた札が出せるなら、その札だけ続けて出せる（出さずに次へも可）。
 //   - ワイルドドロー4は、場の色と同じ色の札を持っていないときだけ出せる（公式の「チャレンジ」の代わり）。
-//   - ドロー2・ドロー4は重ねて返せない。2人のときリバースはスキップと同じ。
+//   - ドロー2・ドロー4は重ねて返せない（詳細設定「重ねて返す」で返せる。下）。2人のときリバースはスキップと同じ。
 //   - 残り1枚の宣言は省略（自動で「ラスト1枚」と表示）。
 //   - 山が尽きたら、捨て札の一番上を残して切り直す。
+// 詳細設定「重ねて返す」（2026-10-06 本人の決定。最初はなし）: ドロー2を出された人はドロー2を、ドロー4を出された人はドロー4を
+//   重ねて次の人へ回せる（同じ種類どうしだけ。色は問わない）。重ねなかった人（山をタップ）は、たまった枚数を全部引いて1回休み。
+//   返すときのドロー4は、場の色の札を持っていても出せる（本人の決定）。重ね返しの途中（s.pend）は、ほかの札は出せない。
 
 import { mulberry32, shuffle } from './util.js';
 
@@ -52,6 +55,7 @@ export function cardName(c) {
 }
 
 function canPlay(s, p, card) {
+  if (s.pend) return kindOf(card) === s.pend.k; // 重ね返しの途中は同じ種類だけ
   if (card === 'W') return true;
   if (card === 'W4') return !s.hands[p].some((c) => colorOf(c) === s.color);
   const top = s.discard[s.discard.length - 1];
@@ -124,11 +128,13 @@ function logText(s, nameP) {
   if (!L) return `最初の札は「${cardName(s.discard[0])}」`;
   if (L.t === 'draw') return L.got ? `${nameP(L.p)}が山から1枚引いた` : '山札が無いので引けなかった';
   if (L.t === 'pass') return `${nameP(L.p)}は引いた札を出さずに次へ`;
+  if (L.t === 'take') return `${nameP(L.p)}が${L.got}枚引いて1回休み`;
   let t = `${nameP(L.p)}が「${cardName(L.card)}」を出した`;
   if (L.card[0] === 'W') t += `（次の色: ${COLOR_NAME[L.color]}）`;
   const k = kindOf(L.card);
   if (L.victim !== undefined && (k === 'S' || k === 'R')) t += ` → ${nameP(L.victim)}は1回休み`;
   else if (k === 'R') t += ' → 回る向きが反対に';
+  else if (L.pend) t += ` → たまって${L.pend}枚。次の人は重ねて返すか、${L.pend}枚引く`;
   else if (L.victim !== undefined) t += ` → ${nameP(L.victim)}が${L.got}枚引いて1回休み`;
   return t;
 }
@@ -143,12 +149,16 @@ export default {
   minPlayers: 2,
   maxPlayers: 10,
 
-  init(n, seed) {
+  settings: [
+    { key: 'stack', label: '重ねて返す', desc: 'ドロー2にはドロー2、ドロー4にはドロー4を重ねて次の人へ回せる。重ねなかった人が、たまった枚数を全部引く', def: false },
+  ],
+
+  init(n, seed, { rules = {} } = {}) {
     const deck = shuffle(makeDeck(), mulberry32(seed));
     const hands = Array.from({ length: n }, () => sortHand(deck.splice(-HAND_SIZE)));
     let top = deck.pop();
     while (!isNumber(top)) { deck.unshift(top); top = deck.pop(); }
-    return { n, seed, shuffles: 0, deck, discard: [top], hands, turn: 0, dir: 1, color: top[0], drawn: null, winner: null, step: 0, last: null };
+    return { n, seed, rules: { stack: false, ...rules }, pend: null, shuffles: 0, deck, discard: [top], hands, turn: 0, dir: 1, color: top[0], drawn: null, winner: null, step: 0, last: null };
   },
 
   turn(s) { return s.winner === null ? s.turn : null; },
@@ -185,6 +195,11 @@ export default {
       } else if (k === 'R') {
         s.dir = -s.dir;
         if (s.n === 2) { last.victim = 1 - p; s.turn = p; } else s.turn = next(1);
+      } else if ((k === 'D' || k === 'W4') && s.rules?.stack) {
+        // 重ねて返す: 引かせるのは、重ねなかった人が決まってから
+        s.pend = { k, n: (s0.pend?.n ?? 0) + (k === 'D' ? 2 : 4) };
+        last.pend = s.pend.n;
+        s.turn = next(1);
       } else if (k === 'D' || k === 'W4') {
         last.victim = next(1);
         last.got = drawInto(s, last.victim, k === 'D' ? 2 : 4).length;
@@ -197,6 +212,13 @@ export default {
 
     if (m.t === 'draw') {
       if (s.drawn !== null) return null;
+      if (s.pend) {
+        // 重ねなかった: たまった枚数を全部引いて1回休み
+        s.last = { p, t: 'take', got: drawInto(s, p, s.pend.n).length };
+        s.pend = null;
+        s.turn = next(1);
+        return s;
+      }
       const got = drawInto(s, p, 1);
       s.last = { p, t: 'draw', got: got.length };
       if (got.length && canPlay(s, p, got[0])) s.drawn = got[0];
@@ -222,6 +244,7 @@ export default {
     if (s.drawn !== null) return Math.random() < 0.15 ? { t: 'pass' } : play(hand.indexOf(s.drawn));
     const legal = hand.map((_, i) => i).filter((i) => canPlay(s, p, hand[i]));
     if (!legal.length) return { t: 'draw' };
+    if (s.pend) return Math.random() < 0.2 ? { t: 'draw' } : play(legal[0]); // 重ね返し: たいていは返す
     if (Math.random() < 0.3) return play(legal[Math.floor(Math.random() * legal.length)]);
     const nextLeft = s.hands[(((p + s.dir) % s.n) + s.n) % s.n].length;
     const sameColor = (c) => hand.filter((x) => colorOf(x) === colorOf(c)).length;
@@ -279,10 +302,12 @@ export default {
     const canDraw = myTurn && s.drawn === null;
     const deck = document.createElement(canDraw ? 'button' : 'div');
     deck.className = 'ccard big back' + (canDraw ? ' playable' : '');
-    deck.innerHTML = `<span class="ccard-deck">山札<br><small>${s.deck.length}枚</small></span>`;
+    deck.innerHTML = s.pend
+      ? `<span class="ccard-deck">${s.pend.n}枚<br>引く</span>`
+      : `<span class="ccard-deck">山札<br><small>${s.deck.length}枚</small></span>`;
     if (canDraw) {
       deck.type = 'button';
-      deck.setAttribute('aria-label', '山札から1枚引く');
+      deck.setAttribute('aria-label', s.pend ? `山札から${s.pend.n}枚引く` : '山札から1枚引く');
       deck.onclick = () => o.onMove({ t: 'draw' });
     }
     const top = cardEl(s.discard[s.discard.length - 1]);
@@ -308,7 +333,9 @@ export default {
       const hint = document.createElement('small');
       hint.textContent = s.drawn !== null
         ? '引いた札を出すか、「出さずに次へ」を押してください'
-        : '光っている札が出せます。出さないときは山札をタップ';
+        : s.pend
+          ? `${s.pend.k === 'D' ? 'ドロー2' : 'ドロー4'}を重ねて返すか、山札をタップして${s.pend.n}枚引いてください`
+          : '光っている札が出せます。出さないときは山札をタップ';
       head.append(hint);
     }
     root.append(head);

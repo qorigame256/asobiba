@@ -1,5 +1,6 @@
 // 海戦ゲーム（バトルシップ）。2人。10×10 の自分の海に、5・4・3・3・2マスの船5隻をたてかよこに並べる（2026-10-05 本人承認）。
 // 先手が並べ終えたら後手が並べ、そのあと交代で相手の海のマスを1つずつ撃つ。当たっても外れても次は相手の番（本人承認）。
+// 詳細設定「当たったらもう一度」（2026-10-06 本人の決定。最初はなし）: 当たったら（沈めたときも）続けてもう1回撃てる。外れたら相手の番。
 // 船のマスを全部撃たれたら、その船は沈む。相手の船を先に全部沈めた方の勝ち。
 // 決まりごと（Claude の判断）: 船どうしは となり合ってもよい（重なるのはだめ）。どの船を沈めたかは相手にも知らせる。
 // 相手の船は画面に出さないが、手札と同じ簡易の隠し方（全員の端末が全部の配置を知っている）。同じ画面の2人では隠せないので、オンラインだけ（noLocal）。
@@ -131,10 +132,13 @@ const game = {
   ready: true,
   noLocal: true,
   players: ['先手', '後手'],
-  settings: [CPU_SETTING],
+  settings: [
+    CPU_SETTING,
+    { key: 'again', label: '当たったらもう一度', desc: '当たったら（沈めたときも）続けてもう1回撃てる。外れたら相手の番', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
+  ],
 
-  init() {
-    return { phase: 'place', turn: 0, grid: [null, null], shots: [Array(N * N).fill(false), Array(N * N).fill(false)], last: null, won: null, count: 0 };
+  init({ rules = {} } = {}) {
+    return { again: rules.again === 'on', phase: 'place', turn: 0, grid: [null, null], shots: [Array(N * N).fill(false), Array(N * N).fill(false)], last: null, won: null, count: 0 };
   },
 
   turn(s) { return s.turn; },
@@ -158,8 +162,8 @@ const game = {
     const shots = s.shots.slice();
     shots[p] = shots[p].slice();
     shots[p][m] = true;
-    const t = { ...s, shots, turn: 1 - p, count: s.count + 1 };
     const k = s.grid[1 - p][m];
+    const t = { ...s, shots, turn: s.again && k >= 0 ? p : 1 - p, count: s.count + 1 };
     const before = sunkList(s, p);
     const after = k >= 0 ? sunkList(t, p) : before;
     t.last = { p, cell: m, hit: k >= 0, sunk: after.length > before.length ? k : null };
@@ -187,8 +191,9 @@ const game = {
     const l = s.last;
     if (!l || l.placed || s.won !== null) return '';
     const who = `<b class="pl p${l.p}">${game.players[l.p]}</b>`;
-    if (l.sunk !== null) return `${who}が${SHIP_NAMES[l.sunk]}を沈めた！`;
-    return `${who}の弾は${l.hit ? '<b>命中！</b>' : 'はずれ'}`;
+    const more = s.again && l.hit ? '（もう一度撃てる）' : '';
+    if (l.sunk !== null) return `${who}が${SHIP_NAMES[l.sunk]}を沈めた！${more}`;
+    return `${who}の弾は${l.hit ? '<b>命中！</b>' : 'はずれ'}${more}`;
   },
 
   render(root, s, o) {

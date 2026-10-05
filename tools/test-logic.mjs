@@ -293,6 +293,45 @@ for (let k = 0; k < 400; k++) {
 }
 console.log('colors games by players', JSON.stringify(wins));
 
+// 重ねて返す（詳細設定）
+const stk = (o) => base({ rules: { stack: true }, pend: null, ...o });
+s = stk({ hands: [['rD', 'g1'], ['bD', 'yD', 'r9', 'W4'], ['gD', 'y2']] });
+t = U.apply(s, { p: 0, t: 'play', i: 0 });
+assert.deepEqual([t.pend, t.turn, t.hands[1].length], [{ k: 'D', n: 2 }, 1, 4], 'ドロー2はすぐ引かせず、次の人へ');
+assert.equal(U.apply(t, { p: 1, t: 'play', i: t.hands[1].indexOf('r9') }), null, '重ね返しの途中は色が同じでも数字の札は出せない');
+assert.equal(U.apply(t, { p: 1, t: 'play', i: t.hands[1].indexOf('W4'), c: 'r' }), null, 'ドロー2にドロー4は重ねられない');
+let cs2 = U.apply(t, { p: 1, t: 'play', i: t.hands[1].indexOf('yD') });
+assert.deepEqual([cs2.pend.n, cs2.turn, cs2.color], [4, 2, 'y'], '色が違ってもドロー2なら重ねられる');
+const cs3 = U.apply(cs2, { p: 2, t: 'play', i: cs2.hands[2].indexOf('gD') });
+assert.deepEqual([cs3.pend.n, cs3.turn], [6, 0]);
+const cs4 = U.apply(cs3, { p: 0, t: 'draw' });
+assert.deepEqual([cs4.hands[0].length, cs4.turn, cs4.pend, cs4.drawn], [7, 1, null, null], '重ねなければ、たまった枚数を全部引いて1回休み');
+assert.equal(total(cs4), total(s));
+s = stk({ hands: [['W4', 'g1'], ['W4', 'r9'], ['y1', 'y2']] });
+t = U.apply(s, { p: 0, t: 'play', i: 0, c: 'g' });
+assert.equal(t.pend.n, 4);
+cs2 = U.apply(t, { p: 1, t: 'play', i: 0, c: 'r' });
+assert.ok(cs2, '返すときのドロー4は、場の色の札を持っていても出せる');
+assert.deepEqual([cs2.pend.n, cs2.turn], [8, 2]);
+s = base({ hands: [['rD', 'g1'], ['bD', 'b2'], ['y1', 'y2']] });
+assert.equal(U.apply(s, { p: 0, t: 'play', i: 0 }).hands[1].length, 4, '設定なし（rules が無い局面）は今までどおりすぐ引かせる');
+assert.equal(U.init(3, 1).rules.stack, false, '最初は重ねて返せない');
+// 重ねて返すありで、CPU どうしで最後まで
+for (let k = 0; k < 200; k++) {
+  const n = 2 + (k % 9);
+  let st = U.init(n, k * 104729 + 3, { rules: { stack: true } });
+  let steps = 0;
+  while (!U.result(st)) {
+    const p = U.turn(st);
+    const next = U.apply(st, { ...U.cpu(st, p), p });
+    assert.ok(next, '重ね返しで CPU が反則の手を出した');
+    assert.equal(total(next), 108, '重ね返しで札の枚数が変わった');
+    st = next;
+    if (++steps > 5000) throw new Error('重ね返しのいろあわせが終わらない');
+  }
+}
+console.log('colors stack OK');
+
 // ---------- 大富豪 ----------
 const D = GAMES.daifugo;
 const ALL = Object.fromEntries(D.settings.map((x) => [x.key, true]));
@@ -1586,6 +1625,27 @@ for (let g = 0; g < 12; g++) {
     assert.ok(++guard < 210);
   }
 }
+// 当たったらもう一度（詳細設定）
+assert.equal(KS.init().again, false, '最初は当たっても交代');
+s = KS.init({ rules: { again: 'on' } });
+s = KS.apply(KS.apply(s, { t: 'place', ships: fleet }), { t: 'place', ships: fleet });
+s = KS.apply(s, 0);
+assert.deepEqual([s.last.hit, s.turn], [true, 0], '当たったらもう一度');
+s = KS.apply(s, 99);
+assert.deepEqual([s.last.hit, s.turn], [false, 1], '外れたら相手の番');
+s = KS.init({ rules: { again: 'on' } });
+s = KS.apply(KS.apply(s, { t: 'place', ships: fleet }), { t: 'place', ships: fleet });
+for (const i of shipCells) { assert.equal(s.turn, 0, '当たり続ける間は先手の番'); s = KS.apply(s, i); }
+assert.deepEqual(KS.result(s), { winner: 0, cells: [] }, '当たり続けて全部沈めたら勝ち');
+for (let g = 0; g < 12; g++) {
+  let st = KS.init({ rules: { again: 'on' } });
+  let guard = 0;
+  while (!KS.result(st)) {
+    st = KS.apply(st, KS.cpu(st, st.turn, { cpu: ['weak', 'normal', 'strong'][g % 3] }));
+    assert.ok(st, '当たったらもう一度で CPU が反則を出した');
+    assert.ok(++guard < 210);
+  }
+}
 console.log('kaisen OK');
 
 // ---------- 弾幕回避 ----------
@@ -1594,6 +1654,13 @@ console.log('kaisen OK');
   const DM = await import('../app/js/games/danmaku.js');
   assert.deepEqual(DM.makeBullets(7, 60), DM.makeBullets(7, 60), '弾の出方は種から同じに作る');
   assert.notDeepEqual(DM.makeBullets(7, 60).slice(0, 5), DM.makeBullets(8, 60).slice(0, 5));
+  // 難しさ: ふつうは前と同じ弾幕。やさしい < ふつう < むずかしい の順に弾が多い
+  assert.deepEqual(DM.makeBullets(7, 60, 'normal'), DM.makeBullets(7, 60), '難しさを書かなければ ふつう');
+  assert.equal(DM.makeBullets(7, 90).length, 1606, 'ふつうの弾の数が前と変わった（種 7・90秒）');
+  assert.equal(DM.makeBullets(7, 90).reduce((x, b) => x + b.t + b.x + b.y + b.vx + b.vy, 0).toFixed(6), '102059.256123', 'ふつうの弾の出方・速さが前と変わった');
+  const cnt = ['easy', 'normal', 'hard'].map((lv) => DM.makeBullets(7, 90, lv).length);
+  assert.ok(cnt[0] < cnt[1] && cnt[1] < cnt[2], '難しさの順に弾が多い ' + cnt);
+  assert.equal(D.init(2, 1).rules.level, 'normal', '最初は ふつう');
   const run = (st, ms) => ms.reduce((x, m) => { const y = D.apply(x, m); assert.ok(y, JSON.stringify(m)); return y; }, st);
   let d = run(D.init(3, 5, { rules: { time: '60' } }), [{ p: -1, t: 'go' }]);
   assert.equal(D.apply(d, { p: 0, t: 'hit', ms: 61000 }), null, '時間より後には当たれない');
