@@ -196,7 +196,7 @@ for (const [g, n] of [[C, 20], [R, 12], [TS, 12]]) {
   for (const m of [0, 4]) y = D.apply(y, m); // 左上の四角が2辺。20・21を引くと3辺目になる
   for (let k = 0; k < 20; k++) assert.ok(![20, 21].includes(D.cpu(y, 0, lv('strong'))), '点と線: 3辺目を引かない');
 
-  for (const [g, rules, n, games, id] of [[G, {}, 2, 80, 'gomoku'], [D, {}, 2, 100, 'dots'], [D, { players: 3 }, 3, 90, 'dots-3'], [D, { players: 4 }, 4, 80, 'dots-4']]) {
+  for (const [g, rules, n, games, id] of [[G, {}, 2, 80, 'gomoku'], [D, {}, 2, 100, 'dots'], [D, { players: 3 }, 3, 90, 'dots-3'], [D, { players: 4 }, 4, 80, 'dots-4'], [GAMES.mancala, {}, 2, 60, 'mancala']]) {
     // 3人以上の点と線は、つよいとふつうの差が小さい（適当に引く1割だけ）ので、よわいとの差だけを見る
     for (const [a, b] of n === 2 ? [['normal', 'weak'], ['strong', 'normal']] : [['normal', 'weak'], ['strong', 'weak']]) {
       let aw = 0;

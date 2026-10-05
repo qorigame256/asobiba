@@ -1186,3 +1186,88 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .ww-left { text-align: center; font-size: 1.4rem; font-weight: 800; font-variant-numeric: tabular-nums; }
 .ww-guess { display: flex; justify-content: center; }
 .ww-guess input { width: min(100%, 320px); font-size: 1.1rem; }
+
+/* ---------- 七並べ ---------- */
+[data-game="sevens"] .board { width: min(100%, 680px); }
+.sv { display: flex; flex-direction: column; gap: 10px; }
+.sv-pass { font-size: .78rem; color: var(--muted); }
+.sv-field { background: #2e6b47; border-radius: var(--radius); padding: 8px 6px; display: flex; flex-direction: column; gap: 4px; }
+.sv-row { display: grid; grid-template-columns: 1.1fr repeat(13, 1fr); gap: 2px; align-items: center; }
+.sv-row .pcard { width: 100%; }
+.sv-mark { color: #fff; font-weight: 800; text-align: center; font-size: clamp(.9rem, 4vw, 1.3rem); }
+.sv-mark.red { color: #ffb3a8; }
+.pcard.sv-empty { background: rgba(255, 255, 255, .08); box-shadow: none; border: 1px dashed rgba(255, 255, 255, .25); color: rgba(255, 255, 255, .35); display: grid; place-items: center; font-size: clamp(.55rem, 2.4vw, .85rem); font-weight: 700; }
+.pcard.sv-empty.open { border: 1.5px solid var(--win); color: var(--win); }
+.pcard.sv-dumped { filter: brightness(.82) saturate(.6); }
+.sv-row .pcard.pop { animation: pop .3s ease-out; box-shadow: 0 0 0 2px var(--win); }
+.sv-hand .pcard.usable { box-shadow: 0 0 0 2px var(--win); cursor: pointer; }
+.sv-hand .pcard.dim { filter: brightness(.88) saturate(.6); }
+
+/* ---------- マンカラ ---------- */
+.board.mc { width: min(100%, 620px); display: flex; flex-direction: column; gap: 10px; }
+.mc-wrap { display: flex; gap: 6px; background: #8a5a35; border-radius: 22px; padding: 8px; box-shadow: inset 0 2px 6px rgba(0, 0, 0, .3); }
+.mc-mid { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.mc-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.mc-pit {
+  aspect-ratio: 1; border-radius: 50%; background: #6b4226; box-shadow: inset 0 3px 6px rgba(0, 0, 0, .45);
+  position: relative; display: grid; place-items: center; padding: 0;
+}
+.mc-pit.store { aspect-ratio: auto; width: 13%; border-radius: 999px; }
+.mc-pit.p0 { outline: 2px solid transparent; }
+.board button.mc-pit.playable { cursor: pointer; box-shadow: inset 0 3px 6px rgba(0, 0, 0, .45), 0 0 0 3px var(--win); background: #6b4226; }
+.board button.mc-pit.playable:hover { filter: brightness(1.15); }
+.mc-pit.sown { box-shadow: inset 0 3px 6px rgba(0, 0, 0, .45), 0 0 0 2px #fff8; }
+.mc-pit.from { box-shadow: inset 0 3px 6px rgba(0, 0, 0, .45), 0 0 0 2px var(--accent); }
+.mc-pit.cap { box-shadow: inset 0 3px 6px rgba(0, 0, 0, .45), 0 0 0 3px #e04b3c; }
+.mc-stones { display: flex; flex-wrap: wrap; justify-content: center; align-content: center; gap: 2px; width: 70%; height: 70%; }
+.mc-stones i { width: 22%; aspect-ratio: 1; border-radius: 50%; background: hsl(var(--h), 55%, 62%); box-shadow: inset -1px -1px 2px rgba(0, 0, 0, .3); }
+.mc-num { position: absolute; bottom: -2px; right: -2px; background: #fff; color: var(--ink); border-radius: 999px; min-width: 1.6em; padding: 0 4px; font-size: .78rem; font-weight: 800; line-height: 1.5; text-align: center; }
+.mc-pit.store .mc-num { position: static; font-size: 1.1rem; }
+.mc-pit.store.p0 .mc-num { color: var(--p0); }
+.mc-pit.store.p1 .mc-num { color: var(--p1); }
+
+/* ---------- お絵描き当て ---------- */
+[data-game="oekaki"] .board { width: min(100%, 560px); }
+.oe { display: flex; flex-direction: column; gap: 10px; }
+.oe-topic { background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 8px 12px; text-align: center; }
+.oe-topic small { color: var(--muted); }
+.oe-word { font-size: 1.6rem; font-weight: 800; }
+.oe-hint { font-size: 1.3rem; letter-spacing: .2em; color: var(--muted); }
+.oe-wrap { width: min(100%, max(260px, calc(100dvh - 330px))); margin: 0 auto; }
+.oe-canvas { display: block; width: 100%; aspect-ratio: 1; background: #fff; border: 1.5px solid var(--line); border-radius: 10px; touch-action: none; }
+.oe-canvas.drawing { cursor: crosshair; border-color: var(--accent); }
+.oe-tools { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px 14px; }
+.oe-colors, .oe-widths, .oe-acts { display: flex; gap: 6px; align-items: center; }
+.board button.oe-color { width: 30px; height: 30px; border-radius: 50%; background: var(--c); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line); cursor: pointer; font-size: .9rem; }
+.board button.oe-width { width: 34px; height: 34px; border-radius: 8px; background: #fff; border: 1.5px solid var(--line); display: grid; place-items: center; cursor: pointer; }
+.oe-width i { display: block; border-radius: 50%; background: var(--ink); }
+.board button.oe-color.on, .board button.oe-width.on { box-shadow: 0 0 0 3px var(--accent); }
+.oe-form { display: flex; gap: 8px; }
+.oe-form .btn { flex: none; }
+.oe-chat { max-height: 160px; overflow-y: auto; background: var(--panel); border: 1.5px solid var(--line); border-radius: 10px; padding: 6px 10px; font-size: .9rem; }
+.oe-chat .ok { color: #2f8a4a; }
+
+/* ---------- せりあい ---------- */
+[data-game="seri"] .board { width: min(100%, 620px); }
+.sr { display: flex; flex-direction: column; gap: 10px; }
+.sr-last { background: #eef3f8; border-radius: var(--radius); padding: 8px 12px; text-align: center; font-size: .9rem; }
+.sr-last.pop { animation: pop .3s ease-out; }
+.sr-bids { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 8px; margin-top: 4px; }
+.sr-bid { background: #fff; border-radius: 999px; padding: 0 10px; border: 1px solid var(--line); }
+.sr-bid.cancel { text-decoration: line-through; color: var(--muted); }
+.sr-bid.win { background: #fff1c2; border-color: var(--win); font-weight: 700; }
+.sr-now { background: #2e6b47; color: #fff; border-radius: var(--radius); padding: 10px; text-align: center; }
+.sr-now .um-label { color: #d7eadc; }
+.sr-now small { color: #d7eadc; }
+.sr-pots { display: flex; justify-content: center; gap: 8px; margin: 6px 0; }
+.sr-point { display: grid; place-items: center; width: 64px; aspect-ratio: 5 / 7; border-radius: 8px; background: #fff; color: #2f6fb3; font-size: 1.6rem; font-weight: 800; box-shadow: 0 2px 4px rgba(0, 0, 0, .3); }
+.sr-point.minus { color: #e04b3c; }
+.sr-hand { display: grid; grid-template-columns: repeat(auto-fill, minmax(42px, 1fr)); gap: 6px; }
+.board button.sr-card { height: 52px; border-radius: 8px; background: #fff; border: 1.5px solid var(--line); font-size: 1.2rem; font-weight: 800; cursor: pointer; }
+.board button.sr-card.on { background: var(--accent); color: #fff; border-color: var(--accent); transform: translateY(-4px); }
+.board button.sr-card.used { opacity: .25; cursor: default; }
+.board button.sr-card.sent { opacity: 1; background: #fff1c2; border-color: var(--win); }
+.board button.sr-card:disabled:not(.used):not(.sent) { cursor: default; }
+.mc-pit.store { display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+.mc-who { font-size: .7rem; font-weight: 700; color: #f3e3cf; writing-mode: vertical-rl; letter-spacing: .1em; }
+.mc-pit.store .mc-stones { display: none; }

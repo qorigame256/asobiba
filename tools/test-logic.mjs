@@ -1129,6 +1129,178 @@ tie = voteAll(tie, (p) => (p < 2 ? (p === 0 ? 1 : 0) : (p === 2 ? 3 : 2)));
 assert.deepEqual([tie.phase, WW.result(tie).winners], ['end', [tie.wolf]], 'やり直しでも並んだらウルフの勝ち');
 console.log('babanuki / doubt / yacht / wordwolf OK');
 
+// ---------- 七並べ ----------
+const SV = GAMES.sevens;
+s = SV.init(4, 7, {});
+assert.equal(Object.keys(s.field).length, 4, '7の札4枚が最初に場にある');
+assert.ok(s.hands.every((h) => h.every((c) => !/^[shdc]7$/.test(c))), '手札に7は無い');
+assert.equal(s.hands.reduce((a, h) => a + h.length, 0), 48);
+{
+  // ♦7 を持っていた人から始める（手札の数から、♦7 を含む7を何枚抜いたかは分からないので、配り直して確かめる）
+  const { mulberry32, shuffle } = await import('../app/js/games/util.js');
+  const { makeDeck } = await import('../app/js/games/cards.js');
+  let seen = 0;
+  for (let seed = 1; seed <= 12; seed++) {
+    const holder = shuffle(makeDeck(0), mulberry32(seed)).indexOf('d7') % 4;
+    if (holder) seen++;
+    assert.equal(SV.init(4, seed, {}).turn, holder, '♦7 を持っていた人から始める');
+  }
+  assert.ok(seen >= 3, '最初の人以外が ♦7 を持つ配り方も確かめる');
+}
+assert.ok(SV.canPlace(s, 'h6') && SV.canPlace(s, 'h8'), '7のとなりに出せる');
+assert.ok(!SV.canPlace(s, 'h5') && !SV.canPlace(s, 'h7'), '離れた札・出ている札は出せない');
+const sv = { ...s, field: { ...s.field, h8: 1, h9: 1, h10: 1, h11: 1, h12: 1, h13: 1 } };
+assert.ok(!SV.canPlace(sv, 'h1'), 'トンネルなしでは K のあと A は出せない');
+assert.ok(SV.canPlace({ ...sv, tunnel: true }, 'h1'), 'トンネルなら K のあと A を出せる');
+{
+  const p = s.turn;
+  const bad = s.hands[p].find((c) => !SV.canPlace(s, c));
+  assert.equal(SV.apply(s, { p, t: 'play', c: bad }), null, '出せない札は反則');
+  assert.equal(SV.apply(s, { p: (p + 1) % 4, t: 'pass' }), null, '番でない人は動けない');
+  let t = s;
+  for (let k = 0; k < 3; k++) {
+    t = SV.apply(t, { p, t: 'pass' });
+    assert.equal(t.outs.length, 0, '3回まではパスできる');
+    while (t.turn !== p) t = SV.apply(t, { p: t.turn, t: 'pass' });
+  }
+  const before = t.hands[p].length;
+  t = SV.apply(t, { p, t: 'pass' });
+  assert.ok(t.outs.includes(p) && t.hands[p].length === 0, '4回目のパスで失格');
+  assert.equal(Object.keys(t.field).length, 4 + before, '失格した人の札は場に並ぶ');
+}
+for (let g = 0; g < 30; g++) {
+  const n = 3 + (g % 4);
+  let st = SV.init(n, 500 + g, { rules: { tunnel: g % 2 === 0, passes: g % 3 ? 3 : 5 } });
+  let guard = 0;
+  while (!SV.result(st)) {
+    st = SV.apply(st, { p: st.turn, ...SV.cpu(st, st.turn) });
+    assert.ok(st, '七並べの CPU が反則を出した');
+    assert.ok(++guard < 500);
+  }
+  assert.equal(Object.keys(st.field).length + st.hands.reduce((a, h) => a + h.length, 0), 52, '札の数が崩れない');
+  assert.equal(new Set(SV.result(st).ranking).size, n, '全員に順位');
+}
+console.log('sevens OK');
+
+// ---------- マンカラ ----------
+const MC = GAMES.mancala;
+s = MC.init({});
+assert.deepEqual(s.pits, [4, 4, 4, 4, 4, 4, 0, 4, 4, 4, 4, 4, 4, 0]);
+s = MC.apply(s, 2);
+assert.deepEqual(s.pits, [4, 4, 0, 5, 5, 5, 1, 4, 4, 4, 4, 4, 4, 0], '反時計回りに1個ずつ');
+assert.equal(s.turn, 0, 'ゴールで止まったらもう1回');
+s = MC.apply(s, 5);
+assert.equal(s.turn, 1, 'ゴールで止まらなければ交代');
+assert.equal(MC.apply(MC.init({}), 6), null, '0〜5 だけ');
+const mc = { pits: [], turn: 0, last: null, over: false, count: 0 };
+assert.equal(MC.apply({ ...mc, pits: [1, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 5, 0, 0] }, 0).last.capture.got, 6, '空いた穴で止まったら向かいの石と合わせて取る');
+assert.equal(MC.apply({ ...mc, pits: [1, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0] }, 0).last.capture, null, '向かいが空なら取らない');
+const sk = MC.apply({ ...mc, pits: [0, 0, 0, 0, 0, 9, 0, 1, 0, 0, 0, 0, 0, 0] }, 5);
+assert.equal(sk.pits[13], 0, '相手のゴールは飛ばす');
+assert.equal(sk.pits[0], 1, '飛ばした分は自分の側へ回る');
+const end = MC.apply({ ...mc, pits: [0, 0, 0, 0, 0, 1, 10, 2, 3, 0, 0, 0, 0, 5] }, 5);
+assert.ok(end.over && end.pits[13] === 10 && end.pits[6] === 11, '片側が空になったら残りは持ち主のゴールへ');
+assert.deepEqual(MC.result(end), { winner: 0, cells: [] });
+for (let g = 0; g < 20; g++) {
+  let st = MC.init({ rules: { stones: 3 + (g % 4) } });
+  const total = st.pits.reduce((a, b) => a + b, 0);
+  let guard = 0;
+  while (!MC.result(st)) {
+    st = MC.apply(st, MC.cpu(st, st.turn, { cpu: ['weak', 'normal', 'strong'][g % 3] }));
+    assert.ok(st, 'マンカラの CPU が反則を出した');
+    assert.ok(++guard < 400);
+  }
+  assert.equal(st.pits[6] + st.pits[13], total, '石の数が崩れない');
+}
+console.log('mancala OK');
+
+// ---------- せりあい ----------
+const SR = GAMES.seri;
+s = SR.init(3, 11);
+assert.equal(s.pot.length, 1);
+const bidAll = (st, vs) => vs.reduce((t, v, p) => SR.apply(t, { p, t: 'bid', r: t.round, v }), st);
+{
+  const pos = { ...s, pot: [5] };
+  let t = SR.apply(pos, { p: 0, t: 'bid', r: 0, v: 15 });
+  assert.equal(SR.apply(t, { p: 0, t: 'bid', r: 0, v: 14 }), null, '1回に1枚');
+  t = bidAll(pos, [15, 15, 3]);
+  assert.equal(t.last.who, 2, '同じ数は打ち消し合い、残った人が取る');
+  assert.equal(t.scores[2], 5);
+  assert.ok(!t.hands[0].includes(15), '出した札は使えなくなる');
+  t = bidAll(pos, [12, 9, 3]);
+  assert.equal(t.last.who, 0, 'プラスは一番大きい数の人');
+  t = bidAll({ ...s, pot: [-4] }, [1, 2, 9]);
+  assert.equal(t.last.who, 0, 'マイナスは一番小さい数の人');
+  assert.equal(t.scores[0], -4);
+  t = bidAll({ ...s, pot: [6] }, [4, 4, 4]);
+  assert.equal(t.last.who, -1, '全員打ち消したら誰も取らない');
+  assert.deepEqual([t.pot.length, t.pot[0]], [2, 6], '次の回に持ち越す');
+  assert.equal(SR.apply(t, { p: 0, t: 'bid', r: 0, v: 5 }), null, '前の回の手は弾く');
+  const t2 = bidAll(t, [10, 2, 1]);
+  assert.equal(t2.scores[t2.last.who], 6 + t.pot[1], '持ち越した札はまとめて取る');
+}
+for (let g = 0; g < 20; g++) {
+  let st = SR.init(2 + (g % 5), 900 + g);
+  let guard = 0;
+  while (!SR.result(st)) {
+    for (let p = 0; p < st.n; p++) if (SR.canAct(st, p)) { st = SR.apply(st, { p, ...SR.cpu(st, p) }); assert.ok(st, 'せりあいの CPU が反則を出した'); }
+    assert.ok(++guard < 100);
+  }
+  assert.equal(st.round, 15);
+  assert.ok(st.hands.every((h) => h.length === 0), '15回で全部の札を使い切る');
+  const lost = st.last.lost ?? [];
+  assert.equal(st.scores.reduce((a, b) => a + b, 0) + lost.reduce((a, b) => a + b, 0), 40, '点数の合計（+55 −15）が崩れない');
+}
+console.log('seri OK');
+
+// ---------- お絵描き当て ----------
+const OE = GAMES.oekaki;
+const { encode, decode } = await import('../app/js/games/oekaki.js');
+const { TOPICS } = await import('../app/js/games/oekaki-data.js');
+const { kana } = await import('../app/js/games/party.js');
+assert.deepEqual(decode(encode([[0, 0], [999, 500], [64, 63]])), [[0, 0], [999, 500], [64, 63]], '座標の縮め方は元に戻せる');
+assert.ok(TOPICS.length >= 100, 'お題は100以上');
+assert.equal(new Set(TOPICS.map((t) => kana(t[0]))).size, TOPICS.length, 'お題が重ならない');
+assert.ok(TOPICS.every((t) => t.every((x) => kana(x).length > 0)));
+assert.ok(OE.noCpu);
+s = OE.init(3, 41, { rules: { time: 60 } });
+assert.equal(new Set(s.topics).size, 3, '同じ対局で同じお題は出ない');
+assert.equal(OE.referee(s).ms, 60000);
+const ans = OE.topic(s);
+const line = { p: 0, t: 'line', k: 0, g: 0, c: 0, w: 1, d: encode([[10, 10], [200, 300]]) };
+let oe = OE.apply(s, line);
+assert.equal(oe.strokes.length, 1);
+assert.equal(OE.apply(oe, line), null, '同じ線の手が2回届いても2回目は反則');
+assert.equal(OE.apply(s, { ...line, p: 1 }), null, '描く人しか描けない');
+assert.equal(OE.apply(s, { ...line, d: 'AB' }), null, '壊れた座標は反則');
+oe = OE.apply(oe, { p: 0, t: 'line', k: 1, g: 0, c: 0, w: 1, d: encode([[200, 300], [250, 300]]) });
+oe = OE.apply(oe, { p: 0, t: 'line', k: 2, g: 2, c: 1, w: 0, d: encode([[5, 5], [6, 6]]) });
+const undone = OE.apply(oe, { p: 0, t: 'undo', k: 3 });
+assert.equal(undone.strokes.length, 2, '1つ戻すと最後のひと筆だけ消える');
+assert.equal(OE.apply(undone, { p: 0, t: 'undo', k: 4 }).strokes.length, 0, 'ひと筆が区切られていてもまとめて消える');
+assert.equal(OE.apply(oe, { p: 0, t: 'guess', n: 0, text: ans[0] }), null, '描く人は答えられない');
+oe = OE.apply(oe, { p: 1, t: 'guess', n: 0, text: 'ぜったいちがうこたえ' });
+assert.deepEqual([oe.chat.length, oe.scores[1]], [1, 0], '外れた答えは記録に残る');
+assert.equal(OE.apply(oe, { p: 1, t: 'guess', n: 0, text: ans[0] }), null, '同じ番号の答えは2回目を弾く');
+const hira = ans.map(kana).find((x) => /^[ぁ-ゖー]+$/.test(x));
+const kata = hira.replace(/[ぁ-ゖ]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0x60));
+oe = OE.apply(oe, { p: 2, t: 'guess', n: 0, text: ` ${kata} ` });
+assert.deepEqual([oe.correct, oe.scores], [[2], [3, 0, 10]], 'カタカナでも正解・1番は10点・描いた人に3点');
+assert.equal(OE.canAct(oe, 2), false, '当てた人はもう答えない');
+oe = OE.apply(oe, { p: 1, t: 'guess', n: 1, text: ans[0] });
+assert.deepEqual([oe.phase, oe.scores], ['show', [6, 8, 10]], '全員当てたら答え合わせへ・2番は8点');
+assert.equal(OE.apply(oe, { p: -1, t: 'end', turn: 0 }), null, '答え合わせ中の締め切りは弾く');
+oe = OE.apply(oe, { p: -1, t: 'next', turn: 0 });
+assert.deepEqual([oe.turn, oe.phase, oe.strokes.length], [1, 'draw', 0], '次の人が描く');
+oe = OE.apply(oe, { p: -1, t: 'end', turn: 1 });
+assert.equal(oe.why, 'time', '時間切れ');
+oe = OE.apply(oe, { p: -1, t: 'next', turn: 1 });
+oe = OE.apply(oe, { p: 2, t: 'giveup', k: 0 });
+oe = OE.apply(oe, { p: -1, t: 'next', turn: 2 });
+assert.ok(OE.result(oe), '全員が1回ずつ描いたら終わり');
+assert.deepEqual(OE.result(oe).winners, [2]);
+console.log('oekaki OK');
+
 // 遊び方: どのゲームにもあり、長くしない（1つ4行まで）
 const { GAME_ORDER } = await import('../app/js/games/index.js');
 for (const id of GAME_ORDER) {
