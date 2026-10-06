@@ -850,6 +850,22 @@ stronger('s13 h13 d4 c4 h2', 's12 h12 d11 c11 h1', 'ツーペアは上のペア�
 stronger('s13 h13 d4 c4 h3', 's13 c13 h4 s4 d2', 'ツーペアが同じなら残りの札');
 stronger('s1 h1 d4 c7 h9', 's1 c1 h4 s7 d8', 'ワンペアが同じなら残りの札');
 assert.equal(compareEval(ev('s1 h13 d4 c7 h9'), ev('c1 s13 h4 s7 d9')), 0, 'マーク違いは引き分け');
+// ジョーカー（詳細設定）: どの札の代わりにもなり、一番強くなる札として数える
+for (const [hand, name] of [
+  ['JK s9 h9 d9 c9', 'ファイブカード'], ['JK s10 s11 s12 s13', 'ロイヤルストレートフラッシュ'], ['JK s2 s3 s4 s5', 'ストレートフラッシュ'],
+  ['JK s9 h9 d9 c2', 'フォーカード'], ['JK s9 h9 d2 c2', 'フルハウス'], ['JK s2 s5 s7 s11', 'フラッシュ'], ['JK h2 d3 c4 s6', 'ストレート'],
+  ['JK h1 d2 c3 s4', 'ストレート'], ['JK h9 d9 c4 s2', 'スリーカード'], ['JK h13 d9 c4 s2', 'ワンペア'],
+]) assert.equal(handName(ev(hand)), name, `ジョーカー入りの ${hand} は ${name}`);
+assert.deepEqual(ev('JK s2 s3 s4 s5'), [8, 6], 'ジョーカーは一番強くなる札（A-5 より 2-6 のストレートフラッシュ）');
+assert.deepEqual(ev('JK h13 d9 c4 s2'), [1, 13, 9, 4, 2], 'ペアは一番強い数字で作る');
+assert.deepEqual(ev('JK s2 s5 s7 s11'), [5, 14, 11, 7, 5, 2], 'フラッシュのジョーカーは A');
+stronger('JK s2 h2 d2 c2', 's10 s11 s12 s13 s1', 'ファイブカード > ロイヤルストレートフラッシュ');
+stronger('JK s10 h10 d10 c10', 'JK s9 h9 d9 c9', 'ファイブカードどうしは数字で比べる');
+stronger('JK h1 d9 c4 s2', 's13 c13 h12 d11 c9', 'ジョーカーの A のペア > K のペア');
+stronger('JK s10 s11 s12 s13', 'JK h9 h10 h11 h12', 'ジョーカー入りのストレートフラッシュどうしは上の数字で比べる');
+stronger('s9 c9 h9 d13 s3', 'JK h9 d9 c4 s2', 'ジョーカー入りのスリーカードも残りの札で比べる');
+assert.equal(compareEval(ev('JK h13 d9 c4 s2'), ev('s13 c13 h9 d4 c2')), 0, 'ジョーカーの無い手と同じ強さなら引き分け');
+assert.equal(compareEval(ev('JK s2 s5 s7 s9'), ev('h1 h2 h5 h7 h9')), 0, 'ジョーカー入りのフラッシュも同じ強さなら引き分け');
 
 s = P.init(3, 5, { rules: { end: 'last', hands: 10 } });
 assert.deepEqual(s, P.init(3, 5, { rules: { end: 'last', hands: 10 } }), '同じ種なら同じ配り方');
@@ -918,6 +934,49 @@ for (let k = 0; k < 60; k++) {
   hands += st.handNo;
 }
 console.log('poker games', pgames, 'hands', hands);
+
+// ポーカーのジョーカー: なしでは前と同じ配り方、ありでは53枚。6人が全部交換しても札が崩れない。CPU どうしで最後まで進み、ジョーカーを捨てない
+const pkCards = (st) => [...st.h.deck, ...st.h.muck, ...st.h.cards.flatMap((c, q) => (c && !st.h.folded[q] ? c : []))]; // 降りた人の札は捨て札にある
+assert.deepEqual({ ...P.init(4, 77, { rules: {} }), rules: null }, { ...P.init(4, 77, { rules: { joker: false } }), rules: null }, 'ジョーカーなしは前と同じ');
+assert.equal(pkCards(P.init(4, 77, { rules: {} })).length, 52);
+assert.ok(!pkCards(P.init(6, 77, { rules: {} })).includes('JK'), 'なしではジョーカーが無い');
+s = P.init(6, 77, { rules: { joker: true } });
+assert.equal(pkCards(s).length, 53, 'ジョーカーありは53枚');
+assert.equal(new Set(pkCards(s)).size, 53);
+assert.ok(pkCards(s).includes('JK'));
+s = { ...s, h: { ...s.h, phase: 'draw', toAct: 0, drew: Array(6).fill(null) } };
+for (let k = 0; k < 6; k++) {
+  s = P.apply(s, { p: s.h.toAct, t: 'draw', idx: [0, 1, 2, 3, 4] });
+  assert.ok(s, '6人が5枚ずつ交換できる');
+  assert.equal(pkCards(s).length, 53, '6人が5枚ずつ交換しても53枚のまま');
+  assert.equal(new Set(pkCards(s)).size, 53);
+}
+assert.equal(s.h.phase, 'bet2');
+let pjGames = 0;
+let jkSeen = 0;
+for (let k = 0; k < 30; k++) {
+  const n = 2 + (k % 5);
+  let st = P.init(n, k * 7919 + 3, { rules: { end: k % 2 ? 'last' : 'hands', hands: 5, joker: true } });
+  let steps = 0;
+  while (!P.result(st)) {
+    const p = st.h.phase === 'end' ? st.outAt.indexOf(null) : P.turn(st);
+    const m = { ...P.cpu(st, p), p };
+    if (m.t === 'draw') {
+      assert.ok(m.idx.every((i) => st.h.cards[p][i] !== 'JK'), 'CPU はジョーカーを捨てない');
+      if (st.h.cards[p].includes('JK')) jkSeen++;
+    }
+    const next = P.apply(st, m);
+    assert.ok(next, `ポーカーの CPU が反則の手を出した（ジョーカーあり・${n}人）`);
+    st = next;
+    if (st.h.phase !== 'end') assert.equal(pkCards(st).length, 53, 'ジョーカーありで札が53枚のまま');
+    const inPot = st.h.phase === 'end' ? 0 : st.h.total.reduce((a, b) => a + b, 0);
+    assert.equal(st.chips.reduce((a, b) => a + b, 0) + inPot, n * 1000, 'チップの合計が変わった（ジョーカーあり）');
+    if (++steps > 30000) throw new Error('ポーカー（ジョーカーあり）が終わらない');
+  }
+  pjGames++;
+}
+assert.ok(jkSeen > 10, `CPU がジョーカーを持って交換する場面がある: ${jkSeen}`);
+console.log('poker joker games', pjGames, 'joker draws', jkSeen);
 
 // ---------- スピード ----------
 const SP = GAMES.speed;
@@ -1070,6 +1129,85 @@ console.log('hitblow games 100, avg rounds', (hbRounds / 100).toFixed(1));
       assert.ok(st, '同じ数字ありで CPU が反則の手を出した');
       if (st.round > 80) throw new Error('同じ数字ありのヒット＆ブローが終わらない');
     }
+  }
+}
+// 詳細設定「答え」: 自分で決める（各自が答えを決め、次の席の人の数を当てる）
+{
+  // みんな同じ（最初）は今と全く同じ
+  for (const rules of [{}, { mode: 'race' }, { digits: 3, dup: 'on' }]) {
+    assert.deepEqual(HB.init(3, 99, { rules: { ...rules, secret: 'same' } }), HB.init(3, 99, { rules }), 'みんな同じ は前と同じ局面');
+  }
+  // 答えも前の作りで出ていたものと同じ（「答え」を足す前の hitblow.js で出した値）
+  assert.equal(HB.init(3, 99, { rules: {} }).answer, '1935');
+  assert.equal(HB.init(2, 12345, { rules: { mode: 'race', digits: 3 } }).answer, '648');
+  assert.equal(HB.init(4, 7, { rules: { dup: 'on' } }).answer, '0096');
+  assert.equal(HB.init(2, 5, { rules: {} }).secrets, undefined, 'みんな同じ では答えを決める欄が無い');
+  // 自分で決める: 始めは答えを決める間
+  s = HB.init(3, 7, { rules: { secret: 'own' } });
+  assert.deepEqual(s, HB.init(3, 7, { rules: { secret: 'own' } }), '同じ種なら同じ（CPU の答えも）');
+  assert.equal(s.setting, true);
+  assert.equal(HB.turn(s), null, '決めている間は全員が同時に動く');
+  assert.ok([0, 1, 2].every((p) => HB.canAct(s, p)));
+  assert.ok(s.auto.length === 3 && s.auto.every((a) => /^\d{4}$/.test(a) && new Set(a).size === 4), 'CPU の答えは種から作る（決まりどおり）');
+  assert.deepEqual(HB.cpu(s, 1), { t: 'secret', g: s.auto[1] }, 'CPU は種から作った答えを出す');
+  assert.equal(HB.apply(s, { p: 0, t: 'guess', g: '1234', r: 1 }), null, '決めている間は予想できない');
+  assert.equal(HB.apply(s, { p: 0, t: 'secret', g: '1123' }), null, '答えも同じ数字は使えない');
+  assert.equal(HB.apply(s, { p: 0, t: 'secret', g: '123' }), null, '答えの桁数が違う');
+  assert.equal(HB.apply(s, { p: 0, t: 'secret', g: '12a4' }), null, '数字だけ');
+  assert.equal(HB.apply(s, { p: 3, t: 'secret', g: '1234' }), null, 'いない人');
+  t = HB.apply(s, { p: 0, t: 'secret', g: '1234' });
+  assert.ok(t && t.setting);
+  assert.equal(HB.apply(t, { p: 0, t: 'secret', g: '1234' }), null, '同じ手が2回届いても2回目は弾く');
+  assert.equal(HB.apply(t, { p: 0, t: 'secret', g: '5678' }), null, '決め直しはできない');
+  assert.equal(HB.canAct(t, 0), false);
+  assert.equal(HB.phaseText(t, 0).includes('待って'), true, '決めた人は待つ');
+  t = HB.apply(t, { p: 2, t: 'secret', g: '9012' });
+  t = HB.apply(t, { p: 1, t: 'secret', g: '5678' });
+  assert.equal(t.setting, false, '全員が決めたら当て始める');
+  assert.deepEqual(t.secrets, ['1234', '5678', '9012']);
+  assert.equal(HB.apply(t, { p: 1, t: 'secret', g: '3456' }), null, '当て始めたら答えは決められない');
+  assert.equal(HB.turn(t), 0, '順番に当てるは最初の人から');
+  // 次の席の人の答えで結果が出る（0 → 1 の 5678、1 → 2 の 9012、2 → 0 の 1234）
+  t = HB.apply(t, { p: 0, t: 'guess', g: '1234', r: 1 });
+  assert.deepEqual(t.log[0], { p: 0, g: '1234', hit: 0, blow: 0 }, '自分の答えを言っても当たりにならない');
+  assert.equal(HB.result(t), null);
+  t = HB.apply(t, { p: 1, t: 'guess', g: '9021', r: 2 });
+  assert.deepEqual(t.log[1], { p: 1, g: '9021', hit: 2, blow: 2 }, '1 は 2 の答えに対する結果');
+  t = HB.apply(t, { p: 2, t: 'guess', g: '1234', r: 3 });
+  assert.deepEqual(HB.result(t).winners, [2], '最初に自分の相手の数を当てた人の勝ち');
+  assert.deepEqual(HB.result(t).secrets, ['1234', '5678', '9012'], '決着したら全員の答えを見せる');
+  assert.ok(HB.resultText(HB.result(t), 0, (p) => `P${p}`).includes('P1 <b>5678</b>'));
+  // 2人なら当て合い（同時に早当て・同じ回に当てたら同着）
+  s = HB.init(2, 3, { rules: { secret: 'own', mode: 'race', digits: 3 } });
+  t = HB.apply(HB.apply(s, { p: 1, t: 'secret', g: '789' }), { p: 0, t: 'secret', g: '123' });
+  assert.equal(t.setting, false);
+  t = HB.apply(t, { p: 0, t: 'guess', g: '123', r: 1 });
+  t = HB.apply(t, { p: 1, t: 'guess', g: '132', r: 1 });
+  assert.deepEqual(t.hist[0][0], { g: '123', hit: 0, blow: 0 }, '0 は 1 の答え 789 を当てる（自分の答えを言っても当たらない）');
+  assert.deepEqual(t.hist[1][0], { g: '132', hit: 1, blow: 2 }, '1 は 0 の答え 123 を当てる');
+  assert.equal(HB.result(t), null);
+  t = HB.apply(t, { p: 0, t: 'guess', g: '789', r: 2 });
+  t = HB.apply(t, { p: 1, t: 'guess', g: '123', r: 2 });
+  assert.deepEqual(HB.result(t).winners, [0, 1], '2人とも同じ回に当てたら同着');
+  // 同じ数字を使ってよいときは答えにも使える
+  s = HB.init(2, 3, { rules: { secret: 'own', dup: 'on' } });
+  assert.ok(HB.apply(s, { p: 0, t: 'secret', g: '1123' }), '同じ数字ありなら答えにも使える');
+  // CPU どうしで最後まで（2〜5人・両方の遊び方・桁数・同じ数字）
+  for (let k = 0; k < 60; k++) {
+    const n = 2 + (k % 4);
+    const rules = { secret: 'own', digits: k % 3 ? 4 : 3, mode: k % 2 ? 'race' : 'turn', dup: k % 5 === 0 ? 'on' : 'off' };
+    let st = HB.init(n, k * 11 + 3, { rules });
+    let steps = 0;
+    while (!HB.result(st)) {
+      const ps = Array.from({ length: n }, (_, p) => p).filter((p) => HB.canAct(st, p));
+      const p = ps[Math.floor(Math.random() * ps.length)];
+      const next = HB.apply(st, { ...HB.cpu(st, p), p });
+      assert.ok(next, '答えを自分で決めるときに CPU が反則の手を出した');
+      st = next;
+      if (++steps > 2000) throw new Error('答えを自分で決めるヒット＆ブローが終わらない');
+    }
+    assert.deepEqual(st.secrets, st.auto, 'CPU の答えは種から作ったもの');
+    for (const p of HB.result(st).winners) assert.equal(st.hist[p].at(-1).g, st.secrets[(p + 1) % n], '勝った人は次の席の人の答えを当てた');
   }
 }
 
@@ -1927,6 +2065,88 @@ for (let g = 0; g < 30; g++) {
     assert.equal(st.hands.flat().length + st.pile.length, 52, '札の数は52のまま');
   }
 }
+// 前後どれでもよい（free）
+{
+  const ok = (st, n) => DB.apply(st, { p: st.turn, t: 'play', cards: [st.hands[st.turn][0]], n });
+  const pass = (st) => DB.apply(st, { p: -1, t: 'close', w: st.plays });
+  let f = DB.init(3, 21, { rules: { free: true } });
+  assert.equal(f.free, true);
+  assert.equal(ok(f, 2), null, '最初は A だけ');
+  assert.equal(ok(f, undefined), null, 'ありのときは言った数字が要る');
+  f = pass(ok(f, 1));
+  assert.equal(f.played.num, 1);
+  assert.equal(ok(f, 3), null, '2つ上は選べない');
+  assert.equal(ok(f, 12), null, '2つ下は選べない');
+  assert.equal(ok(f, '2'), null, '数字でない値は反則');
+  assert.ok(ok(f, 13) && ok(f, 1) && ok(f, 2), 'A のあとは K・A・2 を選べる');
+  f = pass(ok(f, 13));
+  assert.ok(ok(f, 12) && ok(f, 13) && ok(f, 1), 'K のあとは Q・K・A を選べる');
+  assert.equal(ok(f, 2), null);
+  // ダウトで札を引き取ったあとも、直前に言った数字から続ける
+  const pl2 = f.turn;
+  f = ok(f, 12);
+  const dbr2 = (pl2 + 1) % 3;
+  f = DB.apply(f, { p: dbr2, t: 'doubt', w: f.plays, ms: 300 });
+  assert.ok(f, 'ダウトを押せる');
+  const card2 = f.played.cards[0];
+  f = DB.apply(f, { p: -1, t: 'close', w: f.plays });
+  assert.equal(f.reveal.lie, rk(card2) !== 12, '言った数字（Q）でうそか決める');
+  assert.ok(ok(f, 11) && ok(f, 12) && ok(f, 13), '引き取ったあとも Q から続ける');
+  assert.equal(ok(f, 1), null);
+  // 同じ手が2回届いても2回目は反則
+  const m2 = { p: f.turn, t: 'play', cards: [f.hands[f.turn][0]], n: 12 };
+  const f2 = DB.apply(f, m2);
+  assert.equal(DB.apply(f2, m2), null, '同じ手の2回目は反則');
+  // 同じ手の一覧から同じ局面
+  const mv = [];
+  let a = DB.init(4, 33, { rules: { free: true } });
+  for (let k = 0; k < 40 && !DB.result(a); k++) {
+    for (let p = 0; p < a.n; p++) if (DB.canAct(a, p)) { const m = { p, ...DB.cpu(a, p) }; mv.push(m); a = DB.apply(a, m); }
+    if (a.phase === 'doubt') { const m = { ...DB.referee(a).move, p: -1 }; mv.push(m); a = DB.apply(a, m); }
+  }
+  let b = DB.init(4, 33, { rules: { free: true } });
+  for (const m of mv) b = DB.apply(b, m);
+  assert.deepEqual(b, a, '同じ手の一覧から同じ局面');
+  // なしのときは今と同じ（n なしの手のまま。n を付けるなら決まった数字だけ）
+  let g = DB.init(3, 21, {});
+  assert.equal(g.free, false);
+  assert.equal(ok(g, 2), null, 'なしのときは決まった数字以外は反則');
+  assert.ok(ok(g, 1));
+  const gm = DB.cpu(g, g.turn);
+  assert.equal('n' in gm, false, 'なしのときの CPU の手は今の形のまま');
+  g = pass(DB.apply(g, { p: 0, t: 'play', cards: [g.hands[0][0]] }));
+  assert.equal(ok(g, 13), null, 'なしのときは A のあとは 2 だけ');
+  assert.equal(ok(g, 1), null);
+  assert.ok(DB.apply(g, { p: 1, t: 'play', cards: [g.hands[1][0]] }));
+  // CPU は言える数字のうち手札に多い数字を選びやすい
+  let h = pass(ok(DB.init(3, 21, { rules: { free: true } }), 1));
+  const best = [13, 1, 2].reduce((x, y) => (h.hands[h.turn].filter((c) => rk(c) === y).length > h.hands[h.turn].filter((c) => rk(c) === x).length ? y : x));
+  let hit = 0;
+  for (let k = 0; k < 200; k++) if (DB.cpu(h, h.turn).n === best) hit++;
+  assert.ok(hit > 140, `CPU は手札に多い数字を選びやすい（${hit}/200）`);
+  // CPU どうしで最後まで
+  for (let gg = 0; gg < 30; gg++) {
+    let st = DB.init(3 + (gg % 6), 100 + gg, { rules: { free: true } });
+    let guard = 0;
+    while (!DB.result(st)) {
+      let moved = false;
+      for (let p = 0; p < st.n; p++) {
+        if (!DB.canAct(st, p)) continue;
+        const m = DB.cpu(st, p);
+        if (m.t === 'play') {
+          const d = st.last ? (m.n - st.last + 13) % 13 : -1;
+          assert.ok(st.last ? [0, 1, 12].includes(d) : m.n === 1, 'CPU は言える数字だけを言う');
+        }
+        st = DB.apply(st, { p, ...m });
+        assert.ok(st, 'ダウト（前後どれでもよい）の CPU が反則を出した');
+        moved = true;
+      }
+      if (!moved) { const r = DB.referee(st); st = DB.apply(st, { ...r.move, p: -1 }); }
+      assert.ok(++guard < 5000, 'ダウト（前後どれでもよい）が終わらない');
+      assert.equal(st.hands.flat().length + st.pile.length, 52, '札の数は52のまま');
+    }
+  }
+}
 
 // ---------- ヨット ----------
 const YT = GAMES.yacht;
@@ -2319,6 +2539,27 @@ oe = OE.apply(oe, { p: 2, t: 'giveup', k: 0 });
 oe = OE.apply(oe, { p: -1, t: 'next', turn: 2 });
 assert.ok(OE.result(oe), '全員が1回ずつ描いたら終わり');
 assert.deepEqual(OE.result(oe).winners, [2]);
+// ヒント（見せるだけ。手の一覧と点には入らない）
+{
+  const { hintText, readingOf } = await import('../app/js/games/oekaki.js');
+  assert.equal(OE.init(2, 1).hint, false, 'ヒントは最初なし');
+  assert.equal(OE.init(2, 1, { rules: { hint: 'on' } }).hint, true);
+  assert.deepEqual(hintText('りんご', 0, 80000, true), { mask: '○○○', len: 3, first: null }, '始めは文字数だけ');
+  assert.equal(hintText('りんご', 40000, 80000, true).first, null, '半分では まだ1文字目を出さない');
+  assert.deepEqual(hintText('りんご', 59999, 80000, true).first, null);
+  assert.deepEqual(hintText('りんご', 60000, 80000, true), { mask: 'り○○', len: 3, first: 'り' }, '残り4分の1で最初の1文字');
+  assert.deepEqual(hintText('りんご', 200000, 80000, false), { mask: '○○○', len: 3, first: null }, 'なしなら最初の1文字は出ない');
+  assert.equal(hintText('けーき', 90000, 120000, true).mask, 'け○○', 'のばす音も1文字に数える');
+  for (const t of TOPICS) {
+    const r = readingOf(t);
+    assert.ok(/^[ぁ-ゖー]+$/.test(r), `お題「${t[0]}」の読みがひらがな`);
+    assert.equal(hintText(r, 1e9, 60000, true).mask.length, r.length, '○の数は読みの文字数');
+  }
+  // ヒントありでも、同じ手から同じ局面になる（時刻を使わない）
+  const h0 = OE.init(3, 41, { rules: { time: 60, hint: 'on' } });
+  const g = { p: 1, t: 'guess', n: 0, text: OE.topic(h0)[0] };
+  assert.deepEqual(OE.apply(h0, g).scores, OE.apply(OE.init(3, 41, { rules: { time: 60 } }), g).scores, 'ヒントで点は変わらない');
+}
 console.log('oekaki OK');
 
 // ---------- ブラックジャック ----------
@@ -2541,6 +2782,69 @@ for (let g = 0; g < 30; g++) {
   }
 }
 assert.ok(sonarUsed >= 40, 'CPU もソナーを使う: ' + sonarUsed);
+// 海の広さ（詳細設定。8×8 は船 4・3・3・2）
+{
+  const KM = await import('../app/js/games/kaisen.js');
+  const setting = KS.settings.find((x) => x.key === 'size');
+  assert.deepEqual([setting.def, setting.choices.map((c) => c[0])], [10, [10, 8]], '海の広さは 10×10 が最初');
+  assert.equal(KS.init().size, 10, '最初は 10×10');
+  assert.equal(KS.init({ rules: { size: 10 } }).shots[0].length, 100, '10×10 は100マス');
+  const s8 = KS.init({ rules: { size: 8 } });
+  assert.deepEqual([s8.size, s8.shots[0].length, KM.fleetOf(8)], [8, 64, [4, 3, 3, 2]], '8×8 は64マス・船は 4・3・3・2');
+  const fleet8 = [[0, 0, false], [2, 0, false], [4, 0, false], [6, 0, true]];
+  assert.ok(KM.layout(fleet8, 8), '8×8 に4隻並べられる');
+  assert.equal(KM.layout(fleet, 8), null, '8×8 に5隻は並べられない');
+  assert.equal(KM.layout(fleet8), null, '10×10 に4隻は並べられない');
+  assert.equal(KM.layout([[0, 5, false], ...fleet8.slice(1)], 8), null, '8×8: 右へはみ出す');
+  assert.ok(KM.layout([[0, 4, false], ...fleet8.slice(1)], 8), '8×8: 右のはしまでなら置ける');
+  assert.equal(KM.layout([...fleet8.slice(0, 3), [7, 0, true]], 8), null, '8×8: 下へはみ出す');
+  assert.equal(KM.layout([...fleet8.slice(0, 3), [0, 2, true]], 8), null, '8×8: 重なる');
+  for (let k = 0; k < 50; k++) {
+    const r = KM.randomShips(8);
+    assert.ok(r.length === 4 && KM.layout(r, 8), '8×8 のおまかせは必ず並べられる');
+  }
+  assert.equal(KS.apply(s8, { t: 'place', ships: fleet }), null, '8×8 で5隻の並べ方は反則');
+  s = KS.apply(KS.apply(s8, { t: 'place', ships: fleet8 }), { t: 'place', ships: fleet8 });
+  assert.deepEqual([s.phase, s.turn], ['fire', 0], '8×8: 両方並べたら先手から撃つ');
+  assert.equal(KS.apply(s, 64), null, '8×8: 盤の外（64）は撃てない');
+  assert.ok(KS.apply(s, 63), '8×8: 右下（63）は撃てる');
+  const cells8 = [];
+  KM.layout(fleet8, 8).forEach((k, i) => { if (k >= 0) cells8.push(i); });
+  assert.equal(cells8.length, 12, '8×8 の船のマスは12');
+  let miss8 = 63;
+  let sunk8 = 0;
+  for (const i of cells8) {
+    assert.equal(KS.result(s), null, '全部沈める前は決着しない');
+    s = KS.apply(s, i);
+    assert.ok(s, '8×8: 撃てる');
+    if (s.last.sunk !== null) sunk8++;
+    if (!KS.result(s)) { while (KM.layout(fleet8, 8)[miss8] >= 0) miss8--; s = KS.apply(s, miss8--); }
+  }
+  assert.equal(sunk8, 4, '8×8: 4隻とも沈めたことが分かる');
+  assert.deepEqual(KS.result(s), { winner: 0, cells: [] }, '8×8: 全部沈めたら勝ち');
+  assert.ok(KS.info(KS.apply(KS.apply(KS.apply(KS.apply(s8, { t: 'place', ships: fleet8 }), { t: 'place', ships: fleet8 }), 0), 63)).includes('はずれ'), '8×8: 撃った結果を書ける');
+  // ソナー: 8×8 の右下の隅は 2×2、(1,1) のまわりは 0段目 0〜2（4マスの船）と 2段目 0〜2（3マスの船）で6つ
+  assert.deepEqual(KM.sonarArea(63, 8), [54, 55, 62, 63], '8×8 の右下の隅は 2×2');
+  assert.deepEqual(KM.sonarArea(11), KM.sonarArea(11, 10), '一辺を書かなければ 10×10');
+  s = KS.init({ rules: { size: 8, sonar: 'on' } });
+  s = KS.apply(KS.apply(s, { t: 'place', ships: fleet8 }), { t: 'place', ships: fleet8 });
+  const so8 = KS.apply(s, { t: 'sonar', c: 9 });
+  assert.deepEqual([so8.last.n, so8.turn], [6, 1], '8×8 でもソナーを使える');
+  assert.equal(KS.apply(s, { t: 'sonar', c: 64 }), null, '8×8: ソナーも盤の外は選べない');
+  // 10×10 の手と結果は前と同じ（マスの番号 = 段*10+列）
+  s = KS.apply(KS.apply(KS.init(), { t: 'place', ships: fleet }), { t: 'place', ships: fleet });
+  assert.deepEqual(KS.apply(s, 99).last, { p: 0, cell: 99, hit: false, sunk: null }, '10×10 の右下は 99');
+  // CPU どうしで最後まで（ソナー・当たったらもう一度も）
+  for (let g = 0; g < 24; g++) {
+    let st = KS.init({ rules: { size: 8, sonar: g % 2 ? 'on' : 'off', again: g % 4 >= 2 ? 'on' : 'off' } });
+    let guard = 0;
+    while (!KS.result(st)) {
+      st = KS.apply(st, KS.cpu(st, st.turn, { cpu: ['weak', 'normal', 'strong'][g % 3] }));
+      assert.ok(st, '8×8 で CPU が反則を出した');
+      assert.ok(++guard < 140);
+    }
+  }
+}
 console.log('kaisen OK');
 
 // ---------- 弾幕回避 ----------
