@@ -147,6 +147,29 @@ function tallyHtml() {
   return `🏆 この部屋の成績（${t.games}回）: ${list}`;
 }
 
+// 待合室に出す成績表の行。ホストには「成績を0に戻す」も付ける（2026-10-06 本人の決定。日をまたいで同じ部屋を使うときのため）
+function tallyLine() {
+  const html = tallyHtml();
+  if (!html) return null;
+  const p = document.createElement('p');
+  p.className = 'lobby-note tally';
+  p.innerHTML = html;
+  if (S.isHost) {
+    const b = makeButton('成績を0に戻す', () => {
+      if (!confirm('この部屋の成績表と連勝を0に戻しますか？')) return;
+      S.tally = null;
+      S.streak = null;
+      saveRoom();
+      sendState();
+      render();
+      toast('成績表を0に戻しました');
+    }, 'ghost small');
+    b.classList.add('tally-reset');
+    p.append(' ', b);
+  }
+  return p;
+}
+
 /* ---------- 勝ち残り（2026-10-06 本人の決定）: 盤のゲームのもう一回で、負けた人が観戦の人と交代する ---------- */
 // Claude の判断: ホストが待合室で付け外しする（部屋の設定。ゲームを変えても残る）。エアホッケーは結果が main.js を通らないので使えない。
 // 勝った人は残り、負けた人の席に、待っている人（前から待っている順 → 負けた人の順）が入る。待っている人がいなければ、負けた人がそのまま続ける。
@@ -239,9 +262,10 @@ function rulesOf(gameId, rules) {
 }
 
 // 「おまかせ」（待合室でホストが押すと詳細設定を抽選する。2026-10-06 本人の決定）で抽選しない項目。本人が決めたのは
-// 人数・CPU の強さと速さ・盤の大きさ。時間・回数・長さ・難しさ・読み上げ・駒落ち・ヒント（神経衰弱・難読漢字）も好みなので抽選しない（Claude の判断）。
+// 人数・CPU の強さと速さ・盤の大きさ。時間・回数・長さ・難しさ・読み上げ・駒落ち・ヒント（神経衰弱・難読漢字・お絵描き当て）・
+// エアホッケーのゴールの広さ（goal。盤の大きさと同じ）・難読漢字の答え方（choice。難しさと同じ）も好みなので抽選しない（Claude の判断）。
 // マルバツ・将棋の size は盤の大きさでなく遊び方（スーパー・消える・5五将棋）なので抽選する。
-const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint']);
+const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice']);
 const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
 
 // 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、エアホッケーは 2〜3。ほかは2）
@@ -918,23 +942,23 @@ function renderLobby(game) {
   html += short
     ? `<p class="lobby-total">あと${game.minPlayers - humans.length}人そろうと始められます</p>`
     : `<p class="lobby-total">${humans.length + cpus}人で遊びます</p>`;
-  const tally = tallyHtml();
-  if (tally) html += `<p class="lobby-note tally">${tally}</p>`;
   board.className = 'board lobby';
   board.innerHTML = html;
+  const tally = tallyLine();
+  if (tally) board.append(tally);
   if (game.settings) board.append(rulesPanel(game));
 
   if (!S.isHost) return;
   const start = makeButton('始める', startRound);
   start.disabled = short;
-  if (game.noCpu || seats) { controls.append(start, gameSelect()); return; }
+  if (game.noCpu || seats) { controls.append(start, gameSelect(), rouletteButton()); return; }
   const setCpus = (n) => { S.cpus = n; saveRoom(); sendState(); render(); };
   const step = game.evenTeams ? 2 : 1; // チームの人数をそろえるゲームは2人ずつ
   const minus = makeButton('CPU を減らす', () => setCpus(cpus - step), 'secondary');
   minus.disabled = humans.length + cpus - step < game.minPlayers || cpus < step;
   const plus = makeButton('CPU を増やす', () => setCpus(cpus + step), 'secondary');
   plus.disabled = humans.length + cpus + step > game.maxPlayers;
-  controls.append(minus, plus, start, gameSelect());
+  controls.append(minus, plus, start, gameSelect(), rouletteButton());
 }
 
 function renderBoardLobby(game) {
@@ -993,8 +1017,8 @@ function renderBoardLobby(game) {
     w.textContent = '観戦: ' + watchers.map(nameOf).join('、');
     board.append(w);
   }
-  const tally = tallyHtml();
-  if (tally) board.insertAdjacentHTML('beforeend', `<p class="lobby-note tally">${tally}</p>`);
+  const tally = tallyLine();
+  if (tally) board.append(tally);
   if (!game.live) board.append(stayPanel());
   if (game.settings) board.append(rulesPanel(game));
   if (!S.isHost) return;
@@ -1004,7 +1028,7 @@ function renderBoardLobby(game) {
     start.disabled = true;
     board.insertAdjacentHTML('beforeend', '<p class="lobby-total">友だちが部屋に入ると始められます</p>');
   }
-  controls.append(start, gameSelect());
+  controls.append(start, gameSelect(), rouletteButton());
 }
 
 // 勝ち残りの付け外し（ホストだけ。ほかの人には付いているときだけ出す）
@@ -1159,6 +1183,21 @@ function gameSelect() {
   };
   label.append(sel);
   return label;
+}
+
+// ゲームのルーレット（2026-10-06 本人の決定）: 待合室でホストが押すと、いまの部屋の人数で遊べるゲームから1つを抽選して切り替える。
+// Claude の判断: いまのゲームは外す。CPU を入れられないゲームは人がそろっているときだけ、エアホッケー（CPU を選べるのは3人のときだけ）は2人以上いるときだけ。
+function rouletteButton() {
+  const n = S.members.length;
+  const ok = (g) => g.ready && g.id !== S.gameId && (!g.noCpu || n >= g.minPlayers) && (!g.live || n >= 2);
+  const ids = GAME_ORDER.filter((id) => ok(GAMES[id]));
+  const b = makeButton('🎲 ゲームを抽選', () => {
+    const id = ids[Math.floor(Math.random() * ids.length)];
+    newRound(id, { lobby: true });
+    toast(`🎲 ${GAMES[id].name} になりました。もう一度押すと引き直せます`);
+  }, 'secondary');
+  b.disabled = !ids.length;
+  return b;
 }
 
 /* ---------- 操作 ---------- */
