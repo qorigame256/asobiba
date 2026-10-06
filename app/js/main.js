@@ -806,7 +806,8 @@ const predKey = () => `${S.gameId}:${S.round}`;
 const predsNow = () => (S.preds?.key === predKey() ? S.preds.by : {});
 function predOpen(game, res) {
   if (S.mode !== 'online' || !S.order || res || game.live) return false;
-  const played = game.multi ? S.moves.filter((m) => Number.isInteger(m?.p) && m.p >= 0).length : S.moves.length;
+  // ヒット＆ブローの「自分で決める答え」の手（t: 'secret'）は当て合いの前の準備なので数えない
+  const played = game.multi ? S.moves.filter((m) => Number.isInteger(m?.p) && m.p >= 0 && m.t !== 'secret').length : S.moves.length;
   return played < S.order.length;
 }
 function setPred(id, p) {
