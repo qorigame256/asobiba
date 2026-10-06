@@ -2,7 +2,7 @@
 // CPU どうし（下側は上下を入れ替えて同じ CPU を使う）で何試合も打たせ、パックが盤の外へ抜けない・決着が付く・
 // 強い CPU が弱い CPU に勝ち越す、を確かめる。3人（六角形の盤）も同じことを確かめる。画面は使わない。
 import {
-  stepPuck, cpuTarget, clampMallet, CPU_LEVELS, stepHex, clampHex, cpuHex, zoneHex, addGoal, overOf, HEX_A, GOAL3,
+  stepPuck, cpuTarget, clampMallet, CPU_LEVELS, stepHex, clampHex, cpuHex, zoneHex, addGoal, overOf, HEX_A, GOAL3, bouncePucks, scoreOf,
 } from '../app/js/games/hockey.js';
 import { mulberry32 } from '../app/js/games/util.js';
 
@@ -236,6 +236,66 @@ function match3(lvs, seed, target = 7) {
   // 点数と順位
   check('3人: 失点の少ない順に順位（同点は同じ順位）', JSON.stringify(overOf(3, [7, 2, 2], 7)?.rank) === '[3,1,1]' && overOf(3, [6, 2, 2], 7) === null);
   check('2人: 取った点で数える（入れられた側の相手に1点）', JSON.stringify(addGoal(2, [0, 0], 1)) === '[1,0]' && JSON.stringify(overOf(2, [7, 3], 7)?.rank) === '[1,2]');
+}
+
+// パック2つ
+{
+  const a = { x: 0.4, y: 0.8, vx: 2, vy: 0 };
+  const b = { x: 0.4 + 2 * R_P - 0.01, y: 0.8, vx: -1, vy: 0 };
+  const hit = bouncePucks(a, b, 1);
+  check('パック2つ: 正面でぶつかると速さが入れ替わる（はね返りの係数1）', hit > 0 && Math.abs(a.vx + 1) < 1e-9 && Math.abs(b.vx - 2) < 1e-9);
+  check('パック2つ: 重なりを押し離す', Math.hypot(b.x - a.x, b.y - a.y) >= 2 * R_P - 1e-9);
+  const c = { x: 0.3, y: 0.5, vx: 0.5, vy: 0.2 };
+  const d = { x: 0.3 + R_P * 1.5, y: 0.5 + R_P * 0.5, vx: -0.4, vy: 0.1 };
+  const px = c.vx + d.vx;
+  const py = c.vy + d.vy;
+  bouncePucks(c, d);
+  check('パック2つ: ななめに当たっても勢いの合計は変わらない', Math.abs(c.vx + d.vx - px) < 1e-9 && Math.abs(c.vy + d.vy - py) < 1e-9);
+  check('パック2つ: 離れていく2つは当たらない', bouncePucks({ x: 0.5, y: 0.5, vx: -1, vy: 0 }, { x: 0.5 + R_P, y: 0.5, vx: 1, vy: 0 }) === 0);
+  check('失点から点数を作る（2人は相手の失点・3人は失点そのもの）', JSON.stringify(scoreOf(2, [1, 3])) === '[3,1]' && JSON.stringify(scoreOf(3, [1, 2, 0])) === '[1,2,0]');
+  // CPU どうしを2つのパックで打たせる（どちらの CPU も、自分の陣地にあってゴールに近いパックを追う）
+  let ok = true;
+  let done = 0;
+  let goals = 0;
+  for (let seed = 1; seed <= 20; seed++) {
+    const rnd = mulberry32(seed);
+    const lost = [0, 0];
+    const ps = [{ x: W / 2, y: H * 0.72, vx: 0, vy: 0 }, { x: W / 2, y: H * 0.28, vx: 0, vy: 0 }];
+    const ms = [{ x: W / 2, y: H - 0.16, vx: 0, vy: 0 }, { x: W / 2, y: 0.16, vx: 0, vy: 0 }];
+    const lv = CPU_LEVELS.normal;
+    const aim = [{ ...ms[0] }, { ...ms[1] }];
+    const timers = [0, 0];
+    const pick = (p) => {
+      const hy = p === 0 ? H : 0;
+      const v = (q) => ((q.y > H / 2) === (p === 0) ? 0 : 1) + Math.abs(q.y - hy);
+      return v(ps[1]) < v(ps[0]) ? ps[1] : ps[0];
+    };
+    for (let t = 0; t < 600 && Math.max(...lost) < 7; t += 1 / 60) {
+      for (const p of [0, 1]) {
+        timers[p] -= 1 / 60;
+        if (timers[p] > 0) continue;
+        timers[p] = lv.react;
+        const q = pick(p);
+        aim[p] = p === 1 ? cpuTarget(q, ms[1], lv, rnd) : flip(cpuTarget(flip(q), flip(ms[0]), lv, rnd));
+      }
+      for (let i = 0; i < 4; i++) {
+        move(ms[0], 0, aim[0], lv.speed, 1 / 240);
+        move(ms[1], 1, aim[1], lv.speed, 1 / 240);
+        bouncePucks(ps[0], ps[1]); // hockey.js と同じく、パックどうしを先に・壁を後に
+        ps.forEach((q, k) => {
+          const g = stepPuck(q, ms, 1 / 240);
+          if (g !== null) { lost[1 - g]++; goals++; ps[k] = { x: W / 2 + (k ? 0.15 : 0), y: g === 0 ? 0.28 * H : 0.72 * H, vx: 0, vy: 0 }; }
+        });
+        for (const q of ps) {
+          if (q.x < R_P - 1e-6 || q.x > W - R_P + 1e-6 || ((q.y < R_P - 1e-3 || q.y > H - R_P + 1e-3) && Math.abs(q.x - W / 2) >= GOAL / 2)) ok = false;
+        }
+        if (Math.hypot(ps[0].x - ps[1].x, ps[0].y - ps[1].y) < 2 * R_P - 0.03) ok = false; // 1歩で近づく分（最高速度 / 240）までは重なってよい
+      }
+    }
+    if (Math.max(...lost) >= 7) done++;
+  }
+  check('パック2つ: CPU どうしで、パックが壁を抜けず・ほとんど重ならない', ok);
+  check('パック2つ: CPU どうしで決着が付く', done >= 18, `${done}/20 試合・ゴール ${goals}`);
 }
 
 console.log(failed ? `\n${failed} 件の失敗` : '\nすべて OK');

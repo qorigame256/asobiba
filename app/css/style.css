@@ -1219,6 +1219,10 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .sv-row .pcard.pop { animation: pop .3s ease-out; box-shadow: 0 0 0 2px var(--win); }
 .sv-hand .pcard.usable { box-shadow: 0 0 0 2px var(--win); cursor: pointer; }
 .sv-hand .pcard.dim { filter: brightness(.88) saturate(.6); }
+.pcard.sv-empty.sv-spot { background: rgba(255, 214, 90, .35); border: 2px solid #ffd65a; color: #fff; cursor: pointer; padding: 0; font-family: inherit; }
+.sv-row .pcard.sv-joker { outline: 2px solid #ffd65a; }
+.sv-hand .pcard.picked { transform: translateY(-6px); box-shadow: 0 0 0 3px #ffd65a; }
+.sv-jnote { margin: 0; text-align: center; font-weight: 700; color: var(--accent, #c05a2b); }
 
 /* ---------- マンカラ ---------- */
 .board.mc { width: min(100%, 620px); display: flex; flex-direction: column; gap: 10px; }
@@ -1344,6 +1348,8 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .bj-player.mine .pcard { width: 56px; }
 .bj-cards .pcard.pop { animation: pop .3s ease-out; }
 .bj-acts { flex-wrap: wrap; gap: 8px; }
+.bj-sub { margin-top: 6px; font-size: .85rem; }
+.bj-note { width: 100%; text-align: center; font-weight: 700; }
 
 /* ---------- アクションの4つ（弾幕回避・玉入れ・間違い探し・2色爆弾サバイバル） ---------- */
 .ac, .mg { display: flex; flex-direction: column; gap: 8px; }

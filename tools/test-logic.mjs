@@ -1471,6 +1471,53 @@ for (let g = 0; g < 30; g++) {
   assert.equal(Object.keys(st.field).length + st.hands.reduce((a, h) => a + h.length, 0), 52, '札の数が崩れない');
   assert.equal(new Set(SV.result(st).ranking).size, n, '全員に順位');
 }
+// ジョーカー（詳細設定）
+{
+  const { jokerSpots, playable } = await import('../app/js/games/sevens.js');
+  let t = SV.init(4, 7, { rules: { joker: true } });
+  assert.equal(t.hands.reduce((a, h) => a + h.length, 0), 49, 'ジョーカー入りは手札が1枚多い');
+  const jp = t.hands.findIndex((h) => h.includes('JK'));
+  t = { ...t, turn: jp };
+  const own = SV.canPlace(t, 'h6') && t.hands[jp].includes('h6') ? 'h6' : ['h6', 'h8', 's6', 's8', 'd6', 'd8', 'c6', 'c8'].find((c) => t.hands[jp].includes(c));
+  if (own) assert.equal(SV.apply(t, { p: jp, t: 'play', c: 'JK', at: own }), null, '自分が持っている札の所にはジョーカーを置けない');
+  assert.equal(SV.apply(t, { p: jp, t: 'play', c: 'JK', at: 'h3' }), null, '出せない所にはジョーカーを置けない');
+  const at = jokerSpots(t, jp).find((c) => /^[shdc][68]$/.test(c));
+  const owner = t.hands.findIndex((h) => h.includes(at));
+  t = SV.apply(t, { p: jp, t: 'play', c: 'JK', at });
+  assert.deepEqual([t.field[at], t.jk, t.hands[jp].includes('JK')], ['joker', { at, owner }, false], 'ジョーカーを本物の札の代わりに置く');
+  const beyond = at[0] + (at.endsWith('6') ? 5 : 9);
+  assert.ok(SV.canPlace(t, beyond), 'ジョーカーの先にも出せる');
+  while (t.turn !== owner) t = SV.apply(t, { p: t.turn, t: 'pass' });
+  assert.equal(SV.apply(t, { p: owner, t: 'pass' }), null, '本物の札を持っている人はパスできない');
+  const other = t.hands[owner].find((c) => c !== at && SV.canPlace(t, c));
+  if (other) assert.equal(SV.apply(t, { p: owner, t: 'play', c: other }), null, 'ほかの札も出せない');
+  assert.deepEqual(playable(t, owner), [at]);
+  const n0 = t.hands[owner].length;
+  t = SV.apply(t, { p: owner, t: 'play', c: at });
+  assert.deepEqual([t.field[at], t.jk, t.hands[owner].includes('JK'), t.hands[owner].length], ['play', null, true, n0], '本物の札を出してジョーカーを受け取る');
+  {
+    let u = SV.init(4, 7, { rules: { joker: true } });
+    const hp = u.hands.findIndex((h) => h.includes('JK'));
+    while (!u.outs.includes(hp)) u = SV.apply(u, { p: u.turn, t: 'pass' });
+    assert.ok(!('JK' in u.field), '失格した人のジョーカーは場に並べない');
+  }
+  let used = 0;
+  for (let g = 0; g < 30; g++) {
+    const n = 3 + (g % 4);
+    let st = SV.init(n, 700 + g, { rules: { joker: true, tunnel: g % 2 === 0 } });
+    let guard = 0;
+    while (!SV.result(st)) {
+      st = SV.apply(st, { p: st.turn, ...SV.cpu(st, st.turn) });
+      assert.ok(st, '七並べ（ジョーカー）の CPU が反則を出した');
+      if (st.last?.t === 'joker') used++;
+      assert.ok(++guard < 600);
+    }
+    const onField = Object.values(st.field).filter((v) => v !== 'joker').length;
+    assert.equal(onField + st.hands.reduce((a, h) => a + h.filter((c) => c !== 'JK').length, 0), 52, '札の数が崩れない（ジョーカー）');
+  }
+  assert.ok(used >= 10, 'CPU もジョーカーを使う');
+  console.log('sevens joker uses', used);
+}
 console.log('sevens OK');
 
 // ---------- マンカラ ----------
@@ -1651,6 +1698,24 @@ s = bjState([['s5', 'h6']], ['s10', 'h6'], ['c10', 'd10']);
 bj = BJ.apply(s, { p: 0, t: 'double', r: 0 });
 assert.deepEqual([bj.hands[0].length, bj.bets[0], bj.out[0]], [3, 20, 20], 'ダブルは1枚だけ引いて賭けが倍（親はバースト）');
 assert.equal(BJ.apply(BJ.apply(bjState([['s5', 'h6']], ['s10', 'h7'], ['c2', 'c3']), { p: 0, t: 'hit', r: 0, k: 2 }), { p: 0, t: 'double', r: 0 }), null, '3枚目からはダブルできない');
+// スプリット（詳細設定）
+{
+  const sp = (hands, dealer, rest) => ({ ...bjState(hands, dealer, rest), splitOn: true });
+  assert.equal(BJ.apply(bjState([['s8', 'h8']], ['s10', 'h7'], ['c3']), { p: 0, t: 'split', r: 0 }), null, '詳細設定がなしならスプリットできない');
+  assert.equal(BJ.apply(sp([['s13', 'h12']], ['s10', 'h7'], ['c3']), { p: 0, t: 'split', r: 0 }), null, 'K と Q は同じ数字ではない');
+  let t = BJ.apply(sp([['s8', 'h8']], ['s10', 'h7'], ['c3', 'c10', 'd9']), { p: 0, t: 'split', r: 0 });
+  assert.deepEqual([t.hands[0], t.wait[0]], [['s8', 'c3'], ['h8']], '1つ目に2枚目を配り、2つ目は待つ');
+  t = BJ.apply(t, { p: 0, t: 'double', r: 0, h: 0 });
+  assert.deepEqual([t.fin[0].c, t.fin[0].bet, t.hands[0], t.bets[0], t.done[0]], [['s8', 'c3', 'c10'], 20, ['h8', 'd9'], 10, false], '分けたあともダブルでき、終わったら2つ目へ');
+  assert.equal(BJ.apply(t, { p: 0, t: 'double', r: 0, h: 0 }), null, '1つ目への手が2回届いても2つ目には効かない');
+  assert.equal(BJ.apply(t, { p: 0, t: 'stand', r: 0 }), null, 'h の無い（1つ目の）スタンドも弾く');
+  t = BJ.apply(t, { p: 0, t: 'stand', r: 0, h: 1 });
+  assert.deepEqual([t.phase, t.outFin[0], t.out[0], t.points[0]], ['result', 20, 20, 120], '2つの手の合計（21で+20・17どうしで±0）');
+  t = BJ.apply(sp([['s1', 'h1']], ['s10', 'h9'], ['c13', 'd5']), { p: 0, t: 'split', r: 0 });
+  assert.deepEqual([t.phase, t.outFin[0], t.out[0]], ['result', 10, 0], 'A を分けたら1枚ずつで終わり・分けた21はブラックジャックではない（+10）');
+  t = BJ.apply(sp([['s8', 'h8']], ['s10', 'h7'], ['c8', 'd2']), { p: 0, t: 'split', r: 0 });
+  assert.equal(BJ.apply(t, { p: 0, t: 'split', r: 0 }), null, '分けるのは1回だけ');
+}
 // 配った時点のブラックジャック
 let found = 0;
 for (let seed = 1; seed < 400 && found < 2; seed++) {

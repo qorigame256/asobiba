@@ -4,13 +4,28 @@
 // 手札を早くなくした順に順位が付き、失格した人は最後（あとで失格した人ほど上）。
 // トンネル（詳細設定・最初はなし）: K と A をつながっているものとみなす（K が出ていれば A を、A が出ていれば K を出せる）。
 // 決まりごと（Claude の判断）: 出せるのは「となりの数字がもう場にある」札。失格で並べた札のとなりにも出せる。
-// 手: { p, t: 'play', c: 札 } / { p, t: 'pass' }
+// ジョーカー（詳細設定・最初はなし。2026-10-06 本人承認）: 1枚入れて53枚を配る。出せる場所（空いていて、となりが場にある所）に本物の札の代わりに置ける。
+//   その本物の札を持っている人は、次の自分の番に必ずその札を出し（パスもほかの札も出せない）、ジョーカーを受け取る。
+//   作り（Claude の判断）: 自分が持っている札の場所には置けない。ジョーカーが最後の1枚なら置いて上がってよい。失格した人のジョーカーは場に並べず捨てる。
+//   置いたジョーカーは field[置いた所] = 'joker'、出さなければいけない人は jk = { at: 置いた所, owner }。
+// 手: { p, t: 'play', c: 札 } / { p, t: 'play', c: 'JK', at: 置く所 } / { p, t: 'pass' }
 
 import { mulberry32, shuffle } from './util.js';
-import { makeDeck, suitOf, rankOf, cardEl, cardLabel, SUITS, SUIT_MARK } from './cards.js';
+import { makeDeck, suitOf, rankOf, cardEl, cardLabel, SUITS, SUIT_MARK, JOKER } from './cards.js';
 
 const clone = (s) => ({ ...s, hands: s.hands.map((h) => h.slice()), field: { ...s.field }, passes: s.passes.slice(), done: s.done.slice(), outs: s.outs.slice() });
-const ORDER = (c) => SUITS.indexOf(suitOf(c)) * 13 + rankOf(c);
+const ORDER = (c) => (c === JOKER ? 99 : SUITS.indexOf(suitOf(c)) * 13 + rankOf(c));
+const ALL = SUITS.flatMap((su) => Array.from({ length: 13 }, (_, k) => su + (k + 1)));
+
+// ジョーカーを置ける所（出せる所のうち、自分が本物の札を持っていない所）
+export function jokerSpots(s, p) {
+  return ALL.filter((c) => canPlace(s, c) && !s.hands[p].includes(c));
+}
+// p が出せる札（ジョーカーの所の札を出さなければいけないときは、その札だけ）
+export function playable(s, p) {
+  if (s.jk && s.jk.owner === p) return [s.jk.at];
+  return s.hands[p].filter((c) => (c === JOKER ? jokerSpots(s, p).length > 0 : canPlace(s, c)));
+}
 
 // 札 c を出せるか（場にまだ無く、となりの数字が場にある）
 function canPlace(s, c) {
@@ -45,10 +60,12 @@ export default {
   settings: [
     { key: 'passes', label: 'パスできる回数', desc: 'これを超えてパスすると失格（手札は全部場に並べる）', def: 3, choices: [[3, '3回'], [5, '5回']] },
     { key: 'tunnel', label: 'トンネル', desc: 'K と A をつながっているとみなす（K が出ていれば A を、A が出ていれば K を出せる）', def: false },
+    { key: 'joker', label: 'ジョーカー', desc: '1枚入れる。出せる所に本物の札の代わりに置ける。その札を持っている人は、次の番に必ずその札を出してジョーカーを受け取る', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const deck = shuffle(makeDeck(0), mulberry32(seed));
+    const joker = rules.joker === true;
+    const deck = shuffle(makeDeck(joker ? 1 : 0), mulberry32(seed));
     const hands = Array.from({ length: n }, () => []);
     deck.forEach((c, k) => hands[k % n].push(c));
     const field = {};
@@ -59,7 +76,7 @@ export default {
       hands[p] = h.filter((x) => rankOf(x) !== 7).sort((a, b) => ORDER(a) - ORDER(b));
     });
     const s = {
-      n, maxPass: rules.passes === 5 ? 5 : 3, tunnel: rules.tunnel === true,
+      n, maxPass: rules.passes === 5 ? 5 : 3, tunnel: rules.tunnel === true, joker, jk: null,
       hands, field, turn, passes: Array(n).fill(0), done: [], outs: [], last: null, step: 0,
     };
     // 7 しか持っていなかった人は配った時点で上がり
@@ -91,7 +108,23 @@ export default {
     const p = m.p;
     const s = clone(s0);
     s.step += 1;
-    if (m.t === 'play') {
+    if (s0.jk && s0.jk.owner === p) {
+      // ジョーカーの所の本物の札を出して、ジョーカーを受け取る
+      if (m.t !== 'play' || m.c !== s0.jk.at) return null;
+      s.hands[p].splice(s.hands[p].indexOf(m.c), 1);
+      s.hands[p].push(JOKER);
+      s.field[m.c] = 'play';
+      s.jk = null;
+      s.last = { t: 'swap', p, c: m.c };
+    } else if (m.t === 'play' && m.c === JOKER) {
+      const i = s.hands[p].indexOf(JOKER);
+      if (i < 0 || typeof m.at !== 'string' || !jokerSpots(s0, p).includes(m.at)) return null;
+      s.hands[p].splice(i, 1);
+      s.field[m.at] = 'joker';
+      s.jk = { at: m.at, owner: s.hands.findIndex((h) => h.includes(m.at)) };
+      s.last = { t: 'joker', p, c: m.at, owner: s.jk.owner };
+      if (!s.hands[p].length) { s.done.push(p); s.last.up = true; }
+    } else if (m.t === 'play') {
       const i = s.hands[p].indexOf(m.c);
       if (i < 0 || !canPlace(s, m.c)) return null;
       s.hands[p].splice(i, 1);
@@ -101,7 +134,7 @@ export default {
     } else if (m.t === 'pass') {
       s.passes[p] += 1;
       if (s.passes[p] > s.maxPass) {
-        for (const c of s.hands[p]) s.field[c] = 'out';
+        for (const c of s.hands[p]) if (c !== JOKER) s.field[c] = 'out';
         s.last = { t: 'out', p, cards: s.hands[p].slice() };
         s.hands[p] = [];
         s.outs.push(p);
@@ -119,7 +152,17 @@ export default {
   // 手札が多くパスに余裕があるときは、相手を助けるだけの札しか無ければ ときどきパスする。2割は適当に出して弱めている
   cpu(s, p) {
     const hand = s.hands[p];
-    const ok = hand.filter((c) => canPlace(s, c));
+    if (s.jk && s.jk.owner === p) return { t: 'play', c: s.jk.at };
+    const ok = hand.filter((c) => c !== JOKER && canPlace(s, c));
+    // ジョーカーは、ほかに出せる札が無いとき（か最後の1枚のとき）に使う。置く所は、その先の札を自分が持っている所（無ければ適当）
+    if (hand.includes(JOKER) && (!ok.length || hand.length === 1)) {
+      const spots = jokerSpots(s, p);
+      if (spots.length) {
+        const good = spots.filter((c) => [rankOf(c) - 1, rankOf(c) + 1].some((x) => hand.includes(suitOf(c) + x)));
+        const pool = good.length && Math.random() >= 0.2 ? good : spots;
+        return { t: 'play', c: JOKER, at: pool[Math.floor(Math.random() * pool.length)] };
+      }
+    }
     if (!ok.length) return { t: 'pass' };
     if (Math.random() < 0.2) return { t: 'play', c: ok[Math.floor(Math.random() * ok.length)] };
     // その札を出したあと、同じ向きの続きを自分が何枚持っているか
@@ -140,6 +183,9 @@ export default {
 
   render(root, s, o) {
     const me = o.me >= 0 ? o.me : null;
+    // ジョーカーを押したら、置く所を場から選ぶ（同じ局面の間だけ覚えておく）
+    const picking = pickJoker === `${s.step}:${me}` && o.canMove;
+    const redraw = () => this.render(root, s, o);
     const nameP = (p) => (p === me ? 'あなた' : o.names[p]);
     const res = this.result(s);
     root.innerHTML = '';
@@ -184,14 +230,24 @@ export default {
       for (let r = 1; r <= 13; r++) {
         const c = su + r;
         let e;
-        if (s.field[c]) {
+        if (s.field[c] === 'joker') {
+          e = cardEl(JOKER);
+          e.classList.add('sv-joker');
+          e.title = `${cardLabel(c)} の代わり`;
+          if (o.fresh && s.last?.t === 'joker') e.classList.add('pop');
+        } else if (s.field[c]) {
           e = cardEl(c);
           if (s.field[c] === 'out') e.classList.add('sv-dumped');
           if (o.fresh && s.last?.t === 'play' && s.last.c === c) e.classList.add('pop');
         } else {
-          e = document.createElement('div');
-          e.className = 'pcard sv-empty' + (!res && canPlace(s, c) ? ' open' : '');
+          const spot = picking && jokerSpots(s, me).includes(c);
+          e = document.createElement(spot ? 'button' : 'div');
+          e.className = 'pcard sv-empty' + (!res && canPlace(s, c) ? ' open' : '') + (spot ? ' sv-spot' : '');
           e.textContent = r === 1 ? 'A' : r > 10 ? ['J', 'Q', 'K'][r - 11] : String(r);
+          if (spot) {
+            e.type = 'button';
+            e.onclick = () => { pickJoker = null; o.onMove({ t: 'play', c: JOKER, at: c }); };
+          }
         }
         row.append(e);
       }
@@ -205,6 +261,15 @@ export default {
 
     // 自分の手札
     if (me !== null && !res) {
+      const forced = s.jk && s.jk.owner === me;
+      if (forced || picking) {
+        const note = document.createElement('p');
+        note.className = 'sv-jnote';
+        note.textContent = forced
+          ? `ジョーカーが ${cardLabel(s.jk.at)} の所に置かれました。${o.canMove ? 'その札を出して、ジョーカーを受け取ってください' : '次の番にその札を出します'}`
+          : 'ジョーカーを置く所を、場の光っているマスから選んでください';
+        root.insertBefore(note, field);
+      }
       const head = document.createElement('div');
       head.className = 'cc-hand-head';
       const left = s.maxPass - s.passes[me];
@@ -214,17 +279,21 @@ export default {
       root.append(head);
       const hand = document.createElement('div');
       hand.className = 'bb-hand sv-hand';
+      const can = o.canMove ? playable(s, me) : [];
       for (const c of s.hands[me]) {
-        const usable = o.canMove && canPlace(s, c);
+        const usable = can.includes(c);
         const e = cardEl(c, usable ? 'button' : 'div');
         if (usable) {
           e.classList.add('usable');
-          e.onclick = () => o.onMove({ t: 'play', c });
+          if (c === JOKER && picking) e.classList.add('picked');
+          e.onclick = c === JOKER
+            ? () => { pickJoker = picking ? null : `${s.step}:${me}`; redraw(); }
+            : () => { pickJoker = null; o.onMove({ t: 'play', c }); };
         } else if (o.canMove) e.classList.add('dim');
         hand.append(e);
       }
       root.append(hand);
-      if (o.canMove) {
+      if (o.canMove && !forced) {
         const act = document.createElement('div');
         act.className = 'cc-actions';
         const b = document.createElement('button');
@@ -239,6 +308,8 @@ export default {
   },
 };
 
+let pickJoker = null;
+
 function tag(cls, text) {
   const t = document.createElement('span');
   t.className = 'cc-tag ' + cls;
@@ -250,6 +321,8 @@ function logText(s, nameP) {
   const l = s.last;
   if (!l) return `7の札を並べました。${nameP(s.turn)}から始めます`;
   if (l.t === 'play') return `${nameP(l.p)}が ${cardLabel(l.c)} を出した${l.up ? '。上がり！' : ''}`;
+  if (l.t === 'joker') return `${nameP(l.p)}が ${cardLabel(l.c)} の所にジョーカーを置いた${l.up ? '。上がり！' : `（${nameP(l.owner)}は次にその札を出す）`}`;
+  if (l.t === 'swap') return `${nameP(l.p)}が ${cardLabel(l.c)} を出してジョーカーを受け取った`;
   if (l.t === 'pass') return `${nameP(l.p)}がパス（${s.passes[l.p]}回目）`;
   return `${nameP(l.p)}がパスしすぎて失格。手札${l.cards.length}枚を場に並べた`;
 }
