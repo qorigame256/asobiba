@@ -131,6 +131,7 @@ const game = {
   desc: '自分の海に船を隠して並べ、交代で相手の海を撃つ。相手の船を先に全部沈めた方の勝ち',
   ready: true,
   noLocal: true,
+  noUndo: true, // オンラインの「待った」は付けない（外れたマスを知ったまま撃ち直せてしまうため。2026-10-06 本人の決定）
   players: ['先手', '後手'],
   settings: [
     CPU_SETTING,

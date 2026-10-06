@@ -163,6 +163,7 @@ p { margin: 0; }
   margin-top: 18px;
 }
 .game-select { color: var(--muted); font-size: .9rem; }
+.undo-ask { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; width: 100%; font-size: .95rem; }
 .game-select select { font: inherit; padding: 4px 8px; border-radius: 8px; border: 1.5px solid var(--line); background: #fff; }
 
 /* 盤のマスは button だが見た目はマスにする */
@@ -297,7 +298,7 @@ p { margin: 0; }
 /* ---------- リバーシ ---------- */
 .rv {
   display: grid;
-  grid-template-columns: repeat(8, 1fr);
+  grid-template-columns: repeat(var(--rv-n, 8), 1fr);
   gap: 2px;
   padding: 2px;
   background: #1f4d32;

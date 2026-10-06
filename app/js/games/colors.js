@@ -3,7 +3,7 @@
 //
 // 札: 色1文字 + 中身。色 r赤 y黄 g緑 b青。中身 0〜9 / S（スキップ）/ R（リバース）/ D（ドロー2）。
 //     色の無い札は 'W'（ワイルド）と 'W4'（ワイルドドロー4）。全108枚。
-// 手: { p, t: 'play', i: 手札の何枚目か（手札は常に並べ替え済み）, c: ワイルドで選ぶ色 }
+// 手: { p, t: 'play', i: 手札の何枚目か（手札は常に並べ替え済み）, c: ワイルドで選ぶ色, to: 「7で交換」の相手（3人以上のときだけ） }
 //     { p, t: 'draw' }（山から1枚引く。重ね返しの途中なら、たまった枚数を全部引く） / { p, t: 'pass' }（引いた札を出さずに次へ）
 //
 // 公式ルールから変えた所（ネット対戦向けに簡単にした。変えるなら本人に確認）:
@@ -16,6 +16,9 @@
 // 詳細設定「重ねて返す」（2026-10-06 本人の決定。最初はなし）: ドロー2を出された人はドロー2を、ドロー4を出された人はドロー4を
 //   重ねて次の人へ回せる（同じ種類どうしだけ。色は問わない）。重ねなかった人（山をタップ）は、たまった枚数を全部引いて1回休み。
 //   返すときのドロー4は、場の色の札を持っていても出せる（本人の決定）。重ね返しの途中（s.pend）は、ほかの札は出せない。
+// 詳細設定「7で交換・0で回す」（2026-10-06 本人の決定。最初はなし）: 7を出した人は、選んだ1人と手札をまるごと交換する（2人なら相手と）。
+//   0を出したら、全員が手札をいま回っている向きの次の人へ渡す。出してちょうど手札がなくなったときは交換も回しもせず上がり（Claude の判断）。
+//   CPU は手札がいちばん少ない人と交換する。
 
 import { mulberry32, shuffle } from './util.js';
 
@@ -93,7 +96,7 @@ function pickColor(hand, skip) {
 
 /* ---------- 画面 ---------- */
 
-let picking = null; // ワイルドの色を選んでいる途中 { step, i }（通信で描き直されても閉じないよう外に持つ）
+let picking = null; // ワイルドの色（7で交換なら相手）を選んでいる途中 { step, i, seven }（通信で描き直されても閉じないよう外に持つ）
 
 // 札の絵（2026-10-04 本人の希望で本家風に。ロゴや本家の絵は写さず、形だけ似せて自分で描いた）。
 // 色の札は「色の地・斜めの白い楕円・縁取りした大きな数字や記号・左上と右下に小さく同じもの」。6 と 9 は下線で見分ける。
@@ -132,7 +135,9 @@ function logText(s, nameP) {
   let t = `${nameP(L.p)}が「${cardName(L.card)}」を出した`;
   if (L.card[0] === 'W') t += `（次の色: ${COLOR_NAME[L.color]}）`;
   const k = kindOf(L.card);
-  if (L.victim !== undefined && (k === 'S' || k === 'R')) t += ` → ${nameP(L.victim)}は1回休み`;
+  if (L.swap !== undefined) t += ` → ${nameP(L.p)}と${nameP(L.swap)}が手札を交換`;
+  else if (L.rotate) t += ' → 全員が手札を次の人へ渡した';
+  else if (L.victim !== undefined && (k === 'S' || k === 'R')) t += ` → ${nameP(L.victim)}は1回休み`;
   else if (k === 'R') t += ' → 回る向きが反対に';
   else if (L.pend) t += ` → たまって${L.pend}枚。次の人は重ねて返すか、${L.pend}枚引く`;
   else if (L.victim !== undefined) t += ` → ${nameP(L.victim)}が${L.got}枚引いて1回休み`;
@@ -151,6 +156,7 @@ export default {
 
   settings: [
     { key: 'stack', label: '重ねて返す', desc: 'ドロー2にはドロー2、ドロー4にはドロー4を重ねて次の人へ回せる。重ねなかった人が、たまった枚数を全部引く', def: false },
+    { key: 'sevenZero', label: '7で交換・0で回す', desc: '7を出したら、選んだ1人と手札を交換する。0を出したら、全員が手札を次の人へ渡す（回っている向き）', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -158,7 +164,7 @@ export default {
     const hands = Array.from({ length: n }, () => sortHand(deck.splice(-HAND_SIZE)));
     let top = deck.pop();
     while (!isNumber(top)) { deck.unshift(top); top = deck.pop(); }
-    return { n, seed, rules: { stack: false, ...rules }, pend: null, shuffles: 0, deck, discard: [top], hands, turn: 0, dir: 1, color: top[0], drawn: null, winner: null, step: 0, last: null };
+    return { n, seed, rules: { stack: false, sevenZero: false, ...rules }, pend: null, shuffles: 0, deck, discard: [top], hands, turn: 0, dir: 1, color: top[0], drawn: null, winner: null, step: 0, last: null };
   },
 
   turn(s) { return s.winner === null ? s.turn : null; },
@@ -181,6 +187,8 @@ export default {
       if (card === undefined || (s.drawn !== null && card !== s.drawn) || !canPlay(s0, p, card)) return null;
       const wild = card[0] === 'W';
       if (wild ? !COLORS.includes(m.c) : m.c !== undefined) return null;
+      const swap = s.rules?.sevenZero && kindOf(card) === '7'; // 7で交換（詳細設定）
+      if (swap && s.n > 2 ? !Number.isInteger(m.to) || m.to < 0 || m.to >= s.n || m.to === p : m.to !== undefined) return null;
       s.hands[p].splice(m.i, 1);
       s.discard.push(card);
       s.color = wild ? m.c : card[0];
@@ -189,6 +197,15 @@ export default {
       s.last = last;
       if (!s.hands[p].length) { s.winner = p; return s; }
       const k = kindOf(card);
+      if (swap) {
+        const to = s.n > 2 ? m.to : 1 - p;
+        [s.hands[p], s.hands[to]] = [s.hands[to], s.hands[p]];
+        last.swap = to;
+      } else if (k === '0' && s.rules?.sevenZero) { // 0で回す（詳細設定）: 全員が次の人へ渡す
+        const old = s.hands;
+        s.hands = old.map((_, q) => old[(((q - s.dir) % s.n) + s.n) % s.n]);
+        last.rotate = true;
+      }
       if (k === 'S') {
         last.victim = next(1);
         s.turn = next(2);
@@ -240,7 +257,17 @@ export default {
   // 強くなりすぎないよう、3回に1回くらいは出せる札から適当に選ぶ。
   cpu(s, p) {
     const hand = s.hands[p];
-    const play = (i) => (hand[i][0] === 'W' ? { t: 'play', i, c: pickColor(hand, i) } : { t: 'play', i });
+    // 7で交換の相手は、手札がいちばん少ない人（同じなら近い席）
+    const fewest = () => {
+      let best = null;
+      for (let k = 1; k < s.n; k++) { const q = (p + k) % s.n; if (best === null || s.hands[q].length < s.hands[best].length) best = q; }
+      return best;
+    };
+    const play = (i) => {
+      if (hand[i][0] === 'W') return { t: 'play', i, c: pickColor(hand, i) };
+      if (s.rules?.sevenZero && kindOf(hand[i]) === '7' && s.n > 2) return { t: 'play', i, to: fewest() };
+      return { t: 'play', i };
+    };
     if (s.drawn !== null) return Math.random() < 0.15 ? { t: 'pass' } : play(hand.indexOf(s.drawn));
     const legal = hand.map((_, i) => i).filter((i) => canPlay(s, p, hand[i]));
     if (!legal.length) return { t: 'draw' };
@@ -253,6 +280,8 @@ export default {
       if (c === 'W') return -10;
       const k = kindOf(c);
       if (k === 'S' || k === 'R' || k === 'D') return (nextLeft <= 2 ? 50 : 8) + sameColor(c);
+      // 7で交換: 自分より手札の少ない人がいれば出したい
+      if (k === '7' && s.rules?.sevenZero && s.hands[fewest()].length < hand.length - 1) return 40 + sameColor(c);
       return 10 + Number(k) + sameColor(c);
     };
     return play(legal.reduce((a, b) => (score(hand[b]) > score(hand[a]) ? b : a)));
@@ -349,7 +378,9 @@ export default {
         e.type = 'button';
         e.classList.add('playable');
         e.onclick = () => {
-          if (card[0] === 'W') { picking = { step: s.step, i }; draw(); } else o.onMove({ t: 'play', i });
+          if (card[0] === 'W') { picking = { step: s.step, i }; draw(); }
+          else if (s.rules?.sevenZero && kindOf(card) === '7' && s.n > 2) { picking = { step: s.step, i, seven: true }; draw(); }
+          else o.onMove({ t: 'play', i });
         };
       }
       if (picking?.i === i) e.classList.add('picked');
@@ -369,7 +400,28 @@ export default {
       root.append(actions);
     }
 
-    if (picking) {
+    if (picking?.seven) {
+      const pick = document.createElement('div');
+      pick.className = 'cc-picker';
+      pick.innerHTML = '<p>手札を交換する人を選んでください</p>';
+      const row = document.createElement('div');
+      for (let k = 1; k < s.n; k++) {
+        const q = (me + k) % s.n;
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn secondary';
+        b.textContent = `${o.names[q]}（${s.hands[q].length}枚）`;
+        b.onclick = () => { const i = picking.i; picking = null; o.onMove({ t: 'play', i, to: q }); };
+        row.append(b);
+      }
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'btn ghost';
+      cancel.textContent = 'やめる';
+      cancel.onclick = () => { picking = null; draw(); };
+      pick.append(row, cancel);
+      root.append(pick);
+    } else if (picking) {
       const pick = document.createElement('div');
       pick.className = 'cc-picker';
       pick.innerHTML = '<p>次の色を選んでください</p>';

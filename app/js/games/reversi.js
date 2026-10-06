@@ -1,4 +1,5 @@
-// リバーシ。8×8。黒（プレイヤー0）が先手。手 = マスの番号 0〜63（段*8+列）。
+// リバーシ。8×8（2人のときは詳細設定「盤の大きさ」で 6×6・10×10 も。2026-10-06 本人の決定）。黒（プレイヤー0）が先手。
+// 手 = マスの番号（段*大きさ+列。8×8 なら 0〜63）。
 // 置ける場所が無い側は自動でパスになる。両方置けなくなったら終局。
 // 詳細設定「人数」で3人・4人にもできる（2026-10-04 本人の決定。市販の「ローリット」に近い決まりを Claude が推し、本人が承認）:
 //   黒・白・赤・青で順番に置く。はさむ石は相手なら誰の色でも（混ざっていても）よい。はさめる所があれば必ずそこに置き、
@@ -7,12 +8,16 @@
 
 import { CPU_SETTING, boardCpu } from './util.js';
 
-const N = 8;
+const N8 = 8; // 3〜4人はいつも 8×8
 const DIRS = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
+
+// 盤の一辺（盤は正方形なので、マスの数から分かる）
+const sizeOf = (board) => Math.round(Math.sqrt(board.length));
 
 // 相手の石 = 空きでも自分でもない石（2人なら 1 - p と同じ）
 function flipsFor(board, p, i) {
   if (board[i] !== null) return [];
+  const N = sizeOf(board);
   const r0 = Math.floor(i / N);
   const c0 = i % N;
   const all = [];
@@ -31,6 +36,7 @@ function flipsFor(board, p, i) {
 }
 
 function legalMoves(board, p) {
+  const N = sizeOf(board);
   const list = [];
   for (let i = 0; i < N * N; i++) if (flipsFor(board, p, i).length) list.push(i);
   return list;
@@ -38,6 +44,7 @@ function legalMoves(board, p) {
 
 // 3人以上: はさめる所が無ければ、石のとなりの空いたマス
 function nearMoves(board) {
+  const N = sizeOf(board);
   const list = [];
   for (let i = 0; i < N * N; i++) {
     if (board[i] !== null) continue;
@@ -66,20 +73,22 @@ const START = {
 };
 
 // CPU の形勢判断: 隅は大きく加点、隅の隣は減点（相手に隅を取られやすい）。打てる場所の多さも少し見る
-const WEIGHTS = [
-  100, -20, 10, 5, 5, 10, -20, 100,
-  -20, -40, -2, -2, -2, -2, -40, -20,
-  10, -2, 1, 1, 1, 1, -2, 10,
-  5, -2, 1, 0, 0, 1, -2, 5,
-  5, -2, 1, 0, 0, 1, -2, 5,
-  10, -2, 1, 1, 1, 1, -2, 10,
-  -20, -40, -2, -2, -2, -2, -40, -20,
-  100, -20, 10, 5, 5, 10, -20, 100,
-];
+// 8×8 では次の表と同じになる（ほかの大きさでも、端からの距離で同じ考え方の点を付ける）:
+//   100 -20 10  5  5 10 -20 100 / -20 -40 -2 -2 -2 -2 -40 -20 / 10 -2 1 1 1 1 -2 10 / 5 -2 1 0 0 1 -2 5 …
+function weightOf(n, i) {
+  const d = (x) => Math.min(x, n - 1 - x);
+  const [a, b] = [d(Math.floor(i / n)), d(i % n)].sort((x, y) => x - y);
+  if (a === 0) return b === 0 ? 100 : b === 1 ? -20 : b === 2 ? 10 : 5;
+  if (a === 1) return b === 1 ? -40 : -2;
+  return a === 2 ? 1 : 0;
+}
+const WEIGHT_CACHE = {};
+const weights = (board) => (WEIGHT_CACHE[board.length] ??= Array.from({ length: board.length }, (_, i) => weightOf(sizeOf(board), i)));
 
 function score(s, p) {
+  const W = weights(s.board);
   let v = 0;
-  s.board.forEach((x, i) => { if (x === p) v += WEIGHTS[i]; else if (x !== null) v -= WEIGHTS[i]; });
+  s.board.forEach((x, i) => { if (x === p) v += W[i]; else if (x !== null) v -= W[i]; });
   return v + (legalMoves(s.board, p).length - legalMoves(s.board, 1 - p).length) * 3;
 }
 
@@ -97,6 +106,8 @@ function wideCpu(s, rules) {
   const moves = movesOf(s);
   if (moves.length === 1 || Math.random() < { weak: 0.5, normal: 0.1, strong: 0 }[level]) return moves[Math.floor(Math.random() * moves.length)];
   const p = s.turn;
+  const N = N8;
+  const W = weights(s.board);
   const CORNERS = [0, N - 1, N * (N - 1), N * N - 1];
   let best = -Infinity;
   let top = [];
@@ -105,7 +116,7 @@ function wideCpu(s, rules) {
     board[m] = p;
     for (const i of flipsFor(s.board, p, m)) board[i] = p;
     let v = 0;
-    board.forEach((x, i) => { if (x === p) v += WEIGHTS[i]; });
+    board.forEach((x, i) => { if (x === p) v += W[i]; });
     const look = level === 'weak' ? 0 : level === 'normal' ? 1 : s.n - 1;
     for (let d = 1; d <= look; d++) {
       const q = (p + d) % s.n;
@@ -123,7 +134,7 @@ export default {
   id: 'reversi',
   name: 'リバーシ',
   icon: '⚫',
-  desc: '相手の石をはさんでひっくり返す。最後に多い方が勝ち。オンラインでは3〜4人も選べる',
+  desc: '相手の石をはさんでひっくり返す。最後に多い方が勝ち。オンラインでは盤の大きさ（6×6・10×10）や3〜4人も選べる',
   ready: true,
   players: ['黒', '白', '赤', '青'],
   // 詳細設定の人数（2〜4人）。待合室の席の数になる
@@ -133,6 +144,11 @@ export default {
       key: 'players', label: '人数', def: 2,
       desc: '3人・4人では 黒・白・赤・青 で順番に置く。はさめる所が無いときは、石のとなりならどこにでも置ける',
       choices: [[2, '2人'], [3, '3人'], [4, '4人']],
+    },
+    {
+      key: 'size', label: '盤の大きさ', def: 8,
+      desc: '2人のときだけ。6×6 は早く終わり、スマホでも押しやすい。3人・4人はいつも 8×8',
+      choices: [[8, '8×8（ふつう）'], [6, '6×6（短い）'], [10, '10×10（長い）']],
     },
     CPU_SETTING,
   ],
@@ -147,12 +163,14 @@ export default {
 
   init({ rules = {} } = {}) {
     const n = rules.players ?? 2;
+    const N = n > 2 ? N8 : [6, 8, 10].includes(rules.size) ? rules.size : N8;
     const board = Array(N * N).fill(null);
     if (n > 2) {
       for (const [i, p] of Object.entries(START[n])) board[i] = p;
     } else {
-      board[27] = 1; board[36] = 1; // d4, e5 = 白
-      board[28] = 0; board[35] = 0; // e4, d5 = 黒
+      const h = N / 2; // 真ん中の4マス。8×8 なら d4・e5 が白、e4・d5 が黒
+      board[(h - 1) * N + h - 1] = 1; board[h * N + h] = 1;
+      board[(h - 1) * N + h] = 0; board[h * N + h - 1] = 0;
     }
     return { n, board, turn: 0, last: null, flipped: [], passed: null, over: false };
   },
@@ -160,7 +178,7 @@ export default {
   turn(s) { return s.turn; },
 
   apply(s, m) {
-    if (s.over || !Number.isInteger(m) || m < 0 || m >= N * N) return null;
+    if (s.over || !Number.isInteger(m) || m < 0 || m >= s.board.length) return null;
     if (s.n > 2) {
       if (!movesOf(s).includes(m)) return null;
       const flips = flipsFor(s.board, s.turn, m);
@@ -214,6 +232,7 @@ export default {
     const flipped = new Set(o.fresh ? s.flipped : []);
     root.innerHTML = '';
     root.className = 'board rv';
+    root.style.setProperty('--rv-n', sizeOf(s.board));
     s.board.forEach((v, i) => {
       const cell = document.createElement('button');
       cell.type = 'button';

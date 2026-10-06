@@ -19,6 +19,8 @@
 //   carry = 次の対局へ持ち越す前の結果（人の id → 順位）。ホストが対局を始めるときに prev へ並べ替える。
 // 部屋を作る・同じ画面で遊ぶのは持ち主の端末だけ（owner.js）。ほかの人は招待された部屋に入るだけ。
 // banned = ホストが退出させた人の id。あいさつが来ても入れず、もう一度「退出」を送る。
+// undo = この対局で「待った」をした回数（盤のゲームのオンライン）。待ったをすると手の一覧が短くなり、ふつうの同期（長い方が正）では
+//   戻せないので、ホストだけが手を削って undo を1つ進め、受け手は undo が大きい一覧をそのまま受け入れる。対局が替わると 0 に戻る。
 
 import { GAMES, GAME_ORDER } from './games/index.js';
 import { connectRoom } from './net.js';
@@ -56,7 +58,7 @@ function myName() {
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -537,6 +539,8 @@ function renderPage() {
       makeButton('1手戻す', () => { S.moves.pop(); render(); }, 'secondary'),
       makeButton('最初から', () => { if (confirm('最初からやり直しますか？')) rematch(); }, 'secondary'),
     );
+  } else if (S.mode === 'online' && !game.multi) {
+    appendUndo(game);
   }
   if (S.mode === 'online' && S.isHost) controls.append(gameSelect());
   appendMemberPanel();
@@ -813,7 +817,8 @@ function scheduleCpu(game, st, res) {
   // （取り消すと相手が速いと CPU が永久に動けない。1人ずつだと、待っている CPU の後ろの CPU が動けない）
   const ps = S.order.map((id, i) => i).filter((i) => cpuControlled(S.order[i]) && canAct(st, i));
   for (const p of game.realtime ? ps : ps.slice(0, 1)) {
-    const key = game.realtime ? `${S.gameId}:${S.round}:rt:${p}` : `${S.gameId}:${S.round}:${S.moves.length}:${p}`;
+    // 待ったで手が減ると同じ長さに戻るので、待ったの回数も鍵に入れる（入れないと「もう予約してある」と見て CPU が止まる）
+    const key = game.realtime ? `${S.gameId}:${S.round}:rt:${p}` : `${S.gameId}:${S.round}:${S.undo ?? 0}:${S.moves.length}:${p}`;
     if (S.cpuKeys[p] === key) continue; // もう予約してある
     S.cpuKeys[p] = key;
     const session = S;
@@ -868,6 +873,8 @@ function newRound(gameId, { lobby = false } = {}) {
   S.round += 1;
   S.first = 1 - S.first;
   S.moves = [];
+  S.undo = 0;
+  S.undoAsk = null;
   S.order = null;
   S.seed = 0;
   S.prev = null;
@@ -900,6 +907,8 @@ function startRound() {
   const prev = S.carry ? order.map((id) => S.carry[id]) : null;
   S.prev = prev?.every(Number.isInteger) ? prev : null;
   S.moves = [];
+  S.undo = 0;
+  S.undoAsk = null;
   saveRoom();
   sendState();
   render();
@@ -986,9 +995,10 @@ function joinRoom(raw) {
 
 function enterPlay() {
   S.banned ??= [];
+  S.undo ??= 0;
   Object.assign(S, {
     conn: S.mode === 'online' ? 'connecting' : 'local', seen: {}, full: false, hostLeft: false,
-    shownKey: null, shownLen: 0, lostKey: '', cpuKeys: {}, refKey: null, couldMove: null, waitFrom: Date.now(),
+    shownKey: null, shownLen: 0, lostKey: '', cpuKeys: {}, refKey: null, couldMove: null, waitFrom: Date.now(), undoAsk: null,
   });
   showScreen('play');
   render();
@@ -1042,10 +1052,10 @@ function openNet() {
 
 function send(msg, qos) { S?.net?.send(msg, qos); }
 function sendState() {
-  const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick } = S;
-  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick });
+  const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, undo } = S;
+  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0 });
 }
-function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves }); }
+function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves, u: S.undo ?? 0 }); }
 function askState() { send({ type: 'hello', isHost: false, name: myName() }); }
 
 function onConn(status) {
@@ -1088,6 +1098,9 @@ function onMessage(msg) {
       break;
     case 'move':
       onMoves(msg);
+      break;
+    case 'undo':
+      onUndo(msg);
       break;
     case 'rematch':
       if (S.isHost) {
@@ -1140,7 +1153,10 @@ function adoptState(msg) {
   S.rules = msg.rules && typeof msg.rules === 'object' ? msg.rules : {};
   for (const id of S.members) S.seen[id] ??= Date.now();
   const sameRound = S.gameId === msg.gameId && S.round === msg.round;
-  if (sameRound && S.moves.length > msg.moves.length && isPrefix(msg.moves, S.moves)) {
+  const mu = Number.isInteger(msg.u) ? msg.u : 0;
+  if (sameRound && mu < (S.undo ?? 0)) {
+    // 待ったより前の古い知らせ。手の一覧は受け取らない
+  } else if (sameRound && mu === (S.undo ?? 0) && S.moves.length > msg.moves.length && isPrefix(msg.moves, S.moves)) {
     sendMoves(); // こちらの方が進んでいる（ホストが取りこぼした）ので教える
   } else if (msg.order === null || replay(msg)) {
     S.gameId = msg.gameId;
@@ -1151,7 +1167,10 @@ function adoptState(msg) {
     S.cpus = msg.cpus;
     S.pick = Array.isArray(msg.pick) ? msg.pick.slice() : null;
     S.prev = Array.isArray(msg.prev) ? msg.prev.slice() : null;
+    if (sameRound && mu > (S.undo ?? 0)) toast('待ったで戻しました');
+    if (!sameRound || mu !== (S.undo ?? 0)) S.undoAsk = null;
     S.moves = msg.moves.slice();
+    S.undo = mu;
   }
   saveRoom();
 }
@@ -1160,6 +1179,21 @@ function onMoves(msg) {
   if (!Array.isArray(msg.moves)) return;
   if (msg.gameId !== S.gameId || msg.round !== S.round) {
     if (S.isHost) sendState(); else askState();
+    return;
+  }
+  const mu = Number.isInteger(msg.u) ? msg.u : 0;
+  if (mu < (S.undo ?? 0)) { // 待ったより前の古い一覧。こちらが正しいので教える
+    if (S.isHost) sendMoves();
+    return;
+  }
+  if (mu > (S.undo ?? 0)) { // 待ったで短くなった一覧。ホストが決めたものなので、短くてもそのまま受け入れる
+    if (!S.isHost && msg.from === S.members[0] && replay({ ...S, moves: msg.moves })) {
+      S.moves = msg.moves.slice();
+      S.undo = mu;
+      S.undoAsk = null;
+      saveRoom();
+      toast('待ったで戻しました');
+    } else if (!S.isHost) askState();
     return;
   }
   if (msg.moves.length > S.moves.length && isPrefix(S.moves, msg.moves) && replay({ ...S, moves: msg.moves })) {
@@ -1176,6 +1210,119 @@ function onMoves(msg) {
       rebase(msg);
     } else if (S.isHost) sendState(); else askState();
   }
+}
+
+/* ---------- 待った（盤のゲームのオンライン） ---------- */
+// 2026-10-06 本人の決定: 自分の最後の手の前まで戻す（そのあとのほかの人の手も消える）。対局しているほかの人（CPU の席は数えない）の
+// 誰か1人が「いいよ」を押したら戻る。ほかの人が全員 CPU ならすぐ戻る。ほかの人が全員「だめ」なら取り下げ。海戦ゲーム（noUndo）には付けない。
+// 戻すのはホストの端末だけ（手を削って undo を進め、一覧を送る）。頼みごとは S.undoAsk = { key, by, len, no: [だめと言った人] }（保存しない）。
+
+// それぞれの手を打った人（手の前の番）。盤のゲームの手には打った人が入っていないので、局面を当て直して調べる
+function moversOf(game) {
+  let st = replay({ ...S, moves: [] });
+  const who = [];
+  for (const m of S.moves) {
+    if (!st) break;
+    who.push(game.turn(st));
+    st = game.apply(st, m);
+  }
+  return who;
+}
+
+// 待ったに「いいよ」を言える人（頼んだ人のほかの、対局している人。CPU と部屋を出た人の席は数えない）
+const undoApprovers = (by) => roundOrder().filter((id) => id && id !== by && !cpuControlled(id));
+const undoKey = (by, len) => `${S.gameId}:${S.round}:${S.undo ?? 0}:${len}:${by}`;
+
+// ホストが戻す
+function doUndo(len) {
+  if (!S.isHost || !Number.isInteger(len) || len < 0 || len >= S.moves.length) return;
+  S.moves = S.moves.slice(0, len);
+  S.undo = (S.undo ?? 0) + 1;
+  S.undoAsk = null;
+  saveRoom();
+  sendMoves();
+  toast('待ったで戻しました');
+}
+
+function askUndo(len) {
+  const by = S.myId;
+  if (S.isHost && !undoApprovers(by).length) { doUndo(len); render(); return; }
+  S.undoAsk = { key: undoKey(by, len), by, len, no: [] };
+  send({ type: 'undo', act: 'ask', gameId: S.gameId, round: S.round, u: S.undo ?? 0, len });
+  render();
+}
+
+function answerUndo(ok) {
+  const a = S.undoAsk;
+  if (!a) return;
+  if (ok && S.isHost) { doUndo(a.len); render(); return; }
+  send({ type: 'undo', act: ok ? 'ok' : 'no', key: a.key });
+  if (!ok) noUndo(a, S.myId);
+  render();
+}
+
+// だめと言った人を足す。言える人が全員だめなら取り下げ
+function noUndo(a, id) {
+  if (!a.no.includes(id)) a.no.push(id);
+  if (undoApprovers(a.by).every((x) => a.no.includes(x))) {
+    if (a.by === S.myId) toast('待ったは断られました');
+    S.undoAsk = null;
+  }
+}
+
+function onUndo(msg) {
+  const a = S.undoAsk;
+  if (msg.act === 'ask') {
+    if (msg.gameId !== S.gameId || msg.round !== S.round || msg.u !== (S.undo ?? 0)) return;
+    if (!Number.isInteger(msg.len) || msg.len < 0 || msg.len >= S.moves.length || !roundOrder().includes(msg.from)) return;
+    if (S.isHost && !undoApprovers(msg.from).length) { doUndo(msg.len); return; }
+    S.undoAsk = { key: undoKey(msg.from, msg.len), by: msg.from, len: msg.len, no: [] };
+  } else if (!a || msg.key !== a.key) {
+    // 古い頼みごとへの返事
+  } else if (msg.act === 'ok') {
+    if (S.isHost && undoApprovers(a.by).includes(msg.from)) doUndo(a.len);
+  } else if (msg.act === 'no') {
+    if (undoApprovers(a.by).includes(msg.from)) noUndo(a, msg.from);
+  } else if (msg.act === 'cancel' && msg.from === a.by) {
+    S.undoAsk = null;
+  }
+}
+
+// 対局の下の段に出す「待った」のボタンか、頼みごとの返事
+function appendUndo(game) {
+  if (game.noUndo || game.live) return;
+  const st = replay(S);
+  if (!st || game.result(st)) return;
+  const me = myPlayer();
+  const a = S.undoAsk;
+  if (a && (a.len >= S.moves.length || !roundOrder().includes(a.by))) S.undoAsk = null; // もう戻せない頼みごと
+  if (S.undoAsk) {
+    const box = document.createElement('div');
+    box.className = 'undo-ask';
+    const text = document.createElement('span');
+    if (a.by === S.myId) {
+      text.textContent = '待ったを頼んでいます…';
+      box.append(text, makeButton('やめる', () => {
+        send({ type: 'undo', act: 'cancel', key: a.key });
+        S.undoAsk = null;
+        render();
+      }, 'ghost small'));
+    } else if (undoApprovers(a.by).includes(S.myId) && !a.no.includes(S.myId)) {
+      text.textContent = `${nameOf(a.by)}が待ったを頼んでいます（${S.moves.length - a.len}手戻す）`;
+      box.append(text, makeButton('いいよ', () => answerUndo(true), 'primary small'), makeButton('だめ', () => answerUndo(false), 'secondary small'));
+    } else {
+      text.textContent = `${nameOf(a.by)}が待ったを頼んでいます`;
+      box.append(text);
+    }
+    ctl().append(box);
+    return;
+  }
+  if (me === null || me === SPECTATOR || !seatsFilled()) return;
+  const mine = moversOf(game).lastIndexOf(me);
+  if (mine < 0) return;
+  const b = makeButton('待った', () => askUndo(mine), 'secondary');
+  b.title = '自分の最後の手の前まで戻します（ほかの人が CPU でなければ、誰か1人の「いいよ」が要ります）';
+  ctl().append(b);
 }
 
 // 同時に動くゲームで、ゲストの手とホスト側の手がぶつかったとき。ゲストの手がまだ打てるなら後ろに足す

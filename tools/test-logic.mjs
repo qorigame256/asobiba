@@ -176,6 +176,21 @@ assert.ok(s);
 assert.equal(s.board[27], 0);
 assert.equal(s.turn, 1);
 assert.deepEqual(s.flipped, [27]);
+// 盤の大きさ（2人だけ。3〜4人はいつも 8×8）
+for (const [size, cells] of [[6, [14, 15, 20, 21]], [10, [44, 45, 54, 55]]]) {
+  const r6 = R.init({ rules: { size } });
+  assert.equal(r6.board.length, size * size, size + '×' + size + ' の盤');
+  assert.deepEqual(cells.map((i) => r6.board[i]), [1, 0, 0, 1], size + '×' + size + ' の最初の石は真ん中');
+  let g = r6; let k = 0;
+  while (!R.result(g) && k++ < 200) {
+    const c = Array.from({ length: size * size }, (_, i) => i).filter((i) => R.apply(g, i));
+    g = R.apply(g, c[Math.floor(Math.random() * c.length)]);
+    assert.ok(g, size + '×' + size + ' を最後まで打てる');
+  }
+  assert.ok(R.result(g), size + '×' + size + ' が終わる');
+}
+assert.equal(R.init({ rules: { players: 3, size: 6 } }).board.length, 64, '3人は盤の大きさを選んでも 8×8');
+assert.equal(R.apply(R.init({ rules: { size: 6 } }), 36), null, '盤の外の番号は打てない');
 // 3〜4人のリバーシ
 assert.equal(R.seatCount({ players: 3 }), 3);
 let rv;
@@ -331,6 +346,47 @@ for (let k = 0; k < 200; k++) {
   }
 }
 console.log('colors stack OK');
+// 7で交換・0で回す（詳細設定）
+{
+  const sz = (o) => base({ rules: { sevenZero: true }, ...o });
+  s = sz({ hands: [['r7', 'g1', 'g2'], ['b1'], ['y1', 'y2', 'y3', 'y4']] });
+  assert.equal(U.apply(s, { p: 0, t: 'play', i: 0 }), null, '3人以上は交換の相手を選ぶ');
+  assert.equal(U.apply(s, { p: 0, t: 'play', i: 0, to: 0 }), null, '自分とは交換できない');
+  t = U.apply(s, { p: 0, t: 'play', i: 0, to: 1 });
+  assert.deepEqual([t.hands[0], t.hands[1], t.turn], [['b1'], ['g1', 'g2'], 1], '7で選んだ人と手札を交換');
+  assert.equal(total(t), total(s));
+  assert.equal(U.apply(base({ hands: s.hands }), { p: 0, t: 'play', i: 0, to: 1 }), null, '設定なしでは相手を付けられない');
+  assert.deepEqual(U.apply(base({ hands: s.hands }), { p: 0, t: 'play', i: 0 }).hands[1], ['b1'], '設定なしでは7は交換しない');
+  const two = sz({ n: 2, hands: [['r7', 'g1'], ['b1', 'b2', 'b3']] });
+  assert.deepEqual(U.apply(two, { p: 0, t: 'play', i: 0 }).hands[0], ['b1', 'b2', 'b3'], '2人は相手を選ばずに交換');
+  s = sz({ hands: [['r0', 'g1'], ['b1'], ['y1', 'y2']] });
+  t = U.apply(s, { p: 0, t: 'play', i: 0 });
+  assert.deepEqual(t.hands, [['y1', 'y2'], ['g1'], ['b1']], '0で全員が次の人へ渡す');
+  t = U.apply({ ...s, dir: -1 }, { p: 0, t: 'play', i: 0 });
+  assert.deepEqual(t.hands, [['b1'], ['y1', 'y2'], ['g1']], '左回りなら逆へ渡す');
+  s = sz({ hands: [['r7'], ['b1'], ['y1']] });
+  t = U.apply(s, { p: 0, t: 'play', i: 0, to: 1 });
+  assert.deepEqual([t.winner, t.hands[0], t.hands[1]], [0, [], ['b1']], '最後の1枚の7は交換せず上がり');
+  s = sz({ hands: [['r7', 'g1', 'g2', 'g3'], ['b1', 'b2', 'b3'], ['y1']] });
+  for (let k = 0; k < 20; k++) {
+    const m = U.cpu(s, 0);
+    if (m.i === 0) assert.equal(m.to, 2, 'CPU は手札がいちばん少ない人と交換');
+  }
+  for (let k = 0; k < 200; k++) {
+    const n = 2 + (k % 9);
+    let st = U.init(n, k * 7907 + 5, { rules: { sevenZero: true, stack: k % 2 === 1 } });
+    let steps = 0;
+    while (!U.result(st)) {
+      const p = U.turn(st);
+      const next = U.apply(st, { ...U.cpu(st, p), p });
+      assert.ok(next, '7・0で CPU が反則の手を出した');
+      assert.equal(total(next), 108, '7・0で札の枚数が変わった');
+      st = next;
+      if (++steps > 5000) throw new Error('7・0のいろあわせが終わらない');
+    }
+  }
+  console.log('colors seven-zero OK');
+}
 
 // ---------- 大富豪 ----------
 const D = GAMES.daifugo;
@@ -1269,6 +1325,23 @@ assert.equal(YT.apply(s, { p: 0, t: 'roll', r: 0, k: 1, keep: [false, false, fal
 s = YT.apply(s, { p: 0, t: 'roll', r: 1, k: 1, keep: [false, false, false, false, false] });
 assert.equal(YT.apply(s, { p: 0, t: 'score', r: 1, cat: 6 }), null, '書いた役には書けない');
 assert.deepEqual(YT.init(3, 21), YT.init(3, 21));
+// 2回目のヨット（詳細設定）: ヨットに50点を書いたあと、5個そろえてほかの役に書くと +100
+{
+  const five = (on, yachtCol) => {
+    const st = YT.init(2, 5, { rules: { bonusYacht: on } });
+    st.pl[0] = { ...st.pl[0], dice: [4, 4, 4, 4, 4], rolls: 1, sheet: [null, null, null, null, null, null, null, null, null, null, null, yachtCol] };
+    st.round = yachtCol === null ? 0 : 1; // 書いた役の数が回の数
+    return st;
+  };
+  let y = YT.apply(five(true, 50), { p: 0, t: 'score', r: 1, cat: 3 });
+  assert.deepEqual([y.pl[0].sheet[3], y.pl[0].extra, totalOf(y.pl[0].sheet, y.pl[0].extra).total], [20, 100, 170], '2回目のヨットで +100');
+  assert.equal(YT.apply(five(false, 50), { p: 0, t: 'score', r: 1, cat: 3 }).pl[0].extra, 0, '設定がなしなら付かない');
+  assert.equal(YT.apply(five(true, 0), { p: 0, t: 'score', r: 1, cat: 3 }).pl[0].extra, 0, 'ヨットが0点なら付かない');
+  const first = five(true, null);
+  assert.equal(YT.apply(first, { p: 0, t: 'score', r: 0, cat: 11 }).pl[0].extra, 0, '1回目のヨットには付かない');
+  y = { ...y, round: 12, pl: y.pl.map((x) => ({ ...x, sheet: x.sheet.map((v) => v ?? 0) })) };
+  assert.equal(YT.result(y).winner, 0, 'ボーナスも合計に入って勝ち負けを決める');
+}
 // CPU どうしで最後まで
 for (let g = 0; g < 20; g++) {
   let st = YT.init(2 + (g % 4), 100 + g);

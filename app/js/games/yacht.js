@@ -5,6 +5,8 @@
 //   1〜6 … その目の合計 / チョイス … 5個の合計 / フォーダイス … 同じ目が4個以上なら5個の合計 / フルハウス … 3個と2個（5個同じも可）なら5個の合計
 //   Sストレート … 4つ続いた目なら 15点 / Bストレート … 5つ続いた目なら 30点 / ヨット … 5個同じなら 50点
 //   1〜6 の合計が 63点以上なら、ボーナス 35点。
+// 詳細設定「2回目のヨット」（2026-10-06 本人の決定。最初はなし）: ヨットの役に50点を書いたあとで、もう一度5個そろえて
+//   ほかの役に書いたら、そのたびに +100点（よくあるヤッツィーのボーナスと同じ。好きな役に書ける特別な決まり（ジョーカー）は入れない。Claude の判断）。
 // サイコロの目は、対局の種・人・回・何回目の振りから作る（apply が乱数を使わず全員の端末で同じになるように）。
 // 手: { p, t: 'roll', r: 何回目, k: 何振り目(1〜3), keep: [残す5つの真偽] } / { p, t: 'score', r: 何回目, cat: 役の番号 }。
 // r と k を入れているので、同じ手が2回届いても2回目は弾かれる（realtime）。
@@ -16,6 +18,7 @@ export const CATS = ['1', '2', '3', '4', '5', '6', 'チョイス', 'フォーダ
 const ROUNDS = CATS.length;
 const BONUS_AT = 63;
 const BONUS = 35;
+const YACHT_BONUS = 100; // 2回目からのヨット（詳細設定）
 
 const counts = (d) => { const c = Array(7).fill(0); for (const x of d) c[x]++; return c; };
 const sum = (d) => d.reduce((a, b) => a + b, 0);
@@ -33,12 +36,16 @@ export function scoreOf(cat, d) {
   return c.some((x) => x === 5) ? 50 : 0;
 }
 
-export function totalOf(sheet) {
+// extra = 2回目からのヨットのボーナスの合計（詳細設定。無ければ 0）
+export function totalOf(sheet, extra = 0) {
   const upper = sheet.slice(0, 6).reduce((a, b) => a + (b ?? 0), 0);
   const rest = sheet.slice(6).reduce((a, b) => a + (b ?? 0), 0);
   const bonus = upper >= BONUS_AT ? BONUS : 0;
-  return { upper, bonus, total: upper + bonus + rest };
+  return { upper, bonus, total: upper + bonus + rest + extra };
 }
+const totalOfPl = (x) => totalOf(x.sheet, x.extra ?? 0);
+// この出目を役 cat に書くと 2回目からのヨットのボーナスが付くか
+const yachtBonus = (s, x, cat) => !!s.bonusYacht && cat !== 11 && x.sheet[11] === 50 && scoreOf(11, x.dice) === 50;
 
 // 人 p の、回 r の k 振り目のサイコロ5個ぶんの目（残すかどうかに関係なく、毎回同じ5つの数を作る）
 function rollDice(seed, p, r, k) {
@@ -92,11 +99,14 @@ export default {
   realtime: true,
   minPlayers: 2,
   maxPlayers: 10,
+  settings: [
+    { key: 'bonusYacht', label: '2回目のヨット', desc: 'ヨットの役に50点を書いたあとで、もう一度5個そろえたら +100点（そのときも、ほかの役を1つ選んで書く）', def: false },
+  ],
 
-  init(n, seed) {
+  init(n, seed, { rules = {} } = {}) {
     return {
-      n, seed, round: 0, step: 0,
-      pl: Array.from({ length: n }, () => ({ dice: [1, 2, 3, 4, 5], rolls: 0, keep: [false, false, false, false, false], sheet: Array(ROUNDS).fill(null) })),
+      n, seed, round: 0, step: 0, bonusYacht: !!rules.bonusYacht,
+      pl: Array.from({ length: n }, () => ({ dice: [1, 2, 3, 4, 5], rolls: 0, keep: [false, false, false, false, false], sheet: Array(ROUNDS).fill(null), extra: 0 })),
     };
   },
 
@@ -116,7 +126,7 @@ export default {
 
   result(s) {
     if (s.round < ROUNDS) return null;
-    const totals = s.pl.map((x) => totalOf(x.sheet).total);
+    const totals = s.pl.map((x) => totalOfPl(x).total);
     const winners = leaders(totals);
     const rk = ranks(totals);
     const ranking = Array.from({ length: s.n }, (_, p) => p).sort((a, b) => rk[a] - rk[b]);
@@ -144,6 +154,7 @@ export default {
       if (x0.rolls < 1 || !Number.isInteger(m.cat) || m.cat < 0 || m.cat >= ROUNDS || x0.sheet[m.cat] !== null) return null;
       const s = clone(s0);
       const x = s.pl[m.p];
+      if (yachtBonus(s, x, m.cat)) x.extra = (x.extra ?? 0) + YACHT_BONUS;
       x.sheet[m.cat] = scoreOf(m.cat, x.dice);
       x.last = m.cat;
       s.step += 1;
@@ -259,9 +270,10 @@ export default {
           b.type = 'button';
           b.className = 'yt-pick';
           const sc = scoreOf(cat, s.pl[me].dice);
-          b.textContent = sc;
-          if (!sc) b.classList.add('zero');
-          b.setAttribute('aria-label', `${label}に ${sc}点を書く`);
+          const plus = yachtBonus(s, s.pl[me], cat) ? YACHT_BONUS : 0;
+          b.textContent = plus ? `${sc}+${plus}` : sc;
+          if (!sc && !plus) b.classList.add('zero');
+          b.setAttribute('aria-label', `${label}に ${sc}点を書く${plus ? `（ヨットのボーナス +${plus}点）` : ''}`);
           b.onclick = () => { if (sc || confirm(`${label}に 0点を書きますか？`)) o.onMove({ t: 'score', r: s.round, cat }); };
           td.append(b);
         }
@@ -277,10 +289,18 @@ export default {
         }, 'bonus');
       }
     });
+    if (s.bonusYacht) {
+      addRow('ヨット追加', (p) => { // 2回目からのヨット（詳細設定）。そろえるたびに +100
+        const td = document.createElement('td');
+        td.className = 'yt-sub' + (p === me ? ' mine' : '');
+        td.textContent = s.pl[p].extra ? `+${s.pl[p].extra}` : '−';
+        return td;
+      }, 'bonus');
+    }
     addRow('合計', (p) => {
       const td = document.createElement('td');
       td.className = 'yt-total' + (p === me ? ' mine' : '');
-      td.textContent = totalOf(s.pl[p].sheet).total;
+      td.textContent = totalOfPl(s.pl[p]).total;
       return td;
     }, 'total');
     wrap.append(table);
