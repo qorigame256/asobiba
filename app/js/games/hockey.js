@@ -10,10 +10,13 @@
 //   ゴールしても止めず、入ったパックだけ入れられた側の陣地に置き直す（もう1つは動き続ける）。
 //   Claude の判断: パックどうしもぶつかる（オンラインでは、両方を同じ端末が動かしているときだけ。片方がほかの端末ならすり抜ける）。
 //   最初は席0と席1の陣地に1つずつ。CPU は自分の陣地にあるパック（その中ではゴールに近い方）を追う。
+// ゴールの広さ（2026-10-06 の9回目。Claude が出した案から本人が推奨どおり選んだ）: 詳細設定（同じ画面は始める前の設定）で
+//   せまい・ふつう（最初。前と同じ）・ひろい。ゴールの幅（GOAL・GOAL3）に倍率（GOAL_SIZES）を掛ける。全員のゴールが同じ幅。
+//   CPU の狙いのずれと守る範囲もゴールの幅に合わせる（台を作る table に幅を渡す）。
 // Claude の判断: 2人の盤は縦長（幅1・高さ1.6）。マレット（打つ道具）は自分の陣地から出られない（2人は半分、3人は中心から見た扇形）。
 //   ゴールされた側から打ち始める。最初は赤（席0）から。
 //
-// 盤の形は「台」（RECT = 2人の長方形、HEX = 3人の六角形）にまとめ、動かし方・同期は台の関数だけを使う。
+// 盤の形は「台」（table で作る。2人の長方形と3人の六角形。ゴールの幅も台が持つ）にまとめ、動かし方・同期は台の関数だけを使う。
 //   台の step はゴールに入れられた席（失点した席）を返す。点数の数え方は2人（取った点）と3人（失点）で違う（addGoal）。
 //
 // オンラインの同期（試作）: 「パックが今ある陣地の席を動かしている端末」がパックの動きを計算してほかへ送る（持ち主）。
@@ -30,7 +33,7 @@ const W = 1;
 const H = 1.6;
 const R_P = 0.042; // パックの半径
 const R_M = 0.07; // マレットの半径
-const GOAL = 0.36; // ゴールの幅
+export const GOAL = 0.36; // ゴールの幅（ゴールの広さが「ふつう」のとき）
 const MAX_V = 3.4; // パックの最高速度（盤の幅 / 秒）
 const MALLET_V = 7; // マレットが指を追いかける最高速度
 const FRICTION = 0.3;
@@ -45,7 +48,15 @@ const GOAL_PAUSE = 1.2;
 // （両隣の壁の半分ずつを含む）。広さは2人の盤より少し広い（3人分）
 export const HEX_R = 0.83; // 中心から角まで
 export const HEX_A = (HEX_R * Math.sqrt(3)) / 2; // 中心から辺まで
-export const GOAL3 = 0.38;
+export const GOAL3 = 0.38; // ゴールの幅（ふつうのとき）
+// ゴールの広さ（詳細設定 goal）。幅に掛ける倍率。Claude の判断: せまい 0.75・ひろい 1.35
+//   （2人: 0.27・0.486。3人: 0.285・0.513 で、六角形の辺 0.83 の角から 0.16 離れる。せまいでもパック2つ分より広く、パックは通れる）
+export const GOAL_SIZES = {
+  narrow: { name: 'せまい', mul: 0.75 },
+  normal: { name: 'ふつう', mul: 1 },
+  wide: { name: 'ひろい', mul: 1.35 },
+};
+const goalKeyOf = (k) => (Object.hasOwn(GOAL_SIZES, k) ? k : 'normal');
 const PAD = 0.03; // 縁の線を描く余白
 
 export const CPU_LEVELS = {
@@ -131,8 +142,9 @@ export function bouncePucks(a, b, e = E_HIT) {
 }
 
 // パックを dt 秒進める。ゴールに入ったら点を取った側（0 / 1）を返す。mallets は当たりを見るマレット。
-// ev（任意）を渡すと、マレットに当たった強さ（ev.hit）と壁に当たった強さ（ev.wall）のいちばん大きいものを書き込む（効果音用）
-export function stepPuck(puck, mallets, dt, ev = null) {
+// ev（任意）を渡すと、マレットに当たった強さ（ev.hit）と壁に当たった強さ（ev.wall）のいちばん大きいものを書き込む（効果音用）。
+// goal = ゴールの幅（ゴールの広さの設定で変わる）
+export function stepPuck(puck, mallets, dt, ev = null, goal = GOAL) {
   friction(puck, dt);
   // マレットに押されて壁へめり込むことがあるので、マレットの当たりを先に、壁を後に見る
   let hit = 0;
@@ -140,12 +152,12 @@ export function stepPuck(puck, mallets, dt, ev = null) {
   for (const m of mallets) hit = Math.max(hit, bounceCircle(puck, m.x, m.y, R_P + R_M, m.vx, m.vy));
   if (puck.x < R_P) { wall = Math.max(wall, -puck.vx); puck.x = R_P; puck.vx = Math.abs(puck.vx) * E_WALL; }
   if (puck.x > W - R_P) { wall = Math.max(wall, puck.vx); puck.x = W - R_P; puck.vx = -Math.abs(puck.vx) * E_WALL; }
-  const mouth = Math.abs(puck.x - W / 2) < GOAL / 2;
+  const mouth = Math.abs(puck.x - W / 2) < goal / 2;
   if (puck.y < R_P && !mouth) { wall = Math.max(wall, -puck.vy); puck.y = R_P; puck.vy = Math.abs(puck.vy) * E_WALL; }
   if (puck.y > H - R_P && !mouth) { wall = Math.max(wall, puck.vy); puck.y = H - R_P; puck.vy = -Math.abs(puck.vy) * E_WALL; }
   if (puck.y < -R_P) return 0; // 上のゴール（青の陣地）に入った → 赤の点
   if (puck.y > H + R_P) return 1;
-  for (const px of [W / 2 - GOAL / 2, W / 2 + GOAL / 2]) for (const py of [0, H]) wall = Math.max(wall, bounceCircle(puck, px, py, R_P, 0, 0, E_WALL));
+  for (const px of [W / 2 - goal / 2, W / 2 + goal / 2]) for (const py of [0, H]) wall = Math.max(wall, bounceCircle(puck, px, py, R_P, 0, 0, E_WALL));
   if (ev) { ev.hit = Math.max(ev.hit, hit); ev.wall = Math.max(ev.wall, wall); }
   capSpeed(puck);
   return null;
@@ -160,12 +172,12 @@ function bumpSound(ev) {
 /* ---------- CPU（2人の上側・プレイヤー1） ---------- */
 
 // 打ち返せそうなら相手のゴールへ向けて打ち込み、相手の陣地にあるときはゴールの前で構える。
-// 強さは、動く速さ・判断の間隔（反応の遅さ）・狙いのずれで変える
-export function cpuTarget(puck, m, lv, rnd) {
+// 強さは、動く速さ・判断の間隔（反応の遅さ）・狙いのずれで変える。goal = ゴールの幅（狙う広さと、守る範囲に使う）
+export function cpuTarget(puck, m, lv, rnd, goal = GOAL) {
   const defY = 0.2;
   if (puck.y < H / 2 + R_P) {
     if (puck.y < m.y - 0.01) return { x: W / 2 + (puck.x - W / 2) * 0.5, y: R_M + 0.01 }; // パックが後ろにある → 下がって回り込む
-    const gx = W / 2 + (rnd() - 0.5) * GOAL * (1 + lv.err * 6);
+    const gx = W / 2 + (rnd() - 0.5) * goal * (1 + lv.err * 6);
     const ax = gx - puck.x;
     const ay = H - puck.y;
     const al = Math.hypot(ax, ay);
@@ -179,7 +191,7 @@ export function cpuTarget(puck, m, lv, rnd) {
     x = ((x - R_P) % (2 * span) + 2 * span) % (2 * span);
     x = R_P + (x > span ? 2 * span - x : x);
   }
-  x = Math.min(W / 2 + GOAL / 2 + 0.05, Math.max(W / 2 - GOAL / 2 - 0.05, x));
+  x = Math.min(W / 2 + goal / 2 + 0.05, Math.max(W / 2 - goal / 2 - 0.05, x));
   return { x: x + (rnd() - 0.5) * lv.err * 2, y: defY };
 }
 
@@ -191,10 +203,17 @@ const dir = (deg) => ({ x: Math.cos((deg * Math.PI) / 180), y: Math.sin((deg * M
 const seatDir = (p) => dir(90 + 120 * p);
 // 6つの辺（u = 外向きの向き）。goal = その辺をゴールにしている席（壁は -1）
 const EDGES = [30, 90, 150, 210, 270, 330].map((deg) => ({ u: dir(deg), goal: (deg - 90) % 120 === 0 ? (((deg - 90) / 120) % 3 + 3) % 3 : -1 }));
-const POSTS = [0, 1, 2].flatMap((p) => {
-  const u = seatDir(p);
-  return [1, -1].map((k) => ({ x: u.x * HEX_A - u.y * k * (GOAL3 / 2), y: u.y * HEX_A + u.x * k * (GOAL3 / 2) }));
-});
+// ゴールの両端の柱（ゴールの幅ごとに1回だけ作って覚えておく）
+const POSTS = new Map();
+const postsOf = (goal) => {
+  if (!POSTS.has(goal)) {
+    POSTS.set(goal, [0, 1, 2].flatMap((p) => {
+      const u = seatDir(p);
+      return [1, -1].map((k) => ({ x: u.x * HEX_A - u.y * k * (goal / 2), y: u.y * HEX_A + u.x * k * (goal / 2) }));
+    }));
+  }
+  return POSTS.get(goal);
+};
 // 席ごとのマレットの動ける範囲（「向き・点 ≦ 上限」の組の並び）: 盤の内側と、自分の扇形（境目から R_M 離れる）
 const MALLET_LIMITS = [0, 1, 2].map((p) => {
   const c = 90 + 120 * p;
@@ -224,15 +243,15 @@ export function clampHex(p, x, y) {
   return q;
 }
 
-// パックを dt 秒進める。ゴールに入ったら、入れられた席（0〜2）を返す
-export function stepHex(puck, mallets, dt, ev = null) {
+// パックを dt 秒進める。ゴールに入ったら、入れられた席（0〜2）を返す。goal = ゴールの幅
+export function stepHex(puck, mallets, dt, ev = null, goal = GOAL3) {
   friction(puck, dt);
   let hit = 0;
   let wall = 0;
   for (const m of mallets) hit = Math.max(hit, bounceCircle(puck, m.x, m.y, R_P + R_M, m.vx, m.vy));
   for (const e of EDGES) {
     const d = puck.x * e.u.x + puck.y * e.u.y; // 中心から外向きの距離
-    if (e.goal >= 0 && Math.abs(-puck.x * e.u.y + puck.y * e.u.x) < GOAL3 / 2) { // ゴールの口の前
+    if (e.goal >= 0 && Math.abs(-puck.x * e.u.y + puck.y * e.u.x) < goal / 2) { // ゴールの口の前
       if (d > HEX_A + R_P) return e.goal;
       continue;
     }
@@ -243,7 +262,7 @@ export function stepHex(puck, mallets, dt, ev = null) {
       if (vn > 0) { wall = Math.max(wall, vn); puck.vx -= (1 + E_WALL) * vn * e.u.x; puck.vy -= (1 + E_WALL) * vn * e.u.y; }
     }
   }
-  for (const q of POSTS) wall = Math.max(wall, bounceCircle(puck, q.x, q.y, R_P, 0, 0, E_WALL));
+  for (const q of postsOf(goal)) wall = Math.max(wall, bounceCircle(puck, q.x, q.y, R_P, 0, 0, E_WALL));
   if (ev) { ev.hit = Math.max(ev.hit, hit); ev.wall = Math.max(ev.wall, wall); }
   capSpeed(puck);
   return null;
@@ -256,7 +275,7 @@ const rot = (o, deg) => {
   const s = Math.sin((deg * Math.PI) / 180);
   return { x: o.x * c - o.y * s, y: o.x * s + o.y * c };
 };
-export function cpuHex(p, puck, m, lv, rnd, mallets) {
+export function cpuHex(p, puck, m, lv, rnd, mallets, goal = GOAL3) {
   const back = (o) => rot(o, 120 * p);
   const q = rot(puck, -120 * p);
   const v = rot({ x: puck.vx, y: puck.vy }, -120 * p);
@@ -271,7 +290,7 @@ export function cpuHex(p, puck, m, lv, rnd, mallets) {
     }).sort((a, b) => b.open - a.open);
     const o = (rnd() < 0.75 ? opp[0] : opp[1]).o;
     const u = seatDir(o);
-    const off = (rnd() - 0.5) * GOAL3 * (1 + lv.err * 6);
+    const off = (rnd() - 0.5) * goal * (1 + lv.err * 6);
     const gx = u.x * HEX_A - u.y * off;
     const gy = u.y * HEX_A + u.x * off;
     const ax = gx - puck.x;
@@ -282,29 +301,39 @@ export function cpuHex(p, puck, m, lv, rnd, mallets) {
   }
   let x = q.x;
   if (v.y > 0.05) x = q.x + v.x * ((defY - q.y) / v.y); // こちらへ向かってくる → 構える線に来る位置を読む（壁の跳ね返りは読まない）
-  x = Math.min(GOAL3 / 2 + 0.05, Math.max(-GOAL3 / 2 - 0.05, x));
+  x = Math.min(goal / 2 + 0.05, Math.max(-goal / 2 - 0.05, x));
   return back({ x: x + (rnd() - 0.5) * lv.err * 2, y: defY });
 }
 
 /* ---------- 台（盤の形ごとの関数の組） ---------- */
 
-const RECT = {
-  n: 2, w: W, h: H,
-  step(puck, ms, dt, ev) { const g = stepPuck(puck, ms, dt, ev); return g === null ? null : 1 - g; },
-  clamp: clampMallet,
-  zone: (q) => (q.y > H / 2 ? 0 : 1),
-  serve: servePuck,
-  home: homeMallet,
-  cpu(p, puck, m, lv, rnd) {
-    if (p === 1) return cpuTarget(puck, m, lv, rnd);
-    const t = cpuTarget(flipO(puck), flipO(m), lv, rnd);
-    return { x: W - t.x, y: H - t.y };
-  },
-};
-const HEX = {
-  n: 3, w: 2 * (HEX_R + PAD), h: 2 * (HEX_A + PAD),
-  step: stepHex, clamp: clampHex, zone: zoneHex, serve: serveHex, home: homeHex, cpu: cpuHex,
-};
+// 台を作る。n = 人数（2: 長方形、3: 六角形）、goalKey = ゴールの広さ（GOAL_SIZES の鍵）。goal = この台のゴールの幅
+function table(n, goalKey = 'normal') {
+  const mul = GOAL_SIZES[goalKeyOf(goalKey)].mul;
+  if (n === 3) {
+    const goal = GOAL3 * mul;
+    return {
+      n: 3, w: 2 * (HEX_R + PAD), h: 2 * (HEX_A + PAD), goal,
+      step: (puck, ms, dt, ev) => stepHex(puck, ms, dt, ev, goal),
+      clamp: clampHex, zone: zoneHex, serve: serveHex, home: homeHex,
+      cpu: (p, puck, m, lv, rnd, ms) => cpuHex(p, puck, m, lv, rnd, ms, goal),
+    };
+  }
+  const goal = GOAL * mul;
+  return {
+    n: 2, w: W, h: H, goal,
+    step(puck, ms, dt, ev) { const g = stepPuck(puck, ms, dt, ev, goal); return g === null ? null : 1 - g; },
+    clamp: clampMallet,
+    zone: (q) => (q.y > H / 2 ? 0 : 1),
+    serve: servePuck,
+    home: homeMallet,
+    cpu(p, puck, m, lv, rnd) {
+      if (p === 1) return cpuTarget(puck, m, lv, rnd, goal);
+      const t = cpuTarget(flipO(puck), flipO(m), lv, rnd, goal);
+      return { x: W - t.x, y: H - t.y };
+    },
+  };
+}
 
 // 点数: 2人は取った点、3人は失点（c = 入れられた席）
 export function addGoal(n, score, c) {
@@ -389,7 +418,7 @@ function drawRect(ctx, view, st, P, opts) {
     ctx.fillStyle = COLORS[p];
     ctx.globalAlpha = 0.85;
     const [gx, gy] = P(W / 2, y);
-    ctx.fillRect(gx - (GOAL / 2) * s, gy - s * 0.012, GOAL * s, s * 0.024);
+    ctx.fillRect(gx - (opts.goal / 2) * s, gy - s * 0.012, opts.goal * s, s * 0.024);
     ctx.globalAlpha = 1;
   }
   // 点数（盤の中央の線の近く。2人で同じ画面のときは上の人の分を逆さに）
@@ -412,7 +441,7 @@ function drawRect(ctx, view, st, P, opts) {
   }
 }
 
-function drawHex(ctx, view, st, P) {
+function drawHex(ctx, view, st, P, goal) {
   const { s, w, h } = view;
   ctx.clearRect(0, 0, w, h);
   const corners = [0, 1, 2, 3, 4, 5].map((k) => { const v = dir(60 * k); return P(v.x * HEX_R, v.y * HEX_R); });
@@ -449,8 +478,8 @@ function drawHex(ctx, view, st, P) {
   ctx.lineWidth = Math.max(5, s * 0.03);
   for (let p = 0; p < 3; p++) {
     const u = seatDir(p);
-    const [ax, ay] = P(u.x * HEX_A - u.y * (GOAL3 / 2), u.y * HEX_A + u.x * (GOAL3 / 2));
-    const [bx, by] = P(u.x * HEX_A + u.y * (GOAL3 / 2), u.y * HEX_A - u.x * (GOAL3 / 2));
+    const [ax, ay] = P(u.x * HEX_A - u.y * (goal / 2), u.y * HEX_A + u.x * (goal / 2));
+    const [bx, by] = P(u.x * HEX_A + u.y * (goal / 2), u.y * HEX_A - u.x * (goal / 2));
     ctx.strokeStyle = COLORS[p];
     ctx.beginPath();
     ctx.moveTo(ax, ay);
@@ -518,7 +547,8 @@ function mount(root, opts) {
   const panel = el('div', 'hk-panel');
   root.append(panel, canvas); // 設定・もう一回は盤の上（盤の下だとスマホで見落とすため）
   let n = online && Number(opts.rules?.players) === 3 ? 3 : 2;
-  let T = n === 3 ? HEX : RECT;
+  let goalKey = online ? goalKeyOf(opts.rules?.goal) : 'normal'; // ゴールの広さ
+  let T = table(n, goalKey);
   let pucks = online && Number(opts.rules?.pucks) === 2 ? 2 : 1; // パックの数
   const view = { s: 1, w: 1, h: 1 };
   // 盤の座標 ↔ 画面の座標。自分は常に画面の下側（2人: オンラインの青は上下逆さ。3人: 自分のゴールが下に来るように回す）
@@ -661,7 +691,8 @@ function mount(root, opts) {
     if (opts.mode === 'cpu') return p === 0 ? 'あなた' : n === 2 ? 'CPU' : `CPU${p}`;
     return PLAYERS[p];
   };
-  const goalText = () => (n === 2 ? `${target}点先取` : `${target}点取られたら終わり`) + (pucks === 2 ? '・パック2つ' : '');
+  const goalText = () => (n === 2 ? `${target}点先取` : `${target}点取られたら終わり`) + (pucks === 2 ? '・パック2つ' : '')
+    + (goalKey !== 'normal' ? `・ゴール${GOAL_SIZES[goalKey].name}` : '');
   // 決着したときの盤の上の文（画面に描くので色の名前を使う）
   function overBanner() {
     const me = perspective();
@@ -747,6 +778,10 @@ function mount(root, opts) {
     const rowP = el('label', 'hk-row');
     rowP.append(el('span', '', 'パック'), pk);
     box.append(rowP);
+    const gk = selectEl(Object.entries(GOAL_SIZES).map(([k, v]) => [k, v.name]), goalKeyOf(prefs.goal));
+    const rowG = el('label', 'hk-row');
+    rowG.append(el('span', '', 'ゴールの広さ'), gk);
+    box.append(rowG);
     let lv;
     if (opts.mode === 'cpu') {
       lv = selectEl(Object.entries(CPU_LEVELS).map(([k, v]) => [k, v.name]), CPU_LEVELS[prefs.level] ? prefs.level : 'weak');
@@ -759,7 +794,8 @@ function mount(root, opts) {
     // 人数を変えたら、盤の形と説明をその場で切り替えて見せる
     const showPlayers = () => {
       n = pl && Number(pl.value) === 3 ? 3 : 2;
-      T = n === 3 ? HEX : RECT;
+      goalKey = goalKeyOf(gk.value);
+      T = table(n, goalKey);
       pucks = Number(pk.value) === 2 ? 2 : 1;
       resetState();
       ptsLabel.textContent = n === 3 ? '何点取られたら終わり' : '何点先取';
@@ -772,10 +808,11 @@ function mount(root, opts) {
     };
     if (pl) pl.onchange = showPlayers;
     pk.onchange = showPlayers;
+    gk.onchange = showPlayers; // ゴールの幅もその場で盤に描いて見せる
     box.append(btn('始める', 'primary', () => {
       target = Number(pts.value);
       if (lv) level = CPU_LEVELS[lv.value];
-      savePrefs({ points: target, level: lv?.value ?? prefs.level, players: pl ? n : prefs.players, pucks });
+      savePrefs({ points: target, level: lv?.value ?? prefs.level, players: pl ? n : prefs.players, pucks, goal: goalKey });
       startLocal();
     }));
     panel.append(box);
@@ -1006,8 +1043,8 @@ function mount(root, opts) {
   function frame(now) {
     if (!alive) return;
     tick(now);
-    if (n === 2) drawRect(ctx, view, st, toScreen, { rotateTop: opts.mode === 'two', flip });
-    else drawHex(ctx, view, st, toScreen);
+    if (n === 2) drawRect(ctx, view, st, toScreen, { rotateTop: opts.mode === 'two', flip, goal: T.goal });
+    else drawHex(ctx, view, st, toScreen, T.goal);
     raf = requestAnimationFrame(frame);
   }
   // 画面が隠れて描き替えが止まっても（ほかのアプリへ切り替えたときなど）、オンラインでは位置のやり取りを続ける
@@ -1052,6 +1089,7 @@ export default {
   settings: [
     { key: 'players', label: '人数', desc: '3人は六角形の盤で、人が足りなければ CPU が入る', def: 2, choices: [[2, '2人'], [3, '3人']] },
     { key: 'points', label: '何点で終わり', desc: '2人は先にこの点を取った方の勝ち。3人は誰かがこの数だけ入れられたら終わりで、失点の少ない人の勝ち', def: 7, choices: POINTS.map((p) => [p, `${p}点`]) },
+    { key: 'goal', label: 'ゴールの広さ', desc: 'ひろいほど点が入りやすく、1試合が短くなる（全員のゴールが同じ広さ）', def: 'normal', choices: Object.entries(GOAL_SIZES).map(([k, v]) => [k, v.name]) },
     { key: 'pucks', label: 'パック', desc: '2つにすると、2つのパックで同時に打ち合う（パックどうしもぶつかる。ゴールしても止まらずに続く）', def: 1, choices: [[1, '1つ'], [2, '2つ']] },
     { key: 'level', label: 'CPU の強さ', desc: '3人で CPU が入るとき', def: 'weak', choices: Object.entries(CPU_LEVELS).map(([k, v]) => [k, v.name]) },
   ],

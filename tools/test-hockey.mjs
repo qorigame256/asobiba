@@ -1,8 +1,10 @@
 // エアホッケーの動きの自動確認（node tools/test-hockey.mjs）。
 // CPU どうし（下側は上下を入れ替えて同じ CPU を使う）で何試合も打たせ、パックが盤の外へ抜けない・決着が付く・
 // 強い CPU が弱い CPU に勝ち越す、を確かめる。3人（六角形の盤）も同じことを確かめる。画面は使わない。
-import {
-  stepPuck, cpuTarget, clampMallet, CPU_LEVELS, stepHex, clampHex, cpuHex, zoneHex, addGoal, overOf, HEX_A, GOAL3, bouncePucks, scoreOf,
+// ゴールの広さ（せまい・ひろい）でも、決着が付く・パックが壁を抜けない・ひろいほど1試合が短い、を確かめる。
+import HOCKEY, {
+  stepPuck, cpuTarget, clampMallet, CPU_LEVELS, stepHex, clampHex, cpuHex, zoneHex, addGoal, overOf, HEX_A, HEX_R, GOAL3, bouncePucks, scoreOf,
+  GOAL_SIZES,
 } from '../app/js/games/hockey.js';
 import { mulberry32 } from '../app/js/games/util.js';
 
@@ -28,8 +30,8 @@ function move(m, p, t, maxV, dt) {
 }
 const flip = (o) => ({ x: W - o.x, y: H - o.y, vx: -(o.vx ?? 0), vy: -(o.vy ?? 0) });
 
-// 1試合。lv0 = 下側の CPU、lv1 = 上側の CPU。返り値は勝った側・時間・おかしな所
-function match(lv0, lv1, seed, target = 7) {
+// 1試合。lv0 = 下側の CPU、lv1 = 上側の CPU。goal = ゴールの幅。返り値は勝った側・時間・おかしな所
+function match(lv0, lv1, seed, target = 7, goal = GOAL) {
   const rnd = mulberry32(seed);
   const score = [0, 0];
   let puck = { x: W / 2, y: H * 0.72, vx: 0, vy: 0 };
@@ -47,17 +49,17 @@ function match(lv0, lv1, seed, target = 7) {
       if (timers[p] > 0) continue;
       const lv = p === 0 ? lv0 : lv1;
       timers[p] = lv.react;
-      goals[p] = p === 1 ? cpuTarget(puck, ms[1], lv, rnd) : flip(cpuTarget(flip(puck), flip(ms[0]), lv, rnd));
+      goals[p] = p === 1 ? cpuTarget(puck, ms[1], lv, rnd, goal) : flip(cpuTarget(flip(puck), flip(ms[0]), lv, rnd, goal));
     }
     const n = Math.ceil(dt / (1 / 240));
     let g = null;
     for (let i = 0; i < n && g === null; i++) {
       move(ms[0], 0, goals[0], lv0.speed, dt / n);
       move(ms[1], 1, goals[1], lv1.speed, dt / n);
-      g = stepPuck(puck, ms, dt / n);
+      g = stepPuck(puck, ms, dt / n, null, goal);
       maxV = Math.max(maxV, Math.hypot(puck.vx, puck.vy));
       const out = puck.x < R_P - 1e-9 || puck.x > W - R_P + 1e-9
-        || ((puck.y < R_P - 1e-6 || puck.y > H - R_P + 1e-6) && Math.abs(puck.x - W / 2) >= GOAL / 2);
+        || ((puck.y < R_P - 1e-6 || puck.y > H - R_P + 1e-6) && Math.abs(puck.x - W / 2) >= goal / 2);
       if (out) return { error: `パックが壁を抜けた (${puck.x.toFixed(3)}, ${puck.y.toFixed(3)})` };
     }
     stuck = Math.hypot(puck.vx, puck.vy) < 0.02 ? stuck + dt : 0;
@@ -118,13 +120,13 @@ console.log(`   いちばん長い試合 ${Math.round(longest)}秒・パック�
 const dir = (deg) => ({ x: Math.cos((deg * Math.PI) / 180), y: Math.sin((deg * Math.PI) / 180) });
 const seatDir = (p) => dir(90 + 120 * p);
 const EDGE_DEGS = [30, 90, 150, 210, 270, 330];
-// 盤の内側にいるか（ゴールの口の前は外へ出てよい）。r = 円の半径
-function insideHex(o, r, allowMouth) {
+// 盤の内側にいるか（ゴールの口の前は外へ出てよい）。r = 円の半径、goal = ゴールの幅
+function insideHex(o, r, allowMouth, goal = GOAL3) {
   for (const deg of EDGE_DEGS) {
     const u = dir(deg);
     const d = o.x * u.x + o.y * u.y;
     const t = -o.x * u.y + o.y * u.x;
-    const mouth = allowMouth && (deg - 90) % 120 === 0 && Math.abs(t) < GOAL3 / 2;
+    const mouth = allowMouth && (deg - 90) % 120 === 0 && Math.abs(t) < goal / 2;
     if (!mouth && d > HEX_A - r + 1e-6) return false;
   }
   return true;
@@ -146,8 +148,8 @@ function moveHex(m, p, t, maxV, dt) {
 }
 const homeHex = (p) => { const u = seatDir(p); return { x: u.x * (HEX_A - 0.16), y: u.y * (HEX_A - 0.16), vx: 0, vy: 0 }; };
 
-// 1試合。lvs = 席ごとの CPU の強さ。返り値は順位・時間・おかしな所
-function match3(lvs, seed, target = 7) {
+// 1試合。lvs = 席ごとの CPU の強さ。goal = ゴールの幅。返り値は順位・時間・おかしな所
+function match3(lvs, seed, target = 7, goal = GOAL3) {
   const rnd = mulberry32(seed);
   let score = [0, 0, 0];
   let puck = { x: 0, y: 0.3, vx: 0, vy: 0 };
@@ -163,7 +165,7 @@ function match3(lvs, seed, target = 7) {
       timers[p] -= dt;
       if (timers[p] > 0) continue;
       timers[p] = lvs[p].react;
-      goals[p] = cpuHex(p, puck, ms[p], lvs[p], rnd, ms);
+      goals[p] = cpuHex(p, puck, ms[p], lvs[p], rnd, ms, goal);
     }
     const n = Math.ceil(dt / (1 / 240));
     let g = null;
@@ -172,8 +174,8 @@ function match3(lvs, seed, target = 7) {
         moveHex(ms[p], p, goals[p], lvs[p].speed, dt / n);
         if (!insideHex(ms[p], 0.07, false) || !inSector(p, ms[p], 0.07)) return { error: `マレット${p}が範囲の外 (${ms[p].x.toFixed(3)}, ${ms[p].y.toFixed(3)})` };
       }
-      g = stepHex(puck, ms, dt / n);
-      if (g === null && !insideHex(puck, R_P, true)) return { error: `パックが壁を抜けた (${puck.x.toFixed(3)}, ${puck.y.toFixed(3)})` };
+      g = stepHex(puck, ms, dt / n, null, goal);
+      if (g === null && !insideHex(puck, R_P, true, goal)) return { error: `パックが壁を抜けた (${puck.x.toFixed(3)}, ${puck.y.toFixed(3)})` };
     }
     stuck = Math.hypot(puck.vx, puck.vy) < 0.02 ? stuck + dt : 0;
     if (stuck > 20) return { error: `パックが20秒止まったまま (${puck.x.toFixed(2)}, ${puck.y.toFixed(2)})` };
@@ -296,6 +298,77 @@ function match3(lvs, seed, target = 7) {
   }
   check('パック2つ: CPU どうしで、パックが壁を抜けず・ほとんど重ならない', ok);
   check('パック2つ: CPU どうしで決着が付く', done >= 18, `${done}/20 試合・ゴール ${goals}`);
+}
+
+// ゴールの広さ（詳細設定 goal）
+{
+  const setting = HOCKEY.settings.find((x) => x.key === 'goal');
+  check('ゴールの広さ: 詳細設定は せまい・ふつう・ひろい で、最初は ふつう（前と同じ幅）',
+    setting?.def === 'normal' && JSON.stringify(setting.choices) === '[["narrow","せまい"],["normal","ふつう"],["wide","ひろい"]]' && GOAL_SIZES.normal.mul === 1);
+  // 形: パックが柱の間を通れる・柱が盤の角や横の壁と重ならない
+  let shape = true;
+  for (const { mul } of Object.values(GOAL_SIZES)) {
+    const g2 = GOAL * mul;
+    const g3 = GOAL3 * mul;
+    if (g2 - 2 * R_P < 2 * R_P + 0.05 || W / 2 + g2 / 2 > W - 2 * R_P - 0.05) shape = false; // 2人: 柱の間＞パック、柱と横の壁の間もパックが通れる
+    if (g3 - 2 * R_P < 2 * R_P + 0.05 || g3 / 2 > HEX_R / 2 - 2 * R_P - 0.05) shape = false; // 3人: 辺の長さ = HEX_R。柱と角の間もパックが通れる
+  }
+  check('ゴールの広さ: どの広さでもパックが柱の間を通れ、柱が角や横の壁と重ならない', shape);
+  // 口の中と外: どの広さでも、柱の少し内側をまっすぐ打てば入り、柱の少し外側なら跳ね返る（柱の近くは柱に当たるので避ける）
+  const shoot = (x, goal) => {
+    const q = { x, y: 0.1, vx: 0, vy: -3 };
+    let g = null;
+    for (let i = 0; i < 120 && g === null; i++) g = stepPuck(q, [], 1 / 240, null, goal);
+    return g;
+  };
+  const shoot3 = (off, goal) => {
+    const q = { x: off, y: 0.3, vx: 0, vy: 3 }; // 席0（下）のゴールへまっすぐ
+    let g = null;
+    for (let i = 0; i < 120 && g === null; i++) g = stepHex(q, [], 1 / 240, null, goal);
+    return g;
+  };
+  let mouth2 = true;
+  let mouth3 = true;
+  for (const { mul } of Object.values(GOAL_SIZES)) {
+    const h2 = (GOAL * mul) / 2;
+    const h3 = (GOAL3 * mul) / 2;
+    if (shoot(W / 2 + h2 - R_P - 0.01, GOAL * mul) !== 0 || shoot(W / 2 + h2 + R_P + 0.01, GOAL * mul) !== null) mouth2 = false;
+    if (shoot3(-(h3 - R_P - 0.01), GOAL3 * mul) !== 0 || shoot3(h3 + R_P + 0.01, GOAL3 * mul) !== null) mouth3 = false;
+  }
+  check('ゴールの広さ: 2人の口が広さに合わせて変わる（柱の内側は入り、外側は跳ね返る）', mouth2);
+  check('ゴールの広さ: 3人の口が広さに合わせて変わる', mouth3);
+  // CPU どうし（ふつう対ふつう）。広さごとに、決着が付く・壁を抜けない・1試合の長さ
+  const avg2 = {};
+  const avg3 = {};
+  for (const key of ['narrow', 'normal', 'wide']) {
+    const mul = GOAL_SIZES[key].mul;
+    let err = 0;
+    let sum = 0;
+    let cnt = 0;
+    for (let seed = 1; seed <= 20; seed++) {
+      const r = match(L.normal, L.normal, seed + 900, 7, GOAL * mul);
+      if (r.error) { err++; if (err <= 3) console.log('   ' + r.error); continue; }
+      sum += r.t; cnt++;
+    }
+    avg2[key] = cnt ? sum / cnt : Infinity;
+    let err3 = 0;
+    let sum3 = 0;
+    let cnt3 = 0;
+    for (let seed = 1; seed <= 15; seed++) {
+      const r = match3([L.normal, L.normal, L.normal], seed + 1700, 7, GOAL3 * mul);
+      if (r.error) { err3++; if (err3 <= 3) console.log('   ' + r.error); continue; }
+      sum3 += r.t; cnt3++;
+    }
+    avg3[key] = cnt3 ? sum3 / cnt3 : Infinity;
+    if (key !== 'normal') {
+      const name = GOAL_SIZES[key].name;
+      check(`ゴール${name}: 2人の CPU どうし20試合で、パックが壁を抜けない・止まり続けない・必ず決着する`, err === 0, `${err}件`);
+      check(`ゴール${name}: 3人の CPU どうし15試合で、パック・マレットが範囲を抜けない・止まり続けない・必ず決着する`, err3 === 0, `${err3}件`);
+    }
+  }
+  const sec = (o) => ['narrow', 'normal', 'wide'].map((k) => `${GOAL_SIZES[k].name} ${Math.round(o[k])}秒`).join('・');
+  check('ゴールの広さ: ひろいほど1試合が短い（2人）', avg2.wide < avg2.normal && avg2.normal < avg2.narrow, `平均 ${sec(avg2)}`);
+  check('ゴールの広さ: ひろいほど1試合が短い（3人）', avg3.wide < avg3.normal && avg3.normal < avg3.narrow, `平均 ${sec(avg3)}`);
 }
 
 console.log(failed ? `\n${failed} 件の失敗` : '\nすべて OK');
