@@ -25,6 +25,8 @@
 // beg = 初心者マークを付けている人の id の一覧（各自が自分の端末で付け外しし、ホストが集めて全員へ送る）。
 // undo = この対局で「待った」をした回数（盤のゲームのオンライン）。待ったをすると手の一覧が短くなり、ふつうの同期（長い方が正）では
 //   戻せないので、ホストだけが手を削って undo を1つ進め、受け手は undo が大きい一覧をそのまま受け入れる。対局が替わると 0 に戻る。
+// stay = 勝ち残り（2026-10-06 本人の決定。盤のゲームのオンライン）。オンなら、もう一回で負けた人が観戦の人と交代する。line = 交代を待つ人の順番。
+//   どちらもホストが決めて全員へ送る（ほかの人の画面にも「次に入る人」を出すため）。
 
 import { GAMES, GAME_ORDER } from './games/index.js';
 import { connectRoom } from './net.js';
@@ -62,7 +64,7 @@ function myName() {
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -145,11 +147,47 @@ function tallyHtml() {
   return `🏆 この部屋の成績（${t.games}回）: ${list}`;
 }
 
+/* ---------- 勝ち残り（2026-10-06 本人の決定）: 盤のゲームのもう一回で、負けた人が観戦の人と交代する ---------- */
+// Claude の判断: ホストが待合室で付け外しする（部屋の設定。ゲームを変えても残る）。エアホッケーは結果が main.js を通らないので使えない。
+// 勝った人は残り、負けた人の席に、待っている人（前から待っている順 → 負けた人の順）が入る。待っている人がいなければ、負けた人がそのまま続ける。
+// 負けた CPU は待っている人がいれば抜け、いなければ残る。部屋を出た人の席も、待っている人がいれば埋める。
+// 新しく入った人から先に打つ。引き分け・待っている人がいないときは、いつものもう一回（打つ順番を1つ回す）。
+const stayOn = () => S.mode === 'online' && !!S.stay && !GAMES[S.gameId]?.multi && !GAMES[S.gameId]?.live;
+
+// 決着した対局のあとの席（pick の形）と、まだ待っている人の順番。いつものもう一回にするときは null
+function stayNext(res) {
+  if (!stayOn() || !res || !S.order) return null;
+  const ids = S.order.map((id) => (isCpu(id) ? 'cpu' : id));
+  const won = new Set(winnersOf(res));
+  if (!won.size) return null;
+  const gone = (id) => id !== 'cpu' && !S.members.includes(id);
+  const seated = new Set(ids);
+  const waiting = S.members.filter((id) => !seated.has(id) && alive(id));
+  if (!waiting.length) return null;
+  const line = S.line ?? [];
+  const queue = [...line.filter((id) => waiting.includes(id)), ...waiting.filter((id) => !line.includes(id))];
+  const stayers = ids.filter((id, p) => won.has(p) && !gone(id));
+  const out = ids.filter((id, p) => !won.has(p) || gone(id));
+  queue.push(...out.filter((id) => id !== 'cpu' && !gone(id)));
+  const enter = out.map(() => queue.shift() ?? 'cpu');
+  return { pick: [...enter, ...stayers], line: queue };
+}
+
+// 結果の画面に出す「次に入る人」
+function stayHtml(res) {
+  const next = stayNext(res);
+  if (!next) return '';
+  const enter = next.pick.filter((id) => id !== 'cpu' && !S.order.includes(id));
+  if (!enter.length) return '';
+  return '👑 勝ち残り: 次は ' + enter.map((id) => `<b>${esc(id === S.myId ? 'あなた' : nameOf(id))}</b>`).join('・') + ' が入ります';
+}
+
 /* ---------- 連勝（2026-10-06 本人の決定）: 同じゲームを同じ顔ぶれで続けている間、だれが何連勝中かを出す ---------- */
 // Claude の判断: ゲームを変えたり顔ぶれ（CPU を含む）が変わったら数え直す。引き分けは全員の連勝が止まる。勝った人が2人以上（同点の1位）なら全員を数える。
 // オンラインだけ。ホストの端末が数えて全員へ送る（あとから入った人にも同じ数が見えるように）。
 
-const streakKey = () => `${S.gameId}:${[...roundOrder()].sort().join(',')}`;
+// 勝ち残りでは顔ぶれが毎回変わるので、顔ぶれでなくゲームだけで見る（勝ち続けている人の連勝が続くように）
+const streakKey = () => (stayOn() ? `${S.gameId}:stay` : `${S.gameId}:${[...roundOrder()].sort().join(',')}`);
 
 // 結果から勝った人のプレイヤー番号の一覧（引き分けは空）
 function winnersOf(res) {
@@ -543,6 +581,8 @@ function statusHtml(game, st, res) {
   if (preds) html += `<div class="status-sub pred">${preds}</div>`;
   const tally = res ? tallyHtml() : '';
   if (tally) html += `<div class="status-sub tally">${tally}</div>`;
+  const stay = res ? stayHtml(res) : '';
+  if (stay) html += `<div class="status-sub stay">${stay}</div>`;
   return html;
 }
 
@@ -954,6 +994,7 @@ function renderBoardLobby(game) {
   }
   const tally = tallyHtml();
   if (tally) board.insertAdjacentHTML('beforeend', `<p class="lobby-note tally">${tally}</p>`);
+  if (!game.live) board.append(stayPanel());
   if (game.settings) board.append(rulesPanel(game));
   if (!S.isHost) return;
   const start = makeButton('始める', startRound);
@@ -963,6 +1004,26 @@ function renderBoardLobby(game) {
     board.insertAdjacentHTML('beforeend', '<p class="lobby-total">友だちが部屋に入ると始められます</p>');
   }
   controls.append(start, gameSelect());
+}
+
+// 勝ち残りの付け外し（ホストだけ。ほかの人には付いているときだけ出す）
+function stayPanel() {
+  const box = document.createElement('div');
+  box.className = 'lobby-stay';
+  if (!S.isHost) {
+    if (S.stay) box.innerHTML = '<p class="lobby-note">👑 勝ち残り: もう一回では、負けた人が観戦の人と交代します</p>';
+    return box;
+  }
+  const label = document.createElement('label');
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.checked = !!S.stay;
+  input.onchange = () => { S.stay = input.checked; saveRoom(); sendState(); render(); };
+  const text = document.createElement('span');
+  text.innerHTML = '<b>👑 勝ち残り</b> <small>もう一回では、負けた人が観戦の人と交代します（勝った人は続けて打てます）</small>';
+  label.append(input, text);
+  box.append(label);
+  return box;
 }
 
 function rulesPanel(game) {
@@ -1169,8 +1230,11 @@ function newRound(gameId, { lobby = false } = {}) {
   const prevGame = GAMES[S.gameId];
   // 盤のゲームのもう一回は、同じ顔ぶれで先手と後手を入れ替える（3人以上は打つ順番を1つずつ回す）
   if (gameId === S.gameId && !prevGame?.multi && S.order?.length >= 2) {
+    const st = stayOn() ? replay(S) : null;
+    const next = st && stayNext(prevGame.result(st));
     const ids = S.order.map((id) => (isCpu(id) ? 'cpu' : id));
-    S.pick = [...ids.slice(1), ids[0]];
+    S.pick = next ? next.pick : [...ids.slice(1), ids[0]];
+    if (next) S.line = next.line; // 勝ち残りで負けた人と観戦の人が交代する
   }
   if (gameId !== S.gameId) S.carry = null;
   else if (prevGame?.carry && S.order) {
@@ -1362,7 +1426,7 @@ function openNet() {
 function send(msg, qos) { S?.net?.send(msg, qos); }
 function sendState() {
   const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, undo, streak, beg } = S;
-  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null });
+  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [] });
 }
 function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves, u: S.undo ?? 0 }); }
 function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner }); }
@@ -1472,6 +1536,8 @@ function adoptState(msg) {
   S.beg = Array.isArray(msg.beg) ? msg.beg.filter((id) => typeof id === 'string') : [];
   S.streak = msg.streak && typeof msg.streak === 'object' && msg.streak.wins && typeof msg.streak.wins === 'object' ? msg.streak : null;
   S.tally = msg.tally && Number.isInteger(msg.tally.games) && msg.tally.wins && typeof msg.tally.wins === 'object' ? msg.tally : null;
+  S.stay = msg.stay === true;
+  S.line = Array.isArray(msg.line) ? msg.line.filter((id) => typeof id === 'string') : [];
   for (const id of S.members) S.seen[id] ??= Date.now();
   const sameRound = S.gameId === msg.gameId && S.round === msg.round;
   const mu = Number.isInteger(msg.u) ? msg.u : 0;
