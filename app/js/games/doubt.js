@@ -6,7 +6,9 @@
 // 手札がなくなった人の勝ち（最後の札がダウトでうそと分かれば引き取るので、まだ続く）。
 // 決まりごと（Claude の判断）: 全員が「ダウト」か「通す」を押したら秒数を待たずに締め切る。誰かがダウトを押したら、ほかの人の分を待つため1秒後に締め切る。
 //   同じ速さなら、出した人の次の席から近い人。決着しないまま手が 400回を超えたら、手札がいちばん少ない人の勝ち。
-// 手: { p, t: 'play', cards: [札…] } / { p, t: 'doubt', w: 何回目の出し札か, ms } / { p, t: 'pass', w } / { p: -1, t: 'close', w }（ホストの締め切り）
+// 詳細設定「前後どれでもよい」（free。2026-10-06 本人の決定）: 出す数字を、前の人が言った数字と同じ・1つ上・1つ下の3つから選べる（K の上は A、A の下は K）。
+//   最初の1回は A だけ。ダウトで札を引き取ったあとも、直前に言った数字から続ける（局面の last）。手の n が言った数字で、選べない数字なら反則。
+// 手: { p, t: 'play', cards: [札…], n: 言った数字（free のときだけ） } / { p, t: 'doubt', w: 何回目の出し札か, ms } / { p, t: 'pass', w } / { p: -1, t: 'close', w }（ホストの締め切り）
 // 全員が同時に動く（realtime）。同じ手が2回来ても、札はもう手札に無い・同じ回には1回しか押せないので2回目は弾かれる。
 
 import { mulberry32, shuffle, esc } from './util.js';
@@ -17,7 +19,13 @@ const MAX_PLAYS = 400;
 const WINDOWS = { 3: 3000, 4: 4000, 6: 6000 };
 
 const clone = (s) => ({ ...s, hands: s.hands.map((h) => h.slice()), pile: s.pile.slice(), calls: { ...s.calls }, passed: s.passed.slice() });
-const numOf = (s) => (s.plays % 13) + 1; // 次に出す数字
+const numOf = (s) => (s.plays % 13) + 1; // 次に出す数字（前後どれでもよい、がなしのとき）
+// いま言える数字の一覧。なしなら1つ、ありなら「1つ下・同じ・1つ上」の3つ（最初の1回は A だけ）
+const choicesOf = (s) => {
+  if (!s.free) return [numOf(s)];
+  if (!s.last) return [1];
+  return [((s.last + 11) % 13) + 1, s.last, (s.last % 13) + 1];
+};
 const winKey = (s) => `dt:${s.seed}:${s.plays}`;
 
 export default {
@@ -32,6 +40,7 @@ export default {
   maxPlayers: 8,
   settings: [
     { key: 'window', label: 'ダウトの受付', desc: '札が出てから「ダウト！」を押せる秒数', def: 4, choices: [[3, '3秒'], [4, '4秒'], [6, '6秒']] },
+    { key: 'free', label: '前後どれでもよい', desc: '出す数字を、前の人が言った数字と同じ・1つ上・1つ下から選べる（K の上は A。最初は A だけ）', def: false, choices: [[false, 'なし'], [true, 'あり']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -40,7 +49,7 @@ export default {
     deck.forEach((c, k) => hands[k % n].push(c));
     return {
       n, seed, hands, pile: [], turn: 0, plays: 0, phase: 'play', played: null, calls: {}, passed: [],
-      reveal: null, winner: null, limit: WINDOWS[rules.window] ?? 4000, step: 0,
+      reveal: null, winner: null, limit: WINDOWS[rules.window] ?? 4000, step: 0, free: rules.free === true, last: 0,
     };
   },
 
@@ -95,9 +104,13 @@ export default {
     if (m.t === 'play') {
       if (s.phase !== 'play' || !Array.isArray(m.cards) || m.cards.length < 1 || m.cards.length > 4) return null;
       if (new Set(m.cards).size !== m.cards.length || !m.cards.every((c) => s.hands[m.p].includes(c))) return null;
+      // 言った数字。なしのときは n を付けない今までの手でよい（付けるなら決まった数字だけ）
+      const num = s.free ? m.n : m.n === undefined ? numOf(s) : m.n;
+      if (!choicesOf(s).includes(num)) return null;
       s.hands[m.p] = s.hands[m.p].filter((c) => !m.cards.includes(c));
       s.pile.push(...m.cards);
-      s.played = { p: m.p, cards: m.cards.slice(), num: numOf(s) };
+      s.played = { p: m.p, cards: m.cards.slice(), num };
+      s.last = num;
       s.phase = 'doubt';
       s.calls = {};
       s.passed = [];
@@ -126,18 +139,30 @@ export default {
       return { t: 'pass', w: s.plays };
     }
     // 出す番: 本当の札があれば全部出し、ときどき1枚うそを混ぜる。無ければ、しばらく出番の来ない数字の札を1枚（ときどき2枚）
-    const num = numOf(s);
+    // 前後どれでもよい、のときは、言える数字のうち手札に一番多い数字を選ぶ（2割は適当に選ぶ）
     const hand = s.hands[p];
+    const opts = choicesOf(s);
+    const count = (r) => hand.filter((c) => rankOf(c) === r).length;
+    let num = opts[0];
+    if (opts.length > 1) {
+      if (Math.random() < 0.2) num = opts[Math.floor(Math.random() * opts.length)];
+      else num = opts.reduce((a, b) => (count(b) > count(a) ? b : a));
+    }
     const real = hand.filter((c) => rankOf(c) === num);
-    const wait = (c) => (rankOf(c) - num + 13) % 13; // その数字の出番まであと何回
+    // その数字の出番まであと何回（前後どれでもよい、のときは前にも後ろにも進めるので近い方）
+    const wait = (c) => {
+      const d = (rankOf(c) - num + 13) % 13;
+      return s.free ? Math.min(d, 13 - d) : d;
+    };
     const fake = hand.filter((c) => rankOf(c) !== num).sort((a, b) => wait(b) - wait(a));
+    const said = s.free ? { n: num } : {};
     if (real.length) {
       const cards = real.slice(0, 4);
       if (cards.length < 4 && fake.length && Math.random() < 0.2) cards.push(fake[0]);
-      return { t: 'play', cards };
+      return { t: 'play', cards, ...said };
     }
     const k = fake.length >= 2 && Math.random() < 0.25 ? 2 : 1;
-    return { t: 'play', cards: fake.slice(0, k) };
+    return { t: 'play', cards: fake.slice(0, k), ...said };
   },
 
   render(root, s, o) {
@@ -176,7 +201,9 @@ export default {
     if (s.phase === 'doubt') {
       info.innerHTML = `<b>${esc(nameP(s.played.p))}</b>が「<span class="db-num">${rankLabel(s.played.num)}</span>」を <b>${s.played.cards.length}枚</b> 出した`;
     } else if (s.phase === 'play') {
-      info.innerHTML = `次は「<span class="db-num">${rankLabel(numOf(s))}</span>」　<small>場の札 ${s.pile.length}枚</small>`;
+      const opts = choicesOf(s).map((r) => `<span class="db-num">${rankLabel(r)}</span>`).join('・');
+      const tail = s.free && s.last ? 'のどれか' : '';
+      info.innerHTML = `次は「${opts}」${tail}　<small>場の札 ${s.pile.length}枚</small>`;
     } else {
       info.innerHTML = `<small>場の札 ${s.pile.length}枚</small>`;
     }
@@ -220,17 +247,41 @@ export default {
     if (me !== null) {
       const hand = s.hands[me];
       const can = o.canMove && s.phase === 'play';
-      if (!can) picked.clear();
+      const opts = choicesOf(s);
+      if (!can) { picked.clear(); pick.num = 0; }
       for (const c of [...picked]) if (!hand.includes(c)) picked.delete(c);
+      // 言う数字。選べるのが1つだけならそれ。前の局面で選んだ数字が今は選べなければ選び直し
+      if (opts.length === 1) pick.num = opts[0];
+      else if (!opts.includes(pick.num)) pick.num = 0;
+      const num = pick.num;
       const head = document.createElement('div');
       head.className = 'cc-hand-head';
-      head.innerHTML = `あなたの手札 <small>${hand.length}枚${can ? `・「${rankLabel(numOf(s))}」として出す札を1〜4枚えらぶ` : ''}</small>`;
+      const guide = opts.length > 1 ? '・言う数字と、出す札を1〜4枚えらぶ' : `・「${rankLabel(opts[0])}」として出す札を1〜4枚えらぶ`;
+      head.innerHTML = `あなたの手札 <small>${hand.length}枚${can ? guide : ''}</small>`;
+      // 前後どれでもよい: 言う数字のボタン（1つ下・同じ・1つ上）
+      let say = null;
+      if (can && opts.length > 1) {
+        say = document.createElement('div');
+        say.className = 'cc-actions db-say';
+        say.style.cssText = 'gap: 10px; margin-bottom: 8px;'; // 選んで浮いた札とくっつかないように
+        for (const r of opts) {
+          const b = button(rankLabel(r), num === r ? 'primary' : 'secondary', () => {
+            pick.num = r;
+            this.render(root, s, o);
+          });
+          b.style.cssText = 'min-width: 64px; min-height: 48px; font-size: 1.3rem;';
+          b.setAttribute('aria-pressed', String(num === r));
+          b.setAttribute('aria-label', `「${rankLabel(r)}」と言う`);
+          say.append(b);
+        }
+      }
       const row = document.createElement('div');
       row.className = 'df-hand db-hand';
-      const num = numOf(s);
+      // 光らせる（初心者マーク）のは、言う数字を選んでいればその数字、まだならどれかの数字の札
+      const lit = num ? [num] : opts;
       for (const c of hand.slice().sort((a, b) => rankOf(a) - rankOf(b))) {
         const e = cardEl(c, can ? 'button' : 'div');
-        if (rankOf(c) === num && s.phase === 'play') e.classList.add('usable');
+        if (lit.includes(rankOf(c)) && s.phase === 'play') e.classList.add('usable');
         if (picked.has(c)) e.classList.add('selected');
         if (can) {
           e.onclick = () => {
@@ -241,16 +292,20 @@ export default {
         }
         row.append(e);
       }
-      root.append(head, row);
+      root.append(head);
+      if (say) root.append(say);
+      root.append(row);
       if (can) {
         const act = document.createElement('div');
         act.className = 'cc-actions';
-        const go = button(picked.size ? `「${rankLabel(num)}」として ${picked.size}枚 出す` : '札をえらんでください', 'primary', () => {
+        const text = !num ? '言う数字をえらんでください' : picked.size ? `「${rankLabel(num)}」として ${picked.size}枚 出す` : '札をえらんでください';
+        const go = button(text, 'primary', () => {
           const cards = [...picked];
           picked.clear();
-          o.onMove({ t: 'play', cards });
+          pick.num = 0;
+          o.onMove(s.free ? { t: 'play', cards, n: num } : { t: 'play', cards });
         });
-        go.disabled = !picked.size;
+        go.disabled = !picked.size || !num;
         act.append(go);
         root.append(act);
       }
@@ -295,6 +350,7 @@ function close(s0) {
 }
 
 const picked = new Set(); // 出す札としてえらんでいる札（この端末だけ）
+const pick = { num: 0 }; // 前後どれでもよい、で言う数字としてえらんでいる数字（この端末だけ。0 はまだ）
 
 function button(text, cls, onClick) {
   const b = document.createElement('button');
