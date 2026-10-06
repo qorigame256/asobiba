@@ -5,6 +5,8 @@
 // 点数（Claude の判断）: 当てた人は 1番目 10点・2番目 8点・3番目 6点・それより後 5点。描いた人は当てた人1人につき3点。
 // 1回の制限時間は詳細設定で 60／80（最初）／120秒。全員が当てるか時間が来たら、答えを5秒見せて次の人へ。描く人は「あきらめる」で早く終われる。
 // お題は oekaki-data.js から対局の種で選ぶ（同じ対局で同じお題は出ない）。
+// 当てる人の画面には、前から答えの文字数（○○○）を出している。詳細設定「ヒント」をありにすると、残り時間が4分の1になったら
+// 最初の1文字も見せる（2026-10-06 の8回目。見せるだけで点は変わらない。時間は各端末で画面に出てからの時間で計り、手には入れない）。
 //
 // 描いた線は、ペンを動かしている間 0.5秒ごとに区切って「線」の手として送る（離れていても描いている途中が見えるように）。
 // 座標は 0〜999（絵の左上が 0）を2文字ずつに縮めて送る（ENC）。手の一覧を毎回まるごと送る作りなので、送る量を小さくしたい。
@@ -13,7 +15,7 @@
 //     { p, t: 'guess', n: その人のこの回の答えの数, text } / 進行役（p = -1）: { t: 'end', turn } / { t: 'next', turn }
 
 import { mulberry32, shuffle, esc } from './util.js';
-import { kana, scoreChips, leaders, ranks, winnersText, timeBar } from './party.js';
+import { kana, scoreChips, leaders, ranks, winnersText, timeBar, since } from './party.js';
 import { TOPICS } from './oekaki-data.js';
 
 export const COLORS = ['#2d2a26', '#e04b3c', '#2f6fb3', '#3a9d55', '#e8a913', '#8a5a35', '#ffffff'];
@@ -24,6 +26,7 @@ const MAX_TEXT = 20;
 const MAX_D = 2400; // 1つの線の手の座標の文字数の上限（0.5秒ぶんには十分）
 const GUESS_PT = [10, 8, 6];
 const DRAWER_PT = 3;
+const HINT_AT = 0.75; // ヒントの最初の1文字を見せる時（制限時間のこの割合がたったら＝残り4分の1）
 
 const ENC = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 export function encode(pts) {
@@ -41,12 +44,20 @@ const validD = (d) => typeof d === 'string' && d.length >= 4 && d.length <= MAX_
   && [...d].every((ch) => ENC.includes(ch)) && decode(d).every(([x, y]) => x < 1000 && y < 1000);
 
 // 答えの読み（ひらがなだけの書き方）。文字数のヒントに使う
-function readingOf(topic) {
+export function readingOf(topic) {
   for (const x of topic) {
     const k = kana(x);
     if (/^[ぁ-ゖー]+$/.test(k)) return k;
   }
   return kana(topic[0]);
+}
+
+// 当てる人に見せる答えの形（○○○ や り○○）。on はヒントありか、elapsed はこの回が画面に出てからの時間、limit は制限時間（どちらもミリ秒）。
+// 文字数はいつも出す（前から）。ヒントありで残り4分の1になったら、最初の1文字を見せる
+export function hintText(reading, elapsed, limit, on) {
+  const chars = [...reading];
+  const first = on && chars.length > 0 && elapsed >= limit * HINT_AT;
+  return { mask: first ? chars[0] + '○'.repeat(chars.length - 1) : '○'.repeat(chars.length), len: chars.length, first: first ? chars[0] : null };
 }
 
 const clone = (s) => ({ ...s, strokes: s.strokes.slice(), scores: s.scores.slice(), correct: s.correct.slice(), chat: s.chat.slice(), gn: s.gn.slice() });
@@ -80,12 +91,14 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'time', label: '1回の制限時間', desc: '全員が当てたら、時間の前でも次へ進む', def: 80, choices: [[60, '60秒'], [80, '80秒'], [120, '120秒']] },
+    { key: 'hint', label: 'ヒント', desc: '残り時間が4分の1になると、当てる人に答えの最初の1文字を見せる（文字数はいつも見える）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const order = shuffle(TOPICS.map((_, i) => i), mulberry32(seed));
     const s = {
       n, seed, topics: order.slice(0, n), turn: 0, limit: [60, 80, 120].includes(rules.time) ? rules.time : 80,
+      hint: rules.hint === 'on',
       scores: Array(n).fill(0), history: [], ver: 0, why: null, step: 0,
     };
     newTurn(s);
@@ -207,28 +220,21 @@ export default {
     ui.chips = chips;
 
     // お題・ヒント・答え
-    const t = this.topic(s);
-    let html;
-    if (res) {
-      html = '<div class="um-label">おしまい</div>' + s.history.map((h) => `${esc(nameP(h.drawer))}: <b>${esc(TOPICS[h.topic][0])}</b>（${h.correct.length}人が正解）`).join('<br>');
-    } else if (s.phase === 'show') {
-      const why = s.why === 'all' ? '全員が当てました！' : s.why === 'giveup' ? '描く人があきらめました' : '時間切れ';
-      html = `<div class="um-label">${why}</div><div class="oe-word">答えは「${esc(t[0])}」</div>`;
-    } else if (isDrawer) {
-      html = `<div class="um-label">あなたが描くお題（ほかの人には見えません）</div><div class="oe-word">${esc(t[0])}</div><small>文字は書かないでください</small>`;
-    } else {
-      const n = [...readingOf(t)].length;
-      html = `<div class="um-label">${esc(nameP(s.turn))}が描いています</div><div class="oe-hint">${'○'.repeat(n)}</div><small>ひらがなで${n}文字</small>`;
-    }
-    if (ui.topicHtml !== html) { ui.topic.innerHTML = html; ui.topicHtml = html; }
+    ui.res = res;
+    ui.isDrawer = isDrawer;
+    showTopic();
 
-    // 残り時間の帯（場面が替わったら作り直す）
+    // 残り時間の帯（場面が替わったら作り直す）。ヒントの最初の1文字も、ここで決めた時刻に出す（render を待たない）
     const barKey = res ? '' : `oe:${s.seed}:${s.turn}:${s.phase}`;
     if (ui.barKey !== barKey) {
       ui.barKey = barKey;
       const bar = barKey ? timeBar(barKey, s.phase === 'draw' ? s.limit * 1000 : SHOW_MS) : document.createElement('div');
       ui.bar.replaceWith(bar);
       ui.bar = bar;
+      clearTimeout(ui.hintTimer);
+      if (barKey && s.phase === 'draw' && s.hint) {
+        ui.hintTimer = setTimeout(() => { if (ui.barKey === barKey) showTopic(); }, Math.max(0, s.limit * 1000 * HINT_AT - since(barKey)) + 30);
+      }
     }
 
     paint(s);
@@ -264,6 +270,29 @@ export default {
 /* ---------- 画面の部品（描き直しで消えないよう、回ごとに1回だけ作る） ---------- */
 
 const ui = { key: null };
+
+// お題の欄（お題・文字数とヒント・答え）。render と、ヒントを出す時刻の両方から呼ぶ。同じ中身なら書き換えない
+function showTopic() {
+  const { s, o, res, isDrawer } = ui;
+  const me = o.me >= 0 ? o.me : null;
+  const nameP = (p) => (p === me ? 'あなた' : o.names[p]);
+  const t = TOPICS[s.topics[s.turn]];
+  let html;
+  if (res) {
+    html = '<div class="um-label">おしまい</div>' + s.history.map((h) => `${esc(nameP(h.drawer))}: <b>${esc(TOPICS[h.topic][0])}</b>（${h.correct.length}人が正解）`).join('<br>');
+  } else if (s.phase === 'show') {
+    const why = s.why === 'all' ? '全員が当てました！' : s.why === 'giveup' ? '描く人があきらめました' : '時間切れ';
+    html = `<div class="um-label">${why}</div><div class="oe-word">答えは「${esc(t[0])}」</div>`;
+  } else if (isDrawer) {
+    html = `<div class="um-label">あなたが描くお題（ほかの人には見えません）</div><div class="oe-word">${esc(t[0])}</div><small>文字は書かないでください</small>`;
+  } else {
+    // 時間は残り時間の帯と同じ鍵で計る（この端末の画面に出てからの時間）
+    const h = hintText(readingOf(t), since(`oe:${s.seed}:${s.turn}:draw`), s.limit * 1000, s.hint);
+    const note = !s.hint ? '' : h.first ? `。ヒント: 1文字目は「${esc(h.first)}」` : '。残り4分の1で1文字目が出ます'; // スマホ幅で1行に収まる長さ（出たときに絵が動かない）
+    html = `<div class="um-label">${esc(nameP(s.turn))}が描いています</div><div class="oe-hint">${esc(h.mask)}</div><small>ひらがなで${h.len}文字${note}</small>`;
+  }
+  if (ui.topicHtml !== html) { ui.topic.innerHTML = html; ui.topicHtml = html; }
+}
 
 function build(root, s, key, res) {
   root.innerHTML = '';

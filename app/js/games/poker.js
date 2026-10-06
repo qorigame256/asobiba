@@ -11,14 +11,17 @@
 //     端数は親（D）の次の人から順に配る。オールインに届かない上乗せでも、ほかの人はもう一度動ける（本式より少し緩い）。
 //   - 2人のときは親が小さい方のブラインドを出し、1回目の賭けは親から、2回目は親でない方から。
 //   - 山札が足りなくなったら、捨てられた札を切り直して使う。
+// ジョーカー（詳細設定・最初はなし。2026-10-06 本人承認）: 山に1枚足して53枚。どの札の代わりにもなり、その手で一番強くなる札として数える
+//   （同じ役どうしの比べ方も同じ。ジョーカーが入っていない手との差は付けない）。一番強い役に「ファイブカード」（同じ数字5枚）が加わる。
+//   作り（Claude の判断）: evaluate がジョーカーを52通りの札に置き替えて一番強いものを選ぶ。手札ではジョーカーを右の端に並べる。CPU はジョーカーを捨てない。
 
 import { mulberry32, shuffle } from './util.js';
-import { SUITS, suitOf, rankOf, makeDeck, cardEl, backEl } from './cards.js';
+import { SUITS, JOKER, suitOf, rankOf, makeDeck, cardEl, backEl } from './cards.js';
 
 const START_CHIPS = 1000;
 const LEVEL_HANDS = 5;
 const CAP = 4;
-const HAND_NAMES = ['役なし', 'ワンペア', 'ツーペア', 'スリーカード', 'ストレート', 'フラッシュ', 'フルハウス', 'フォーカード', 'ストレートフラッシュ'];
+const HAND_NAMES = ['役なし', 'ワンペア', 'ツーペア', 'スリーカード', 'ストレート', 'フラッシュ', 'フルハウス', 'フォーカード', 'ストレートフラッシュ', 'ファイブカード'];
 const HAND_HELP = [
   ['ロイヤルストレートフラッシュ', '同じマークの 10・J・Q・K・A'],
   ['ストレートフラッシュ', '同じマークで5枚の連番'],
@@ -32,11 +35,25 @@ const HAND_HELP = [
   ['役なし', '一番強い札で比べる'],
 ];
 
-const pr = (c) => (rankOf(c) === 1 ? 14 : rankOf(c)); // A が一番強い
+const pr = (c) => (c === JOKER ? 15 : rankOf(c) === 1 ? 14 : rankOf(c)); // A が一番強い（ジョーカーは並べるときだけ一番右）
 const sortCards = (h) => h.sort((a, b) => pr(a) - pr(b) || SUITS.indexOf(suitOf(a)) - SUITS.indexOf(suitOf(b)));
 
-// 役の強さを [役の番号, 比べる数字…] で返す。大きい方が強い
+// 役の強さを [役の番号, 比べる数字…] で返す。大きい方が強い。
+// ジョーカーは52通りの札に置き替えて、一番強くなるものを選ぶ（同じ札が2枚になってもよい。同じ数字5枚はファイブカード）
 export function evaluate(cards) {
+  const j = cards.indexOf(JOKER);
+  if (j < 0) return evaluatePlain(cards);
+  let best = null;
+  for (const su of SUITS) {
+    for (let r = 1; r <= 13; r++) {
+      const ev = evaluate(cards.map((c, i) => (i === j ? su + r : c)));
+      if (!best || compareEval(ev, best) > 0) best = ev;
+    }
+  }
+  return best;
+}
+
+function evaluatePlain(cards) {
   const rs = cards.map(pr).sort((a, b) => b - a);
   const flush = cards.every((c) => suitOf(c) === suitOf(cards[0]));
   const count = new Map();
@@ -48,6 +65,7 @@ export function evaluate(cards) {
     else if (rs.join() === '14,5,4,3,2') straight = 5; // A-2-3-4-5
   }
   const g = groups.map((x) => x[0]);
+  if (groups[0][1] === 5) return [9, g[0]]; // ジョーカーを使ったときだけ
   if (straight && flush) return [8, straight];
   if (groups[0][1] === 4) return [7, ...g];
   if (groups[0][1] === 3 && groups[1][1] === 2) return [6, ...g];
@@ -111,7 +129,7 @@ function startHand(s) {
   const [small, big] = blinds(s.handNo);
   const sb = players.length === 2 ? s.dealer : nextAlive(s, s.dealer);
   const bb = nextAlive(s, sb);
-  const deck = shuffle(makeDeck(), mulberry32(s.seed + s.handNo * 7919));
+  const deck = shuffle(makeDeck(s.rules.joker === true ? 1 : 0), mulberry32(s.seed + s.handNo * 7919));
   const cards = Array(s.n).fill(null);
   for (const p of players) cards[p] = sortCards(deck.splice(-5));
   s.h = {
@@ -239,19 +257,34 @@ const clone = (s) => ({
 
 /* ---------- CPU ---------- */
 
+// 捨てる札の位置。ジョーカーは必ず残す
 function chooseDiscards(cards, ev) {
-  const all = [0, 1, 2, 3, 4];
+  const all = [0, 1, 2, 3, 4].filter((i) => cards[i] !== JOKER);
+  const joker = all.length < 5;
   if (ev[0] >= 4) return []; // ストレート以上は交換しない
+  // あと1枚でフラッシュ・ストレート（ジョーカーはどちらにも足りない1枚として数える）
+  const oneAway = () => {
+    for (const i of all) {
+      const rest = cards.filter((c, j) => j !== i && c !== JOKER);
+      if (rest.every((c) => suitOf(c) === suitOf(rest[0]))) return [i];
+      for (const ace of joker ? [14, 1] : [14]) { // A を 1 とみなすのはジョーカーのときだけ（なしのときは前と同じ選び方にする）
+        const rs = rest.map((c) => (pr(c) === 14 ? ace : pr(c))).sort((a, b) => a - b);
+        if (new Set(rs).size === rs.length && rs[rs.length - 1] - rs[0] <= 4) return [i];
+      }
+    }
+    return null;
+  };
+  // ジョーカーで作った小さいワンペアなら、フラッシュ・ストレートを狙う方を先に見る
+  if (joker && ev[0] === 1 && ev[1] < 11) {
+    const d = oneAway();
+    if (d) return d;
+  }
   if (ev[0] >= 1) { // 組になっている数字は残す
     const keep = new Set(ev.slice(1, ev[0] === 2 ? 3 : 2));
     return all.filter((i) => !keep.has(pr(cards[i])));
   }
-  for (const i of all) { // あと1枚でフラッシュ・ストレート
-    const rest = cards.filter((_, j) => j !== i);
-    if (rest.every((c) => suitOf(c) === suitOf(rest[0]))) return [i];
-    const rs = rest.map(pr).sort((a, b) => a - b);
-    if (new Set(rs).size === 4 && rs[3] - rs[0] <= 4) return [i];
-  }
+  const d = oneAway();
+  if (d) return d;
   const top = all.reduce((a, b) => (pr(cards[b]) > pr(cards[a]) ? b : a));
   return all.filter((i) => i !== top || pr(cards[top]) < 13);
 }
@@ -260,7 +293,7 @@ function strength(s, p) {
   const cards = s.h.cards[p];
   const ev = evaluate(cards);
   const pre = s.h.phase === 'bet1';
-  if (ev[0] >= 3) return pre ? 3.2 : 3.6;
+  if (ev[0] >= 3) return pre ? 3.2 : 3.6; // ジョーカーがあれば、それで一番強くなる役で見る（evaluate）
   if (ev[0] === 2) return pre ? 2.8 : 2.8;
   if (ev[0] === 1) return ev[1] >= 11 ? (pre ? 2.2 : 2) : 1.4;
   if (pre && chooseDiscards(cards, ev).length === 1) return 1.3; // あと1枚の見込み
@@ -299,6 +332,7 @@ export default {
   settings: [
     { key: 'end', label: '終わり方', desc: '「最後の1人まで」はチップが無くなった人から抜ける。「決めた回数で」はその回数でチップが一番多い人の勝ち', def: 'last', choices: [['last', '最後の1人まで'], ['hands', '決めた回数で']] },
     { key: 'hands', label: '回数', desc: '「決めた回数で」のときに勝負する回数', def: 10, choices: [[5, '5回'], [10, '10回'], [20, '20回']] },
+    { key: 'joker', label: 'ジョーカー', desc: '1枚入れる（53枚）。どの札の代わりにもなり、一番強くなる札として数える。同じ数字5枚の「ファイブカード」が一番強い役になる', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -573,12 +607,18 @@ export default {
     help.ontoggle = () => { helpOpen = help.open; };
     help.innerHTML = '<summary>役の強さ（上ほど強い）</summary>';
     const ol = document.createElement('ol');
-    for (const [n, d] of HAND_HELP) {
+    const rows = s.rules.joker === true ? [['ファイブカード', '同じ数字5枚（ジョーカーを使ったときだけ）'], ...HAND_HELP] : HAND_HELP;
+    for (const [n, d] of rows) {
       const li = document.createElement('li');
       li.innerHTML = `<b>${n}</b> ${d}`;
       ol.append(li);
     }
     help.append(ol);
+    if (s.rules.joker === true) {
+      const note = document.createElement('p');
+      note.textContent = 'ジョーカーはどの札の代わりにもなり、その手で一番強くなる札として数えます（ジョーカーが無い手と同じ強さなら引き分け）。';
+      help.append(note);
+    }
     root.append(help);
   },
 };
