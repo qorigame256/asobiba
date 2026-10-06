@@ -517,7 +517,7 @@ export default {
       hint.textContent = s.drawn !== null
         ? '引いた札を出すか、「出さずに次へ」を押してください'
         : s.pend?.ch
-          ? `${s.rules?.stack ? 'ドロー4を重ねて返すか、' : ''}下の「チャレンジ」か「受ける」を選んでください`
+          ? `${s.rules?.stack && s.hands[me].includes('W4') ? 'ドロー4を重ねて返すか、' : ''}下の「チャレンジ」か「受ける」を選んでください`
           : s.pend
           ? `${s.pend.k === 'D' ? 'ドロー2' : 'ドロー4'}を重ねて返すか、山札をタップして${s.pend.n}枚引いてください`
           : '光っている札が出せます。出さないときは山札をタップ';
@@ -587,13 +587,13 @@ export default {
       const ask = document.createElement('div');
       ask.className = 'cc-picker cc-challenge';
       const p1 = document.createElement('p');
-      p1.textContent = `${o.names[by]}のワイルドドロー4。出す前の場の色（${COLOR_NAME[s.pend.ch.color]}）の札を持っていたと思うなら「チャレンジ」`
+      p1.textContent = `${o.names[by]}のドロー4。出す前の場の色（${COLOR_NAME[s.pend.ch.color]}）の札を持っていたと思うなら「チャレンジ」`
         + `（当たれば${o.names[by]}が${s.pend.n}枚、外れたらあなたが${s.pend.n + 2}枚引いて1回休み）`;
       const row = document.createElement('div');
       row.style.flexWrap = 'wrap';
       const chal = document.createElement('button');
       chal.type = 'button';
-      chal.className = 'btn';
+      chal.className = 'btn primary';
       chal.textContent = '🔍 チャレンジ';
       chal.onclick = () => o.onMove({ t: 'challenge' });
       const take = document.createElement('button');
