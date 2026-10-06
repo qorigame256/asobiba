@@ -11,7 +11,7 @@
 //   - 出せる札があっても山から引いてよい。引いた札が出せるなら、その札だけ続けて出せる（出さずに次へも可）。
 //   - ワイルドドロー4は、場の色と同じ色の札を持っていないときだけ出せる（公式の「チャレンジ」の代わり）。
 //   - ドロー2・ドロー4は重ねて返せない（詳細設定「重ねて返す」で返せる。下）。2人のときリバースはスキップと同じ。
-//   - 残り1枚の宣言は省略（自動で「ラスト1枚」と表示）。
+//   - 残り1枚の宣言は省略（自動で「ラスト1枚」と表示）。宣言をする遊び方は詳細設定「最後の1枚の宣言」（下）。
 //   - 山が尽きたら、捨て札の一番上を残して切り直す。
 // 詳細設定「重ねて返す」（2026-10-06 本人の決定。最初はなし）: ドロー2を出された人はドロー2を、ドロー4を出された人はドロー4を
 //   重ねて次の人へ回せる（同じ種類どうしだけ。色は問わない）。重ねなかった人（山をタップ）は、たまった枚数を全部引いて1回休み。
@@ -25,6 +25,10 @@
 // 詳細設定「出せるまで引く」（2026-10-06 本人の決定。決まりは Claude の推奨を本人が承認。最初はなし）: 山を1回押すと、出せる札が来るまでまとめて引く。
 //   来た札は「出す」か「出さずに次へ」を選べる（今までと同じ）。出せる札を持っていても引いてよい。山と捨て札が尽きたらそこでやめて次の人へ。
 //   重ね返しの途中（s.pend）で引くときは、今までどおりたまった枚数だけ引く。
+// 詳細設定「最後の1枚の宣言」（2026-10-06 本人の決定。最初はなし）: 出したあと手札が1枚になるときは、出す前に「いろあわせ！」ボタンを押しておく
+//   （手の call: true）。押さずに1枚になったら、その場で山から2枚引く。Claude の判断: ボタンは自分の番の間ずっと出す（1枚になるときだけ出すと
+//   覚えていなくても気づけてしまうため）。手札が何枚でも押してよい（1枚にならなければ何も起きない）。7で交換・0で回すのあとは、
+//   出し終わった時点で自分が持っている手札で数える。上がり（0枚）のときは要らない。CPU は1割5分の見込みで宣言を忘れる。
 
 import { mulberry32, shuffle } from './util.js';
 
@@ -102,6 +106,7 @@ function pickColor(hand, skip) {
 
 /* ---------- 画面 ---------- */
 
+let called = false; // 最後の1枚の宣言（詳細設定）を、この番で押したか（この端末だけ。出す手に call として付ける）
 let picking = null; // ワイルドの色（7で交換なら相手、まとめ出しならいっしょに出す札）を選んでいる途中 { step, i, seven, multi: [位置…], more }（通信で描き直されても閉じないよう外に持つ）
 
 // 札の絵（2026-10-04 本人の希望で本家風に。ロゴや本家の絵は写さず、形だけ似せて自分で描いた）。
@@ -147,6 +152,8 @@ function logText(s, nameP) {
   else if (k === 'R') t += ' → 回る向きが反対に';
   else if (L.pend) t += ` → たまって${L.pend}枚。次の人は重ねて返すか、${L.pend}枚引く`;
   else if (L.victim !== undefined) t += ` → ${nameP(L.victim)}が${L.got}枚引いて1回休み`;
+  if (L.call) t += '。「いろあわせ！」';
+  else if (L.forgot) t += `。宣言を忘れたので${L.forgot}枚引いた`;
   return t;
 }
 
@@ -164,6 +171,7 @@ export default {
     { key: 'stack', label: '重ねて返す', desc: 'ドロー2にはドロー2、ドロー4にはドロー4を重ねて次の人へ回せる。重ねなかった人が、たまった枚数を全部引く', def: false },
     { key: 'multi', label: '同じ数字まとめ出し', desc: '同じ数字の札を何枚でもまとめて出せる（数字の札だけ）。最後に置いた札の色が場の色になる', def: false },
     { key: 'untilPlay', label: '出せるまで引く', desc: '山を1回押すと、出せる札が来るまでまとめて引く（来た札は出しても出さなくてもよい）', def: false },
+    { key: 'call', label: '最後の1枚の宣言', desc: '手札が1枚になる札を出すときは、先に「いろあわせ！」を押す。忘れたら2枚引く', def: false },
     { key: 'sevenZero', label: '7で交換・0で回す', desc: '7を出したら、選んだ1人と手札を交換する。0を出したら、全員が手札を次の人へ渡す（回っている向き）', def: false },
   ],
 
@@ -180,7 +188,11 @@ export default {
   result(s) { return s.winner === null ? null : { winner: s.winner }; },
   startSound: 'shuffle',
   // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
-  sound(a, b, m) { return m.t === 'draw' ? 'draw' : m.t === 'pass' ? 'pop' : 'card'; },
+  sound(a, b, m) {
+    if (b.last?.call) return 'call';
+    if (b.last?.forgot) return 'wrong';
+    return m.t === 'draw' ? 'draw' : m.t === 'pass' ? 'pop' : 'card';
+  },
 
   apply(s0, m) {
     if (!m || s0.winner !== null || m.p !== s0.turn) return null;
@@ -241,6 +253,11 @@ export default {
       } else {
         s.turn = next(1);
       }
+      // 最後の1枚の宣言（詳細設定）: 宣言せずに1枚になったら2枚引く
+      if (s.rules?.call && s.hands[p].length === 1) {
+        if (m.call === true) last.call = true;
+        else last.forgot = drawInto(s, p, 2).length;
+      }
       return s;
     }
 
@@ -281,6 +298,13 @@ export default {
   // CPU: 出せる札の中から「数字の大きい札を先に・ワイルドは取っておく・次の人が残り少ないなら妨害札」で選ぶ。
   // 強くなりすぎないよう、3回に1回くらいは出せる札から適当に選ぶ。
   cpu(s, p) {
+    const m = this.cpuMove(s, p);
+    // 最後の1枚の宣言（詳細設定）: 出したら1枚になりそうなら宣言する（1割5分は忘れる）
+    if (m.t === 'play' && s.rules?.call && s.hands[p].length - 1 - (m.more?.length ?? 0) === 1 && Math.random() >= 0.15) m.call = true;
+    return m;
+  },
+
+  cpuMove(s, p) {
     const hand = s.hands[p];
     // 7で交換の相手は、手札がいちばん少ない人（同じなら近い席）
     const fewest = () => {
@@ -329,6 +353,9 @@ export default {
     const nameP = (p) => (p === me ? 'あなた' : o.names[p]);
     const myTurn = o.canMove;
     if (!myTurn || picking?.step !== s.step) picking = null;
+    if (!myTurn) called = false;
+    // 出す手。宣言（詳細設定）を押してあれば call を付ける
+    const play = (m) => o.onMove(called && s.rules?.call ? { ...m, call: true } : m);
 
     root.innerHTML = '';
     root.className = 'board cc';
@@ -413,7 +440,7 @@ export default {
       ? mine.map((_, j) => j).filter((j) => j !== i && isNumber(mine[j]) && kindOf(mine[j]) === kindOf(mine[i])) : []);
     const send = (i, more) => {
       if (s.rules?.sevenZero && kindOf(mine[i]) === '7' && s.n > 2) { picking = { step: s.step, i, seven: true, more }; draw(); }
-      else { picking = null; o.onMove(more?.length ? { t: 'play', i, more } : { t: 'play', i }); }
+      else { picking = null; play(more?.length ? { t: 'play', i, more } : { t: 'play', i }); }
     };
     mine.forEach((card, i) => {
       const multi = picking?.multi;
@@ -437,15 +464,27 @@ export default {
     });
     root.append(hand);
 
-    if (myTurn && s.drawn !== null) {
+    if (myTurn && (s.drawn !== null || s.rules?.call)) {
       const actions = document.createElement('div');
       actions.className = 'cc-actions';
-      const pass = document.createElement('button');
-      pass.type = 'button';
-      pass.className = 'btn secondary';
-      pass.textContent = '出さずに次へ';
-      pass.onclick = () => o.onMove({ t: 'pass' });
-      actions.append(pass);
+      if (s.rules?.call) {
+        // 最後の1枚の宣言: 自分の番の間ずっと出す。押してから札を出す
+        const call = document.createElement('button');
+        call.type = 'button';
+        call.className = 'btn cc-call ' + (called ? 'primary' : 'secondary');
+        call.textContent = called ? '📣 いろあわせ！（宣言した）' : '📣 いろあわせ！';
+        call.setAttribute('aria-pressed', String(called));
+        call.onclick = () => { called = !called; draw(); };
+        actions.append(call);
+      }
+      if (s.drawn !== null) {
+        const pass = document.createElement('button');
+        pass.type = 'button';
+        pass.className = 'btn secondary';
+        pass.textContent = '出さずに次へ';
+        pass.onclick = () => o.onMove({ t: 'pass' });
+        actions.append(pass);
+      }
       root.append(actions);
     }
 
@@ -478,7 +517,7 @@ export default {
         b.type = 'button';
         b.className = 'btn secondary';
         b.textContent = `${o.names[q]}（${s.hands[q].length}枚）`;
-        b.onclick = () => { const { i, more } = picking; picking = null; o.onMove(more?.length ? { t: 'play', i, more, to: q } : { t: 'play', i, to: q }); };
+        b.onclick = () => { const { i, more } = picking; picking = null; play(more?.length ? { t: 'play', i, more, to: q } : { t: 'play', i, to: q }); };
         row.append(b);
       }
       const cancel = document.createElement('button');
@@ -498,7 +537,7 @@ export default {
         b.type = 'button';
         b.className = `cc-pick c-${c}`;
         b.textContent = COLOR_NAME[c];
-        b.onclick = () => { const i = picking.i; picking = null; o.onMove({ t: 'play', i, c }); };
+        b.onclick = () => { const i = picking.i; picking = null; play({ t: 'play', i, c }); };
         row.append(b);
       }
       const cancel = document.createElement('button');

@@ -3,6 +3,8 @@
 // 速さは各自の端末で「画面に出てから正解を送るまで」を測る（party.js の since）。
 //
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open →（正解が出たら1.5秒 / 制限時間）→ close → shown → next …
+// 詳細設定「ヒント」（2026-10-06 本人の決定。最初はなし）: 制限時間の4割（25秒なら10秒）がたつと、読みの1文字目を見せる。
+//   見せるだけなので手の一覧には入れず、各自の端末で「画面に出てから」の時間で出す（Claude の判断）。読みが2つ以上あるときは最初の読みの1文字目。
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'try', q: 問題番号, text: 答え, ms, n: その問題で何回目の答えか }
 
 import { mulberry32, shuffle } from './util.js';
@@ -13,6 +15,7 @@ const TOTAL = 10;
 const READY_MS = 3000;
 const SHOWN_MS = 3500;
 const GRACE_MS = 1500;
+const HINT_AT = 0.4; // ヒント（詳細設定）を出すのは、制限時間のこの割合がたったとき
 const LEVELS = { easy: 'ふつう', hard: 'むずかしい', expert: '超むずかしい', mix: 'ぜんぶまぜる' };
 const CPU_RATE = { easy: 0.55, hard: 0.4, expert: 0.3, mix: 0.4 };
 
@@ -42,10 +45,11 @@ export default {
   settings: [
     { key: 'level', label: '難しさ', desc: '出る漢字の難しさ', def: 'easy', choices: Object.entries(LEVELS) },
     { key: 'time', label: '制限時間', desc: '1問あたりの時間', def: '25', choices: [['15', '15秒'], ['25', '25秒'], ['40', '40秒']] },
+    { key: 'hint', label: 'ヒント', desc: '制限時間の4割（25秒なら10秒）がたつと、読みの1文字目を見せる', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { level: 'easy', time: '25', ...rules };
+    const r = { level: 'easy', time: '25', hint: false, ...rules };
     const qs = shuffle(poolOf(r.level), mulberry32(seed)).slice(0, TOTAL);
     return {
       n, seed, rules: r, qs, q: -1, phase: 'ready',
@@ -181,6 +185,14 @@ export default {
     if (s.phase === 'open') {
       since(key); // 画面に出た時刻を覚える
       card.append(timeBar(key, limit));
+      if (s.rules.hint) {
+        const hint = document.createElement('div');
+        hint.className = 'kj-hint';
+        card.append(hint);
+        setTimeout(() => {
+          if (hint.isConnected) hint.textContent = `ヒント: 「${[...yomis[0]][0]}」から始まる`;
+        }, Math.max(0, limit * HINT_AT - since(key)));
+      }
     } else {
       const ans = document.createElement('div');
       ans.className = 'kj-answer';

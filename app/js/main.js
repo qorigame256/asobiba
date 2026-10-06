@@ -20,6 +20,7 @@
 // 部屋を作る・同じ画面で遊ぶのは持ち主の端末だけ（owner.js）。ほかの人は招待された部屋に入るだけ。
 // banned = ホストが退出させた人の id。あいさつが来ても入れず、もう一度「退出」を送る。
 // streak = 連勝（2026-10-06 本人の決定）。{ key: ゲームと顔ぶれ, counted: 数え終えた対局, wins: 人の id → 連勝の数 }。ホストだけが数えて全員へ送る。
+// tally = 部屋の成績表（2026-10-06 本人の決定）。{ games: 決着した対局の数, wins: 人の id → 勝った回数 }。ゲームをまたいで数える。ホストが数えて全員へ送る。
 // beg = 初心者マークを付けている人の id の一覧（各自が自分の端末で付け外しし、ホストが集めて全員へ送る）。
 // undo = この対局で「待った」をした回数（盤のゲームのオンライン）。待ったをすると手の一覧が短くなり、ふつうの同期（長い方が正）では
 //   戻せないので、ホストだけが手を削って undo を1つ進め、受け手は undo が大きい一覧をそのまま受け入れる。対局が替わると 0 に戻る。
@@ -60,7 +61,7 @@ function myName() {
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -121,6 +122,19 @@ function setBeg(id, on) {
   saveRoom();
 }
 
+/* ---------- 部屋の成績表（2026-10-06 本人の決定）: この部屋で決着した対局の数と、だれが何回勝ったか（ゲームをまたいで） ---------- */
+// Claude の判断: 人だけを出す（CPU は出さない）。引き分けはだれも勝ちにしない。同点の1位・チームの勝ちは全員を数える。
+// 部屋にいる人は0勝でも出し、出た人は勝ちがあれば出す。勝った回数の多い順。待合室と、対局の結果の画面に出す。
+function tallyHtml() {
+  const t = S.tally;
+  if (S.mode !== 'online' || !t?.games) return '';
+  const w = (id) => (Number.isInteger(t.wins[id]) ? t.wins[id] : 0); // 届いた数は整数だけ使う（外から来た値なので）
+  const ids = [...new Set([...S.members, ...Object.keys(t.wins)])].filter((id) => !isCpu(id) && (S.members.includes(id) || w(id)));
+  ids.sort((a, b) => w(b) - w(a));
+  const list = ids.map((id) => `<b>${esc(id === S.myId ? 'あなた' : nameOf(id))}</b> ${w(id)}勝`).join('・');
+  return `🏆 この部屋の成績（${t.games}回）: ${list}`;
+}
+
 /* ---------- 連勝（2026-10-06 本人の決定）: 同じゲームを同じ顔ぶれで続けている間、だれが何連勝中かを出す ---------- */
 // Claude の判断: ゲームを変えたり顔ぶれ（CPU を含む）が変わったら数え直す。引き分けは全員の連勝が止まる。勝った人が2人以上（同点の1位）なら全員を数える。
 // オンラインだけ。ホストの端末が数えて全員へ送る（あとから入った人にも同じ数が見えるように）。
@@ -133,7 +147,8 @@ function winnersOf(res) {
   return Number.isInteger(res.winner) ? [res.winner] : [];
 }
 
-function countStreak(res) {
+// 対局の結果を見たときに1回だけ、連勝と部屋の成績表を数える（ホストだけ）
+function countResult(res) {
   if (!S.isHost || S.mode !== 'online' || !S.order) return;
   const counted = `${S.gameId}:${S.round}`;
   if (S.streak?.counted === counted) return;
@@ -141,6 +156,11 @@ function countStreak(res) {
   const before = S.streak?.key === key ? S.streak.wins : {};
   const won = new Set(winnersOf(res).map((p) => S.order[p]));
   S.streak = { key, counted, wins: Object.fromEntries(S.order.map((id) => [id, won.has(id) ? (before[id] ?? 0) + 1 : 0])) };
+  // 部屋の成績表: 人だけを数える（CPU の番号は対局ごとに付け直すので数えない）
+  const t = S.tally ?? { games: 0, wins: {} };
+  const wins = { ...t.wins };
+  for (const id of won) if (!isCpu(id)) wins[id] = (wins[id] ?? 0) + 1;
+  S.tally = { games: t.games + 1, wins };
   saveRoom();
   sendState();
 }
@@ -171,7 +191,7 @@ function rulesOf(gameId, rules) {
 }
 
 // 「おまかせ」（待合室でホストが押すと詳細設定を抽選する。2026-10-06 本人の決定）で抽選しない項目。本人が決めたのは
-// 人数・CPU の強さと速さ・盤の大きさ。時間・回数・長さ・難しさ・読み上げ・駒落ち・神経衰弱のヒントも好みなので抽選しない（Claude の判断）。
+// 人数・CPU の強さと速さ・盤の大きさ。時間・回数・長さ・難しさ・読み上げ・駒落ち・ヒント（神経衰弱・難読漢字）も好みなので抽選しない（Claude の判断）。
 // マルバツ・将棋の size は盤の大きさでなく遊び方（スーパー・消える・5五将棋）なので抽選する。
 const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint']);
 const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
@@ -509,6 +529,8 @@ function statusHtml(game, st, res) {
   if (extra) html += `<div class="status-sub">${extra}</div>`;
   const streak = streakHtml();
   if (streak) html += `<div class="status-sub streak">${streak}</div>`;
+  const tally = res ? tallyHtml() : '';
+  if (tally) html += `<div class="status-sub tally">${tally}</div>`;
   return html;
 }
 
@@ -626,7 +648,7 @@ function renderPage() {
 
   const res = game.result(st);
   if (!game.multi) tickClock(game, st, res);
-  if (res) countStreak(res);
+  if (res) countResult(res);
   status.innerHTML = statusHtml(game, st, res);
 
   // 新しく打たれた手だけ動きを付ける（接続表示の更新などで描き直したときは動かさない）
@@ -715,6 +737,8 @@ function renderLobby(game) {
   html += short
     ? `<p class="lobby-total">あと${game.minPlayers - humans.length}人そろうと始められます</p>`
     : `<p class="lobby-total">${humans.length + cpus}人で遊びます</p>`;
+  const tally = tallyHtml();
+  if (tally) html += `<p class="lobby-note tally">${tally}</p>`;
   board.className = 'board lobby';
   board.innerHTML = html;
   if (game.settings) board.append(rulesPanel(game));
@@ -788,6 +812,8 @@ function renderBoardLobby(game) {
     w.textContent = '観戦: ' + watchers.map(nameOf).join('、');
     board.append(w);
   }
+  const tally = tallyHtml();
+  if (tally) board.insertAdjacentHTML('beforeend', `<p class="lobby-note tally">${tally}</p>`);
   if (game.settings) board.append(rulesPanel(game));
   if (!S.isHost) return;
   const start = makeButton('始める', startRound);
@@ -1196,7 +1222,7 @@ function openNet() {
 function send(msg, qos) { S?.net?.send(msg, qos); }
 function sendState() {
   const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, undo, streak, beg } = S;
-  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [] });
+  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null });
 }
 function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves, u: S.undo ?? 0 }); }
 function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner }); }
@@ -1302,6 +1328,7 @@ function adoptState(msg) {
   S.rules = msg.rules && typeof msg.rules === 'object' ? msg.rules : {};
   S.beg = Array.isArray(msg.beg) ? msg.beg.filter((id) => typeof id === 'string') : [];
   S.streak = msg.streak && typeof msg.streak === 'object' && msg.streak.wins && typeof msg.streak.wins === 'object' ? msg.streak : null;
+  S.tally = msg.tally && Number.isInteger(msg.tally.games) && msg.tally.wins && typeof msg.tally.wins === 'object' ? msg.tally : null;
   for (const id of S.members) S.seen[id] ??= Date.now();
   const sameRound = S.gameId === msg.gameId && S.round === msg.round;
   const mu = Number.isInteger(msg.u) ? msg.u : 0;

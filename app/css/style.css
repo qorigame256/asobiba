@@ -137,6 +137,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
   body.beginner #screen-play .board :is(.playable, .usable, button.sg-cell) { animation: none !important; }
 }
 .status-sub.streak { color: #c0541a; font-weight: 700; }
+.tally { color: #6b5a2e; } /* 部屋の成績表 */
 .status-sub.beg-hint { color: #b06a00; }
 .howto { margin-top: 8px; background: var(--panel); border-radius: 12px; padding: 8px 14px; font-size: .9rem; line-height: 1.6; }
 .howto p { margin: 4px 0; }
@@ -1123,6 +1124,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .kj-word { font-size: clamp(2.2rem, 12vw, 3.4rem); font-weight: 800; letter-spacing: .06em; line-height: 1.3; font-family: "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", serif; }
 .kj-word.small { font-size: 1.6rem; font-family: inherit; }
 .kj-answer { font-size: 1.3rem; font-weight: 700; color: #2f8a4a; margin-top: 6px; }
+.kj-hint { margin-top: 6px; min-height: 1.4em; font-weight: 700; color: #b06a00; } /* 難読漢字のヒント（しばらくたつと読みの1文字目） */
 .kj-form { display: flex; gap: 8px; }
 .kj-form input { flex: 1; min-width: 0; font: inherit; font-size: 1.2rem; padding: 8px 12px; border: 1.5px solid var(--line); border-radius: 10px; background: #fff; }
 .kj-form input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }

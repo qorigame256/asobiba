@@ -289,7 +289,7 @@ assert.equal(R.result(R.apply(s, 63)).winner, null, 'いちばん多い人が2�
 // 四隅封印: 隅には置けない（はさめても）。2人でも3人でも最後まで打てて終わる（3人は隅を残して埋まったら終わり）
 s = { ...R.init({ rules: { corners: true } }), board: Object.assign(Array(64).fill(null), { 1: 1, 2: 0 }), turn: 0 };
 assert.equal(R.apply(s, 0), null, '四隅封印では隅に置けない');
-assert.ok(R.apply({ ...s, shut: false }, 0), '封印なしなら隅に置ける');
+assert.ok(R.apply({ ...s, shut: false, closed: null }, 0), '封印なしなら隅に置ける');
 for (const players of [2, 3]) {
   let g = R.init({ rules: { corners: true, players } }); let k = 0;
   while (!R.result(g) && k++ < 100) {
@@ -298,6 +298,41 @@ for (const players of [2, 3]) {
     g = R.apply(g, c[Math.floor(Math.random() * c.length)]);
   }
   assert.ok(R.result(g) && [0, 7, 56, 63].every((i) => g.board[i] === null), `四隅封印の${players}人が隅を空けたまま終わる`);
+}
+// 穴あき盤: 種で決まる・点対称・隅と真ん中の 4×4 には無い・穴には置けない・はさむ線は穴で止まる・CPU が最後まで打てる
+{
+  assert.deepEqual(R.init().holes, [], '最初は穴なし');
+  const H = (seed, rules = {}) => R.init({ rules: { holes: true, ...rules }, seed });
+  assert.deepEqual(H(5).holes, H(5).holes, '同じ種なら同じ穴');
+  let differ = 0;
+  for (let seed = 1; seed <= 30; seed++) {
+    for (const [size, want] of [[6, 2], [8, 4], [10, 6]]) {
+      const g = H(seed, { size });
+      assert.equal(g.holes.length, want, `${size}×${size} の穴は${want}つ`);
+      assert.ok(g.holes.every((i) => g.holes.includes(size * size - 1 - i)), '点対称');
+      const lo = size / 2 - 2;
+      assert.ok(g.holes.every((i) => { const r = Math.floor(i / size); const c = i % size; return ![0, size - 1, size * (size - 1), size * size - 1].includes(i) && !(r >= lo && r <= lo + 3 && c >= lo && c <= lo + 3); }), '隅と真ん中の 4×4 には無い');
+    }
+    if (JSON.stringify(H(seed).holes) !== JSON.stringify(H(1).holes)) differ++;
+  }
+  assert.ok(differ > 20, '種で穴が変わる');
+  // 黒 a1(0)… 白を穴の向こうではさめない: 0段目の 1 に白・2 が穴・3 に黒 → 黒は 0 に置いても 1 を返せない
+  const g = { ...R.init({ rules: { holes: true } }), closed: new Set([2, 61]), holes: [2, 61], board: Object.assign(Array(64).fill(null), { 1: 1, 3: 0, 27: 1, 28: 0, 35: 0, 36: 1 }), turn: 0 };
+  assert.equal(R.apply(g, 0), null, '穴の向こうの石ではさめない');
+  assert.equal(R.apply({ ...g, closed: new Set([61]), board: Object.assign(g.board.slice(), { 2: 1 }) }, 0)?.board[1], 0, '穴でなければはさめる');
+  assert.equal(R.apply({ ...g, board: Object.assign(g.board.slice(), { 1: null, 3: 1, 4: 0 }) }, 2), null, '穴には置けない');
+  for (const rules of [{}, { players: 3 }, { players: 4 }, { corners: true }, { size: 6 }, { size: 10 }]) {
+    for (let k = 0; k < 3; k++) {
+      let st = R.init({ rules: { holes: true, ...rules }, seed: 50 + k });
+      let guard = 0;
+      while (!R.result(st)) {
+        st = R.apply(st, R.cpu(st, st.turn, { ...rules, cpu: ['weak', 'normal', 'strong'][k] }));
+        assert.ok(st, '穴あき盤で CPU が反則を出した');
+        assert.ok(++guard < 120);
+      }
+      assert.ok(st.holes.every((i) => st.board[i] === null), '穴は最後まで空き');
+    }
+  }
 }
 
 // ランダム対局で落ちないこと・必ず終わること
@@ -501,6 +536,44 @@ console.log('colors stack OK');
   assert.deepEqual([c.last.got, c.drawn, c.turn], [1, null, 1], '設定なしなら1枚だけ引いて次へ');
   c = U.apply({ ...base(['b9', 'y7'], { untilPlay: true }), discard: ['r5'] }, { p: 0, t: 'draw' });
   assert.deepEqual([c.last.got, c.drawn, c.turn], [2, null, 1], '山と捨て札が尽きたらやめて次へ');
+}
+
+// いろあわせの最後の1枚の宣言: 宣言せずに1枚になったら2枚引く・宣言していれば引かない・1枚にならなければ何も起きない・上がりは要らない
+{
+  const U = GAMES.colors;
+  const cb = (hands, rules = { call: true }) => ({ ...U.init(3, 1, { rules }), deck: ['r1', 'r2', 'r3', 'r4'], discard: ['r5'], hands, color: 'r', turn: 0, drawn: null });
+  let c = U.apply(cb([['r7', 'g1'], ['b1', 'b2'], ['y1', 'y2']]), { p: 0, t: 'play', i: 0 });
+  assert.deepEqual([c.hands[0].length, c.last.forgot, c.turn], [3, 2, 1], '宣言せずに1枚になったら2枚引いて、番は次へ');
+  c = U.apply(cb([['r7', 'g1'], ['b1', 'b2'], ['y1', 'y2']]), { p: 0, t: 'play', i: 0, call: true });
+  assert.deepEqual([c.hands[0].length, c.last.call, c.last.forgot], [1, true, undefined], '宣言していれば引かない');
+  c = U.apply(cb([['r7', 'g1', 'g2'], ['b1', 'b2'], ['y1', 'y2']]), { p: 0, t: 'play', i: 0 });
+  assert.deepEqual([c.hands[0].length, c.last.forgot], [2, undefined], '2枚残るなら宣言は要らない');
+  c = U.apply(cb([['r7'], ['b1', 'b2'], ['y1', 'y2']]), { p: 0, t: 'play', i: 0 });
+  assert.deepEqual([c.winner, c.hands[0].length], [0, 0], '上がりは宣言が要らない');
+  c = U.apply(cb([['r7', 'g1'], ['b1', 'b2'], ['y1', 'y2']], {}), { p: 0, t: 'play', i: 0 });
+  assert.equal(c.hands[0].length, 1, '設定なしなら宣言しなくても引かない');
+  c = U.apply(cb([['r7', 'g7', 'g1'], ['b1', 'b2'], ['y1', 'y2']], { call: true, multi: true }), { p: 0, t: 'play', i: 0, more: [1] });
+  assert.equal(c.hands[0].length, 3, 'まとめ出しで1枚になっても、宣言しなければ2枚引く');
+  // 7で交換して1枚にならなければ要らない（出し終わった時点の手札で数える）
+  c = U.apply(cb([['r7', 'g1'], ['b1', 'b2'], ['y1', 'y2']], { call: true, sevenZero: true }), { p: 0, t: 'play', i: 0, to: 1 });
+  assert.deepEqual([c.hands[0], c.last.forgot], [['b1', 'b2'], undefined], '交換して2枚なら引かない');
+  let calls = 0;
+  let forgot = 0;
+  for (let k = 0; k < 60; k++) {
+    let st = U.init(2 + (k % 5), k * 131 + 7, { rules: { call: true, multi: k % 2 === 1, sevenZero: k % 3 === 0 } });
+    let steps = 0;
+    while (!U.result(st)) {
+      const p = U.turn(st);
+      const next = U.apply(st, { ...U.cpu(st, p), p });
+      assert.ok(next, '宣言ありで CPU が反則の手を出した');
+      assert.equal(total(next), 108, '宣言ありで札の枚数が変わった');
+      if (next.last?.call) calls++;
+      if (next.last?.forgot) forgot++;
+      st = next;
+      if (++steps > 5000) throw new Error('宣言ありのいろあわせが終わらない');
+    }
+  }
+  assert.ok(calls > 40 && forgot > 3 && forgot < calls, `CPU はたいてい宣言し、ときどき忘れる: ${calls} / ${forgot}`);
 }
 
 // ---------- 大富豪 ----------
@@ -2218,6 +2291,28 @@ for (let g = 0; g < 20; g++) {
   assert.ok(n > 140 && n < 200, 'CPU は16で親が10ならたいてい降りる ' + n);
   for (let i = 0; i < 50; i++) assert.notEqual(BJ.cpu({ ...bjState([['s10', 'h3']], ['s10', 'h7'], ['c5']), surOn: true }, 0).t, 'surrender', 'CPU は13では降りない');
 }
+// ファイブカード: 5枚で21以下なら止まって勝ち（親が19でも）。設定なしなら止まらない
+{
+  const five = (on) => ({ ...bjState([['s2', 'h3']], ['s10', 'h9'], ['c2', 'd2', 's4', 'c3']), fiveOn: on });
+  let x = five(true);
+  for (let k = 2; k < 5; k++) { assert.equal(x.done[0], false, 'まだ引ける'); x = BJ.apply(x, { p: 0, t: 'hit', r: 0, k }); }
+  assert.deepEqual([x.hands[0].length, x.phase, x.out?.[0]], [5, 'result', 10], '5枚で13なら止まり、親の19に勝つ');
+  x = five(false);
+  for (let k = 2; k < 5; k++) x = BJ.apply(x, { p: 0, t: 'hit', r: 0, k });
+  assert.deepEqual([x.done[0], x.phase], [false, 'play'], '設定なしなら5枚でも止まらない');
+  const bust = BJ.apply(BJ.apply(BJ.apply({ ...bjState([['s10', 'h2']], ['s10', 'h9'], ['c2', 'd5', 's9']), fiveOn: true }, { p: 0, t: 'hit', r: 0, k: 2 }), { p: 0, t: 'hit', r: 0, k: 3 }), { p: 0, t: 'stand', r: 0 });
+  assert.equal(bust.out[0], 0, '4枚で19は親の19と引き分け（ファイブカードではない）');
+  for (let g = 0; g < 20; g++) {
+    let st = BJ.init(3, 900 + g, { rules: { five: true, split: true, surrender: true } });
+    let guard = 0;
+    while (!BJ.result(st)) {
+      let moved = false;
+      for (let p = 0; p < 3; p++) if (BJ.canAct(st, p)) { st = BJ.apply(st, { ...BJ.cpu(st, p), p }); assert.ok(st, 'ファイブカードありで CPU が反則'); moved = true; }
+      if (!moved) st = BJ.apply(st, { p: -1, t: 'next', r: st.round });
+      assert.ok(++guard < 500);
+    }
+  }
+}
 console.log('blackjack OK');
 
 // ---------- 海戦ゲーム ----------
@@ -2350,6 +2445,18 @@ console.log('kaisen OK');
   assert.deepEqual(D.result(e).winners, [1], '全員当たったら長くもった人の勝ち');
   e = run(D.init(3, 5), [{ p: -1, t: 'go' }, { p: 0, t: 'hit', ms: 5000 }, { p: -1, t: 'end' }]);
   assert.deepEqual(D.result(e).winners, [1, 2], '時間まで残った人は全員1位');
+  // 残機（詳細設定）: その数だけ当たったら脱落・同じ当たりは1回だけ数える・順位は最後の1機を失った時刻
+  assert.equal(D.init(2, 1).rules.lives, 1, '最初は1機');
+  let L = run(D.init(2, 5, { rules: { lives: 3 } }), [{ p: -1, t: 'go' }, { p: 0, t: 'hit', ms: 3000, k: 0 }]);
+  assert.deepEqual([L.hits[0], L.dead[0]], [1, null], '3機なら1回当たっても残る');
+  assert.equal(D.apply(L, { p: 0, t: 'hit', ms: 3000, k: 0 }), null, '同じ当たりは1回だけ');
+  L = run(L, [{ p: 1, t: 'hit', ms: 4000, k: 0 }, { p: 0, t: 'hit', ms: 8000, k: 1 }, { p: 1, t: 'hit', ms: 9000, k: 1 }, { p: 1, t: 'hit', ms: 12000, k: 2 }]);
+  assert.deepEqual([L.dead[1], L.dead[0], L.phase], [12000, null, 'play'], '3回目で脱落');
+  L = run(L, [{ p: 0, t: 'hit', ms: 20000, k: 2 }]);
+  assert.deepEqual([L.phase, D.result(L).winners], ['end', [0]], '最後の1機を長くもった人の勝ち');
+  L = run(D.init(2, 5, { rules: { lives: 2 } }), [{ p: -1, t: 'go' }, { p: 0, t: 'hit', ms: 3000, k: 0 }]);
+  assert.equal(L.dead[0], null, '2機なら1回目は残る');
+  assert.equal(run(L, [{ p: 0, t: 'hit', ms: 5000, k: 1 }]).dead[0], 5000, '2機なら2回目で脱落');
 }
 
 // ---------- 玉入れ ----------

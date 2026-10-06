@@ -8,6 +8,8 @@
 //   2つ目の手に2枚目を配って hands[p] で遊ぶ。どちらの手の番かを手の h（0 / 1）に入れ、1つ目への手が2回届いても2つ目に効かないようにする。
 // サレンダー（詳細設定。最初はなし。2026-10-06 本人承認）: 最初の2枚のときだけ（引いた後・スプリットした後は不可）降りられ、賭けの半分（5点）を失う。
 //   親がブラックジャックならすぐ終わるので降りられない。CPU は「16で親が9・10・A」「15で親が10」のとき降りる。
+// ファイブカード（詳細設定。最初はなし。2026-10-06 本人の決定）: 5枚引いて合計21以下なら、その手はそこで止まり、親の札に関係なく勝ち（+10。ダブルはしていないので賭けは10）。
+//   Claude の判断: スプリットした手でも同じ。親がブラックジャックの回はすぐ終わるので起きない。
 // 決まりごと（Claude の判断）: 毎回52枚の新しい山を、対局の種と何回目かから作る。親の最初の2枚がブラックジャックなら、すぐに開いてその回は終わり
 // （プレイヤーもブラックジャックなら引き分け）。プレイヤーは全員同時に動く。全員が終えたら親が引き、結果を4.5秒見せて次の回へ。
 // 持ち点はマイナスになってもよい（最後まで遊べるように）。A は 1 か 11、J・Q・K は 10。
@@ -36,6 +38,8 @@ const isBJ = (cards) => cards.length === 2 && total(cards).v === 21;
 // スプリットした手の21はブラックジャックにしない
 const bjOf = (s, p, cards) => !s.sp?.[p] && isBJ(cards);
 const handNo = (s, p) => (s.fin?.[p] ? 1 : 0);
+// ファイブカード（詳細設定）: 5枚で21以下
+export const isFive = (s, cards) => !!s.fiveOn && cards.length >= 5 && total(cards).v <= 21;
 export const canSurrender = (s, p) => !!s.surOn && !s.sp[p] && s.hands[p].length === 2 && !s.done[p];
 export const canSplit = (s, p) => !!s.splitOn && !s.sp[p] && s.hands[p].length === 2 && rankOf(s.hands[p][0]) === rankOf(s.hands[p][1]);
 
@@ -55,6 +59,9 @@ function handDone(s, p) {
   s.done[p] = s.sp[p] === 'A' || total(s.hands[p]).v >= 21;
 }
 
+// 引いたあと、その手がもう止まるか（21以上・ファイブカード）
+const stops = (s, cards) => total(cards).v >= 21 || isFive(s, cards);
+
 // 1つの手の勝ち負け（増えた点。負けはマイナス）
 function gainOf(s, p, cards, bet) {
   if (s.sur[p]) return -bet / 2;
@@ -62,6 +69,7 @@ function gainOf(s, p, cards, bet) {
   const d = total(s.dealer).v;
   const dBJ = isBJ(s.dealer);
   if (v > 21) return -bet;
+  if (isFive(s, cards)) return bet;
   if (bjOf(s, p, cards)) return dBJ ? 0 : Math.round(bet * 1.5);
   if (dBJ) return -bet;
   if (d > 21 || v > d) return bet;
@@ -93,7 +101,7 @@ function deal(s) {
 
 // 全員が終えたら親が引いて、勝ち負けを決める（スプリットした人は2つの手の合計）
 function settle(s) {
-  const alive = (p, h) => !s.sur[p] && total(h).v <= 21 && !bjOf(s, p, h);
+  const alive = (p, h) => !s.sur[p] && total(h).v <= 21 && !bjOf(s, p, h) && !isFive(s, h);
   const live = s.hands.some((h, p) => alive(p, h) || (s.fin[p] && alive(p, s.fin[p].c)));
   if (!isBJ(s.dealer) && live) while (total(s.dealer).v < 17) s.dealer.push(s.deck[s.pos++]);
   s.outFin = s.fin.map((f, p) => (f ? gainOf(s, p, f.c, f.bet) : null));
@@ -115,11 +123,12 @@ export default {
   settings: [
     { key: 'rounds', label: '回数', desc: 'この回数を遊んで、持ち点が多い人の勝ち', def: 5, choices: [[3, '3回'], [5, '5回'], [10, '10回']] },
     { key: 'surrender', label: 'サレンダー', desc: '最初の2枚を見て降りると、賭けの半分（5）だけ失ってその回を終われる', def: false },
+    { key: 'five', label: 'ファイブカード', desc: '5枚引いて合計が21以下なら、親の札に関係なく勝ち（+10）', def: false },
     { key: 'split', label: 'スプリット', desc: '最初の2枚が同じ数字なら、2つの手に分けて別々に勝負できる（賭けもそれぞれ10。分けるのは1回だけ。A を分けたら1枚ずつで終わり）', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const s = { n, seed, rounds: [3, 5, 10].includes(rules.rounds) ? rules.rounds : 5, splitOn: rules.split === true, surOn: rules.surrender === true, round: 0, points: Array(n).fill(START), step: 0 };
+    const s = { n, seed, rounds: [3, 5, 10].includes(rules.rounds) ? rules.rounds : 5, splitOn: rules.split === true, fiveOn: rules.five === true, surOn: rules.surrender === true, round: 0, points: Array(n).fill(START), step: 0 };
     deal(s);
     return s;
   },
@@ -182,7 +191,7 @@ export default {
     } else if (m.t === 'hit') {
       if (m.k !== hand.length) return null;
       hand.push(s.deck[s.pos++]);
-      if (total(hand).v >= 21) handDone(s, p);
+      if (stops(s, hand)) handDone(s, p);
     } else if (m.t === 'stand') {
       handDone(s, p);
     } else if (m.t === 'double') {
@@ -211,7 +220,7 @@ export default {
     if (canSplit(s, p) && wantSplit && Math.random() >= 0.2) return { t: 'split', r: s.round };
     if (hand.length === 2 && !soft && (v === 11 || (v === 10 && upv < 10))) act = 'double';
     else if (soft) act = v <= 17 || (v === 18 && upv >= 9) ? 'hit' : 'stand';
-    else if (v <= 11) act = 'hit';
+    else if (v <= 11 || (s.fiveOn && hand.length === 4 && v <= 13)) act = 'hit'; // ファイブカードがあれば、4枚で小さいときはもう1枚
     else if (v <= 16) act = upv >= 7 ? 'hit' : 'stand';
     else act = 'stand';
     if (Math.random() < 0.15 && act !== 'double') act = act === 'hit' ? 'stand' : v < 19 ? 'hit' : 'stand';
@@ -256,9 +265,10 @@ export default {
         if (s.sur[p]) return s.phase === 'result' ? `サレンダー <span class="pt-ng">${g}</span>` : 'サレンダー';
         if (s.phase === 'result') {
           if (total(cards).v > 21) return `バースト <span class="pt-ng">${g}</span>`;
+          if (isFive(s, cards)) return `<span class="pt-ok">ファイブカード +${g}</span>`;
           return g > 0 ? `<span class="pt-ok">勝ち +${g}</span>` : g < 0 ? `<span class="pt-ng">負け ${g}</span>` : '引き分け ±0';
         }
-        return done ? (total(cards).v > 21 ? 'バースト' : bjOf(s, p, cards) ? 'ブラックジャック！' : 'スタンド') : '考え中…';
+        return done ? (total(cards).v > 21 ? 'バースト' : bjOf(s, p, cards) ? 'ブラックジャック！' : isFive(s, cards) ? 'ファイブカード！' : 'スタンド') : '考え中…';
       };
       const cardsRow = (cards, fresh) => {
         const row = document.createElement('div');

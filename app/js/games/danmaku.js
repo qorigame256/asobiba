@@ -6,7 +6,10 @@
 // ほかの人の自機の位置は見た目だけなので、手の一覧に入れず 0.1秒ごとに送りっぱなしにする（o.stream / onStream）。
 //
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready →(3秒)→ go → play →(時間＋待ち)→ end
-// 手: { p: -1, t: 'go' | 'end' } / { p, t: 'hit', ms: もった時間 } / { p, t: 'last', ms }
+// 詳細設定「残機」（2026-10-06 本人の決定。最初は 1機＝今までどおり当たったら脱落）: 2機・3機なら、その数だけ当たったら脱落。
+//   Claude の判断: 当たったあと2秒は当たらない（自機が点滅する）。その場で続ける。順位は脱落した時刻（最後の1機を失った時刻）で決める。
+// 手: { p: -1, t: 'go' | 'end' } / { p, t: 'hit', ms: もった時間, k: 何回目の当たりか（0から） } / { p, t: 'last', ms }
+//   k が局面の hits[p] と違う手は反則（同じ当たりが2回届いても1回だけ数える）。
 // CPU（と部屋を出た人の席）はホストの端末がよける動きを計算する（cpu の中の sim）。腕前はわざと鈍くしてある。
 
 import { mulberry32 } from './util.js';
@@ -20,6 +23,7 @@ export const HIT_R = 0.009; // 自機の当たり判定の半径（見た目よ�
 const SHIP_R = 0.02;
 const SEND_MS = 100;
 const START = { x: 0.5, y: H - 0.12 };
+const SAFE_SEC = 2; // 残機があって当たったあと、当たらない秒数
 
 /* ---------- 弾の作り方（全員同じ） ---------- */
 
@@ -134,7 +138,8 @@ export function cpuStep(c, active, sec, dt, rnd) {
 
 const durOf = (s) => Number(s.rules.time);
 const goKey = (s) => `danmaku:${s.seed}:go`;
-const clone = (s) => ({ ...s, dead: s.dead.slice() });
+const clone = (s) => ({ ...s, dead: s.dead.slice(), hits: s.hits.slice() });
+const livesOf = (s) => ([1, 2, 3].includes(Number(s.rules.lives)) ? Number(s.rules.lives) : 1);
 const aliveSeats = (s) => s.dead.map((v, p) => (v === null ? p : -1)).filter((p) => p >= 0);
 const maxDead = (s) => Math.max(0, ...s.dead.filter((v) => v !== null));
 
@@ -206,7 +211,8 @@ function draw() {
   // 自分
   if (ui.me !== null) {
     if (s.dead[ui.me] === null && !ui.hit) {
-      ship(ui.x, ui.y, ui.me, 1, '');
+      const safe = sec < ui.safeUntil; // 当たったあとの、当たらない間は点滅
+      ship(ui.x, ui.y, ui.me, safe && Math.floor(now / 120) % 2 ? 0.25 : 1, '');
       ctx.beginPath();
       ctx.arc(ui.x * k, ui.y * k, HIT_R * k, 0, Math.PI * 2);
       ctx.fillStyle = '#fff';
@@ -232,6 +238,7 @@ function draw() {
   else {
     const alive = aliveSeats(s).length;
     text = `残り ${Math.ceil(durOf(s) - sec)}秒・生き残り ${alive}/${s.n}`;
+    if (livesOf(s) > 1 && ui.me !== null && s.dead[ui.me] === null && !ui.hit) text += `・残機 ${livesOf(s) - ui.hits}`;
     if (ui.me !== null && (s.dead[ui.me] !== null || ui.hit)) text += '（観戦中）';
   }
   if (text) ctx.fillText(text, k / 2, k * 0.06);
@@ -249,11 +256,13 @@ function step() {
   const ky = (ui.keys.has('ArrowDown') ? 1 : 0) - (ui.keys.has('ArrowUp') ? 1 : 0);
   if (kx || ky) { ui.x = clamp(ui.x + kx * 0.6 * dt, 0.02, 0.98); ui.y = clamp(ui.y + ky * 0.6 * dt, 0.02, H - 0.02); }
   if (s.dead[ui.me] !== null || ui.hit) return;
-  if (hitAt(ui.mine(sec), sec, ui.x, ui.y)) {
-    ui.hit = true;
+  const active = ui.mine(sec);
+  if (sec >= ui.safeUntil && hitAt(active, sec, ui.x, ui.y)) {
     ui.boomAt = performance.now();
-    o.onMove({ t: 'hit', ms: Math.round(sec * 1000) });
-    return;
+    o.onMove({ t: 'hit', ms: Math.round(sec * 1000), k: ui.hits });
+    ui.hits += 1;
+    if (ui.hits >= livesOf(s)) { ui.hit = true; return; }
+    ui.safeUntil = sec + SAFE_SEC; // 残機があれば続ける
   }
   // 最後の1人になって、ほかの全員より長くもったら終わり
   const others = s.dead.filter((v, p) => p !== ui.me);
@@ -310,12 +319,13 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'time', label: '時間', desc: 'この時間まで残った人は全員1位。後ほど弾が多く速くなる', def: '90', choices: [['60', '60秒'], ['90', '90秒'], ['120', '120秒']] },
+    { key: 'lives', label: '残機', desc: '何回当たったら脱落するか。2機・3機なら、当たっても2秒は当たらずに続けられる', def: 1, choices: [[1, '1機（当たったら脱落）'], [2, '2機'], [3, '3機']] },
     { key: 'level', label: '難しさ', desc: '弾の数と速さ。やさしいは少なく遅く、むずかしいは多く速い', def: 'normal', choices: [['easy', 'やさしい'], ['normal', 'ふつう'], ['hard', 'むずかしい']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { time: '90', level: 'normal', ...rules };
-    return { n, seed, rules: r, phase: 'ready', dead: Array(n).fill(null), step: 0 };
+    const r = { time: '90', level: 'normal', lives: 1, ...rules };
+    return { n, seed, rules: r, phase: 'ready', dead: Array(n).fill(null), hits: Array(n).fill(0), step: 0 };
   },
 
   turn() { return null; },
@@ -365,6 +375,9 @@ export default {
     const s = clone(s0);
     s.step += 1;
     if (m.t === 'hit') {
+      if ((m.k ?? 0) !== s0.hits[m.p]) return null; // 同じ当たりが2回届いた
+      s.hits[m.p] += 1;
+      if (s.hits[m.p] < livesOf(s0)) return s; // 残機がある
       s.dead[m.p] = Math.round(m.ms);
       if (aliveSeats(s).length === 0) s.phase = 'end';
       return s;
@@ -386,7 +399,7 @@ export default {
     const now = Math.min(since(goKey(s)) / 1000, durOf(s));
     let c = sims.get(key);
     if (!c) {
-      c = { x: 0.2 + Math.random() * 0.6, y: H - 0.15, vx: 0, vy: 0, timer: 0, sec: now, dead: null, view: tracker(bulletsOf(s)) };
+      c = { x: 0.2 + Math.random() * 0.6, y: H - 0.15, vx: 0, vy: 0, timer: 0, sec: now, dead: null, hitAt: [], safe: 0, view: tracker(bulletsOf(s)) };
       sims.set(key, c);
       if (sims.size > 40) sims.delete(sims.keys().next().value);
     }
@@ -395,9 +408,14 @@ export default {
       c.sec += dt;
       const active = c.view(c.sec);
       cpuStep(c, active, c.sec, dt, Math.random);
-      if (hitAt(active, c.sec, c.x, c.y)) c.dead = Math.round(c.sec * 1000);
+      if (c.sec >= c.safe && hitAt(active, c.sec, c.x, c.y)) {
+        c.hitAt.push(Math.round(c.sec * 1000));
+        c.safe = c.sec + SAFE_SEC;
+        if (c.hitAt.length >= livesOf(s)) c.dead = c.hitAt[c.hitAt.length - 1];
+      }
     }
-    if (c.dead) return { t: 'hit', ms: c.dead };
+    const k = s.hits[p];
+    if (k < c.hitAt.length) return { t: 'hit', ms: c.hitAt[k], k }; // まだ送っていない当たり（1回に1つずつ）
     const others = s.dead.filter((v, q) => q !== p);
     if (others.every((v) => v !== null) && now * 1000 > maxDead(s)) return { t: 'last', ms: Math.round(now * 1000) };
     return null;
@@ -418,8 +436,9 @@ export default {
   render(root, s, o) {
     const me = o.me >= 0 ? o.me : null;
     const sc = s.dead.map((v) => (v === null ? '' : (v / 1000).toFixed(1)));
+    const lives = livesOf(s);
     const chips = scoreChips(o, s.dead.map(() => 0), {
-      extra: (p) => (s.dead[p] === null ? (s.phase === 'end' ? '最後まで' : '') : `${esc(sc[p])}秒で脱落`),
+      extra: (p) => (s.dead[p] === null ? (s.phase === 'end' ? '最後まで' : lives > 1 ? `残機 ${lives - s.hits[p]}` : '') : `${esc(sc[p])}秒で脱落`),
     });
     chips.querySelectorAll('.pt-score').forEach((e) => e.remove());
     const key = `${s.seed}:${me}`;
@@ -446,7 +465,7 @@ export default {
     since(`danmaku:${s.seed}:ready`);
     ui = {
       key, canvas, ctx: canvas.getContext('2d'), chips, wrap, me, cur: { s, o }, scale: 300,
-      x: START.x, y: START.y, hit: false, boomAt: 0, sentLast: false, lastSend: 0, lastCpuSend: 0, last: null,
+      x: START.x, y: START.y, hit: me !== null && s.hits[me] >= livesOf(s), hits: me !== null ? s.hits[me] : 0, safeUntil: 0, boomAt: 0, sentLast: false, lastSend: 0, lastCpuSend: 0, last: null,
       ghosts: new Map(), keys: new Set(), view: tracker(bulletsOf(s)), mine: tracker(bulletsOf(s)),
     };
     wrap.classList.toggle('ac-live', s.phase === 'play' && me !== null);
