@@ -17,6 +17,8 @@
 //     数え方は5飛びと同じ（同じ数字の組は枚数、階段は1枚）。手札が足りなければ全部。出した人が渡し終える（捨て終える）まで次へ進まない（s.pend）。
 //     階段に7と10が両方入っていたら、渡してから捨てる。渡す・捨てるで手札がなくなったら上がり（反則上がりにしない）。出して上がったときは何もしない。
 //     8切りなどで場が流れるときも、渡し終えてから流す。CPU は弱い札から渡す（捨てる）。
+//   - 9リバース（詳細設定。2026-10-06 本人の決定）: 9を出すたびに順番の向き（s.dir）が入れ替わり、場が流れてもそのまま。枚数に関係なく1回
+//     （階段に9があっても1回）。逆回りでは「次の人」（5飛び・7渡しの相手も）が反対どなりになる。8切りなどで流れるときも向きは変わる。
 //   - カード交換: 大貧民の一番強い2枚 → 大富豪、大富豪が選んだ2枚 → 大貧民。4人以上なら貧民と富豪で1枚ずつも。
 //     前の対局と顔ぶれが違うときは交換しない。
 
@@ -161,9 +163,12 @@ function legalPlays(s, p) {
 
 const isActive = (s, p) => !s.out.includes(p) && !s.fouls.includes(p);
 
+// from から k 人先の席（いまの向きで）
+const seatAt = (s, from, k) => (((from + k * (s.dir ?? 1)) % s.n) + s.n) % s.n;
+
 function nextActive(s, from) {
   for (let k = 1; k <= s.n; k++) {
-    const q = (from + k) % s.n;
+    const q = seatAt(s, from, k);
     if (isActive(s, q)) return q;
   }
   return from;
@@ -180,7 +185,7 @@ function clearField(s) {
 // 次に出す人へ。パスしていない人がもう居なければ場を流す
 function advance(s, from) {
   for (let k = 1; k <= s.n; k++) {
-    const q = (from + k) % s.n;
+    const q = seatAt(s, from, k);
     if (!isActive(s, q) || s.passed[q]) continue;
     if (q === s.by) break;
     s.turn = q;
@@ -251,6 +256,7 @@ const RULE_LIST = [
   { key: 'five', label: '5飛び', desc: '5を出すと、出した5の枚数だけ次の人を飛ばす（飛ばされた人はパスと同じ）', def: false },
   { key: 'seven', label: '7渡し', desc: '7を出すと、出した7の枚数だけ好きな札を次の人に渡す（必ず）', def: false },
   { key: 'ten', label: '10捨て', desc: '10を出すと、出した10の枚数だけ好きな札を捨てる（必ず）', def: false },
+  { key: 'nine', label: '9リバース', desc: '9を出すと順番の向きが逆になる（次に9が出るまでそのまま）', def: false },
   { key: 'elevenBack', label: '11バック', desc: 'J を出すと、場が流れるまで強さの順番が逆になる', def: false },
   { key: 'spe3', label: 'スペ3返し', desc: 'ジョーカー1枚には ♠3 で勝てる', def: false },
   { key: 'miyako', label: '都落ち', desc: '大富豪が1番に上がれないと、その時点で大貧民になる', def: false },
@@ -412,6 +418,7 @@ export default {
     s.by = p;
     if (s.rules.revolution && meld.kind === 'set' && meld.n >= 4) { s.rev = !s.rev; effects.push(s.rev ? '革命' : '革命返し'); }
     if (s.rules.elevenBack && contains(meld, 11)) { s.back = !s.back; effects.push('11バック'); }
+    if (s.rules.nine && contains(meld, 9)) { s.dir = -(s.dir ?? 1); effects.push('9リバース'); }
     let flow = false;
     if (s.rules.eight && contains(meld, 8)) { flow = true; effects.push('8切り'); }
     if (f?.solo && meld.cards[0] === 's3') { flow = true; effects.push('スペ3返し'); }
@@ -424,7 +431,7 @@ export default {
       const k = meld.kind === 'set' ? meld.n : 1;
       let done = 0;
       for (let j = 1; j < s.n && done < k; j++) {
-        const q = (p + j) % s.n;
+        const q = seatAt(s, p, j);
         if (!isActive(s, q) || s.passed[q]) continue;
         s.passed[q] = true;
         done++;
@@ -528,6 +535,7 @@ export default {
     const badges = [];
     if (s.rev) badges.push('革命中');
     if (s.back) badges.push('11バック中');
+    if (s.dir === -1) badges.push('逆回り');
     if (s.lock) badges.push('しばり ' + s.lock.map((x) => SUIT_MARK[x]).join(''));
     if (badges.length) {
       const b = document.createElement('div');

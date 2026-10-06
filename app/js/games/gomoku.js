@@ -1,9 +1,14 @@
 // 五目並べ。2人（黒が先手）。交代で線の交わる点に石を置き、たて・よこ・ななめに5つ以上並べたら勝ち。
-// 禁じ手（連珠のルール）は無し。6つ以上並んでも勝ち（Claude の判断。ルールを覚えなくても遊べるように）。
+// 最初は禁じ手（連珠のルール）なしで、6つ以上並んでも勝ち（Claude の判断。ルールを覚えなくても遊べるように）。禁じ手は詳細設定（下）。
 // 詳細設定「ぴったり五目」（2026-10-06 本人の決定）: ちょうど5つで勝ち。6つ以上つながっても勝ちにならない（置くことはできる）。両者とも同じ。
 // 詳細設定「はさみ取り」（2026-10-06 本人の決定。決まりは Claude の推奨を本人が承認）: 相手の石がちょうど2つ並んだ両側を自分の石ではさむと取れる
 //   （置いた石の8方向それぞれで見る）。5組（10個）取っても勝ち。自分から、はさまれる形に置いても取られない。取られた点にはまた置ける。
 //   「ぴったり五目」と同時に使える。Claude の判断: 置いて取ったあとに5つ並びを見る。取って5組と5つ並びが同時なら5つ並びの光る石を出す。
+// 詳細設定「禁じ手」（2026-10-06 本人の決定。正式な連珠どおり）: 先手の黒だけ、三三・四四・長連（6つ以上）になる点に置けない。
+//   ちょうど5つ並ぶ点は、同時に三三などになっても置けて勝ち（連珠と同じ）。禁じ手の点は押せないようにして印を出す（本人承認。正式には置いたら負け）。
+//   Claude の判断: 「三」は、もう1つ置くと両端の空いた四（達四）になる並び。その1つが禁じ手かどうかまでは見ない（正式にはさかのぼって見るが、まれなため）。
+//   同じ線の上の2つの四（●_●●●_● など）も四四に数える。黒が置ける点が禁じ手しか無くなったら引き分け。
+//   「ぴったり五目」と同時なら、白も6つ以上では勝てない（黒の長連は禁じ手のまま）。「はさみ取り」とも同時に使える（取る前の盤で見る）。
 // 盤は詳細設定で 15路（最初）か 13路。手 = 点の番号（段*路数+列。段0が一番上）。全部埋まったら引き分け。
 
 import { CPU_SETTING } from './util.js';
@@ -90,6 +95,67 @@ function place(s, i) {
   if (!won && s.capture && caps[s.turn] >= CAP_GOAL) won = { winner: s.turn, cells: [i], byCap: true };
   return { ...t, turn: 1 - s.turn, last: i, won, count: s.count + 1 };
 }
+
+// 禁じ手: 点 i（空き）に黒が置くと三三・四四・長連になるか
+const BLACK = 0;
+function forbidden(grid, n, i) {
+  const r0 = Math.floor(i / n);
+  const c0 = i % n;
+  const R = 6; // 置いた点から左右6マスずつ見る（線の配列の真ん中が i）
+  let fours = 0;
+  let threes = 0;
+  let five = false;
+  let over = false;
+  for (const [dr, dc] of DIRS) {
+    const line = [];
+    for (let k = -R; k <= R; k++) {
+      const r = r0 + dr * k;
+      const c = c0 + dc * k;
+      line.push(k === 0 ? BLACK : r >= 0 && r < n && c >= 0 && c < n ? grid[r * n + c] : 'x');
+    }
+    // 真ん中を含む黒のつながりの長さ（はみ出した端の位置も返す）
+    const runAt = (L, j) => {
+      let a = j;
+      let b = j;
+      while (a > 0 && L[a - 1] === BLACK) a--;
+      while (b < L.length - 1 && L[b + 1] === BLACK) b++;
+      return [a, b];
+    };
+    const [a0, b0] = runAt(line, R);
+    const len = b0 - a0 + 1;
+    if (len === 5) five = true;
+    if (len >= 6) over = true;
+    // 四: 1つ置けばちょうど5つ（置いた石を含む）になる空き点
+    const fivePts = [];
+    for (let j = 1; j < line.length - 1; j++) {
+      if (line[j] !== null) continue;
+      const L = line.slice();
+      L[j] = BLACK;
+      const [a, b] = runAt(L, j);
+      if (b - a + 1 === 5 && a <= R && R <= b) fivePts.push(j);
+    }
+    if (fivePts.length) {
+      // 両端の空いた四（_●●●●_）は1つの四。それ以外で2点あれば同じ線に四が2つ
+      fours += fivePts.length >= 2 && !(fivePts.length === 2 && fivePts[1] - fivePts[0] === 5) ? 2 : 1;
+      continue;
+    }
+    // 三: 1つ置くと達四（両端の空いた、ちょうど4つのつながり）になる
+    for (let j = 2; j < line.length - 2; j++) {
+      if (line[j] !== null) continue;
+      const L = line.slice();
+      L[j] = BLACK;
+      const [a, b] = runAt(L, j);
+      if (b - a + 1 !== 4 || a > R || R > b) continue;
+      if (a < 2 || b > line.length - 3) continue;
+      if (L[a - 1] === null && L[b + 1] === null && L[a - 2] !== BLACK && L[b + 2] !== BLACK) { threes++; break; }
+    }
+  }
+  if (five) return false;
+  return over || fours >= 2 || threes >= 2;
+}
+const banned = (s, i) => !!s.renju && s.turn === BLACK && s.grid[i] === null && forbidden(s.grid, s.size, i);
+// 黒の番で、置ける点が禁じ手しか無い
+const stuck = (s) => !!s.renju && s.turn === BLACK && s.grid.every((v, i) => v !== null || forbidden(s.grid, s.size, i));
 
 /* ---------- CPU ---------- */
 
@@ -180,9 +246,10 @@ function capValue(s, i, p) {
 function gomokuCpu(s, rules) {
   const lv = LEVEL[rules?.cpu] ?? LEVEL.weak;
   const p = s.turn;
-  const list = candidates(s).map((i) => {
+  const list = candidates(s).filter((i) => !(p === BLACK && banned(s, i))).map((i) => {
     let mine = cellValue(s, i, p) + capValue(s, i, p);
-    const theirs = cellValue(s, i, 1 - p) + capValue(s, i, 1 - p);
+    // 黒が禁じ手で置けない点は、白が守らなくてよい
+    const theirs = s.renju && 1 - p === BLACK && forbidden(s.grid, s.size, i) ? 0 : cellValue(s, i, 1 - p) + capValue(s, i, 1 - p);
     if (s.capture && mine < 100000) mine -= exposed(s.grid, s.size, i, p) * 400 * lv.guard; // 取られる形へ置くのを嫌う
     // 自分が勝てる手は必ず打つ。相手の五を止めるのも必ず（よわいでも）
     const v = mine >= 100000 ? 1e9 : theirs >= 100000 ? 1e8 : mine * 1.1 + theirs * lv.guard + Math.random();
@@ -213,6 +280,7 @@ export default {
   settings: [
     { key: 'size', label: '盤', desc: '13路はスマホで押しやすい', def: 15, choices: [[15, '15路（15×15）'], [13, '13路（13×13）']] },
     { key: 'exact', label: 'ぴったり五目', desc: 'ちょうど5つで勝ち。6つ以上つながっても勝ちにならない', def: false },
+    { key: 'renju', label: '禁じ手', desc: '先手の黒だけ、三三・四四・6つ以上並ぶ点に置けない（連珠のルール。先手の有利を消す）', def: false },
     { key: 'capture', label: 'はさみ取り', desc: '相手の石がちょうど2つ並んだ両側をはさむと取れる。5組（10個）取っても勝ち', def: false },
     CPU_SETTING,
   ],
@@ -221,19 +289,19 @@ export default {
 
   init({ rules = {} } = {}) {
     const size = rules.size === 13 ? 13 : 15;
-    return { size, exact: !!rules.exact, capture: !!rules.capture, caps: [0, 0], taken: [], grid: Array(size * size).fill(null), turn: 0, last: null, won: null, count: 0 };
+    return { size, exact: !!rules.exact, renju: !!rules.renju, capture: !!rules.capture, caps: [0, 0], taken: [], grid: Array(size * size).fill(null), turn: 0, last: null, won: null, count: 0 };
   },
 
   turn(s) { return s.turn; },
 
   apply(s, i) {
-    if (!Number.isInteger(i) || i < 0 || i >= s.grid.length || s.grid[i] !== null || s.won) return null;
+    if (!Number.isInteger(i) || i < 0 || i >= s.grid.length || s.grid[i] !== null || s.won || banned(s, i)) return null;
     return place(s, i);
   },
 
   result(s) {
     if (s.won) return s.won;
-    if (s.grid.every((v) => v !== null)) return { winner: null, cells: [] };
+    if (s.grid.every((v) => v !== null) || stuck(s)) return { winner: null, cells: [] };
     return null;
   },
 
@@ -253,6 +321,7 @@ export default {
     root.innerHTML = '';
     root.className = 'board gm';
     root.style.setProperty('--n', n);
+    const ban = s.renju && s.turn === BLACK && !res;
     const stars = n === 15 ? [3, 7, 11] : [3, 6, 9]; // 目印の点（星）
     for (let i = 0; i < n * n; i++) {
       const r = Math.floor(i / n);
@@ -267,6 +336,10 @@ export default {
         stone.className = 'gm-stone p' + v + (win.has(i) ? ' win' : '') + (i === s.last ? ' last' : '') + (i === s.last && o.fresh ? ' pop' : '');
         cell.append(stone);
         cell.tabIndex = -1;
+      } else if (ban && forbidden(s.grid, n, i)) {
+        cell.append(Object.assign(document.createElement('span'), { className: 'gm-ban', textContent: '×' }));
+        cell.tabIndex = -1;
+        cell.setAttribute('aria-label', `${r + 1}段目 ${c + 1}列目（禁じ手）`);
       } else if (o.canMove) {
         if (o.fresh && s.taken?.includes(i)) cell.append(Object.assign(document.createElement('span'), { className: 'gm-ghost' }));
         cell.classList.add('playable', 'p' + s.turn);

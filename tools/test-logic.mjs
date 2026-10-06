@@ -621,6 +621,27 @@ for (let k = 0; k < 300; k++) {
     dgames++;
   }
 }
+{
+  const nine = (hands, o = {}) => dbase(hands, { rules: { ...NONE, nine: true }, ...o });
+  let x = dplay(nine([['s9', 'h3'], ['s10', 'h4'], ['s11', 'h5'], ['s12', 'h6']]), 0, ['s9']);
+  assert.deepEqual([x.dir, x.turn], [-1, 3], '9を出すと逆回りで、前の席の人の番');
+  assert.ok(x.last.effects.includes('9リバース'));
+  x = dpass(x, 3);
+  assert.equal(x.turn, 2, '逆回りのまま次へ');
+  x = dpass(dpass(x, 2), 1);
+  assert.deepEqual([x.field, x.turn, x.dir], [null, 0, -1], '場が流れても逆回りのまま');
+  x = dplay(x, 0, ['h3']);
+  assert.equal(x.turn, 3, '流れたあとも逆回り');
+  const two = dplay(nine([['s9', 'h9', 'd3'], ['s10', 'h4'], ['s11', 'h5']]), 0, ['s9', 'h9']);
+  assert.deepEqual([two.dir, two.turn], [-1, 2], '9を2枚出しても向きが変わるのは1回');
+  const back = dplay({ ...nine([['s9', 'h3'], ['s10', 'h4'], ['s11', 'h5']]), dir: -1 }, 0, ['s9']);
+  assert.deepEqual([back.dir, back.turn], [1, 1], 'もう一度9を出すと元の向き');
+  const off = dplay(dbase([['s9', 'h3'], ['s10', 'h4'], ['s11', 'h5']], { rules: { ...NONE } }), 0, ['s9']);
+  assert.deepEqual([off.dir, off.turn], [undefined, 1], '9リバースがオフなら向きは変わらない');
+  // 5飛びも逆回りの向きで飛ばす
+  const fv = dplay(dbase([['s5', 'h3'], ['s10', 'h4'], ['s11', 'h6'], ['s12', 'h7']], { rules: { ...NONE, nine: true, five: true }, dir: -1 }), 0, ['s5']);
+  assert.deepEqual([fv.passed, fv.turn], [[false, false, false, true], 2], '逆回りの5飛びは前の席の人を飛ばす');
+}
 console.log('daifugo games', dgames);
 
 // ---------- ポーカー（5カードドロー） ----------
@@ -1028,6 +1049,11 @@ assert.equal(NIM.result(t).loser, 1, '最後の1個を取った人の負け');
 assert.equal(NIM.result(t).winner, null, '3人以上は負けが1人');
 t = NIM.apply(NIM.apply(nimBase({ rules: { last: 'win' }, piles: [3] }), { p: 0, t: 'take', pile: 0, k: 2 }), { p: 1, t: 'take', pile: 0, k: 1 });
 assert.equal(NIM.result(t).winner, 1, '「最後を取った人の勝ち」');
+for (const mx of [3, 4, 5]) {
+  for (let k = 0; k < 20; k++) assert.equal(NIM.init(2, k, { rules: { max: mx } }).max, mx, `「1回に取れる数」${mx}個までならいつも${mx}`);
+}
+assert.equal(NIM.init(2, 7, { rules: { max: 0 } }).max, NIM.init(2, 7, { rules: {} }).max, 'おまかせは今までと同じ決め方');
+assert.equal(NIM.init(2, 7, { rules: { max: 4 } }).piles[0], NIM.init(2, 7, { rules: {} }).piles[0], '最大数を決めても山の大きさは同じ');
 assert.equal(t.turn, 1, '終わったら手番は進めない');
 // 筋の良い手: 残りを「最大数＋1」の倍数（負けルールは倍数＋1）にする
 assert.deepEqual(goodMove(nimBase({ piles: [7] })), { pile: 0, k: 2 }, '最大3・負け: 4の倍数+1を残す');
@@ -1526,6 +1552,36 @@ while (!DT.result(s)) s = DT.apply(s, s.lines.indexOf(null));
 assert.equal(dotScores(s).reduce((a, b) => a + b), 9, '四角は全部だれかのもの');
 const top = Math.max(...dotScores(s));
 assert.equal(DT.result(s).winner, dotScores(s).filter((v) => v === top).length === 1 ? dotScores(s).indexOf(top) : null);
+{
+  const RJ = { rules: { renju: true } };
+  const pos = (blacks, whites, turn = 0) => {
+    const x = GM.init(RJ);
+    const grid = x.grid.slice();
+    for (const [r, c] of blacks) grid[r * 15 + c] = 0;
+    for (const [r, c] of whites) grid[r * 15 + c] = 1;
+    return { ...x, grid, turn };
+  };
+  const at = (r, c) => r * 15 + c;
+  assert.equal(GM.apply(pos([[7, 5], [7, 6], [5, 8], [6, 8]], []), at(7, 8)), null, '禁じ手: 黒の三三は置けない');
+  assert.ok(GM.apply(pos([[7, 5], [7, 6], [5, 8], [6, 8]], [[7, 4]]), at(7, 8)), '片方が止まった三は三三にならない');
+  assert.ok(GM.apply(pos([[7, 5], [7, 6], [5, 8], [6, 8]], [], 1), at(7, 8)), '白には禁じ手がない');
+  assert.ok(GM.apply({ ...pos([[7, 5], [7, 6], [5, 8], [6, 8]], []), renju: false }, at(7, 8)), '禁じ手がオフなら置ける');
+  assert.equal(GM.apply(pos([[7, 4], [7, 5], [7, 6], [4, 8], [5, 8], [6, 8]], [[7, 3], [3, 8]]), at(7, 8)), null, '禁じ手: 四四');
+  assert.equal(GM.apply(pos([[7, 2], [7, 4], [7, 5], [7, 8]], []), at(7, 6)), null, '禁じ手: 同じ線の四四');
+  assert.ok(GM.apply(pos([[7, 2], [7, 3], [7, 4], [7, 5]], [[7, 1]]), at(7, 6)), '止まった四を五にするのは置ける');
+  assert.equal(GM.apply(pos([[7, 2], [7, 3], [7, 4], [7, 6], [7, 7]], []), at(7, 5)), null, '禁じ手: 長連（6つ以上）');
+  const five = GM.apply(pos([[7, 3], [7, 4], [7, 5], [7, 6], [5, 7], [6, 7], [5, 9], [6, 8]], []), at(7, 7));
+  assert.equal(five && GM.result(five).winner, 0, 'ちょうど5つになるなら三三と同時でも置けて勝ち');
+  // CPU の黒は禁じ手に置かない（禁じ手の点が一番よい点でも）
+  const bait = pos([[7, 5], [7, 6], [5, 8], [6, 8]], [[0, 0]]);
+  for (let i = 0; i < 30; i++) assert.notEqual(GM.cpu(bait, 0, { cpu: 'strong' }), at(7, 8), 'CPU の黒は禁じ手に置かない');
+  // 置ける点が禁じ手しか無ければ引き分け（空いているのは長連になる1点だけ。ほかは白で埋める）
+  const stuckSt = pos([[7, 2], [7, 3], [7, 4], [7, 6], [7, 7]], []);
+  stuckSt.grid = stuckSt.grid.map((v, i) => (v === null && i !== at(7, 5) ? 1 : v));
+  assert.equal(GM.apply(stuckSt, at(7, 5)), null);
+  assert.deepEqual(GM.result(stuckSt), { winner: null, cells: [] }, '黒が禁じ手しか置けないときは引き分け');
+  assert.equal(GM.result({ ...stuckSt, turn: 1 }), null, '白の番なら引き分けにしない');
+}
 console.log('gomoku / dots OK');
 
 // ---------- ババ抜き ----------
@@ -2094,6 +2150,28 @@ for (let g = 0; g < 20; g++) {
     assert.ok(++guard < 300);
   }
   assert.equal(st.round, st.rounds);
+}
+{
+  const sur = (o = {}) => ({ ...bjState([['s10', 'h6'], ['d9', 'c9']], ['s9', 'h7'], ['c5', 's2', 'h10', 'd10']), surOn: true, ...o });
+  assert.equal(BJ.apply({ ...sur(), surOn: false }, { p: 0, t: 'surrender', r: 0 }), null, 'サレンダーは詳細設定がオンのときだけ');
+  let x = BJ.apply(sur(), { p: 0, t: 'surrender', r: 0 });
+  assert.ok(x && x.done[0] && x.sur[0], 'サレンダーするとその回は終わり');
+  assert.equal(BJ.apply(x, { p: 0, t: 'hit', r: 0, k: 2 }), null, 'サレンダーした後は引けない');
+  x = BJ.apply(x, { p: 1, t: 'stand', r: 0 });
+  assert.deepEqual([x.phase, x.out[0], x.points[0]], ['result', -5, 95], 'サレンダーは賭けの半分（5）を失う');
+  const hit = BJ.apply(sur(), { p: 0, t: 'hit', r: 0, k: 2 });
+  assert.equal(BJ.apply({ ...hit, done: [false, false] }, { p: 0, t: 'surrender', r: 0 }), null, '引いた後はサレンダーできない');
+  const pair = { ...bjState([['s8', 'h8']], ['s9', 'h7'], ['c5', 's2', 'h10', 'd10']), surOn: true, splitOn: true };
+  const sp = BJ.apply(pair, { p: 0, t: 'split', r: 0 });
+  assert.equal(BJ.apply(sp, { p: 0, t: 'surrender', r: 0 }), null, 'スプリットした後はサレンダーできない');
+  const onlySur = BJ.apply({ ...bjState([['s10', 'h6']], ['s10', 'h7'], ['c5']), surOn: true }, { p: 0, t: 'surrender', r: 0 });
+  assert.deepEqual([onlySur.phase, onlySur.dealer.length], ['result', 2], '全員サレンダーなら親は引かない');
+  // CPU: 16 で親が 10 なら（気まぐれの15%を除き）降りる
+  let n = 0;
+  const cpuSt = { ...bjState([['s10', 'h6']], ['s10', 'h7'], ['c5']), surOn: true };
+  for (let i = 0; i < 200; i++) if (BJ.cpu(cpuSt, 0).t === 'surrender') n++;
+  assert.ok(n > 140 && n < 200, 'CPU は16で親が10ならたいてい降りる ' + n);
+  for (let i = 0; i < 50; i++) assert.notEqual(BJ.cpu({ ...bjState([['s10', 'h3']], ['s10', 'h7'], ['c5']), surOn: true }, 0).t, 'surrender', 'CPU は13では降りない');
 }
 console.log('blackjack OK');
 

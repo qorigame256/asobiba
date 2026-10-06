@@ -15,6 +15,8 @@
 // 5人麻雀（2026-10-05 本人の決定）: 5人が同時に1つの卓を囲む。親から数えて5人目は自風なし。ツモは4人麻雀と同じ1人あたりの額を
 //   ほかの4人が払う。卓は五角形（5人を72度ずつ回して置く）。Claude の推奨を本人が承認したもの: 持ち点25000点・東風戦は5局・
 //   チーは上家からだけ・ノーテン罰符3000点・136枚で王牌14枚。
+// 詳細設定（2026-10-06 本人の決定）: 「赤ドラ」なしでは赤い五も普通の五として描き、ドラに数えない。「喰いタン」なしでは鳴いた手（暗槓だけは鳴いていない扱い）の断幺九を付けない。
+//   どちらも最初は「あり」。喰いタンなしは mahjong-engine.js を変えずに、ここで候補からタンヤオを外して一番高い形を選び直す（noKuitanBest）。
 // Claude の判断: 暗槓への国士無双のロンは作らない（ごくまれなため）。抜いた北へのロンはできる（槍槓は付かない）。
 //   リーチ中で和了れない・カンできないときは1秒で自動でツモ切りする。局の結果は全員が「次へ」を押すか30秒で次の局へ。
 //
@@ -25,6 +27,8 @@ import { mulberry32, shuffle } from './util.js';
 import * as E from './mahjong-engine.js';
 
 const RED_IDS = new Set([16, 52, 88]);
+const isRed = (s, id) => s.rules.red !== false && RED_IDS.has(id);
+const TANYAO = E.YAKU_NAMES.indexOf('断幺九');
 const kindOf = (id) => id >> 2;
 const END_MS = 30000;
 const AUTO_MS = 1000;
@@ -140,9 +144,28 @@ function winResult(s, p, tile, { tsumo = false, chankan = false } = {}) {
   const count = (indicators) => indicators.reduce((a, ind) => a + all.filter((id) => kindOf(id) === E.doraKind(kindOf(ind), sanma)).length, 0);
   const inds = Array.from({ length: 1 + h.kans }, (_, i) => doraInd(h, i));
   const uras = h.riichi[p] ? Array.from({ length: 1 + h.kans }, (_, i) => uraInd(h, i)) : [];
-  const dora = { dora: count(inds), ura: count(uras), red: all.filter((id) => RED_IDS.has(id)).length, nuki: h.nuki[p].length };
-  const r = E.bestHand(c, fixed, kindOf(win), ctx, dora.dora + dora.ura + dora.red + dora.nuki);
+  const dora = { dora: count(inds), ura: count(uras), red: all.filter((id) => isRed(s, id)).length, nuki: h.nuki[p].length };
+  const doraHan = dora.dora + dora.ura + dora.red + dora.nuki;
+  const open = h.melds[p].some((m) => m.type !== 'ankan');
+  const r = s.rules.kuitan === false && open ? noKuitanBest(c, fixed, kindOf(win), ctx, doraHan) : E.bestHand(c, fixed, kindOf(win), ctx, doraHan);
   return r ? { ...r, dora, ura: uras, ctx } : null;
+}
+
+// 喰いタンなしの和了の形: E.bestHand と同じ選び方で、役の一覧から断幺九を外したもの
+function noKuitanBest(concealed, fixed, win, ctx, doraHan) {
+  let best = null;
+  for (const c of E.candidates(concealed, fixed, win, ctx)) {
+    const yaku = c.yaku.filter((y) => y.id !== TANYAO);
+    if (!yaku.length) continue;
+    const r = { shape: c.shape, placement: c.placement, yaku, han: 0, fu: 0, base: 0, yakumanCount: 0 };
+    let ymHan = 0;
+    for (const y of yaku) { if (y.yakuman) ymHan += y.han; else r.han += y.han; }
+    if (ymHan) { r.han = ymHan + doraHan; } else { r.han += doraHan; r.fu = E.evaluateFu(c.shape, c.placement, ctx, yaku); }
+    r.base = E.basePoints(r.han, r.fu);
+    if (r.han >= E.YAKUMAN_HAN) r.yakumanCount = Math.floor(r.han / E.YAKUMAN_HAN);
+    if (!best || r.base > best.base || (r.base === best.base && (r.han > best.han || (r.han === best.han && r.fu > best.fu)))) best = r;
+  }
+  return best;
 }
 
 const furiten = (s, p) => {
@@ -597,15 +620,16 @@ function tileEl(id, { small = false, back = false, side = false } = {}) {
   if (back) { e.classList.add('back'); return e; }
   // 牌の絵は img/mj/（FluffyStuff の riichi-mahjong-tiles。CC0）。土台（Front）の上に模様を重ねる
   const k = kindOf(id);
-  const face = E.isHonor(k) ? TILE_HONOR[k - E.EAST] : TILE_SUIT[E.suitOf(k)] + E.numberOf(k) + (RED_IDS.has(id) ? '-Dora' : '');
+  const face = E.isHonor(k) ? TILE_HONOR[k - E.EAST] : TILE_SUIT[E.suitOf(k)] + E.numberOf(k) + (showRed && RED_IDS.has(id) ? '-Dora' : '');
   // ドラの牌は土台を薄い黄色にして目立たせる（本人の希望。赤ドラは絵が赤いので、表示牌から決まるドラだけ）
   const dora = doraKinds.has(k);
   e.style.backgroundImage = `url(img/mj/${face}.svg), url(img/mj/${dora ? 'Front-Dora' : 'Front'}.svg)`;
   e.setAttribute('role', 'img');
-  e.setAttribute('aria-label', tileText(k) + (RED_IDS.has(id) ? '（赤）' : '') + (dora ? '（ドラ）' : ''));
+  e.setAttribute('aria-label', tileText(k) + (showRed && RED_IDS.has(id) ? '（赤）' : '') + (dora ? '（ドラ）' : ''));
   return e;
 }
 let doraKinds = new Set(); // いま描いている局のドラの種類（render の始めに決める）
+let showRed = true; // 赤ドラを赤く描くか（render の始めに決める）
 const TILE_SUIT = ['Man', 'Pin', 'Sou'];
 const TILE_HONOR = ['Ton', 'Nan', 'Shaa', 'Pei', 'Haku', 'Hatsu', 'Chun'];
 const sortHand = (ids) => ids.slice().sort((a, b) => kindOf(a) - kindOf(b) || RED_IDS.has(b) - RED_IDS.has(a));
@@ -784,6 +808,7 @@ function render(root, s, o) {
   const h = s.h;
   const me = o.me >= 0 ? o.me : 0;
   const watching = o.me < 0;
+  showRed = s.rules.red !== false;
   doraKinds = new Set(Array.from({ length: 1 + h.kans }, (_, i) => E.doraKind(kindOf(doraInd(h, i)), s.n === 3)));
   // 下へスクロールしているとき、ページが短くなると上へ引き戻される（iPhone で牌を押すと戻された）。
   // 手牌の下のボタンや説明は出たり消えたりするので、1局の間は盤の高さを今までで一番高いところより縮めない
@@ -901,13 +926,15 @@ export default {
   maxPlayers: 5,
   settings: [
     { key: 'length', label: '長さ', desc: '東風戦は親が1周（4人なら4局ほど）、半荘戦は2周', def: 'east', choices: [['east', '東風戦'], ['south', '半荘戦']] },
+    { key: 'red', label: '赤ドラ', desc: '赤い五（4人・5人は五萬・五筒・五索、3人は五筒・五索）を1枚ずつ入れ、持っているだけで1翻', def: true },
+    { key: 'kuitan', label: '喰いタン', desc: '鳴いた手でも断幺九（2〜8だけの手）が役になる', def: true },
     { key: 'players', label: '人数', desc: '3人麻雀は二萬〜八萬を抜いた108枚・チーなし・北は抜きドラ。5人麻雀は5人目に自風がなく、ツモは4人から受け取る', def: 4, choices: [[4, '4人'], [3, '3人（三人麻雀）'], [5, '5人（五人麻雀）']] },
   ],
   seats(rules) { return rules.players === 3 ? 3 : rules.players === 5 ? 5 : 4; },
 
   init(n, seed, { rules = {} } = {}) {
     const s = {
-      n, seed, rules: { length: rules.length === 'south' ? 'south' : 'east' }, scores: Array(n).fill(n === 3 ? 35000 : 25000),
+      n, seed, rules: { length: rules.length === 'south' ? 'south' : 'east', red: rules.red !== false, kuitan: rules.kuitan !== false }, scores: Array(n).fill(n === 3 ? 35000 : 25000),
       kyoku: 0, honba: 0, kyotaku: 0, handNo: 0, seq: 0, over: false, ranking: null, h: null,
     };
     startHand(s);

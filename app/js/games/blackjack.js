@@ -6,10 +6,12 @@
 //   分けたあとのダブルはあり・A を分けたら1枚ずつ引いて終わり・分けたあとの21はブラックジャック扱いにしない。
 //   作り（Claude の判断）: 1つ目の手を hands[p] で遊び、2つ目の手の最初の1枚は wait[p] で待たせる。1つ目が終わったら fin[p] へ移し、
 //   2つ目の手に2枚目を配って hands[p] で遊ぶ。どちらの手の番かを手の h（0 / 1）に入れ、1つ目への手が2回届いても2つ目に効かないようにする。
+// サレンダー（詳細設定。最初はなし。2026-10-06 本人承認）: 最初の2枚のときだけ（引いた後・スプリットした後は不可）降りられ、賭けの半分（5点）を失う。
+//   親がブラックジャックならすぐ終わるので降りられない。CPU は「16で親が9・10・A」「15で親が10」のとき降りる。
 // 決まりごと（Claude の判断）: 毎回52枚の新しい山を、対局の種と何回目かから作る。親の最初の2枚がブラックジャックなら、すぐに開いてその回は終わり
 // （プレイヤーもブラックジャックなら引き分け）。プレイヤーは全員同時に動く。全員が終えたら親が引き、結果を4.5秒見せて次の回へ。
 // 持ち点はマイナスになってもよい（最後まで遊べるように）。A は 1 か 11、J・Q・K は 10。
-// 手: { p, t: 'hit', r: 何回目か, k: 引く前の手札の枚数, h } / { p, t: 'stand', r, h } / { p, t: 'double', r, h } / { p, t: 'split', r }
+// 手: { p, t: 'hit', r: 何回目か, k: 引く前の手札の枚数, h } / { p, t: 'stand', r, h } / { p, t: 'double', r, h } / { p, t: 'split', r } / { p, t: 'surrender', r }
 //   （h はスプリットした2つ目の手なら 1。無ければ 0）/ 進行役（p = -1）: { t: 'next', r }
 
 import { mulberry32, shuffle, esc } from './util.js';
@@ -34,11 +36,12 @@ const isBJ = (cards) => cards.length === 2 && total(cards).v === 21;
 // スプリットした手の21はブラックジャックにしない
 const bjOf = (s, p, cards) => !s.sp?.[p] && isBJ(cards);
 const handNo = (s, p) => (s.fin?.[p] ? 1 : 0);
+export const canSurrender = (s, p) => !!s.surOn && !s.sp[p] && s.hands[p].length === 2 && !s.done[p];
 export const canSplit = (s, p) => !!s.splitOn && !s.sp[p] && s.hands[p].length === 2 && rankOf(s.hands[p][0]) === rankOf(s.hands[p][1]);
 
 const clone = (s) => ({
   ...s, hands: s.hands.map((h) => h.slice()), dealer: s.dealer.slice(), bets: s.bets.slice(), done: s.done.slice(), points: s.points.slice(), deck: s.deck,
-  sp: s.sp.slice(), wait: s.wait.slice(), fin: s.fin.slice(),
+  sur: s.sur.slice(), sp: s.sp.slice(), wait: s.wait.slice(), fin: s.fin.slice(),
 });
 
 // いまの手が終わった。スプリットの2つ目が待っていれば、そちらに2枚目を配って続ける
@@ -54,6 +57,7 @@ function handDone(s, p) {
 
 // 1つの手の勝ち負け（増えた点。負けはマイナス）
 function gainOf(s, p, cards, bet) {
+  if (s.sur[p]) return -bet / 2;
   const v = total(cards).v;
   const d = total(s.dealer).v;
   const dBJ = isBJ(s.dealer);
@@ -77,6 +81,7 @@ function deal(s) {
   }
   s.bets = Array(s.n).fill(BET);
   s.sp = Array(s.n).fill(false);
+  s.sur = Array(s.n).fill(false);
   s.wait = Array(s.n).fill(null);
   s.fin = Array(s.n).fill(null);
   s.done = s.hands.map((h) => isBJ(h));
@@ -88,7 +93,7 @@ function deal(s) {
 
 // 全員が終えたら親が引いて、勝ち負けを決める（スプリットした人は2つの手の合計）
 function settle(s) {
-  const alive = (p, h) => total(h).v <= 21 && !bjOf(s, p, h);
+  const alive = (p, h) => !s.sur[p] && total(h).v <= 21 && !bjOf(s, p, h);
   const live = s.hands.some((h, p) => alive(p, h) || (s.fin[p] && alive(p, s.fin[p].c)));
   if (!isBJ(s.dealer) && live) while (total(s.dealer).v < 17) s.dealer.push(s.deck[s.pos++]);
   s.outFin = s.fin.map((f, p) => (f ? gainOf(s, p, f.c, f.bet) : null));
@@ -109,11 +114,12 @@ export default {
   maxPlayers: 6,
   settings: [
     { key: 'rounds', label: '回数', desc: 'この回数を遊んで、持ち点が多い人の勝ち', def: 5, choices: [[3, '3回'], [5, '5回'], [10, '10回']] },
+    { key: 'surrender', label: 'サレンダー', desc: '最初の2枚を見て降りると、賭けの半分（5）だけ失ってその回を終われる', def: false },
     { key: 'split', label: 'スプリット', desc: '最初の2枚が同じ数字なら、2つの手に分けて別々に勝負できる（賭けもそれぞれ10。分けるのは1回だけ。A を分けたら1枚ずつで終わり）', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const s = { n, seed, rounds: [3, 5, 10].includes(rules.rounds) ? rules.rounds : 5, splitOn: rules.split === true, round: 0, points: Array(n).fill(START), step: 0 };
+    const s = { n, seed, rounds: [3, 5, 10].includes(rules.rounds) ? rules.rounds : 5, splitOn: rules.split === true, surOn: rules.surrender === true, round: 0, points: Array(n).fill(START), step: 0 };
     deal(s);
     return s;
   },
@@ -161,7 +167,11 @@ export default {
     const s = clone(s0);
     s.step += 1;
     const hand = s.hands[p];
-    if (m.t === 'split') {
+    if (m.t === 'surrender') {
+      if (!canSurrender(s0, p)) return null;
+      s.sur[p] = true;
+      handDone(s, p);
+    } else if (m.t === 'split') {
       if (!canSplit(s0, p)) return null;
       s.sp[p] = rankOf(hand[0]) === 1 ? 'A' : true;
       s.wait[p] = [hand[1]];
@@ -197,6 +207,7 @@ export default {
     const pr = rankOf(hand[0]);
     // スプリット: A と 8 はいつも、9 は親が 7・10・A 以外、2・3・6・7 は親が 2〜7 のとき（気まぐれで2割は分けない）
     const wantSplit = pr === 1 || pr === 8 || (pr === 9 && ![7, 10, 11].includes(upv)) || ([2, 3, 6, 7].includes(pr) && upv <= 7);
+    if (canSurrender(s, p) && !soft && ((v === 16 && upv >= 9) || (v === 15 && upv === 10)) && Math.random() >= 0.15) return { t: 'surrender', r: s.round };
     if (canSplit(s, p) && wantSplit && Math.random() >= 0.2) return { t: 'split', r: s.round };
     if (hand.length === 2 && !soft && (v === 11 || (v === 10 && upv < 10))) act = 'double';
     else if (soft) act = v <= 17 || (v === 18 && upv >= 9) ? 'hit' : 'stand';
@@ -242,6 +253,7 @@ export default {
       head.className = 'bj-head';
       const h = s.hands[p];
       const stText = (cards, done, g) => {
+        if (s.sur[p]) return s.phase === 'result' ? `サレンダー <span class="pt-ng">${g}</span>` : 'サレンダー';
         if (s.phase === 'result') {
           if (total(cards).v > 21) return `バースト <span class="pt-ng">${g}</span>`;
           return g > 0 ? `<span class="pt-ok">勝ち +${g}</span>` : g < 0 ? `<span class="pt-ng">負け ${g}</span>` : '引き分け ±0';
@@ -311,6 +323,7 @@ export default {
       btn('ヒット（1枚引く）', 'primary', { t: 'hit', r: s.round, k: s.hands[me].length, h });
       btn('スタンド（止める）', 'secondary', { t: 'stand', r: s.round, h });
       if (s.hands[me].length === 2) btn('ダブル（賭け2倍で1枚だけ）', 'secondary', { t: 'double', r: s.round, h });
+      if (canSurrender(s, me)) btn('サレンダー（降りて半分返す）', 'secondary', { t: 'surrender', r: s.round });
       if (canSplit(s, me)) btn('スプリット（2つに分ける）', 'secondary', { t: 'split', r: s.round });
       root.append(acts);
     }

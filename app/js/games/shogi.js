@@ -12,9 +12,11 @@
 //   5×5 の盤に 王・金・銀・角・飛・歩 を1枚ずつ（公式の並べ方）。成れるのは相手側の一番奥の1段だけ。二歩・打ち歩詰めは禁止。
 //   千日手は本将棋と同じ。200手で引き分け。駒落ち・3人とは組み合わせない。マスの番号は 段 * 5 + 列（列0 が 5筋）。
 //   盤の大きさ N は盤の長さから決める（sizeOf）。
+// 詳細設定「盤」の 3×4（動物の駒）は shogi34.js に任せる（2026-10-06 本人の決定。局面に zoo: true を持つ）。2人だけ・駒落ちとは組み合わせない。
 
 import { CPU_SETTING } from './util.js';
 import * as three from './shogi3.js';
+import * as zoo from './shogi34.js';
 
 const PAWN = 1;
 const LANCE = 2;
@@ -320,20 +322,21 @@ export default {
   id: 'shogi',
   name: '将棋',
   icon: '☗',
-  desc: '本将棋。駒落ちのハンデも選べる。オンラインでは小さい盤の5五将棋や、3人（六角形の盤）も選べる',
+  desc: '本将棋。駒落ちのハンデも選べる。オンラインでは小さい盤の5五将棋・動物の駒の 3×4 や、3人（六角形の盤）も選べる',
   ready: true,
   players: three.NAMES, // 3人目は3人将棋だけ
   // 詳細設定の人数。3人は shogi3.js が受け持つ（局面に n: 3 を持つ）
   seatCount(rules) { return rules?.players === 3 ? 3 : 2; },
   settings: [
     { key: 'players', label: '人数', desc: '3人では六角形の盤で3人が向き合う。王を取られた人は脱落（駒落ちは使わない）', def: 2, choices: [[2, '2人'], [3, '3人']] },
-    { key: 'size', label: '盤', desc: '5五将棋は 5×5 の盤に 王・金・銀・角・飛・歩 が1枚ずつ。成れるのは一番奥の1段だけ（2人のときだけ。駒落ちは使わない）', def: 'full', choices: [['full', '本将棋（9×9）'], ['mini', '5五将棋（5×5）']] },
+    { key: 'size', label: '盤', desc: '5五将棋は 5×5 の盤に 王・金・銀・角・飛・歩 が1枚ずつ。成れるのは一番奥の1段だけ。3×4 は動物の駒（ライオン・キリン・ゾウ・ヒヨコ）で、ライオンを取るか、ライオンが相手の奥の段に入って取られなければ勝ち（どちらも2人のときだけ。駒落ちは使わない）', def: 'full', choices: [['full', '本将棋（9×9）'], ['mini', '5五将棋（5×5）'], ['zoo', '3×4（動物の駒）']] },
     { key: 'handicap', label: '駒落ち', desc: '先手（上手）が駒を落として先に指す。腕の差があるときに', def: 'none', choices: Object.entries(HANDICAPS) },
     CPU_SETTING,
   ],
 
   init({ rules = {} } = {}) {
     if (rules.players === 3) return three.init();
+    if (rules.size === 'zoo') return zoo.init();
     const mini = rules.size === 'mini';
     const handicap = !mini && HANDICAPS[rules.handicap] ? rules.handicap : 'none';
     const board = mini ? miniBoard() : initialBoard(handicap);
@@ -346,6 +349,7 @@ export default {
 
   apply(s, m) {
     if (s.n === 3) return three.apply(s, m);
+    if (s.zoo) return zoo.apply(s, m);
     if (s.result || !m || typeof m !== 'object') return null;
     if (m.resign === true) {
       return { ...s, result: { winner: 1 - s.turn, cells: [], reason: `${s.turn === 0 ? '先手' : '後手'}の投了` }, last: { resign: true, side: s.turn } };
@@ -381,10 +385,11 @@ export default {
   },
 
   // CPU: 駒の損得で何手先まで読むか（よわい1・ふつう2・つよい3）。読みは1.5秒で打ち切る。弱いほど適当に指すことがある
-  cpu(s, p, rules) { return s.n === 3 ? three.cpuMove(s, rules) : cpuMove(s, rules); },
+  cpu(s, p, rules) { return s.n === 3 ? three.cpuMove(s, rules) : s.zoo ? zoo.cpuMove(s, rules) : cpuMove(s, rules); },
 
   info(s) {
     if (s.n === 3) return three.info(s);
+    if (s.zoo) return zoo.info(s);
     const parts = [];
     if (s.board.length === 25) parts.push('5五将棋');
     if (s.handicap !== 'none') parts.push(`${HANDICAPS[s.handicap]}（☗先手が上手）`);
@@ -396,6 +401,7 @@ export default {
 
   render(root, s, o) {
     if (s.n === 3) { three.render(root, s, o); return; }
+    if (s.zoo) { zoo.render(root, s, o, this.players); return; }
     const draw = () => this.render(root, s, o);
     const N = sizeOf(s.board);
     const last = N * N - 1;

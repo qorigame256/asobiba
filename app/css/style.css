@@ -376,6 +376,7 @@ p { margin: 0; }
 /* はさみ取りで取られた点: 赤い輪が消えていく */
 .gm-ghost { width: 70%; height: 70%; border-radius: 50%; border: 3px solid #e04b3c; position: relative; z-index: 1; pointer-events: none; animation: gmTaken 1.4s ease-out forwards; }
 @keyframes gmTaken { to { opacity: 0; transform: scale(.4); } }
+.gm-ban { position: relative; z-index: 1; width: 72%; height: 72%; display: grid; place-items: center; border-radius: 50%; background: rgba(255, 255, 255, .8); box-shadow: 0 0 0 1.5px #c0392b; color: #c0392b; font-weight: 700; font-size: clamp(9px, 2.6vw, 16px); line-height: 1; pointer-events: none; }
 .gm .gm-pt.playable:hover { background: radial-gradient(circle, rgba(0, 0, 0, .25) 0 30%, transparent 32%); }
 .gm .gm-pt.playable.p1:hover { background: radial-gradient(circle, rgba(255, 255, 255, .6) 0 30%, transparent 32%); }
 [data-game="gomoku"] { --p0: #111; --p1: #8a8a8a; }
@@ -460,6 +461,16 @@ p { margin: 0; }
 .sg .sg-hand-piece small { position: absolute; right: -4px; bottom: -4px; background: var(--ink); color: #fff; font-size: .7rem; border-radius: 999px; padding: 0 5px; line-height: 1.5; }
 .sg .sg-hand-piece.playable { box-shadow: 0 0 0 2px var(--line); }
 .sg .sg-hand-piece.selected { box-shadow: 0 0 0 3px var(--win); background: #fff3c9; }
+/* 将棋の 3×4（動物の駒）: 絵文字の四角い駒。持ち主で地の色を分ける */
+.board.sg.sg34 { width: min(100%, 340px); }
+.sg34 .sg-ranks { grid-template-rows: repeat(4, 1fr); }
+.sg34 .sg-cell { aspect-ratio: 1; }
+.sg34 .sg-piece { clip-path: none; border-radius: 14%; padding: 0; font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif; font-size: clamp(1.5rem, 11vw, 2.6rem); }
+.sg34 .sg-piece.p0 { background: linear-gradient(#e9f7d8, #bfe3a0); box-shadow: inset 0 -3px 0 #7fb35a; }
+.sg34 .sg-piece.p1 { background: linear-gradient(#fde2e2, #f3b5b5); box-shadow: inset 0 3px 0 #d47c7c; }
+.sg34 .sg-piece.flip { padding: 0; }
+.sg34 .sg-hand-piece { width: 44px; height: 44px; }
+.sg34 .sg-hand-piece .sg-piece { font-size: 1.5rem; }
 .sg-check-text { color: #c62d1f; }
 /* 3人将棋（六角形の盤。shogi3.js が SVG で描く） */
 .board.sg3 { width: min(100%, 560px, max(320px, calc((100dvh - 290px) * 1.1))); }

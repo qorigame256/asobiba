@@ -161,6 +161,29 @@ if (!TESTDATA || !fs.existsSync(TESTDATA)) {
     if (x?.h.phase === 'claim') x = act(x, { a: 'timeout', p: -1 });
     check('自分のツモ番が来たら同巡フリテンが消える', x?.h.turn === 2 && x.h.furitenTemp[2] === false);
   }
+  // 詳細設定「赤ドラ」「喰いタン」（2026-10-06）
+  {
+    const s = table(['2m1112223334z', '34m567p678s55s', '19m19p19s1234567z', '19m19p19s1234567z']);
+    s.h.melds[1] = [{ type: 'pon', tiles: ids('222p'), called: null, from: 2 }];
+    s.h.noCalls = false; // 1巡目の人和にしない
+    const win = tile(s, 0, '2m');
+    check('喰いタンありなら鳴いた断幺九で和了れる', !!T.winResult(s, 1, win));
+    s.rules = { ...s.rules, kuitan: false };
+    check('喰いタンなしなら鳴いた断幺九だけでは和了れない', T.winResult(s, 1, win) === null);
+    const c = table(['2m1112223334z', tenpai25m, '19m19p19s1234567z', '19m19p19s1234567z']);
+    c.rules = { ...c.rules, kuitan: false };
+    c.h.noCalls = false;
+    const cr = T.winResult(c, 1, tile(c, 0, '2m'));
+    check('喰いタンなしでも門前の断幺九は付く', cr?.yaku.some((y) => E.YAKU_NAMES[y.id] === '断幺九'));
+    const r = table(['2m1112223334z', tenpai25m, '19m19p19s1234567z', '19m19p19s1234567z']);
+    const i = r.h.hands[1].findIndex((id) => T.kindOf(id) === E.kindOf('5s'));
+    r.h.hands[1][i] = 88; // 赤い五索
+    r.h.noCalls = false;
+    check('赤ドラありなら赤い五は1翻', T.winResult(r, 1, tile(r, 0, '2m'))?.dora.red === 1);
+    r.rules = { ...r.rules, red: false };
+    check('赤ドラなしなら赤い五を数えない', T.winResult(r, 1, tile(r, 0, '2m'))?.dora.red === 0);
+    check('最初は赤ドラ・喰いタンともあり', mj.init(4, 1, { rules: {} }).rules.red === true && mj.init(4, 1, { rules: {} }).rules.kuitan === true);
+  }
   // 喰い替え: チーしたあと打てる牌が無くなるチーは出さない
   {
     const s = table(['6m1112223334z55z', '45m36m', '19m19p19s1234567z', '19m19p19s1234567z']);

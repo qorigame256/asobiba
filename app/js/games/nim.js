@@ -1,6 +1,7 @@
 // 石取りゲーム。2〜6人が順番に、1つの山から石を取る。
 // 山は1つで15〜30個。1回に取れるのは1個から最大数まで。最大数は3〜5個のどれかを対局の始めに決め、その対局の間は変わらない
 // （どちらも seed から作るので全員同じ。本人の決定・2026-10-03。前は「山いくつか」も選べたが、山1つだけにした）。
+// 詳細設定「1回に取れる数」（2026-10-06 本人の決定）: おまかせ（最初。上のとおり3〜5個のどれか）／3個まで／4個まで／5個まで。
 // 最後の1個を取った人の負け（詳細設定で「勝ち」にもできる）。3人以上のときも負けは1人だけ。
 // 手: { p, t: 'take', pile: 0, k: 取る数 }（pile は山の番号。山は1つなので常に 0）
 
@@ -29,12 +30,13 @@ export default {
   id: 'nim',
   name: '石取りゲーム',
   icon: '🪨',
-  desc: '順番に山から石を取る（1回に取れる数は毎回3〜5個のどれかまで）。最後の1個を取らされた人の負け',
+  desc: '順番に山から石を取る（1回に取れる数は3〜5個のどれかまで）。最後の1個を取らされた人の負け',
   ready: true,
   multi: true,
   minPlayers: 2,
   maxPlayers: 6,
   settings: [
+    { key: 'max', label: '1回に取れる数', desc: 'おまかせは対局ごとに3〜5個のどれか', def: 0, choices: [[0, 'おまかせ'], [3, '3個まで'], [4, '4個まで'], [5, '5個まで']] },
     { key: 'last', label: '最後の1個', desc: '最後の1個を取った人が', def: 'lose', choices: [['lose', '負け'], ['win', '勝ち']] },
   ],
 
@@ -42,7 +44,7 @@ export default {
     const rng = mulberry32(seed);
     const r = { last: 'lose', ...rules };
     const piles = [int(rng, 15, 30)];
-    const max = int(rng, 3, 5);
+    const max = [3, 4, 5].includes(rules.max) ? rules.max : int(rng, 3, 5);
     return { n, rules: r, piles, start: piles.slice(), max, turn: 0, ender: null, step: 0, last: null };
   },
 

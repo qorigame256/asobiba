@@ -2,6 +2,7 @@
 // 盤のマス番号 = 段 * 9 + 列（段0 が一段目、列0 が 9筋）。正の数が先手の駒、負の数が後手の駒。
 import shogi, { _test } from '../app/js/games/shogi.js';
 import { _test3 } from '../app/js/games/shogi3.js';
+import { _test34 } from '../app/js/games/shogi34.js';
 
 const { legalMoves } = _test;
 let failed = 0;
@@ -305,6 +306,92 @@ function perft(board, hands, side, d) {
     }
     const again = JSON.parse(JSON.stringify(moves)).reduce((y, m) => (y ? shogi.apply(y, m) : null), shogi.init({ rules: R3 }));
     check('3人: 手の一覧を当て直すと同じ局面', again && again.keys.at(-1) === x.keys.at(-1));
+  }
+}
+
+// 3×4（動物の駒）。マス番号 = 段 * 3 + 列。1ヒヨコ 2ゾウ 3キリン 4ライオン 5ニワトリ
+{
+  const Z = { size: 'zoo' };
+  const z = (r, c) => r * 3 + c;
+  const start = shogi.init({ rules: Z });
+  check('3×4: 最初の並べ方（先手は左からゾウ・ライオン・キリン、前にヒヨコ）', start.zoo && start.board.join() === '-3,-4,-2,0,-1,0,0,1,0,2,4,3');
+  check('3×4: 最初に指せる手は4通り', _test34.moves(start.board, start.hands, 0).length === 4);
+  const zpos = (pieces, { hands = [[0, 0, 0, 0], [0, 0, 0, 0]], turn = 0 } = {}) => {
+    const board = Array(12).fill(0);
+    for (const [r, c, v] of pieces) board[z(r, c)] = v;
+    return { ...start, board, hands, turn, keys: [] };
+  };
+  // ヒヨコを取って持ち駒にし、奥の段に打てる（成らない）。二歩も禁止しない
+  let a = shogi.apply(start, { f: z(2, 1), t: z(1, 1) });
+  check('3×4: ヒヨコを取ると持ち駒になる', a && a.hands[0][1] === 1 && a.board[z(1, 1)] === 1);
+  const drop = zpos([[3, 1, 4], [0, 0, -4], [2, 2, 1]], { hands: [[0, 1, 0, 0], [0, 0, 0, 0]] });
+  const d1 = shogi.apply(drop, { d: 1, t: z(0, 2) });
+  check('3×4: 奥の段にヒヨコを打てて、成らない', d1 && d1.board[z(0, 2)] === 1);
+  check('3×4: 同じ列にヒヨコがあっても打てる（二歩なし）', !!shogi.apply(drop, { d: 1, t: z(1, 2) }));
+  const pr = shogi.apply(zpos([[3, 1, 4], [0, 0, -4], [1, 2, 1]]), { f: z(1, 2), t: z(0, 2) });
+  check('3×4: ヒヨコは奥の段で必ずニワトリになる', pr && pr.board[z(0, 2)] === 5 && /成/.test(pr.last.note));
+  const hen = shogi.apply(zpos([[3, 1, 4], [0, 0, -4], [1, 0, 5]], { turn: 1 }), { f: z(0, 0), t: z(1, 0) });
+  check('3×4: 取ったニワトリはヒヨコに戻る', hen && hen.hands[1][1] === 1 && hen.hands[1][5] === undefined);
+  // 王手の放置ができる・ライオンを取ったら勝ち
+  const leave = zpos([[3, 1, 4], [2, 1, -3], [0, 0, -4], [3, 0, 3]]);
+  const l1 = shogi.apply(leave, { f: z(3, 0), t: z(2, 0) });
+  check('3×4: ライオンがねらわれていても放っておける', l1 && !l1.result);
+  const l2 = l1 && shogi.apply(l1, { f: z(2, 1), t: z(3, 1) });
+  check('3×4: ライオンを取ったら勝ち', l2?.result?.winner === 1, JSON.stringify(l2?.result));
+  // トライ: 取られない奥の段に入れば勝ち。取られる所へ入って取られなければ、相手の手のあとで勝ち
+  const tr = shogi.apply(zpos([[1, 1, 4], [2, 2, -4]]), { f: z(1, 1), t: z(0, 1) });
+  check('3×4: 取られない奥の段に入ったら勝ち（トライ）', tr?.result?.winner === 0 && /トライ/.test(tr.result.reason));
+  const risky = zpos([[1, 1, 4], [2, 2, -4], [0, 2, -3]]);
+  const r1 = shogi.apply(risky, { f: z(1, 1), t: z(0, 1) });
+  check('3×4: 取られる奥の段に入っただけでは勝ちにならない', r1 && !r1.result);
+  const r2 = r1 && shogi.apply(r1, { f: z(2, 2), t: z(2, 1) });
+  check('3×4: 相手が取らなければトライの勝ち', r2?.result?.winner === 0);
+  const r3 = r1 && shogi.apply(r1, { f: z(0, 2), t: z(0, 1) });
+  check('3×4: 相手が取ればライオンを取った勝ち', r3?.result?.winner === 1);
+  // 同じ局面4回で引き分け
+  {
+    let x = zpos([[3, 0, 4], [0, 2, -4]]);
+    x = { ...x, keys: [`${x.board.join(',')}|0000|0000|0`] };
+    const loop = [{ f: z(3, 0), t: z(3, 1) }, { f: z(0, 2), t: z(0, 1) }, { f: z(3, 1), t: z(3, 0) }, { f: z(0, 1), t: z(0, 2) }];
+    for (let i = 0; i < 12 && x && !x.result; i++) x = shogi.apply(x, loop[i % 4]);
+    check('3×4: 同じ局面4回で引き分け', x?.result?.winner === null && x.result.reason === '千日手', JSON.stringify(x?.result));
+  }
+  // つよい は取れるライオンを必ず取る・取られる手を避ける
+  {
+    const t = zpos([[3, 1, 4], [1, 1, -4], [2, 1, 3]]);
+    let ok = true;
+    for (let i = 0; i < 10; i++) { const m = shogi.cpu(t, 0, { cpu: 'strong' }); if (m.t !== z(1, 1)) ok = false; }
+    check('3×4: CPU（つよい）は取れるライオンを取る', ok);
+  }
+  // CPU どうしで最後まで指せる・1手2秒以内・強さの順
+  const game = (a0, a1) => {
+    let x = shogi.init({ rules: Z });
+    let worst = 0;
+    while (!x.result) {
+      const t0 = Date.now();
+      const mv = shogi.cpu(x, x.turn, { cpu: x.turn === 0 ? a0 : a1 });
+      worst = Math.max(worst, Date.now() - t0);
+      const n = shogi.apply(x, JSON.parse(JSON.stringify(mv)));
+      if (!n) return { bad: true };
+      x = n;
+    }
+    return { winner: x.result.winner, worst, ply: x.ply };
+  };
+  for (const [hi, lo] of [['normal', 'weak'], ['strong', 'normal']]) {
+    let win = 0;
+    let lose = 0;
+    let worst = 0;
+    let bad = 0;
+    const N = 20;
+    for (let i = 0; i < N; i++) {
+      const hiFirst = i % 2 === 0;
+      const r = hiFirst ? game(hi, lo) : game(lo, hi);
+      if (r.bad) { bad++; continue; }
+      worst = Math.max(worst, r.worst);
+      if (r.winner === null) continue;
+      if ((r.winner === 0) === hiFirst) win++; else lose++;
+    }
+    check(`3×4: CPU（${hi}）が（${lo}）に勝ち越す・1手2秒以内`, !bad && win > lose && worst < 2000, `${win}勝${lose}敗（${N}局）・最長 ${(worst / 1000).toFixed(2)}秒`);
   }
 }
 
