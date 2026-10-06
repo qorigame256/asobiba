@@ -2,7 +2,10 @@
 // 枠は各色に「5」と「10」が1つずつ、合計4つ。爆弾を指でつまんで同じ色の枠へ入れ、5の枠に5個（10の枠に10個）入れたら、
 // その数の爆弾が、生き残りの中からランダムに選んだ相手の盤へ飛んでいく。
 // 爆弾は出てから FUSE 秒で爆発する（最後の2.5秒は点滅）。入れずに爆発させる・違う色の枠に入れるとライフが1減り、3回で脱落。最後まで残った人の勝ち。
-// 出てくる間は時間とともに短くなる（だんだん忙しくなる）。
+// 出てくる間は時間とともに短くなり、一度に出る数も増える（だんだん忙しくなる）。
+// 詳細設定（2026-10-06 本人の決定）: ライフ 1・3（最初）・5。速さ ゆっくり・ふつう（最初）・はやい は
+//   「忙しさの曲線のどこから始めるか」だけを決める（本人の指定）。いちばん短い間（0.55秒）と一度に出る数の上限（3個）はどれも同じ。
+//   忙しさ L = 始まりからの秒数 ＋ 速さの差（START）。数字は Claude の判断。
 //
 // 自分の盤の爆弾の動きは自分の端末だけで計算する（ほかの人の盤は見えない）。手の一覧に入るのは「爆発した」「送った」だけ。
 // 送る相手は手の一覧の中身から決める（全員同じ相手になる）。届いた分は、その人の端末が入り口から出す（受け取った合計 inc と、
@@ -32,8 +35,18 @@ const BOXES = [
   { c: 1, cap: 5, x0: 0.77, x1: 0.98, y0: 0.2, y1: 0.58 },
   { c: 1, cap: 10, x0: 0.77, x1: 0.98, y0: 0.63, y1: H - 0.04 },
 ];
-// 何秒ごとに1個出るか（始まりからの秒数 t）
-export const spawnGap = (t) => Math.max(0.55, 1.5 - t * 0.006);
+// 速さごとの、忙しさの曲線の始まり（秒）。ゆっくりは間 1.8秒から、はやいは 1.14秒から・2個同時が出始める所から
+export const START = { slow: -50, normal: 0, fast: 60 };
+// 忙しさ L のとき、次が出るまでの秒数
+export const spawnGap = (L) => Math.max(0.55, 1.5 - L * 0.006);
+// 忙しさ L のとき、一度に出る数（r は 0〜1 の乱数）。L=60 から2個がまざり始め、L=180 から3個もまざる
+export function spawnCount(L, r) {
+  const p3 = clamp((L - 180) / 240, 0, 0.25);
+  const p2 = clamp((L - 60) / 240, 0, 0.5);
+  return r < p3 ? 3 : r < p3 + p2 ? 2 : 1;
+}
+export const levelOf = (s, t) => t + (START[s.rules?.speed] ?? 0);
+export const livesOf = (s) => s.lives ?? LIVES;
 
 const goKey = (s) => `bombs:${s.seed}:go`;
 const clone = (s) => ({ ...s, boom: s.boom.slice(), sent: s.sent.slice(), inc: s.inc.slice(), out: s.out.slice(), log: s.log.slice() });
@@ -64,7 +77,7 @@ function spawn(sec, incoming) {
 function boom(x, y, sec) {
   ui.fx.push({ x, y, at: performance.now() });
   const { s, o } = ui.cur;
-  if (ui.me === null || s.out[ui.me] !== null || ui.lost >= LIVES) return;
+  if (ui.me === null || s.out[ui.me] !== null || ui.lost >= livesOf(s)) return;
   ui.lost += 1;
   o.onMove({ t: 'boom', n: ui.lost });
   void sec;
@@ -78,7 +91,11 @@ function step() {
   if (s.phase !== 'play' || ui.me === null || s.out[ui.me] !== null || !o.canMove) return;
   const sec = since(goKey(s)) / 1000;
   // ふつうに出てくる分
-  while (ui.nextSpawn <= sec) { spawn(ui.nextSpawn, false); ui.nextSpawn += spawnGap(ui.nextSpawn); }
+  while (ui.nextSpawn <= sec) {
+    const L = levelOf(s, ui.nextSpawn);
+    for (let i = spawnCount(L, Math.random()); i > 0; i--) spawn(ui.nextSpawn, false);
+    ui.nextSpawn += spawnGap(L);
+  }
   // 相手から届いた分（0.15秒おきに1個）
   if (ui.consumed < s.inc[ui.me] && sec >= ui.nextInc) {
     ui.consumed += 1;
@@ -215,8 +232,8 @@ function draw() {
   ctx.fillStyle = '#fff';
   ctx.font = `bold ${Math.max(13, k * 0.05)}px sans-serif`;
   if (ui.me !== null) {
-    const life = Math.max(0, LIVES - s.boom[ui.me]);
-    ctx.fillText(s.out[ui.me] !== null ? '脱落… ほかの人を待っています' : `ライフ ${'❤'.repeat(life)}${'♡'.repeat(LIVES - life)}`, k / 2, k * 0.06);
+    const life = Math.max(0, livesOf(s) - s.boom[ui.me]);
+    ctx.fillText(s.out[ui.me] !== null ? '脱落… ほかの人を待っています' : `ライフ ${'❤'.repeat(life)}${'♡'.repeat(livesOf(s) - life)}`, k / 2, k * 0.06);
   } else ctx.fillText('観戦中', k / 2, k * 0.06);
   if (ui.flash && now - ui.flash.at < 1600) {
     ctx.font = `bold ${k * 0.055}px sans-serif`;
@@ -252,12 +269,16 @@ if (typeof window !== 'undefined') window.addEventListener('resize', resize);
 
 /* ---------- CPU（ホストの端末だけ） ---------- */
 // 盤の上の爆弾を「出た時刻の列」で持ち、1.0〜1.4秒に1個ずつ古い順に片付ける。2.5% は違う色の枠へ入れてしまう。
-// 片付けが追いつかずに FUSE 秒たった爆弾は爆発する（だんだん忙しくなり、送られるとあふれる）。
+// 片付けが追いつかずに FUSE 秒たった爆弾は爆発する（だんだん忙しくなり、送られるとあふれる）。出方は人と同じ（c.start は速さの差）。
 const sims = new Map();
 export function cpuAdvance(c, upto, incTotal, rnd) {
   while (c.t < upto) {
     const t = Math.min(upto, c.t + 0.1);
-    while (c.nextSpawn <= t) { c.q.push(c.nextSpawn); c.nextSpawn += spawnGap(c.nextSpawn); }
+    while (c.nextSpawn <= t) {
+      const L = c.nextSpawn + (c.start ?? 0);
+      for (let i = spawnCount(L, rnd()); i > 0; i--) c.q.push(c.nextSpawn);
+      c.nextSpawn += spawnGap(L);
+    }
     while (c.consumed < incTotal) { c.consumed += 1; c.q.push(t); }
     c.q.sort((a, b) => a - b);
     while (c.q.length && t - c.q[0] >= FUSE) { c.q.shift(); c.events.push('boom'); }
@@ -287,9 +308,15 @@ export default {
   realtime: true,
   minPlayers: 2,
   maxPlayers: 10,
+  settings: [
+    { key: 'lives', label: 'ライフ', desc: '何回爆発させたら脱落か', def: '3', choices: [['1', '1回'], ['3', '3回'], ['5', '5回']] },
+    { key: 'speed', label: '速さ', desc: '始まったときの忙しさ。どれも時間がたつほど爆弾が多く出てくる（いちばん忙しい所は同じ）', def: 'normal', choices: [['slow', 'ゆっくり'], ['normal', 'ふつう'], ['fast', 'はやい']] },
+  ],
 
-  init(n, seed) {
-    return { n, seed, phase: 'ready', boom: Array(n).fill(0), sent: Array(n).fill(0), inc: Array(n).fill(0), out: Array(n).fill(null), outN: 0, log: [], step: 0 };
+  init(n, seed, { rules = {} } = {}) {
+    const r = { lives: '3', speed: 'normal', ...rules };
+    const lives = [1, 3, 5].includes(Number(r.lives)) ? Number(r.lives) : LIVES;
+    return { n, seed, rules: r, lives, phase: 'ready', boom: Array(n).fill(0), sent: Array(n).fill(0), inc: Array(n).fill(0), out: Array(n).fill(null), outN: 0, log: [], step: 0 };
   },
 
   turn() { return null; },
@@ -339,7 +366,7 @@ export default {
       const s = clone(s0);
       s.step += 1;
       s.boom[m.p] = m.n;
-      if (m.n >= LIVES) {
+      if (m.n >= livesOf(s0)) {
         s.out[m.p] = s.outN;
         s.outN += 1;
         if (aliveOf(s).length <= 1) s.phase = 'end';
@@ -368,7 +395,7 @@ export default {
     const now = since(goKey(s)) / 1000;
     let c = sims.get(key);
     if (!c) {
-      c = { t: now, nextSpawn: now, q: [], consumed: s.inc[p], handleAt: now + 1, box: [[0, 0], [0, 0]], events: [] };
+      c = { t: now, nextSpawn: now, start: levelOf(s, 0), q: [], consumed: s.inc[p], handleAt: now + 1, box: [[0, 0], [0, 0]], events: [] };
       sims.set(key, c);
       if (sims.size > 40) sims.delete(sims.keys().next().value);
     }
@@ -382,7 +409,7 @@ export default {
   render(root, s, o) {
     const me = o.me >= 0 ? o.me : null;
     const chips = scoreChips(o, s.boom.map(() => 0), {
-      extra: (p) => (s.out[p] !== null ? '脱落' : `${'❤'.repeat(LIVES - s.boom[p])}`),
+      extra: (p) => (s.out[p] !== null ? '脱落' : `${'❤'.repeat(Math.max(0, livesOf(s) - s.boom[p]))}`),
     });
     chips.querySelectorAll('.pt-score').forEach((e) => e.remove());
     const key = `${s.seed}:${me}`;

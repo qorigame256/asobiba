@@ -660,6 +660,31 @@ for (let k = 0; k < 100; k++) {
   hbRounds += st.round;
 }
 console.log('hitblow games 100, avg rounds', (hbRounds / 100).toFixed(1));
+// 同じ数字を使ってよい遊び方
+{
+  const HBM = await import('../app/js/games/hitblow.js');
+  assert.deepEqual(HBM.score('1111', '1123'), { hit: 2, blow: 0 }, '答えにある個数までしか数えない');
+  assert.deepEqual(HBM.score('3211', '1123'), { hit: 0, blow: 4 });
+  assert.deepEqual(HBM.score('1312', '1123'), { hit: 1, blow: 3 });
+  assert.deepEqual(HBM.score('1325', '1234'), { hit: 1, blow: 2 }, '重ならない数でも前と同じ');
+  assert.equal(HB.init(2, 99, { rules: { digits: 4 } }).answer, HB.init(2, 99, { rules: { digits: 4, dup: 'off' } }).answer, '使わないときの答えは前と同じ');
+  const answers = Array.from({ length: 200 }, (_, k) => HB.init(2, k, { rules: { dup: 'on' } }).answer);
+  assert.ok(answers.every((a) => /^\d{4}$/.test(a)), '4桁');
+  assert.ok(answers.some((a) => new Set(a).size < 4), '同じ数字が出る答えもある');
+  s = { ...HB.init(2, 1, { rules: { dup: 'on' } }), answer: '1123' };
+  t = HB.apply(s, { p: 0, t: 'guess', g: '1111', r: 1 });
+  assert.deepEqual(t.log[0], { p: 0, g: '1111', hit: 2, blow: 0 }, '同じ数字の予想を出せる');
+  assert.equal(HB.apply(t, { p: 1, t: 'guess', g: '112', r: 2 }), null, '桁数は同じ');
+  for (let k = 0; k < 20; k++) {
+    let st = HB.init(3, k * 7 + 1, { rules: { dup: 'on', digits: k % 2 ? 3 : 4, mode: k % 4 < 2 ? 'race' : 'turn' } });
+    while (!HB.result(st)) {
+      const ps = [0, 1, 2].filter((p) => HB.canAct(st, p));
+      st = HB.apply(st, { ...HB.cpu(st, ps[0]), p: ps[0] });
+      assert.ok(st, '同じ数字ありで CPU が反則の手を出した');
+      if (st.round > 80) throw new Error('同じ数字ありのヒット＆ブローが終わらない');
+    }
+  }
+}
 
 // ---------- 戦争（指の遊び） ----------
 const SS = GAMES.sensou;
@@ -1696,6 +1721,15 @@ console.log('kaisen OK');
   const fly = (x, vx, vy) => { const b = { x, y: TM.H - 0.16, ...TM.launch(vx, vy) }; let q = null; for (let i = 0; i < 2400 && !q; i++) q = TM.stepBall(b, 1 / 240); return q; };
   assert.equal(fly(0.15, 0.15, -3.85), 'in', '横から弧を描いて投げると入る');
   assert.notEqual(fly(0.5, 0, -3.5), 'in', 'カゴの真下からは入らない');
+  // 動くカゴ
+  assert.equal(TM.rimX(false, 1.5), 0.5, '止まっているカゴは真ん中');
+  assert.equal(TM.rimX(true, 0), 0.5, '動くカゴも始まりは真ん中');
+  assert.ok(Math.abs(TM.rimX(true, 1.5) - 0.7) < 1e-9 && Math.abs(TM.rimX(true, 4.5) - 0.3) < 1e-9, '左右に幅の2割ずつ・6秒で1往復');
+  const flyAt = (rx, x, vx, vy) => { const b = { x, y: TM.H - 0.16, ...TM.launch(vx, vy) }; let q = null; for (let i = 0; i < 2400 && !q; i++) q = TM.stepBall(b, 1 / 240, rx); return q; };
+  assert.equal(flyAt(0.5, 0.15, 0.15, -3.85), 'in');
+  assert.notEqual(flyAt(0.7, 0.15, 0.15, -3.85), 'in', 'カゴが動くと同じ投げ方では入らない');
+  assert.equal(flyAt(0.7, 0.35, 0.15, -3.85), 'in', 'カゴと一緒にずらして投げれば入る');
+  assert.equal(T.init(2, 1).rules.move, 'stay', '最初は止まっている');
 }
 
 // ---------- 間違い探し ----------
@@ -1752,6 +1786,37 @@ console.log('kaisen OK');
   b = run(b, [{ p: 2, t: 'boom', n: 1 }, { p: 2, t: 'boom', n: 2 }, { p: 2, t: 'boom', n: 3 }]);
   assert.deepEqual(B.result(b).winners, [0], '最後まで残った人の勝ち');
   assert.deepEqual(B.result(b).ranking, [0, 2, 1], 'あとで脱落した人ほど上');
+  // ライフ
+  b = run(B.init(2, 5, { rules: { lives: '1' } }), [{ p: -1, t: 'go' }, { p: 0, t: 'boom', n: 1 }]);
+  assert.equal(b.out[0], 0, 'ライフ1なら1回で脱落');
+  assert.deepEqual(B.result(b).winners, [1]);
+  b = run(B.init(2, 5, { rules: { lives: '5' } }), [{ p: -1, t: 'go' }, ...[1, 2, 3, 4].map((n) => ({ p: 0, t: 'boom', n }))]);
+  assert.equal(b.out[0], null, 'ライフ5なら4回では残る');
+  b = run(b, [{ p: 0, t: 'boom', n: 5 }]);
+  assert.equal(b.out[0], 0, 'ライフ5なら5回で脱落');
+  assert.equal(B.init(2, 5).lives, 3, '最初はライフ3');
+  assert.equal(B.init(2, 5, { rules: { lives: '9' } }).lives, 3, 'おかしな数は3');
+  // 速さ: 曲線のどこから始めるかだけが違い、いちばん忙しい所は同じ
+  const lv = (speed, t) => BM.levelOf(B.init(2, 5, { rules: { speed } }), t);
+  assert.ok(BM.spawnGap(lv('slow', 0)) > BM.spawnGap(lv('normal', 0)) && BM.spawnGap(lv('normal', 0)) > BM.spawnGap(lv('fast', 0)), '始まりの間は ゆっくり > ふつう > はやい');
+  assert.equal(BM.spawnGap(lv('normal', 0)), 1.5, 'ふつうの始まりは前と同じ');
+  for (const sp of ['slow', 'normal', 'fast']) {
+    assert.equal(BM.spawnGap(lv(sp, 600)), 0.55, `${sp}: いちばん短い間は同じ`);
+    assert.equal(BM.spawnCount(lv(sp, 600), 0), 3, `${sp}: 一度に出る数の上限は同じ`);
+    assert.equal(BM.spawnCount(lv(sp, 600), 0.99), 1);
+  }
+  assert.equal(BM.spawnCount(lv('normal', 30), 0), 1, 'ふつうの始めは1個ずつ');
+  assert.equal(BM.spawnCount(lv('fast', 30), 0), 2, 'はやいは早くから2個がまざる');
+  // CPU の盤も同じ出方（はやいほど早くあふれる）
+  const { mulberry32 } = await import('../app/js/games/util.js');
+  const boomAt = (speed) => {
+    const c = { t: 0, nextSpawn: 0, start: lv(speed, 0), q: [], consumed: 0, handleAt: 1, box: [[0, 0], [0, 0]], events: [] };
+    const rnd = mulberry32(7);
+    for (let t = 1; t <= 400; t++) { BM.cpuAdvance(c, t, 0, rnd); if (c.events.includes('boom')) return t; }
+    return 400;
+  };
+  assert.ok(boomAt('slow') > boomAt('normal') && boomAt('normal') > boomAt('fast'), 'CPU が初めて爆発させるのは はやいほど早い');
+  console.log('bombs first CPU boom (s) slow/normal/fast', boomAt('slow'), boomAt('normal'), boomAt('fast'));
 }
 
 // 遊び方: どのゲームにもあり、長くしない（1つ4行まで）

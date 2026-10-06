@@ -3,6 +3,8 @@
 // チームは席の番号で決める（偶数の席が赤、奇数の席が白。席順は main.js が毎回まぜる）。人数は待合室で偶数にそろえる（evenTeams）。
 // 玉の動きは各自の端末だけで計算し、入った数（合計）を 0.6秒ごとにまとめて手として送る（1個ずつ送ると手の一覧が長くなりすぎるため）。
 // 同じチームの人が投げた玉は見た目だけ、送りっぱなしで届けて画面に出す（o.stream / onStream）。数には入らない。
+// 詳細設定「カゴ」を「左右に動く」にすると、カゴが真ん中から幅の2割ずつ左右へ、約6秒で1往復する（2026-10-06 本人の決定）。
+// 位置は「始まりの合図からの秒数」だけで決めるので、どの端末でもほぼ同じ所にある。CPU は入る見込みを3割から2割に下げる。
 //
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready →(3秒)→ go → play →(時間＋待ち)→ end
 // 手: { p: -1, t: 'go' | 'end' } / { p, t: 'in', n: その人がこれまでに入れた合計 }（前より大きいときだけ受け付ける）
@@ -24,15 +26,19 @@ const MAX_V = 3.4;
 export const TEAM = ['赤', '白'];
 const TEAM_COLOR = ['#e04b3c', '#f4f4f4'];
 const teamOf = (p) => p % 2;
+const SWING = 0.2; // 動くカゴの、真ん中から左右へのふれ幅
+const PERIOD = 6; // 1往復の秒数
+// カゴの真ん中の横の位置（sec = 始まりからの秒数）
+export const rimX = (moving, sec) => (moving ? RIM.x + SWING * Math.sin((2 * Math.PI * Math.max(0, sec)) / PERIOD) : RIM.x);
 
-// 玉を dt 秒進める。カゴに入ったら 'in'、地面や盤の外へ出たら 'out'、まだ飛んでいれば null
-export function stepBall(b, dt) {
+// 玉を dt 秒進める。カゴに入ったら 'in'、地面や盤の外へ出たら 'out'、まだ飛んでいれば null。rx はカゴの真ん中の横の位置
+export function stepBall(b, dt, rx = RIM.x) {
   const py = b.y;
   b.vy += G * dt;
   b.x += b.vx * dt;
   b.y += b.vy * dt;
-  const L = RIM.x - RIM.half;
-  const R = RIM.x + RIM.half;
+  const L = rx - RIM.half;
+  const R = rx + RIM.half;
   // 上から口を通ったら入る
   if (py <= RIM.y && b.y > RIM.y && b.vy > 0 && b.x > L + BALL_R * 0.4 && b.x < R - BALL_R * 0.4) return 'in';
   // 口のふち（左右の点）に当たったら跳ね返る
@@ -48,8 +54,8 @@ export function stepBall(b, dt) {
   }
   // カゴの横・下（網）と柱に当たったら跳ね返る
   const inBody = b.x > L - BALL_R && b.x < R + BALL_R && b.y > RIM.y + 0.005 && b.y < RIM.y + RIM.depth + BALL_R;
-  if (inBody && !b.inside) { b.vx = -b.vx * 0.4; b.vy = Math.max(b.vy, 0) * 0.5 + 0.1; b.x += b.x < RIM.x ? -0.01 : 0.01; }
-  if (b.y > RIM.y + RIM.depth && Math.abs(b.x - RIM.x) < 0.012 + BALL_R && Math.abs(b.vx) > 0) b.vx = -b.vx * 0.5;
+  if (inBody && !b.inside) { b.vx = -b.vx * 0.4; b.vy = Math.max(b.vy, 0) * 0.5 + 0.1; b.x += b.x < rx ? -0.01 : 0.01; }
+  if (b.y > RIM.y + RIM.depth && Math.abs(b.x - rx) < 0.012 + BALL_R && Math.abs(b.vx) > 0) b.vx = -b.vx * 0.5;
   if (b.y > GROUND || b.x < -0.1 || b.x > 1.1) return 'out';
   return null;
 }
@@ -63,6 +69,9 @@ export function launch(vx, vy) {
 
 const durOf = (s) => Number(s.rules.time);
 const goKey = (s) => `tamaire:${s.seed}:go`;
+const movingOf = (s) => s.rules.move === 'move';
+// いまのカゴの位置（始まる前は真ん中、終わったら止める）
+const rimNow = (s) => rimX(movingOf(s), s.phase === 'ready' ? 0 : Math.min(since(goKey(s)) / 1000, durOf(s)));
 const clone = (s) => ({ ...s, cnt: s.cnt.slice() });
 export const teamScores = (s) => [0, 1].map((t) => s.cnt.reduce((a, v, p) => a + (teamOf(p) === t ? v : 0), 0));
 
@@ -75,6 +84,7 @@ function drawField() {
   const ctx = ui.ctx;
   const k = ui.scale;
   const team = ui.team;
+  const rx = rimNow(s);
   // 空と校庭
   const sky = ctx.createLinearGradient(0, 0, 0, k * H);
   sky.addColorStop(0, '#8fd0ff');
@@ -85,9 +95,9 @@ function drawField() {
   ctx.fillRect(0, (GROUND - 0.02) * k, k, k * H);
   // 柱
   ctx.fillStyle = '#8a6a45';
-  ctx.fillRect((RIM.x - 0.008) * k, (RIM.y + RIM.depth) * k, 0.016 * k, (GROUND - RIM.y - RIM.depth) * k);
+  ctx.fillRect((rx - 0.008) * k, (RIM.y + RIM.depth) * k, 0.016 * k, (GROUND - RIM.y - RIM.depth) * k);
   // カゴ（入った玉を少し見せる）
-  const L = RIM.x - RIM.half;
+  const L = rx - RIM.half;
   const balls = Math.min(30, teamScores(s)[team]);
   for (let i = 0; i < balls; i++) {
     const col = i % 6; const row = Math.floor(i / 6);
@@ -103,11 +113,11 @@ function drawField() {
   ctx.beginPath();
   ctx.moveTo(L * k, RIM.y * k);
   ctx.lineTo((L + 0.02) * k, (RIM.y + RIM.depth) * k);
-  ctx.lineTo((RIM.x + RIM.half - 0.02) * k, (RIM.y + RIM.depth) * k);
-  ctx.lineTo((RIM.x + RIM.half) * k, RIM.y * k);
+  ctx.lineTo((rx + RIM.half - 0.02) * k, (RIM.y + RIM.depth) * k);
+  ctx.lineTo((rx + RIM.half) * k, RIM.y * k);
   ctx.stroke();
   ctx.beginPath();
-  ctx.ellipse(RIM.x * k, RIM.y * k, RIM.half * k, 0.012 * k, 0, 0, Math.PI * 2);
+  ctx.ellipse(rx * k, RIM.y * k, RIM.half * k, 0.012 * k, 0, 0, Math.PI * 2);
   ctx.stroke();
   // 飛んでいる玉
   for (const b of ui.balls) {
@@ -137,7 +147,7 @@ function drawField() {
   for (const q of ui.pops) {
     ctx.font = `bold ${k * 0.05}px sans-serif`;
     ctx.fillStyle = '#c0392b';
-    ctx.fillText('+1', RIM.x * k, (RIM.y - 0.04 - (now - q.at) / 7000) * k);
+    ctx.fillText('+1', q.x * k, (RIM.y - 0.04 - (now - q.at) / 7000) * k);
   }
   // 上の文字: 点数と残り時間
   const sc = teamScores(s);
@@ -177,11 +187,12 @@ function step() {
   const dt = Math.min(0.05, (now - ui.last) / 1000);
   ui.last = now;
   const n = Math.max(1, Math.ceil(dt / (1 / 240)));
+  const rx = rimNow(s);
   ui.balls = ui.balls.filter((b) => {
     for (let i = 0; i < n; i++) {
-      const r = stepBall(b, dt / n);
+      const r = stepBall(b, dt / n, rx);
       if (r === 'in') {
-        if (!b.ghost) { ui.count += 1; ui.pops.push({ at: now }); }
+        if (!b.ghost) { ui.count += 1; ui.pops.push({ at: now, x: rx }); }
         return false;
       }
       if (r === 'out') return false;
@@ -229,10 +240,11 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'time', label: '時間', desc: '1回の勝負の長さ', def: '60', choices: [['30', '30秒'], ['60', '60秒'], ['90', '90秒']] },
+    { key: 'move', label: 'カゴ', desc: '左右に動く: カゴがゆっくり左右に行ったり来たりする。入れにくくなる', def: 'stay', choices: [['stay', '止まっている'], ['move', '左右に動く']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { time: '60', ...rules };
+    const r = { time: '60', move: 'stay', ...rules };
     return { n, seed, rules: r, phase: 'ready', cnt: Array(n).fill(0), step: 0 };
   },
 
@@ -283,7 +295,7 @@ export default {
     return s;
   },
 
-  // CPU: 0.5〜0.9秒に1回投げ、3割ほど入る（入ったときだけ手になる）
+  // CPU: 0.5〜0.9秒に1回投げ、3割ほど（カゴが動くときは2割）入る（入ったときだけ手になる）
   cpuDelay(s) { return s.phase === 'play' ? 120 : 500; },
   cpu(s, p) {
     if (s.phase !== 'play' || since(goKey(s)) / 1000 >= durOf(s)) return null;
@@ -293,7 +305,7 @@ export default {
     if (now < cpuNext.get(key)) return null;
     cpuNext.set(key, now + 500 + Math.random() * 400);
     if (cpuNext.size > 40) cpuNext.delete(cpuNext.keys().next().value);
-    return Math.random() < 0.3 ? { t: 'in', n: s.cnt[p] + 1 } : null;
+    return Math.random() < (movingOf(s) ? 0.2 : 0.3) ? { t: 'in', n: s.cnt[p] + 1 } : null;
   },
 
   onStream(d, from) {
@@ -314,7 +326,7 @@ export default {
       s.cnt.forEach((v, p) => {
         const before = ui.cur.s.cnt[p];
         if (o.cpu[p] && p !== me && teamOf(p) === ui.team && v > before && ui.balls.length < 60) {
-          ui.balls.push({ x: RIM.x + (Math.random() - 0.5) * 0.08, y: RIM.y - 0.12, vx: 0, vy: 0.3, ghost: true });
+          ui.balls.push({ x: rimNow(s) + (Math.random() - 0.5) * 0.08, y: RIM.y - 0.12, vx: 0, vy: 0.3, ghost: true });
         }
       });
       chips.scrollLeft = ui.chips.scrollLeft;

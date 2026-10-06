@@ -1,6 +1,8 @@
 // ヒット＆ブロー（数当て）。全員で同じ「答えの数」を当て合う。2〜10人。
 // 答えは 0〜9 の数字を重ならないように並べたもの（桁数は詳細設定で 3 / 4）。対局の種（seed）から作る。
 //   ヒット = 数字も場所も合っている / ブロー = 数字は合っているが場所が違う
+// 詳細設定「同じ数字」を「使ってよい」にすると、答えにも予想にも同じ数字が何回も出てよい（2026-10-06 本人の決定）。
+//   ブローは、その数字が答えにある個数までしか数えない（マスターマインドと同じ数え方。答え 1123・予想 1111 なら 2ヒット 0ブロー）。
 // 遊び方は詳細設定の mode で2つ:
 //   turn（順番に当てる・最初）: 1人ずつ順番に予想を出し、予想と結果は全員に見える。最初に当てた人の勝ち。
 //     ほかの人の予想もヒントになるので、自分の予想で手がかりを出しすぎない駆け引きになる。
@@ -12,29 +14,34 @@ import { mulberry32, shuffle } from './util.js';
 
 const ALL_DIGITS = '0123456789'.split('');
 
-function score(g, ans) {
+// 同じ数字があるときも数えられるよう、ブローは「数字ごとに 予想と答えの少ないほうの個数」の合計からヒットを引く
+export function score(g, ans) {
   let hit = 0;
-  let blow = 0;
+  const cg = Array(10).fill(0);
+  const ca = Array(10).fill(0);
   for (let i = 0; i < g.length; i++) {
     if (g[i] === ans[i]) hit++;
-    else if (ans.includes(g[i])) blow++;
+    cg[g[i]]++;
+    ca[ans[i]]++;
   }
-  return { hit, blow };
+  const common = cg.reduce((a, v, d) => a + Math.min(v, ca[d]), 0);
+  return { hit, blow: common - hit };
 }
 
-const validGuess = (g, digits) => typeof g === 'string' && g.length === digits && /^\d+$/.test(g) && new Set(g).size === digits;
+const validGuess = (g, digits, dup) => typeof g === 'string' && g.length === digits && /^\d+$/.test(g) && (dup || new Set(g).size === digits);
 
 // 桁数ごとの「ありうる答え」の一覧（CPU が使う）
 const ALL_CODES = {};
-function allCodes(digits) {
-  if (ALL_CODES[digits]) return ALL_CODES[digits];
+function allCodes(digits, dup) {
+  const k = `${digits}:${dup}`;
+  if (ALL_CODES[k]) return ALL_CODES[k];
   const out = [];
   const walk = (cur) => {
     if (cur.length === digits) { out.push(cur); return; }
-    for (const d of ALL_DIGITS) if (!cur.includes(d)) walk(cur + d);
+    for (const d of ALL_DIGITS) if (dup || !cur.includes(d)) walk(cur + d);
   };
   walk('');
-  ALL_CODES[digits] = out;
+  ALL_CODES[k] = out;
   return out;
 }
 
@@ -59,14 +66,19 @@ export default {
   settings: [
     { key: 'mode', label: '遊び方', desc: '順番に: 1人ずつ予想し、全員の予想が見える／同時に: 全員が一斉に予想する早当て', def: 'turn', choices: [['turn', '順番に当てる'], ['race', '同時に早当て']] },
     { key: 'digits', label: '桁数', desc: '当てる数字の長さ。4桁のほうが難しい', def: 4, choices: [[3, '3桁'], [4, '4桁']] },
+    { key: 'dup', label: '同じ数字', desc: '使ってよい: 答えにも予想にも同じ数字が何回も出てくる（例 1123）。難しくなる', def: 'off', choices: [['off', '使わない'], ['on', '使ってよい']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const digits = rules.digits === 3 ? 3 : 4;
     const mode = rules.mode === 'race' ? 'race' : 'turn';
-    const answer = shuffle(ALL_DIGITS, mulberry32(seed)).slice(0, digits).join('');
+    const dup = rules.dup === 'on';
+    const rng = mulberry32(seed);
+    const answer = dup
+      ? Array.from({ length: digits }, () => ALL_DIGITS[Math.floor(rng() * 10)]).join('')
+      : shuffle(ALL_DIGITS, rng).slice(0, digits).join('');
     return {
-      n, digits, mode, answer, round: 1, turn: 0, log: [],
+      n, digits, mode, dup, answer, round: 1, turn: 0, log: [],
       hist: Array.from({ length: n }, () => []), pending: Array(n).fill(null), winners: null, step: 0,
     };
   },
@@ -94,7 +106,7 @@ export default {
 
   apply(s0, m) {
     if (!m || m.t !== 'guess' || !Number.isInteger(m.p) || m.p < 0 || m.p >= s0.n) return null;
-    if (!this.canAct(s0, m.p) || m.r !== s0.round || !validGuess(m.g, s0.digits)) return null;
+    if (!this.canAct(s0, m.p) || m.r !== s0.round || !validGuess(m.g, s0.digits, s0.dup)) return null;
     const s = clone(s0);
     s.step += 1;
     if (s.mode === 'turn') {
@@ -122,7 +134,7 @@ export default {
   // 順番に当てる遊び方では、ほかの人の結果は1つずつ3割の見込みでしか使わず、5割は適当に選ぶ
   // （全員の結果を全部使うと、人が2〜3回予想するうちに当ててしまうため。試算でちゃんと考える人に3割ほど勝つ強さ）
   cpu(s, p) {
-    const codes = allCodes(s.digits);
+    const codes = allCodes(s.digits, !!s.dup);
     const turn = s.mode === 'turn';
     const mine = turn ? s.log.filter((h) => h.p === p || Math.random() < 0.3) : s.hist[p];
     const said = new Set((turn ? s.log : mine).map((h) => h.g));
@@ -177,7 +189,9 @@ export default {
 
     const help = document.createElement('p');
     help.className = 'hb-help';
-    help.textContent = `${s.digits}桁・同じ数字は使わない。ヒット(H)＝数字も場所も合っている／ブロー(B)＝数字は合っているが場所が違う`;
+    help.textContent = s.dup
+      ? `${s.digits}桁・同じ数字も使える。ヒット(H)＝数字も場所も合っている／ブロー(B)＝数字は合っているが場所が違う（答えにある個数まで）`
+      : `${s.digits}桁・同じ数字は使わない。ヒット(H)＝数字も場所も合っている／ブロー(B)＝数字は合っているが場所が違う`;
     root.append(help);
 
     // 予想の一覧（順番には全員の予想を1つの表に。同時には自分の表と、ほかの人の表）
@@ -213,7 +227,7 @@ export default {
       entry.text = '';
       o.onMove({ t: 'guess', g, r: s.round });
     };
-    const type = (d) => { if (entry.text.length < s.digits && !entry.text.includes(d)) { entry.text += d; draw(); } };
+    const type = (d) => { if (entry.text.length < s.digits && (s.dup || !entry.text.includes(d))) { entry.text += d; draw(); } };
     const back = () => { if (entry.text) { entry.text = entry.text.slice(0, -1); draw(); } };
 
     const slots = document.createElement('div');
@@ -233,7 +247,7 @@ export default {
       b.type = 'button';
       b.className = 'hb-key';
       b.textContent = d;
-      b.disabled = entry.text.includes(d) || entry.text.length >= s.digits;
+      b.disabled = (!s.dup && entry.text.includes(d)) || entry.text.length >= s.digits;
       b.onclick = () => type(d);
       pad.append(b);
     }
