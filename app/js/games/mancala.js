@@ -10,7 +10,7 @@
 // 誰か1人の側が空になったら全員終わり。一番多い人が2人以上なら引き分け。
 // 詳細設定「捕獲なし」（2026-10-06 本人の決定）: 空いた穴で止まっても石をとらない（2人・3人とも）。
 
-import { CPU_SETTING, boardCpu } from './util.js';
+import { CPU_SETTING, boardCpu, hintIs } from './util.js';
 
 const STORE = [6, 13, 20];
 const pitOf = (p, k) => p * 7 + k;
@@ -163,7 +163,7 @@ const game = {
         e.onclick = () => o.onMove(k);
         e.setAttribute('aria-label', `${k + 1}番目の穴（石${s.pits[i]}個）`);
       }
-      e.className = 'mc-pit p' + owner + (store ? ' store' : '') + (can ? ' playable' : '') + (sown.has(i) ? ' sown' : '')
+      e.className = 'mc-pit p' + owner + (store ? ' store' : '') + (can ? ' playable' : '') + (can && hintIs(o, k) ? ' hint' : '') + (sown.has(i) ? ' sown' : '')
         + (s.last?.from === i ? ' from' : '') + (s.last?.capture && (s.last.capture.at === i || [s.last.capture.opp].flat().includes(i)) ? ' cap' : '');
       const stones = document.createElement('div');
       stones.className = 'mc-stones';

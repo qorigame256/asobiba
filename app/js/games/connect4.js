@@ -17,7 +17,7 @@
 const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
 export const NEUTRAL = -1; // じゃま石
 
-import { CPU_SETTING, boardCpu, mulberry32 } from './util.js';
+import { CPU_SETTING, boardCpu, mulberry32, hintIs } from './util.js';
 
 // 盤（列 w・段 h）の4つ並びの窓の一覧。マスごとに、そのマスを含む窓の番号も持つ
 const WINDOWS = {};
@@ -338,6 +338,7 @@ export default {
       col.setAttribute('aria-label', `${c + 1}列目`);
       if (o.canMove && s.grid[c] === null) {
         col.classList.add('playable', 'p' + s.turn);
+        if (hintIs(o, c)) col.classList.add('hint');
         col.onclick = () => o.onMove(c);
       } else {
         col.tabIndex = -1;
@@ -375,6 +376,7 @@ export default {
       btn.setAttribute('aria-label', `${c + 1}列目の一番下を抜く`);
       if (o.canMove && s.grid[(s.h - 1) * s.w + c] === s.turn) {
         btn.classList.add('playable');
+        if (hintIs(o, { pop: c })) btn.classList.add('hint');
         btn.onclick = () => o.onMove({ pop: c });
       } else {
         btn.disabled = true;

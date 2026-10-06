@@ -17,7 +17,7 @@
 //   作り: 持ち駒の hands[p][0]（駒の番号0は使っていない）を NO_HAND にしておき、make() が取った駒を持ち駒に足さない（CPU の読みも同じ make を通る）。
 // 詳細設定「盤」の 3×4（動物の駒）は shogi34.js に任せる（2026-10-06 本人の決定。局面に zoo: true を持つ）。2人だけ・駒落ちとは組み合わせない。
 
-import { CPU_SETTING } from './util.js';
+import { CPU_SETTING, hintSquares } from './util.js';
 import * as three from './shogi3.js';
 import * as zoo from './shogi34.js';
 
@@ -425,6 +425,7 @@ export default {
     const droppable = new Set(legal.filter((m) => m.d).map((m) => m.d));
     const inCheck = !s.result && attacked(s.board, kingSq(s.board, s.turn), 1 - s.turn);
     const checkedKing = inCheck ? kingSq(s.board, s.turn) : -1;
+    const hint = hintSquares(o); // おすすめの手（動かす駒と行き先）
 
     root.innerHTML = '';
     root.className = 'board sg' + (N === 5 ? ' sg5' : '');
@@ -451,7 +452,7 @@ export default {
         any = true;
         const ok = can && side === s.turn && droppable.has(d);
         const e = document.createElement(ok ? 'button' : 'span');
-        e.className = 'sg-hand-piece' + (ok ? ' playable' : '') + (ui.drop === d && side === s.turn ? ' selected' : '');
+        e.className = 'sg-hand-piece' + (ok ? ' playable' : '') + (ui.drop === d && side === s.turn ? ' selected' : '') + (ok && o.hint?.d === d ? ' hint' : '');
         e.innerHTML = `<span class="sg-piece${side === bottom ? '' : ' flip'}">${KANJI[d]}</span>${n > 1 ? `<small>${n}</small>` : ''}`;
         if (ok) {
           e.type = 'button';
@@ -497,6 +498,7 @@ export default {
       if (i === ui.from) cell.classList.add('selected');
       if (isTarget) cell.classList.add('target');
       if (i === checkedKing) cell.classList.add('checked');
+      if (hint.has(i)) cell.classList.add('hint');
       if (v) {
         const t = Math.abs(v);
         const owner = v > 0 ? 0 : 1;

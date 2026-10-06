@@ -5,6 +5,9 @@
 // 同じチームの人が投げた玉は見た目だけ、送りっぱなしで届けて画面に出す（o.stream / onStream）。数には入らない。
 // 詳細設定「カゴ」を「左右に動く」にすると、カゴが真ん中から幅の2割ずつ左右へ、約6秒で1往復する（2026-10-06 本人の決定）。
 // 位置は「始まりの合図からの秒数」だけで決めるので、どの端末でもほぼ同じ所にある。CPU は入る見込みを3割から2割に下げる。
+// 詳細設定「金の玉」（2026-10-06 本人の決定。最初はなし）: ときどき（6個に1個ほど）手もとに金色の玉が来て、入れると3点。
+//   金の玉かどうかは各自の端末で決める（入れた数と同じく、手には合計の点だけを入れる）。ありのときは「入れた数」でなく「点」で数える。
+//   CPU も入れた玉の6個に1個ほどが3点（Claude の判断）。
 //
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready →(3秒)→ go → play →(時間＋待ち)→ end
 // 手: { p: -1, t: 'go' | 'end' } / { p, t: 'in', n: その人がこれまでに入れた合計 }（前より大きいときだけ受け付ける）
@@ -25,6 +28,9 @@ const RELOAD_MS = 280;
 const MAX_V = 3.4;
 export const TEAM = ['赤', '白'];
 const TEAM_COLOR = ['#e04b3c', '#f4f4f4'];
+const GOLD = '#f2c230';
+const GOLD_RATE = 1 / 6;
+const GOLD_PT = 3;
 const teamOf = (p) => p % 2;
 const SWING = 0.2; // 動くカゴの、真ん中から左右へのふれ幅
 const PERIOD = 6; // 1往復の秒数
@@ -70,6 +76,7 @@ export function launch(vx, vy) {
 const durOf = (s) => Number(s.rules.time);
 const goKey = (s) => `tamaire:${s.seed}:go`;
 const movingOf = (s) => s.rules.move === 'move';
+const goldOf = (s) => s.rules.gold === 'on';
 // いまのカゴの位置（始まる前は真ん中、終わったら止める）
 const rimNow = (s) => rimX(movingOf(s), s.phase === 'ready' ? 0 : Math.min(since(goKey(s)) / 1000, durOf(s)));
 const clone = (s) => ({ ...s, cnt: s.cnt.slice() });
@@ -124,7 +131,7 @@ function drawField() {
     ctx.beginPath();
     ctx.arc(b.x * k, b.y * k, BALL_R * k, 0, Math.PI * 2);
     ctx.globalAlpha = b.ghost ? 0.55 : 1;
-    ctx.fillStyle = TEAM_COLOR[team];
+    ctx.fillStyle = b.gold ? GOLD : TEAM_COLOR[team];
     ctx.fill();
     ctx.strokeStyle = 'rgba(0,0,0,.35)';
     ctx.lineWidth = 1;
@@ -135,7 +142,7 @@ function drawField() {
   if (ui.me !== null && s.phase === 'play' && performance.now() - ui.lastThrow > RELOAD_MS) {
     ctx.beginPath();
     ctx.arc(ui.handX * k, HAND_Y * k, BALL_R * k, 0, Math.PI * 2);
-    ctx.fillStyle = TEAM_COLOR[team];
+    ctx.fillStyle = ui.nextGold ? GOLD : TEAM_COLOR[team];
     ctx.fill();
     ctx.strokeStyle = 'rgba(0,0,0,.4)';
     ctx.stroke();
@@ -146,8 +153,8 @@ function drawField() {
   ctx.textAlign = 'center';
   for (const q of ui.pops) {
     ctx.font = `bold ${k * 0.05}px sans-serif`;
-    ctx.fillStyle = '#c0392b';
-    ctx.fillText('+1', q.x * k, (RIM.y - 0.04 - (now - q.at) / 7000) * k);
+    ctx.fillStyle = q.pt > 1 ? '#b8860b' : '#c0392b';
+    ctx.fillText(`+${q.pt}`, q.x * k, (RIM.y - 0.04 - (now - q.at) / 7000) * k);
   }
   // 上の文字: 点数と残り時間
   const sc = teamScores(s);
@@ -177,7 +184,7 @@ function drawField() {
   if (ui.me !== null && s.phase !== 'end') {
     ctx.font = `${Math.max(11, k * 0.035)}px sans-serif`;
     ctx.fillStyle = '#5a4a30';
-    ctx.fillText(`あなたは${TEAM[team]}チーム・${Math.max(ui.count, s.cnt[ui.me])}個`, k / 2, (H - 0.012) * k);
+    ctx.fillText(`あなたは${TEAM[team]}チーム・${Math.max(ui.count, s.cnt[ui.me])}${goldOf(s) ? '点' : '個'}`, k / 2, (H - 0.012) * k);
   }
 }
 
@@ -192,7 +199,11 @@ function step() {
     for (let i = 0; i < n; i++) {
       const r = stepBall(b, dt / n, rx);
       if (r === 'in') {
-        if (!b.ghost) { ui.count += 1; ui.pops.push({ at: now, x: rx }); }
+        if (!b.ghost) {
+          const pt = b.gold ? GOLD_PT : 1;
+          ui.count += pt;
+          ui.pops.push({ at: now, x: rx, pt });
+        }
         return false;
       }
       if (r === 'out') return false;
@@ -240,11 +251,12 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'time', label: '時間', desc: '1回の勝負の長さ', def: '60', choices: [['30', '30秒'], ['60', '60秒'], ['90', '90秒']] },
+    { key: 'gold', label: '金の玉', desc: 'ときどき金色の玉が来て、入れると3点（入れた数でなく点で数える）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'move', label: 'カゴ', desc: '左右に動く: カゴがゆっくり左右に行ったり来たりする。入れにくくなる', def: 'stay', choices: [['stay', '止まっている'], ['move', '左右に動く']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { time: '60', move: 'stay', ...rules };
+    const r = { time: '60', move: 'stay', gold: 'off', ...rules };
     return { n, seed, rules: r, phase: 'ready', cnt: Array(n).fill(0), step: 0 };
   },
 
@@ -295,7 +307,7 @@ export default {
     return s;
   },
 
-  // CPU: 0.5〜0.9秒に1回投げ、3割ほど（カゴが動くときは2割）入る（入ったときだけ手になる）
+  // CPU: 0.5〜0.9秒に1回投げ、3割ほど（カゴが動くときは2割）入る（入ったときだけ手になる）。金の玉ありなら入った玉の6個に1個ほどが3点
   cpuDelay(s) { return s.phase === 'play' ? 120 : 500; },
   cpu(s, p) {
     if (s.phase !== 'play' || since(goKey(s)) / 1000 >= durOf(s)) return null;
@@ -305,14 +317,15 @@ export default {
     if (now < cpuNext.get(key)) return null;
     cpuNext.set(key, now + 500 + Math.random() * 400);
     if (cpuNext.size > 40) cpuNext.delete(cpuNext.keys().next().value);
-    return Math.random() < (movingOf(s) ? 0.2 : 0.3) ? { t: 'in', n: s.cnt[p] + 1 } : null;
+    if (Math.random() >= (movingOf(s) ? 0.2 : 0.3)) return null;
+    return { t: 'in', n: s.cnt[p] + (goldOf(s) && Math.random() < GOLD_RATE ? GOLD_PT : 1) };
   },
 
   onStream(d, from) {
     if (!ui || ui.me === null || !Array.isArray(d?.b) || from < 0 || from === ui.me || teamOf(from) !== ui.team) return;
     const [x, y, vx, vy] = d.b.map(Number);
     if (![x, y, vx, vy].every(Number.isFinite) || ui.balls.length > 60) return;
-    ui.balls.push({ x: clamp(x, 0, 1), y: clamp(y, 0, H), vx: clamp(vx, -4, 4), vy: clamp(vy, -4, 4), ghost: true });
+    ui.balls.push({ x: clamp(x, 0, 1), y: clamp(y, 0, H), vx: clamp(vx, -4, 4), vy: clamp(vy, -4, 4), ghost: true, gold: d.g === 1 });
   },
 
   render(root, s, o) {
@@ -326,7 +339,7 @@ export default {
       s.cnt.forEach((v, p) => {
         const before = ui.cur.s.cnt[p];
         if (o.cpu[p] && p !== me && teamOf(p) === ui.team && v > before && ui.balls.length < 60) {
-          ui.balls.push({ x: rimNow(s) + (Math.random() - 0.5) * 0.08, y: RIM.y - 0.12, vx: 0, vy: 0.3, ghost: true });
+          ui.balls.push({ x: rimNow(s) + (Math.random() - 0.5) * 0.08, y: RIM.y - 0.12, vx: 0, vy: 0.3, ghost: true, gold: v - before >= GOLD_PT });
         }
       });
       chips.scrollLeft = ui.chips.scrollLeft;
@@ -354,7 +367,7 @@ export default {
     ui = {
       key, canvas, ctx: canvas.getContext('2d'), chips, wrap, me, cur: { s, o }, scale: 300,
       team: me === null ? 0 : teamOf(me), balls: [], pops: [], count: me === null ? 0 : s.cnt[me], sent: 0,
-      lastSend: 0, lastThrow: 0, last: performance.now(), handX: 0.5,
+      lastSend: 0, lastThrow: 0, last: performance.now(), handX: 0.5, nextGold: goldOf(s) && Math.random() < GOLD_RATE,
     };
     wrap.classList.toggle('ac-live', s.phase === 'play' && me !== null);
     resize();
@@ -390,9 +403,10 @@ export default {
       if (vy > -0.6) return; // 上向きにはじいていない
       const v = launch(vx, vy);
       ui.lastThrow = now;
-      const ball = { x: ui.handX, y: HAND_Y, vx: v.vx, vy: v.vy };
+      const ball = { x: ui.handX, y: HAND_Y, vx: v.vx, vy: v.vy, gold: ui.nextGold };
+      ui.nextGold = goldOf(cur) && Math.random() < GOLD_RATE;
       ui.balls.push(ball);
-      co.stream({ b: [+ball.x.toFixed(3), +ball.y.toFixed(3), +ball.vx.toFixed(3), +ball.vy.toFixed(3)] });
+      co.stream({ b: [+ball.x.toFixed(3), +ball.y.toFixed(3), +ball.vx.toFixed(3), +ball.vy.toFixed(3)], ...(ball.gold ? { g: 1 } : {}) });
     };
     canvas.addEventListener('pointerup', up);
     canvas.addEventListener('pointercancel', () => { drag = null; });

@@ -589,6 +589,44 @@ console.log('colors stack OK');
   assert.ok(calls > 40 && forgot > 3 && forgot < calls, `CPU はたいてい宣言し、ときどき忘れる: ${calls} / ${forgot}`);
 }
 
+// いろあわせのドロー4のチャレンジ: いつでも出せる・出された人がチャレンジか4枚引くかを選ぶ
+{
+  const U = GAMES.colors;
+  const chb = (hands, rules = { challenge: true }) => ({ ...U.init(3, 1, { rules }), deck: ['b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8'], discard: ['r5'], hands, color: 'r', turn: 0, drawn: null });
+  const H = () => [['W4', 'r7', 'g1'], ['y1', 'y2'], ['g3', 'g4']];
+  assert.equal(U.apply(chb(H(), {}), { p: 0, t: 'play', i: 0, c: 'g' }), null, '設定なしなら場の色を持っているとドロー4は出せない');
+  let c = U.apply(chb(H()), { p: 0, t: 'play', i: 0, c: 'g' });
+  assert.ok(c, 'チャレンジありならいつでも出せる');
+  assert.deepEqual([c.turn, c.ask.guilty, c.hands[1].length], [1, true, 2], '次の人の答えを待つ（まだ引かない）');
+  assert.equal(U.apply(c, { p: 1, t: 'draw' }), null, '答える前は山から引けない');
+  assert.equal(U.apply(c, { p: 1, t: 'play', i: 0 }), null, '答える前は札を出せない');
+  assert.equal(U.apply(c, { p: 2, t: 'challenge' }), null, '出された人しか答えられない');
+  let d = U.apply(c, { p: 1, t: 'challenge' });
+  assert.deepEqual([d.hands[0].length, d.hands[1].length, d.turn, d.last.guilty, d.ask], [6, 2, 1, true, null], 'チャレンジ成功: 出した人が4枚引き、チャレンジした人の番');
+  assert.ok(U.apply(d, { p: 1, t: 'draw' }), 'チャレンジ成功のあとはふつうに番を続ける');
+  d = U.apply(c, { p: 1, t: 'accept' });
+  assert.deepEqual([d.hands[1].length, d.turn], [6, 2], '4枚引くを選べば4枚引いて1回休み');
+  c = U.apply(chb([['W4', 'g1', 'g2'], ['y1', 'y2'], ['g3', 'g4']]), { p: 0, t: 'play', i: 0, c: 'g' });
+  assert.equal(c.ask.guilty, false);
+  d = U.apply(c, { p: 1, t: 'challenge' });
+  assert.deepEqual([d.hands[0].length, d.hands[1].length, d.turn, d.last.guilty], [2, 8, 2, false], 'チャレンジ失敗: チャレンジした人が6枚引いて1回休み');
+  assert.equal(U.apply(c, { p: 1, t: 'challenge' }).ask, null);
+  c = U.apply(chb(H(), { challenge: true, stack: true }), { p: 0, t: 'play', i: 0, c: 'g' });
+  assert.equal(c, null, '重ねて返すと一緒のときはチャレンジを使わない（今までどおり場の色があると出せない）');
+  for (let k = 0; k < 60; k++) {
+    let st = U.init(2 + (k % 5), k * 71 + 3, { rules: { challenge: true, call: k % 2 === 0, cap: k % 3 === 0 } });
+    let steps = 0;
+    while (!U.result(st)) {
+      const p = U.turn(st);
+      const next = U.apply(st, { ...U.cpu(st, p), p });
+      assert.ok(next, 'チャレンジありで CPU が反則の手を出した');
+      assert.equal(total(next), 108, 'チャレンジありで札の枚数が変わった');
+      st = next;
+      if (++steps > 5000) throw new Error('チャレンジありのいろあわせが終わらない');
+    }
+  }
+}
+
 // いろあわせの手札の上限: 26枚になったら脱落（手札は山の下へ）・脱落した人を飛ばす・残り1人なら勝ち・札の数は108のまま
 {
   const U = GAMES.colors;
@@ -1241,6 +1279,28 @@ for (let k = 0; k < 200; k++) {
   assert.equal(st.scores.reduce((a, b) => a + b, 0), st.cards.length / 2, '組の数の合計');
   mmGames++;
 }
+// ジョーカー（詳細設定）
+for (const [size, top] of [[48, 12], [36, 9], [24, 6]]) {
+  const m = MM.init(2, 5, { rules: { size, joker: 'on' } });
+  assert.equal(m.cards.length, size, 'ジョーカーを入れても枚数（長方形）は同じ');
+  assert.equal(m.cards.filter((c) => c === 'JK').length, 2, 'ジョーカー2枚');
+  assert.ok(!m.cards.includes('d' + top) && !m.cards.includes('c' + top), '一番大きい数字の♦と♣を抜く');
+}
+s = { ...MM.init(2, 0, { rules: { size: 24, joker: 'on' } }), cards: ['JK', 's1', 'JK', 'h1'], taken: Array(4).fill(null), seen: Array(4).fill(false) };
+t = mmFlip(s, 0, 0, 1);
+assert.deepEqual([t.turn, t.scores[0]], [1, 0], 'ジョーカーとほかの札はそろわない');
+t = mmFlip(s, 0, 0, 2);
+assert.deepEqual([t.turn, t.scores[0]], [0, 2], 'ジョーカー2枚は2組ぶん・もう1回');
+for (let k = 0; k < 60; k++) {
+  let st = MM.init(2 + (k % 5), k * 17 + 3, { rules: { size: [48, 36, 24][k % 3], joker: 'on' } });
+  let steps = 0;
+  while (!MM.result(st)) {
+    st = MM.apply(st, { ...MM.cpu(st, st.turn), p: st.turn });
+    assert.ok(st, 'ジョーカーありで神経衰弱の CPU が反則の手を出した');
+    if (++steps > 5000) throw new Error('ジョーカーありの神経衰弱が終わらない');
+  }
+  assert.equal(st.scores.reduce((a, b) => a + b, 0), st.cards.length / 2 + 1, 'ジョーカーありの組の数の合計（ジョーカーが1組多い）');
+}
 console.log('memory games', mmGames);
 // ---------- 石取り ----------
 const NIM = GAMES.nim;
@@ -1355,6 +1415,16 @@ assert.ok(FL.result(s), '15問で終わる');
     return ref(FL, st, 'close').last[0].pt;
   };
   assert.deepEqual([pointsAt(0), pointsAt(5), pointsAt(10)], [3, 6, 9], '1位の点は 3・6・9');
+}
+// お手つき（詳細設定）: 旗を動かして間違えたら −1点、動かさずに間違えたのは0点
+for (const miss of ['off', 'on']) {
+  let st = FL.init(3, 4, { rules: { miss } });
+  st.cmds = st.cmds.map(() => ({ text: '赤上げて', pose: { r: 1, w: 0 } }));
+  st = ref(FL, st, 'next');
+  st = FL.apply(st, { p: 0, t: 'pose', q: 0, r: 1, w: 0, ms: 300, n: 1 });
+  st = FL.apply(st, { p: 1, t: 'pose', q: 0, r: 0, w: 1, ms: 300, n: 1 }); // 白を上げてしまった
+  st = ref(FL, st, 'close'); // p2 は動かさなかった
+  assert.deepEqual(st.scores, miss === 'on' ? [3, -1, 0] : [3, 0, 0], 'お手つき ' + miss);
 }
 
 // ---------- 難読漢字 ----------
@@ -2716,6 +2786,10 @@ console.log('kaisen OK');
   assert.notEqual(flyAt(0.7, 0.15, 0.15, -3.85), 'in', 'カゴが動くと同じ投げ方では入らない');
   assert.equal(flyAt(0.7, 0.35, 0.15, -3.85), 'in', 'カゴと一緒にずらして投げれば入る');
   assert.equal(T.init(2, 1).rules.move, 'stay', '最初は止まっている');
+  // 金の玉（詳細設定）: 手は合計の点なので、3点ずつ増えても受け付ける
+  assert.equal(T.init(2, 1).rules.gold, 'off', '最初は金の玉なし');
+  t = run(T.init(2, 5, { rules: { gold: 'on' } }), [{ p: -1, t: 'go' }, { p: 0, t: 'in', n: 3 }, { p: 0, t: 'in', n: 4 }, { p: 1, t: 'in', n: 3 }, { p: -1, t: 'end' }]);
+  assert.deepEqual(T.result(t).teams, [4, 3], '金の玉の3点も合計に入る');
 }
 
 // ---------- 間違い探し ----------

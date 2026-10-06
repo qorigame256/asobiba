@@ -62,7 +62,7 @@ function myName() {
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'hints'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -557,6 +557,8 @@ function statusHtml(game, st, res) {
   if (extra) html += `<div class="status-sub">${extra}</div>`;
   const streak = streakHtml();
   if (streak) html += `<div class="status-sub streak">${streak}</div>`;
+  const hints = game.multi ? '' : hintHtml(game);
+  if (hints) html += `<div class="status-sub">${hints}</div>`;
   const preds = res ? predHtml(res) : '';
   if (preds) html += `<div class="status-sub pred">${preds}</div>`;
   const tally = res ? tallyHtml() : '';
@@ -700,6 +702,7 @@ function renderPage() {
       stream: (d) => { if (S.mode === 'online') send({ type: 'stream', gameId: S.gameId, round: S.round, d }, 0); },
     });
   }
+  if (!game.multi && opts.canMove && S.hintShow?.at === hintAt()) opts.hint = S.hintShow.move; // おすすめの手
   game.render(board, st, opts);
   if (beginner && opts.canMove && BEG_GAMES.has(S.gameId) && [...board.querySelectorAll('.playable, .usable, button')].some((e) => getComputedStyle(e).getPropertyValue('--beg').trim() === '1')) {
     status.insertAdjacentHTML('beforeend', '<div class="status-sub beg-hint">🔰 光っている所が、いま選べる所です</div>');
@@ -707,6 +710,7 @@ function renderPage() {
   if (fresh) moveSound(game, st, res, prevLen, opts.canMove);
   if (!opts.canMove && S.couldMove !== false) S.waitFrom = Date.now();
   S.couldMove = opts.canMove;
+  appendHint(game, st, opts);
 
   if (res) {
     if (!game.multi) appendReview(game);
@@ -825,6 +829,51 @@ function predHtml(res) {
   const hit = ids.filter((id) => won.includes(by[id]));
   if (!hit.length) return `🔮 予想が当たった人はいません（${ids.length}人が予想）`;
   return '🔮 予想が当たった: ' + hit.map((id) => `<b>${esc(id === S.myId ? 'あなた' : nameOf(id))}</b>`).join('・');
+}
+
+/* ---------- おすすめの手（2026-10-06 本人の決定）: 盤のゲームで、自分の番に💡を押すと CPU（つよい）が考えた手が光る。1局に3回まで ---------- */
+// Claude の判断: 使った回数は送りっぱなし（type: 'hint'）で、受け取った端末がそれぞれ覚える（勝敗予想と同じ。あとから入った人には届かない）。
+// 同じ画面の対局は席ごとに3回。光らせるのは押した端末だけで、その局面のあいだだけ（手が進む・待ったで戻すと消える）。
+// 光らせる場所はゲームが決める（render の o.hint に手を渡す。util.js の hintIs・hintSquares）。海戦ゲーム（noHint）とエアホッケーには出さない。
+const HINT_MAX = 3;
+const hintKey = () => `${S.gameId}:${S.round}:${S.seed}`;
+const hintAt = () => `${hintKey()}:${S.undo ?? 0}:${S.moves.length}`; // いまの局面
+const hintUsed = () => (S.hints?.key === hintKey() ? S.hints.by : {});
+function setHintCount(id, n) {
+  if (S.hints?.key !== hintKey()) S.hints = { key: hintKey(), by: {} };
+  S.hints.by[id] = Math.max(S.hints.by[id] ?? 0, n);
+  saveRoom();
+}
+function appendHint(game, st, opts) {
+  if (game.multi || game.live || game.noHint || !opts.canMove) return;
+  const who = S.mode === 'online' ? S.myId : 'seat' + game.turn(st);
+  const used = hintUsed()[who] ?? 0;
+  const showing = S.hintShow?.at === hintAt();
+  const b = makeButton(showing ? '💡 光っている所がおすすめ' : `💡 おすすめ（あと${HINT_MAX - used}回）`, () => {
+    b.disabled = true;
+    b.textContent = '💡 考え中…';
+    setTimeout(() => { // 将棋は考えるのに少しかかるので、「考え中」を出してから
+      const now = replay(S);
+      const at = hintAt();
+      if (!now || game.result(now) || !canMove(game, now, null) || (hintUsed()[who] ?? 0) >= HINT_MAX) { render(); return; }
+      const m = game.cpu(now, game.turn(now), { ...rulesOf(S.gameId, S.rules), cpu: 'strong' });
+      if (m === null || m === undefined || !game.apply(now, m)) { render(); return; }
+      setHintCount(who, used + 1);
+      S.hintShow = { at, move: m };
+      if (S.mode === 'online') send({ type: 'hint', gameId: S.gameId, round: S.round, n: used + 1 });
+      render();
+    }, 30);
+  }, 'secondary');
+  b.classList.add('hint-btn');
+  b.disabled = showing || used >= HINT_MAX;
+  ctl().append(b);
+}
+// 状態の欄に出す「おすすめを使った回数」（だれも使っていなければ出さない）
+function hintHtml(game) {
+  const list = Object.entries(hintUsed()).filter(([, n]) => Number.isInteger(n) && n > 0);
+  if (!list.length) return '';
+  const label = (id) => (id.startsWith('seat') ? game.players[Number(id.slice(4))] ?? '' : id === S.myId ? 'あなた' : nameOf(id));
+  return '💡 おすすめを使った: ' + list.map(([id, n]) => `${esc(label(id))} ${n}回`).join('・');
 }
 
 /* ---------- 勝った人に紙吹雪（2026-10-06 本人の決定） ---------- */
@@ -1481,6 +1530,12 @@ function onMessage(msg) {
       break;
     case 'pred': // 勝敗予想。対局が同じで、番号が正しく、まだ予想していない人の分だけ覚える
       if (msg.gameId === S.gameId && msg.round === S.round && S.order && Number.isInteger(msg.p) && msg.p >= 0 && msg.p < S.order.length && S.members.includes(msg.from)) setPred(msg.from, msg.p);
+      return;
+    case 'hint': // おすすめの手を使った回数。対局が同じ部屋の人の分だけ覚える
+      if (msg.gameId === S.gameId && msg.round === S.round && Number.isInteger(msg.n) && msg.n >= 1 && msg.n <= HINT_MAX && S.members.includes(msg.from)) {
+        setHintCount(msg.from, msg.n);
+        render();
+      }
       return;
     case 'rematch':
       if (S.isHost) {

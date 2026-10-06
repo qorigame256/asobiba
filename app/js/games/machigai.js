@@ -3,6 +3,8 @@
 // 右の絵だけ何か所か変える（消す・別の絵文字に替える・大きくする・ずらす・図形の色を変える）。
 // 速さは各自の端末で「その絵が出てから押すまで」を測って送り、同じ違いはいちばん短い人の点（通信の遅れで不利にならないように）。
 // 違いでない所を押すと、その端末だけ1.5秒押せなくなる（でたらめな連打で見つけられないように。点は減らない）。
+// 詳細設定「ヒント」（2026-10-06 本人の決定。最初はなし）: 1枚の時間が半分たつと、まだ見つかっていない違いのあたりを大きな丸でぼんやり光らせる。
+//   丸の真ん中は違いの場所から少しずらす（あたりだけ分かるように。Claude の判断）。見せるだけなので手には入れず、各自の端末で絵が出てからの時間で出す。
 //
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready →(3秒)→ go → play（1枚目）→ 全部見つかるか時間切れ → next → show（答えを3秒見せる）
 //   → go → play（2枚目）… 最後の show のあとは end。
@@ -138,6 +140,26 @@ function marks(s, scene, me) {
   return html;
 }
 
+// ヒントの丸（時間が半分たってから、まだ見つかっていない違いだけ）
+const hintDue = (s) => s.rules.hint === 'on' && s.phase === 'play' && since(playKey(s)) >= limitOf(s) / 2;
+function hintHtml(s, scene) {
+  if (!hintDue(s)) return '';
+  let html = '';
+  scene.diffs.forEach((d, i) => {
+    if (s.best[`${s.r}:${i}`]) return;
+    const [x, y, rad] = d.hit[0];
+    const a = i * 2.4 + s.r; // ずらす向き（全員同じ）
+    html += `<circle class="mg-hintc" cx="${(x + Math.cos(a) * rad * 0.7).toFixed(1)}" cy="${(y + Math.sin(a) * rad * 0.7).toFixed(1)}" r="${(rad * 1.9).toFixed(1)}"/>`;
+  });
+  return html;
+}
+function drawHints() {
+  const html = hintHtml(ui.cur.s, sceneOf(ui.cur.s));
+  if (ui.hintHtml === html) return;
+  ui.hintHtml = html;
+  for (const svg of ui.svgs) svg.querySelector('.mg-hint').innerHTML = html;
+}
+
 function clock() {
   if (!ui?.clock.isConnected) return;
   const { s } = ui.cur;
@@ -151,6 +173,7 @@ function clock() {
     text = left > 0 ? `${left}…` : 'スタート！';
   } else text = 'おしまい！';
   if (ui.clockText !== text) { ui.clock.textContent = text; ui.clockText = text; }
+  if (ui.svgs.length) drawHints();
   requestAnimationFrame(clock);
 }
 
@@ -167,6 +190,7 @@ export default {
   settings: [
     { key: 'rounds', label: '絵の枚数', desc: '1回の勝負で探す絵の数', def: '3', choices: [['3', '3枚'], ['5', '5枚']] },
     { key: 'diffs', label: '違いの数', desc: '1枚の絵の中の違いの数', def: '5', choices: [['3', '3か所'], ['5', '5か所'], ['7', '7か所']] },
+    { key: 'hint', label: 'ヒント', desc: '時間が半分たつと、まだ見つかっていない違いのあたりがぼんやり光る', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'time', label: '1枚の時間', desc: 'この時間が来たら答えを見せて次の絵へ', def: '60', choices: [['45', '45秒'], ['60', '60秒'], ['90', '90秒']] },
   ],
 
@@ -262,7 +286,7 @@ export default {
       clockEl.className = 'mg-clock';
       const pics = document.createElement('div');
       pics.className = 'mg-pics';
-      ui = { key, pics, chips, clock: clockEl, clockText: null, cur: { s, o }, svgs: [], lockUntil: 0 };
+      ui = { key, pics, chips, clock: clockEl, clockText: null, cur: { s, o }, svgs: [], lockUntil: 0, hintHtml: '' };
       root.append(chips, clockEl, pics);
       since(`machigai:${s.seed}:ready`);
       if (s.phase !== 'ready') {
@@ -271,7 +295,7 @@ export default {
           const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
           svg.setAttribute('viewBox', `0 0 ${VW} ${VH}`);
           svg.setAttribute('class', 'mg-pic');
-          svg.innerHTML = pictureSvg(scene, scene[side]) + '<g class="mg-marks"></g><g class="mg-miss"></g>';
+          svg.innerHTML = pictureSvg(scene, scene[side]) + '<g class="mg-hint"></g><g class="mg-marks"></g><g class="mg-miss"></g>';
           svg.addEventListener('pointerdown', (e) => {
             const { s: cur, o: co } = ui.cur;
             if (me === null || cur.phase !== 'play' || !co.canMove || cur.r !== s.r) return;
@@ -317,6 +341,7 @@ export default {
     if (ui.svgs.length) {
       const html = marks(s, sceneOf(s), me);
       for (const svg of ui.svgs) svg.querySelector('.mg-marks').innerHTML = html;
+      drawHints();
     }
   },
 };

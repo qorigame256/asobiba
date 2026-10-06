@@ -70,4 +70,13 @@ export function boardCpu(game, st, rules, legal, score, opts) {
 }
 
 // 人の名前など、外から来た文字を HTML に埋め込むときに使う
+// おすすめの手（main.js。2026-10-06 本人の決定）: 盤のゲームの render に o.hint として渡る手と、m が同じ手か
+export const hintIs = (o, m) => o?.hint !== undefined && o.hint !== null && JSON.stringify(o.hint) === JSON.stringify(m);
+// 将棋の仲間の手（{ f, t } / { d, t }）で光らせるマス（動かす駒と行き先）
+export const hintSquares = (o) => {
+  const h = o?.hint;
+  if (!h || typeof h !== 'object' || !Number.isInteger(h.t)) return new Set();
+  return new Set(h.d ? [h.t] : [h.f, h.t]);
+};
+
 export const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

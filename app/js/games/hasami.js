@@ -179,6 +179,7 @@ export default {
     const movable = new Set(legal.map((m) => Math.floor(m / CELLS)));
     const targets = new Set(ui.from === null ? [] : legal.filter((m) => Math.floor(m / CELLS) === ui.from).map((m) => m % CELLS));
     const caught = new Set(o.fresh && s.last ? s.last.cap : []);
+    const hint = Number.isInteger(o.hint) ? [Math.floor(o.hint / CELLS), o.hint % CELLS] : []; // おすすめの手（動かす駒と行き先）
 
     root.innerHTML = '';
     root.className = 'board sg hs';
@@ -197,6 +198,7 @@ export default {
       if (caught.has(i)) cell.classList.add('caught');
       if (i === ui.from) cell.classList.add('selected');
       if (isTarget) cell.classList.add('target');
+      if (hint.includes(i)) cell.classList.add('hint');
       if (v !== null) {
         const piece = document.createElement('span');
         piece.className = 'sg-piece' + (v === bottom ? '' : ' flip') + (v === 1 ? ' promoted' : '');

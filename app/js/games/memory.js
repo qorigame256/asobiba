@@ -5,10 +5,13 @@
 //   すき間のない長方形に並べるため、並べやすい枚数にした（本人の決定・2026-10-03。前は 52枚・26枚）。並べ方は SIZES の cols 列。
 // 詳細設定「続けて取れる組」（2026-10-06 本人の決定）: 組を取って続けてめくれるのは決めた組の数まで。そこまで取ったら次の人へ。
 // 詳細設定「見た札のヒント」（2026-10-06 本人の決定。子ども向けに簡単にする）: 一度めくった札は、伏せたあとも真ん中に小さく数字が残る（マークは出さない）。
+// 詳細設定「ジョーカー」（2026-10-06 本人の決定。最初はなし）: ジョーカー2枚を入れる。ジョーカーはジョーカーとしかそろわず、ほかの札と組めないので
+//   めくったら（もう1枚がジョーカーでなければ）はずれで番が終わる。ジョーカー2枚をそろえたら2組ぶん。
+//   長方形の並びを崩さないよう、一番大きい数字の ♦ と ♣ の2枚を抜いて入れ替える（その数字は ♠ と ♥ の1組だけ。Claude の判断）。
 // 手: { p, t: 'flip', i: 何枚目の札か }。めくった札がもう表なら反則なので、同じ手が2回来ても2回目は弾かれる。
 
 import { mulberry32, shuffle } from './util.js';
-import { makeDeck, rankOf, rankLabel, cardEl, backEl, cardLabel } from './cards.js';
+import { makeDeck, rankOf, rankLabel, cardEl, backEl, cardLabel, JOKER } from './cards.js';
 
 const SIZES = { 48: { top: 12, cols: 8 }, 36: { top: 9, cols: 6 }, 24: { top: 6, cols: 6 } };
 
@@ -28,12 +31,14 @@ export default {
   settings: [
     { key: 'size', label: '枚数', desc: 'すき間のない長方形に並べる', def: 48, choices: [[48, '48枚（A〜Q・8×6）'], [36, '36枚（A〜9・6×6）'], [24, '24枚（A〜6・6×4）']] },
     { key: 'hint', label: '見た札のヒント', desc: '一度めくった札は、伏せたあとも小さく数字が残る（覚えなくても取れるので、小さい子と遊ぶとき向け）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
+    { key: 'joker', label: 'ジョーカー', desc: '2枚入れる（一番大きい数字の♦と♣と入れ替え）。ジョーカーはジョーカーとしかそろわず、2枚そろえたら2組ぶん', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'streak', label: '続けて取れる組', desc: '組を取ったあと続けてめくれるのは、この数の組まで。覚えるのが得意な人の独走を防ぐ', def: 0, choices: [[0, '何組でも'], [2, '2組まで'], [3, '3組まで']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const { top } = SIZES[rules.size] ?? SIZES[48];
-    const deck = makeDeck().filter((c) => rankOf(c) <= top);
+    let deck = makeDeck().filter((c) => rankOf(c) <= top);
+    if (rules.joker === 'on') deck = [...deck.filter((c) => c !== 'd' + top && c !== 'c' + top), JOKER, JOKER];
     const cards = shuffle(deck, mulberry32(seed));
     return {
       n, cards, hint: rules.hint === 'on', limit: [2, 3].includes(rules.streak) ? rules.streak : 0, streak: 0, taken: Array(cards.length).fill(null), open: [], turn: 0, scores: Array(n).fill(0),
@@ -82,7 +87,7 @@ export default {
       if (match) {
         s.taken[a] = m.p;
         s.taken[b] = m.p;
-        s.scores[m.p] += 1;
+        s.scores[m.p] += s.cards[a] === JOKER ? 2 : 1; // ジョーカー2枚は2組ぶん
         s.open = [];
         if (s.taken.every((x) => x !== null)) s.done = true;
         s.streak = (s.streak ?? 0) + 1;
@@ -182,7 +187,7 @@ export default {
       if (s.hint && s.seen[i] && s.taken[i] === null && !s.open.includes(i)) {
         const h = document.createElement('span');
         h.className = 'mm-hint';
-        h.textContent = rankLabel(rankOf(card));
+        h.textContent = card === JOKER ? 'JO' : rankLabel(rankOf(card));
         e.append(h);
       }
       if (o.fresh && s.last?.t === 'pair' && s.last.match && (s.last.a === i || s.last.b === i)) e.classList.add('got');
@@ -204,6 +209,7 @@ function logText(s, nameP) {
   if (!l) return '裏向きの札を2枚めくって、同じ数字ならもらえます';
   if (l.t === 'flip') return `${nameP(l.p)}が ${cardLabel(s.cards[l.i])} をめくった。もう1枚…`;
   const pair = `${cardLabel(s.cards[l.a])} と ${cardLabel(s.cards[l.b])}`;
+  if (l.match && s.cards[l.a] === JOKER) return `${nameP(l.p)}がジョーカー2枚をそろえた！ 2組ぶん${s.done ? '。これで全部です' : l.stop ? `。${s.limit}組続けて取ったので次の人へ` : '。もう1回'}`;
   if (l.match) return s.done ? `${nameP(l.p)}が ${pair} をそろえた！ これで全部です` : `${nameP(l.p)}が ${pair} をそろえた！ ${l.stop ? `${s.limit}組続けて取ったので次の人へ` : 'もう1回'}`;
   return `${nameP(l.p)}は ${pair}… はずれ`;
 }

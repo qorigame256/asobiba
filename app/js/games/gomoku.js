@@ -11,7 +11,7 @@
 //   「ぴったり五目」と同時なら、白も6つ以上では勝てない（黒の長連は禁じ手のまま）。「はさみ取り」とも同時に使える（取る前の盤で見る）。
 // 盤は詳細設定で 15路（最初）か 13路。手 = 点の番号（段*路数+列。段0が一番上）。全部埋まったら引き分け。
 
-import { CPU_SETTING } from './util.js';
+import { CPU_SETTING, hintIs } from './util.js';
 
 const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
 const DIRS8 = [...DIRS, ...DIRS.map(([r, c]) => [-r, -c])];
@@ -343,6 +343,7 @@ export default {
       } else if (o.canMove) {
         if (o.fresh && s.taken?.includes(i)) cell.append(Object.assign(document.createElement('span'), { className: 'gm-ghost' }));
         cell.classList.add('playable', 'p' + s.turn);
+        if (hintIs(o, i)) cell.classList.add('hint');
         cell.setAttribute('aria-label', `${r + 1}段目 ${c + 1}列目`);
         cell.onclick = () => o.onMove(i);
       } else {

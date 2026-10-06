@@ -1,6 +1,8 @@
 // 旗揚げ。お題（「赤上げて」「白下げないで赤下げない」など）が出たら、全員同時に赤と白の旗を正しい形にする。
 // 毎問、旗は「前のお題の正しい形」から始まる（前の問題で間違えても引きずらない）。
 // 正解した人には、形を作り終えた（最後に旗を動かした）速さの順に 1位3点・2位2点・ほか1点。旗を動かさないのが正解なら全員同着。
+// 詳細設定「お手つき」（2026-10-06 本人の決定。最初はなし）: 旗を動かして間違えたら −1点（動かさずに間違えたのは0点のまま。
+//   とりあえず動かすのを損にするため。Claude の判断）。点は0より下にもなる。
 // 15問で点の多い人の勝ち。5問ごとに3段階で難しくなる（STAGES）:
 //   1〜5問目はそのまま / 6〜10問目は制限時間8割・点2倍 / 11〜15問目は制限時間65%・点3倍で、命令を3つつなげた長いお題も出る
 //   （長いお題は読む分として LONG_EXTRA だけ時間を足す）。
@@ -109,6 +111,7 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'speed', label: '制限時間', desc: '1問あたりの時間', def: 'normal', choices: [['slow', 'ゆっくり（4秒）'], ['normal', 'ふつう（3秒）'], ['fast', 'はやい（2秒）']] },
+    { key: 'miss', label: 'お手つき', desc: '旗を動かして間違えたら −1点（動かさずに間違えたのは0点）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'voice', label: 'お題を読み上げる', desc: '各自の端末から声が出ます（iPhone は一度画面に触れてから）', def: false },
   ],
 
@@ -172,11 +175,11 @@ export default {
         const res = s.ans.map((a) => {
           const pose = a ?? from;
           const ms = a && !samePose(a, from) ? a.ms : 0;
-          return { ok: samePose(pose, want), ms };
+          return { ok: samePose(pose, want), ms, moved: !!a && !samePose(a, from) };
         });
         const times = res.filter((r) => r.ok).map((r) => r.ms);
         s.last = res.map((r) => {
-          if (!r.ok) return { ok: false, pt: 0 };
+          if (!r.ok) return { ok: false, pt: s.rules.miss === 'on' && r.moved ? -1 : 0 };
           const rank = 1 + times.filter((t) => t < r.ms).length;
           return { ok: true, ms: r.ms, rank, pt: (POINTS[rank - 1] ?? 1) * stageOf(s.q).mul };
         });
@@ -231,7 +234,7 @@ export default {
     const extra = (p) => {
       if (!shown || !s.last) return '';
       const r = s.last[p];
-      return r.ok ? `<span class="pt-ok">○ ${r.rank}位 +${r.pt}</span>` : '<span class="pt-ng">×</span>';
+      return r.ok ? `<span class="pt-ok">○ ${r.rank}位 +${r.pt}</span>` : `<span class="pt-ng">×${r.pt ? ` ${r.pt}` : ''}</span>`;
     };
     const won = s.phase === 'end' ? leaders(s.scores) : [];
     root.append(scoreChips(o, s.scores, { won, extra }));
@@ -296,7 +299,7 @@ export default {
     msg.className = 'cc-log';
     if (shown && me !== null && s.last) {
       const r = s.last[me];
-      msg.textContent = r.ok ? `正解！ ${r.rank}位（${secText(r.ms)}）` : 'ざんねん、まちがい';
+      msg.textContent = r.ok ? `正解！ ${r.rank}位（${secText(r.ms)}）` : `ざんねん、まちがい${r.pt ? '（お手つき −1点）' : ''}`;
     } else if (s.phase === 'open' && me !== null) {
       msg.textContent = open ? '旗をタップすると上げ下げできます' : 'そこまで！';
     }

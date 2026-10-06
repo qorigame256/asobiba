@@ -6,7 +6,7 @@
 // 線の番号: 横線が先で (段 0〜h) × (列 0〜w-1) → 段*w+列。そのあとに縦線 (段 0〜h-1) × (列 0〜w) → 横線の数 + 段*(w+1)+列。
 // 四角の番号: 段*w+列。手 = 線の番号。
 
-import { CPU_SETTING } from './util.js';
+import { CPU_SETTING, hintIs } from './util.js';
 
 const AUTO = { 2: 4, 3: 5, 4: 6 };
 const SIZE_CHOICES = [['auto', 'おまかせ（2人 4×4・3人 5×5・4人 6×6）'], [3, '3×3'], [4, '4×4'], [5, '5×5'], [6, '6×6']];
@@ -210,6 +210,7 @@ export default {
             e.tabIndex = -1;
           } else if (o.canMove) {
             e.classList.add('playable', 'p' + s.turn);
+            if (hintIs(o, i)) e.classList.add('hint');
             e.setAttribute('aria-label', '線を引く');
             e.onclick = () => o.onMove(i);
           } else {

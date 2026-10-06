@@ -136,6 +136,12 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 @media (prefers-reduced-motion: reduce) {
   body.beginner #screen-play .board :is(.playable, .usable, button.sg-cell) { animation: none !important; }
 }
+/* おすすめの手（main.js の「おすすめの手」の節。各ゲームが hint を付ける）。初心者マークの橙より目立つ青緑で、上に重ねる */
+@keyframes hint-glow { 0%, 100% { outline-color: rgba(0, 170, 160, 1); } 50% { outline-color: rgba(0, 170, 160, .25); } }
+#screen-play .board .hint { outline: 4px solid rgba(0, 170, 160, 1) !important; outline-offset: -2px; animation: hint-glow 1s ease-in-out infinite !important; }
+#screen-play .board polygon.hint { outline: none !important; fill: rgba(0, 200, 190, .45) !important; stroke: rgb(0, 150, 140); stroke-width: .08; animation: none !important; } /* 3人将棋の盤（svg） */
+@media (prefers-reduced-motion: reduce) { #screen-play .board .hint { animation: none !important; } }
+.hint-btn { white-space: nowrap; }
 .status-sub.streak { color: #c0541a; font-weight: 700; }
 .tally { color: #6b5a2e; } /* 部屋の成績表 */
 /* 勝った人に紙吹雪（main.js の confetti） */
@@ -1477,3 +1483,6 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .mg-pics { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
 .mg-pic { flex: 1 1 300px; max-width: 520px; width: 100%; aspect-ratio: 4 / 3; border-radius: 10px; border: 2px solid #0002; touch-action: manipulation; user-select: none; -webkit-user-select: none; cursor: pointer; }
 .mg-wait { padding: 40px 16px; text-align: center; color: var(--muted); }
+.mg-hintc { fill: rgba(255, 236, 120, .38); stroke: rgba(255, 200, 40, .7); stroke-width: 4; pointer-events: none; animation: mg-hint 1.6s ease-in-out infinite; } /* 間違い探しのヒント */
+@keyframes mg-hint { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .mg-hintc { animation: none; } }

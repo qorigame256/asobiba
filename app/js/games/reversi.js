@@ -10,7 +10,7 @@
 //   隅と、真ん中の 4×4 には置かない（始めの形と隅の取り合いは残す）。穴はいつも空きなので、はさむ線もそこで止まる（四隅封印と同じ）。
 //   人数・盤の大きさ・四隅封印と一緒に使える。
 
-import { CPU_SETTING, boardCpu, mulberry32 } from './util.js';
+import { CPU_SETTING, boardCpu, mulberry32, hintIs } from './util.js';
 
 const N8 = 8; // 3〜4人はいつも 8×8
 const DIRS = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
@@ -297,6 +297,7 @@ export default {
       if (s.closed?.has(i)) cell.classList.add('shut');
       if (legal.has(i)) {
         cell.classList.add('playable', 'p' + s.turn);
+        if (hintIs(o, i)) cell.classList.add('hint');
         cell.onclick = () => o.onMove(i);
       } else {
         cell.tabIndex = -1;

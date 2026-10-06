@@ -9,6 +9,8 @@
 // 持ち駒 hands[p][駒の番号] = 枚数。手は shogi.js と同じ形（{ f, t, pr } / { d, t } / { resign: true }）。
 // 王を取られた人・投了した人・指せる手が無くなった人は脱落し、その人の駒（持ち駒も）は消える。
 
+import { hintSquares } from './util.js';
+
 const PAWN = 1;
 const LANCE = 2;
 const KNIGHT = 3;
@@ -427,6 +429,7 @@ export function render(root, s, o) {
   if (ui.drop !== null) for (const m of legal) if (m.d === ui.drop) targets.add(m.t);
   const movable = new Set(legal.filter((m) => !m.d).map((m) => m.f));
   const droppable = new Set(legal.filter((m) => m.d).map((m) => m.d));
+  const hint = hintSquares(o); // おすすめの手（動かす駒と行き先）
   const checked = new Set();
   if (!s.result) for (let q = 0; q < 3; q++) if (s.alive[q] && inCheck(s.board, s.alive, q)) checked.add(kingSq(s.board, q));
 
@@ -461,7 +464,7 @@ export function render(root, s, o) {
       any = true;
       const ok = can && side === s.turn && droppable.has(d);
       const e = document.createElement(ok ? 'button' : 'span');
-      e.className = 'sg-hand-piece' + (ok ? ' playable' : '') + (ui.drop === d && side === s.turn ? ' selected' : '');
+      e.className = 'sg-hand-piece' + (ok ? ' playable' : '') + (ui.drop === d && side === s.turn ? ' selected' : '') + (ok && o.hint?.d === d ? ' hint' : '');
       e.innerHTML = `<span class="sg-piece">${KANJI[d]}</span>${n > 1 ? `<small>${n}</small>` : ''}`;
       if (ok) {
         e.type = 'button';
@@ -503,6 +506,7 @@ export function render(root, s, o) {
     if (i === ui.from) cls.push('selected');
     if (checked.has(i)) cls.push('checked');
     if (isTarget || mineToMove) cls.push('active');
+    if (hint.has(i)) cls.push('hint');
     const poly = svgEl('polygon', { points: ptsText(g.pts), class: cls.join(' ') });
     svg.append(poly);
     if (v) {

@@ -17,7 +17,7 @@
 //   自分も並んでいても相手の勝ち。60手で引き分け。手 = 行き先のマス + 9 × 出どころ（0〜2 = 手元の小・中・大、3〜11 = 盤のマス + 3）。
 //   Claude の判断: 動かす駒は元のマスへ戻せない・打てる手が無ければ引き分け・下に隠れた駒の数は画面に小さく出す。
 
-import { CPU_SETTING, boardCpu } from './util.js';
+import { CPU_SETTING, boardCpu, hintIs } from './util.js';
 
 const LINES = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
 const MARKS = [
@@ -242,6 +242,8 @@ function renderGob(root, s, o) {
   if (gobSel && (gobSel.n !== s.n || !o.canMove)) gobSel = null;
   const pick = (src) => { gobSel = gobSel?.src === src ? null : { n: s.n, src }; renderGob(root, s, { ...o, fresh: false }); };
   const targets = new Set(gobSel ? legal.filter((m) => Math.floor(m / 9) === gobSel.src).map((m) => m % 9) : []);
+  // おすすめの手（手 = 行き先 + 9 × 動かす元。元は 0〜2 が手元の大きさ、3〜11 が盤のマス + 3）
+  const hint = Number.isInteger(o.hint) ? { to: o.hint % 9, src: Math.floor(o.hint / 9) } : null;
   root.innerHTML = '';
   root.className = 'board gob';
   const bottom = o.me === 1 ? 1 : 0; // 自分の手元を下に出す（観戦と同じ画面の対局は ○ が下）
@@ -258,6 +260,7 @@ function renderGob(root, s, o) {
         if (can) {
           b.classList.add('playable');
           if (gobSel?.src === z && k === 0) b.classList.add('sel');
+          if (hint?.src === z && k === 0) b.classList.add('hint');
           b.setAttribute('aria-label', `手元の${GOB_SIZE[z]}を選ぶ`);
           b.onclick = () => pick(z);
         } else b.tabIndex = -1;
@@ -288,6 +291,7 @@ function renderGob(root, s, o) {
     if (i === s.last && !res) cell.classList.add('last');
     if (s.from === i && !res) cell.classList.add('gob-from');
     if (res?.cells.includes(i)) cell.classList.add('win');
+    if (hint && (hint.to === i || hint.src === i + 3)) cell.classList.add('hint');
     if (targets.has(i)) {
       cell.classList.add('playable', 'target');
       cell.setAttribute('aria-label', `${i + 1}番のマスへ`);
@@ -449,6 +453,7 @@ function cellButton(v, i, s, o, playable) {
   }
   if (playable) {
     cell.classList.add('playable');
+    if (hintIs(o, i)) cell.classList.add('hint');
     cell.onclick = () => o.onMove(i);
   } else {
     cell.tabIndex = -1;
