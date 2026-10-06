@@ -5,6 +5,9 @@
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open →（正解が出たら1.5秒 / 制限時間）→ close → shown → next …
 // 詳細設定「ヒント」（2026-10-06 本人の決定。最初はなし）: 制限時間の4割（25秒なら10秒）がたつと、読みの1文字目を見せる。
 //   見せるだけなので手の一覧には入れず、各自の端末で「画面に出てから」の時間で出す（Claude の判断）。読みが2つ以上あるときは最初の読みの1文字目。
+// 詳細設定「答え方」（2026-10-06 本人の決定。最初は 打ち込む）: 4つから選ぶ では、読みを打たずに4つのボタンから1つ選ぶ。
+//   正しい読み（最初の読み）のほかの3つは、同じ難しさのほかの問題の読みから文字数の近いものを選ぶ（choicesOf。種と何問目かから作るので全員同じ）。
+//   答えられるのは1問に1回だけ（何度も試せると当てずっぽうで取れるため）。全員が答えたら、正解がいなくても1.5秒待って締め切る。
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'try', q: 問題番号, text: 答え, ms, n: その問題で何回目の答えか }
 
 import { mulberry32, shuffle } from './util.js';
@@ -18,11 +21,31 @@ const GRACE_MS = 1500;
 const HINT_AT = 0.4; // ヒント（詳細設定）を出すのは、制限時間のこの割合がたったとき
 const LEVELS = { easy: 'ふつう', hard: 'むずかしい', expert: '超むずかしい', mix: 'ぜんぶまぜる' };
 const CPU_RATE = { easy: 0.55, hard: 0.4, expert: 0.3, mix: 0.4 };
+const CHOICES = 4; // 答え方「4つから選ぶ」のボタンの数
 
 const limitOf = (s) => Number(s.rules.time) * 1000;
 const qKey = (s, q = s.q) => `kanji:${s.seed}:${q}`;
 const poolOf = (level) => (level === 'mix' ? [...KANJI.easy, ...KANJI.hard, ...KANJI.expert] : KANJI[level] ?? KANJI.easy);
 export const isRight = (yomis, text) => yomis.includes(kana(text));
+
+// 答え方「4つから選ぶ」の4つの読み。正しい読みは最初の読み。ほかの3つは、その漢字と同じ難しさのほかの問題の最初の読みから、
+// 答えと同じ読み・同じ読みどうしを除いて、文字数の近いものを選ぶ。並べ方とまちがいの選び方は種と何問目かだけで決まる
+export function choicesOf(seed, q, [word, yomis]) {
+  const rnd = mulberry32((Math.imul(seed >>> 0, 0x9e3779b1) ^ Math.imul(q + 1, 0x85ebca6b)) >>> 0);
+  const level = Object.keys(KANJI).find((l) => KANJI[l].some(([w]) => w === word)) ?? 'easy';
+  const ans = yomis[0];
+  const len = [...ans].length;
+  const used = new Set(yomis);
+  const others = [];
+  for (const [w, ys] of shuffle(KANJI[level], rnd)) {
+    if (w === word || used.has(ys[0])) continue;
+    used.add(ys[0]);
+    others.push(ys[0]);
+  }
+  // 文字数の差が小さい順（同じ差の中はまぜた順のまま）
+  others.sort((a, b) => Math.abs([...a].length - len) - Math.abs([...b].length - len));
+  return shuffle([ans, ...others.slice(0, CHOICES - 1)], rnd);
+}
 
 const clone = (s) => ({ ...s, scores: s.scores.slice(), tries: s.tries.slice(), solved: s.solved.slice(), said: s.said.slice() });
 
@@ -46,14 +69,16 @@ export default {
     { key: 'level', label: '難しさ', desc: '出る漢字の難しさ', def: 'easy', choices: Object.entries(LEVELS) },
     { key: 'time', label: '制限時間', desc: '1問あたりの時間', def: '25', choices: [['15', '15秒'], ['25', '25秒'], ['40', '40秒']] },
     { key: 'hint', label: 'ヒント', desc: '制限時間の4割（25秒なら10秒）がたつと、読みの1文字目を見せる', def: false },
+    { key: 'choice', label: '答え方', desc: '読みを打ち込むか、4つの読みから選ぶか（選ぶときは1問に1回だけ）', def: false, choices: [[false, '打ち込む'], [true, '4つから選ぶ']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { level: 'easy', time: '25', hint: false, ...rules };
+    const r = { level: 'easy', time: '25', hint: false, choice: false, ...rules };
     const qs = shuffle(poolOf(r.level), mulberry32(seed)).slice(0, TOTAL);
     return {
       n, seed, rules: r, qs, q: -1, phase: 'ready',
       tries: Array(n).fill(0), solved: Array(n).fill(null), said: Array(n).fill(''), scores: Array(n).fill(0), last: null, step: 0,
+      ...(r.choice ? { opts: qs.map((x, i) => choicesOf(seed, i, x)) } : {}), // 4つから選ぶときの各問題の4つの読み
     };
   },
 
@@ -77,6 +102,7 @@ export default {
     if (s.phase === 'ready') return { key: 'ready', ms: READY_MS, move: { t: 'next' } };
     if (s.phase === 'open') {
       if (s.solved.some((v) => v !== null)) return { key: 'solved' + s.q, ms: GRACE_MS, move: { t: 'close' } };
+      if (s.opts && s.tries.every((v) => v > 0)) return { key: 'all' + s.q, ms: GRACE_MS, move: { t: 'close' } }; // 4つから選ぶ: 全員が答えた
       return { key: 'open' + s.q, ms: limitOf(s) + GRACE_MS, move: { t: 'close' } };
     }
     if (s.phase === 'shown') return { key: 'shown' + s.q, ms: SHOWN_MS, move: { t: 'next' } };
@@ -114,6 +140,7 @@ export default {
     if (typeof m.text !== 'string' || !m.text || m.text.length > 30) return null;
     if (typeof m.ms !== 'number' || !(m.ms >= 0) || m.ms > limitOf(s0) + 500) return null;
     if (m.n !== s0.tries[m.p] + 1 || s0.solved[m.p] !== null) return null;
+    if (s0.opts && (s0.tries[m.p] > 0 || !s0.opts[s0.q].includes(m.text))) return null; // 4つから選ぶ: 1回だけ・4つのどれか
     const s = clone(s0);
     s.step += 1;
     s.tries[m.p] = m.n;
@@ -123,6 +150,7 @@ export default {
   },
 
   // CPU: 難しさに応じた確率で、4秒〜制限時間の7割のあいだに正解する。正解しないときは何も答えない
+  // （4つから選ぶときは、正解しない分は同じ時刻に4つから適当に選ぶ。たまたま当たることもある）
   cpuDelay(s) { return s.phase === 'open' ? 250 : 500; },
   cpu(s, p) {
     if (s.phase !== 'open' || s.solved[p] !== null) return null;
@@ -136,13 +164,20 @@ export default {
     const t = since(qKey(s));
     if (plan.done || t < plan.at) return null;
     plan.done = true;
+    const ms = Math.round(t);
+    if (s.opts) {
+      if (s.tries[p]) return null;
+      const opts = s.opts[s.q];
+      return { t: 'try', q: s.q, text: plan.ok ? s.qs[s.q][1][0] : opts[Math.floor(Math.random() * opts.length)], ms, n: 1 };
+    }
     if (!plan.ok) return null;
-    return { t: 'try', q: s.q, text: s.qs[s.q][1][0], ms: Math.round(t), n: s.tries[p] + 1 };
+    return { t: 'try', q: s.q, text: s.qs[s.q][1][0], ms, n: s.tries[p] + 1 };
   },
 
   render(root, s, o) {
     const me = o.me >= 0 ? o.me : null;
-    const mount = `${s.seed}:${s.q}:${s.phase}:${me}:${me !== null && s.solved[me] !== null}`;
+    // 4つから選ぶときは、自分が答えたら（○×を付けるため）作り直す
+    const mount = `${s.seed}:${s.q}:${s.phase}:${me}:${me !== null && s.solved[me] !== null}${s.opts && me !== null ? ':' + s.tries[me] : ''}`;
     const shown = s.phase === 'shown' || s.phase === 'end';
     const won = s.phase === 'end' ? leaders(s.scores) : [];
     const extra = (p) => {
@@ -205,7 +240,9 @@ export default {
     note.className = 'cc-log';
     ui.note = note;
 
-    if (s.phase === 'open' && me !== null && s.solved[me] === null) {
+    if (s.opts && s.q >= 0) {
+      wrap.append(this.choiceGrid(s, me, o, key, limit, note));
+    } else if (s.phase === 'open' && me !== null && s.solved[me] === null) {
       const form = document.createElement('form');
       form.className = 'kj-form';
       form.innerHTML = '<input type="text" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="send" maxlength="30" placeholder="ひらがなで（送りがなも）"><button type="submit" class="btn primary">答える</button>';
@@ -238,6 +275,48 @@ export default {
     if (ui.input && !matchMedia('(pointer: coarse)').matches && document.activeElement?.tagName !== 'SELECT') ui.input.focus();
   },
 
+  // 答え方「4つから選ぶ」の4つのボタン（2×2）。答えたあと・答えを見せる場面では押せない形にして、○×を付ける
+  choiceGrid(s, me, o, key, limit, note) {
+    const grid = document.createElement('div');
+    grid.className = 'kj-choices';
+    grid.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr; gap: 10px; touch-action: manipulation;';
+    const right = s.qs[s.q][1][0];
+    const shown = s.phase !== 'open';
+    const mine = me !== null && s.tries[me] ? s.said[me] : null;
+    const canPick = s.phase === 'open' && me !== null && !s.tries[me];
+    const btns = s.opts[s.q].map((text) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn secondary kj-choice';
+      // .board button.btn は丸い小さめのボタンなので、押しやすい大きさの四角にする
+      b.style.cssText = 'min-height: 64px; padding: 10px 6px; border-radius: 12px; font-size: 1.2rem; overflow-wrap: anywhere; line-height: 1.3;';
+      const ok = text === right && (shown || mine === right);
+      const ng = text === mine && text !== right;
+      b.textContent = (ok ? '○ ' : ng ? '× ' : '') + text;
+      if (ok) b.style.cssText += 'background: #2f8a4a; border-color: #2f8a4a; color: #fff;';
+      else if (ng) b.style.cssText += 'background: #d9534f; border-color: #d9534f; color: #fff;';
+      else if (!canPick) b.style.cssText += 'opacity: .55;';
+      b.disabled = !canPick;
+      b.onclick = () => {
+        const ms = Math.round(since(key));
+        if (ui.sent || ms >= limit) return;
+        ui.sent = text;
+        for (const x of btns) x.disabled = true;
+        o.onMove({ t: 'try', q: s.q, text, ms, n: 1 });
+      };
+      return b;
+    });
+    grid.append(...btns);
+    if (canPick) {
+      setTimeout(() => {
+        if (!grid.isConnected) return;
+        for (const x of btns) x.disabled = true;
+        note.textContent = '時間切れ！';
+      }, Math.max(0, limit - since(key)));
+    }
+    return grid;
+  },
+
   // 入力欄の下の案内
   note(s, me) {
     const note = ui?.note;
@@ -245,9 +324,10 @@ export default {
     if (s.phase === 'open') {
       const someone = s.solved.some((v) => v !== null);
       if (me !== null && s.solved[me] !== null) note.textContent = `正解！（${secText(s.solved[me])}）ほかの人を待っています`;
-      else if (me !== null && s.tries[me] && s.said[me]) note.textContent = `「${s.said[me]}」はちがいます${someone ? '（ほかの人が正解しました。まもなく締め切り）' : ''}`;
+      else if (me !== null && s.tries[me] && s.said[me]) note.textContent = `${s.opts ? '× ' : ''}「${s.said[me]}」はちがいます${s.opts ? '（この問題はもう答えられません）' : ''}${someone ? '（ほかの人が正解しました。まもなく締め切り）' : ''}`;
       else if (someone) note.textContent = 'ほかの人が正解しました。まもなく締め切り！';
-      else note.textContent = me === null ? '観戦中' : 'カタカナで打っても大丈夫です';
+      else if (me === null) note.textContent = '観戦中';
+      else note.textContent = s.opts ? '4つから1つ選んでください（答えられるのは1回だけ）' : 'カタカナで打っても大丈夫です';
     } else if (s.phase === 'shown' && s.last) {
       note.textContent = s.last.winners.length ? '' : '正解した人はいませんでした';
     } else {

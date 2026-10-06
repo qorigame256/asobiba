@@ -7,8 +7,12 @@
 //
 // 進行（ホストが時間を計って p = -1 の手を足す。main.js の scheduleReferee）:
 //   ready →(3秒)→ next → open（お題を出す）→(制限時間＋通信の待ち)→ close → shown（答え合わせ）→(2.6秒)→ next …
-// 手: { p: -1, t: 'next' | 'close' } / { p, t: 'pose', q: 問題番号, r: 赤 0|1, w: 白 0|1, ms: 画面に出てから最後に動かすまで, n: 通し番号 }
-// （1=上げている。n は同じ手が2回届いたときに2回目を弾くため）
+// 手: { p: -1, t: 'next' | 'close' } / { p, t: 'pose', q: 問題番号, r: 赤 0|1, w: 白 0|1, y: 黄色 0|1, ms: 画面に出てから最後に動かすまで, n: 通し番号 }
+// （1=上げている。y は「黄色い旗」がありのときだけ付ける。n は同じ手が2回届いたときに2回目を弾くため）
+//
+// 詳細設定「黄色い旗」（yellow。2026-10-06）: ありにすると黄色の旗が増え、お題にも黄色が入る。3本の旗の形で正解を決める。
+//   3本ぶん操作が増えるので、制限時間に YELLOW_EXTRA（0.5秒）足す。点・段階・読み上げは同じ。
+//   なしのときは乱数の使い方を前と全く同じにしている（旗を選ぶ所で、2本なら余分に乱数を引かない）ので、お題も結果も前と同じ。
 
 import { mulberry32 } from './util.js';
 import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
@@ -20,21 +24,39 @@ const STAGES = [ // 何問目から・制限時間の倍率・点の倍率・長
   { from: 10, time: 0.65, mul: 3, long: 0.5 },
 ];
 const LONG_EXTRA = 800;
+const YELLOW_EXTRA = 500; // 黄色い旗がありのときに足す時間
 const READY_MS = 3000;
 const SHOWN_MS = 2600;
 const GRACE_MS = 1200; // ゲストの答えが届くのを待つ分
 const LIMITS = { slow: 4000, normal: 3000, fast: 2000 };
 const POINTS = [3, 2];
-const FLAG = { r: '赤', w: '白' };
+const FLAG = { r: '赤', w: '白', y: '黄色' };
 const VERB = { 1: '上げ', 0: '下げ' };
+const YELLOW_CSS = `
+.fl-flag.y .fl-cloth { background: #f2c12e; }
+.fl-flags.fl3 { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.board .fl-flags.fl3 .fl-btn { padding: 10px 2px; }
+.fl-flags.fl3 .fl-flag { transform: scale(.75); transform-origin: 0 0; margin: 0 -25px -42px 0; }
+.fl-flags.fl3 .fl-label { font-size: .95rem; white-space: nowrap; }
+`; // 黄色い旗の見た目（3本並べるときは旗を4分の3に縮める。style.css には入れず、使うときに足す）
+
+// 使う旗（なしなら赤・白、ありなら赤・白・黄色）
+const flagsOf = (yellow) => (yellow ? ['r', 'w', 'y'] : ['r', 'w']);
+// 旗を1つ選ぶ。2本のときは「rng() < 0.5 なら赤」と同じ結果になる
+const pickFlag = (rng, keys) => keys[Math.floor(rng() * keys.length)];
+// f 以外の旗を1つ選ぶ。2本のときは乱数を引かない（なしのときのお題を前と同じにするため）
+function otherFlag(rng, keys, f) {
+  const o = keys.filter((k) => k !== f);
+  return o.length === 1 ? o[0] : o[Math.floor(rng() * o.length)];
+}
 
 // 命令を3つつなげた長いお題（例「赤上げて、白下げないで、赤下げて」）。後ろの命令ほど後で効く
-function makeLong(rng, pose) {
+function makeLong(rng, pose, keys) {
   const next = { ...pose };
-  let f = rng() < 0.5 ? 'r' : 'w';
+  let f = pickFlag(rng, keys);
   const parts = [];
   for (let i = 0; i < 3; i++) {
-    if (i > 0 && rng() < 0.6) f = f === 'r' ? 'w' : 'r';
+    if (i > 0 && rng() < 0.6) f = otherFlag(rng, keys, f);
     const a = rng() < 0.5 ? 1 : 0;
     const not = rng() < 0.35;
     if (!not) next[f] = a;
@@ -44,10 +66,11 @@ function makeLong(rng, pose) {
 }
 
 // お題を1つ作る。pose = この問題を始める前の正しい形。返すのは { text, pose: 正しい形, long: 長いお題か }
-function makeCommand(rng, pose, stage) {
-  if (stage.long && rng() < stage.long) return makeLong(rng, pose);
-  const f = rng() < 0.5 ? 'r' : 'w';
-  const g = f === 'r' ? 'w' : 'r';
+// keys = 使う旗（flagsOf）
+function makeCommand(rng, pose, stage, keys) {
+  if (stage.long && rng() < stage.long) return makeLong(rng, pose, keys);
+  const f = pickFlag(rng, keys);
+  const g = otherFlag(rng, keys, f);
   const v = () => (rng() < 0.5 ? 1 : 0);
   const next = { ...pose };
   const x = rng();
@@ -66,11 +89,16 @@ function makeCommand(rng, pose, stage) {
   return { text, pose: next };
 }
 
-const samePose = (a, b) => a.r === b.r && a.w === b.w;
+// 黄色が無い形（なしのとき）は y を 0 とみなす
+const samePose = (a, b) => a.r === b.r && a.w === b.w && (a.y ?? 0) === (b.y ?? 0);
+const hasYellow = (s) => s.rules.yellow === 'on';
+const firstPose = (yellow) => (yellow ? { r: 0, w: 0, y: 0 } : { r: 0, w: 0 });
 const stageOf = (q) => STAGES.findLast((x) => q >= x.from);
-const limitOf = (s, q = s.q) => Math.round((LIMITS[s.rules.speed] ?? LIMITS.normal) * stageOf(q).time) + (s.cmds[q]?.long ? LONG_EXTRA : 0);
+const limitOf = (s, q = s.q) => Math.round((LIMITS[s.rules.speed] ?? LIMITS.normal) * stageOf(q).time) + (s.cmds[q]?.long ? LONG_EXTRA : 0) + (hasYellow(s) ? YELLOW_EXTRA : 0);
 const qKey = (s, q = s.q) => `flags:${s.seed}:${q}`;
-const startPose = (s, q = s.q) => (q > 0 ? s.cmds[q - 1].pose : { r: 0, w: 0 });
+const startPose = (s, q = s.q) => (q > 0 ? s.cmds[q - 1].pose : firstPose(hasYellow(s)));
+// 形を言葉にする（「赤↑上・白↓下」）
+const poseText = (keys, pose) => keys.map((c) => `${FLAG[c]}${pose[c] ? '↑上' : '↓下'}`).join('・');
 
 const clone = (s) => ({ ...s, scores: s.scores.slice(), ans: s.ans.map((a) => (a ? { ...a } : null)) });
 
@@ -110,19 +138,22 @@ export default {
   settings: [
     { key: 'speed', label: '制限時間', desc: '1問あたりの時間', def: 'normal', choices: [['slow', 'ゆっくり（4秒）'], ['normal', 'ふつう（3秒）'], ['fast', 'はやい（2秒）']] },
     { key: 'voice', label: 'お題を読み上げる', desc: '各自の端末から声が出ます（iPhone は一度画面に触れてから）', def: false },
+    { key: 'yellow', label: '黄色い旗', desc: '赤・白に黄色の旗が増え、お題にも「黄色上げて」などが入る（時間は0.5秒長め）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const rng = mulberry32(seed);
+    const yellow = rules.yellow === 'on';
+    const keys = flagsOf(yellow);
     const cmds = [];
-    let pose = { r: 0, w: 0 };
+    let pose = firstPose(yellow);
     for (let i = 0; i < TOTAL; i++) {
-      const c = makeCommand(rng, pose, stageOf(i));
+      const c = makeCommand(rng, pose, stageOf(i), keys);
       cmds.push(c);
       pose = c.pose;
     }
     return {
-      n, seed, rules: { speed: 'normal', voice: false, ...rules }, cmds, q: -1, phase: 'ready',
+      n, seed, rules: { speed: 'normal', voice: false, yellow: 'off', ...rules }, cmds, q: -1, phase: 'ready',
       ans: Array(n).fill(null), scores: Array(n).fill(0), last: null, step: 0,
     };
   },
@@ -187,16 +218,18 @@ export default {
     }
     if (m.t !== 'pose' || s0.phase !== 'open' || m.q !== s0.q || !Number.isInteger(m.p) || m.p < 0 || m.p >= s0.n) return null;
     if (![0, 1].includes(m.r) || ![0, 1].includes(m.w) || !Number.isInteger(m.n)) return null;
+    const yellow = hasYellow(s0);
+    if (yellow ? ![0, 1].includes(m.y) : m.y !== undefined) return null; // 黄色はありのときだけ
     if (typeof m.ms !== 'number' || !(m.ms >= 0) || m.ms > limitOf(s0) + 500) return null;
     const prev = s0.ans[m.p];
     if (prev && m.n <= prev.n) return null;
     const s = clone(s0);
     s.step += 1;
-    s.ans[m.p] = { r: m.r, w: m.w, ms: m.ms, n: m.n };
+    s.ans[m.p] = yellow ? { r: m.r, w: m.w, y: m.y, ms: m.ms, n: m.n } : { r: m.r, w: m.w, ms: m.ms, n: m.n };
     return s;
   },
 
-  // CPU: 8割は正しい形、2割は間違った形。速さは 0.8〜2.2 秒（制限時間に収まる分だけ）
+  // CPU: 8割は正しい形、2割は間違った形（黄色い旗がありなら3本の形から選ぶ）。速さは 0.8〜2.2 秒（制限時間に収まる分だけ）
   cpuDelay(s) { return s.phase === 'open' ? 150 : 400; },
   cpu(s, p) {
     if (s.phase !== 'open') return null;
@@ -205,7 +238,9 @@ export default {
     if (!plan) {
       const limit = limitOf(s);
       const want = s.cmds[s.q].pose;
-      const wrong = [{ r: 0, w: 0 }, { r: 1, w: 0 }, { r: 0, w: 1 }, { r: 1, w: 1 }].filter((x) => !samePose(x, want));
+      const all = [{ r: 0, w: 0 }, { r: 1, w: 0 }, { r: 0, w: 1 }, { r: 1, w: 1 }];
+      const poses = hasYellow(s) ? [...all.map((x) => ({ ...x, y: 0 })), ...all.map((x) => ({ ...x, y: 1 }))] : all;
+      const wrong = poses.filter((x) => !samePose(x, want));
       plan = {
         at: Math.min(limit * 0.9, 800 + Math.random() * 1400),
         pose: Math.random() < 0.8 ? want : wrong[Math.floor(Math.random() * wrong.length)],
@@ -219,13 +254,21 @@ export default {
     if (t < plan.at) return null;
     plan.done = true;
     if (samePose(plan.pose, startPose(s))) return null; // 動かさないのが答え
-    return { t: 'pose', q: s.q, r: plan.pose.r, w: plan.pose.w, ms: Math.round(t), n: 1 };
+    return { t: 'pose', q: s.q, r: plan.pose.r, w: plan.pose.w, ...(hasYellow(s) ? { y: plan.pose.y } : {}), ms: Math.round(t), n: 1 };
   },
 
   render(root, s, o) {
     const me = o.me >= 0 ? o.me : null;
     root.innerHTML = '';
     root.className = 'board fl';
+    const yellow = hasYellow(s);
+    const keys = flagsOf(yellow);
+    if (yellow && !document.getElementById('fl-yellow-css')) {
+      const st = document.createElement('style');
+      st.id = 'fl-yellow-css';
+      st.textContent = YELLOW_CSS;
+      document.head.append(st);
+    }
 
     const shown = s.phase === 'shown' || s.phase === 'end';
     const extra = (p) => {
@@ -239,7 +282,7 @@ export default {
     const card = document.createElement('div');
     card.className = 'fl-card';
     if (s.phase === 'ready') {
-      card.innerHTML = '<div class="fl-q">よーい…</div><div class="fl-sub">赤と白の旗をお題どおりに動かしてください</div>';
+      card.innerHTML = `<div class="fl-q">よーい…</div><div class="fl-sub">${yellow ? '赤・白・黄色' : '赤と白'}の旗をお題どおりに動かしてください</div>`;
       root.append(card);
       return;
     }
@@ -260,7 +303,7 @@ export default {
     else {
       const ans = document.createElement('div');
       ans.className = 'fl-sub';
-      ans.textContent = `正解: 赤${cmd.pose.r ? '↑上' : '↓下'}・白${cmd.pose.w ? '↑上' : '↓下'}`;
+      ans.textContent = `正解: ${poseText(keys, cmd.pose)}`;
       card.append(ans);
     }
     root.append(card);
@@ -268,8 +311,8 @@ export default {
     // 自分の旗（観戦は正解の形を見せる）
     const pose = me === null || shown ? (shown && me !== null ? (s.ans[me] ?? startPose(s)) : cmd.pose) : local.pose;
     const flags = document.createElement('div');
-    flags.className = 'fl-flags';
-    for (const c of ['r', 'w']) {
+    flags.className = 'fl-flags' + (yellow ? ' fl3' : '');
+    for (const c of keys) {
       const b = document.createElement(open ? 'button' : 'div');
       b.className = 'fl-btn ' + c + (open ? ' playable' : '');
       b.append(flagEl(c, pose[c] === 1));
@@ -285,7 +328,7 @@ export default {
           local.pose = { ...local.pose, [c]: 1 - local.pose[c] };
           local.ms = Math.round(since(key));
           local.n += 1;
-          o.onMove({ t: 'pose', q: s.q, r: local.pose.r, w: local.pose.w, ms: local.ms, n: local.n });
+          o.onMove({ t: 'pose', q: s.q, r: local.pose.r, w: local.pose.w, ...(yellow ? { y: local.pose.y } : {}), ms: local.ms, n: local.n });
         };
       }
       flags.append(b);

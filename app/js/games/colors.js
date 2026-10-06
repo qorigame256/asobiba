@@ -4,12 +4,13 @@
 // 札: 色1文字 + 中身。色 r赤 y黄 g緑 b青。中身 0〜9 / S（スキップ）/ R（リバース）/ D（ドロー2）。
 //     色の無い札は 'W'（ワイルド）と 'W4'（ワイルドドロー4）。全108枚。
 // 手: { p, t: 'play', i: 手札の何枚目か（手札は常に並べ替え済み）, c: ワイルドで選ぶ色, to: 「7で交換」の相手（3人以上のときだけ） }
-//     { p, t: 'draw' }（山から1枚引く。重ね返しの途中なら、たまった枚数を全部引く） / { p, t: 'pass' }（引いた札を出さずに次へ）
+//     { p, t: 'draw' }（山から1枚引く。重ね返し・チャレンジの返事待ちの途中なら、たまった枚数を全部引く） / { p, t: 'pass' }（引いた札を出さずに次へ）
+//     { p, t: 'challenge' }（詳細設定「チャレンジ」で、ワイルドドロー4を出された人がチャレンジする）
 //
 // 公式ルールから変えた所（ネット対戦向けに簡単にした。変えるなら本人に確認）:
 //   - 最初にめくる札は、数字の札が出るまでめくり直す。
 //   - 出せる札があっても山から引いてよい。引いた札が出せるなら、その札だけ続けて出せる（出さずに次へも可）。
-//   - ワイルドドロー4は、場の色と同じ色の札を持っていないときだけ出せる（公式の「チャレンジ」の代わり）。
+//   - ワイルドドロー4は、場の色と同じ色の札を持っていないときだけ出せる（公式の「チャレンジ」の代わり。チャレンジのある遊び方は詳細設定「チャレンジ」（下））。
 //   - ドロー2・ドロー4は重ねて返せない（詳細設定「重ねて返す」で返せる。下）。2人のときリバースはスキップと同じ。
 //   - 残り1枚の宣言は省略（自動で「ラスト1枚」と表示）。宣言をする遊び方は詳細設定「最後の1枚の宣言」（下）。
 //   - 山が尽きたら、捨て札の一番上を残して切り直す。
@@ -32,6 +33,15 @@
 // 詳細設定「手札の上限」（2026-10-06 本人の決定。最初はなし）: 手札が25枚を超えたら（26枚になったら）脱落。脱落した人の手札は山の下に戻し、
 //   その人を飛ばして続ける。残りが1人になったらその人の勝ち（Claude の判断）。2人が残っているときのリバースはスキップと同じ（今までの2人と同じ）。
 //   7で交換・0で回すは、脱落していない人の間だけで行う。
+// 詳細設定「チャレンジ」（2026-10-06 本人の決定。最初はなし）: ワイルドドロー4はいつでも出せる。出された次の人は「チャレンジ」か
+//   「受ける」（山をタップ。4枚引いて1回休み。今までと同じ）を選ぶ。チャレンジしたとき、出した人がそのとき場の色（出す前の色）の札を
+//   持っていたら（うそ）出した人が4枚引き、チャレンジした人は引かずにふつうに自分の番をする。持っていなかったら、チャレンジした人が6枚引いて1回休み。
+//   結果は「持っていた／持っていなかった」だけを全員に出す（手札そのものは見せない）。
+//   作り: 返事を待つ間は重ね返しと同じ s.pend（{ k: 'W4', n: 4, ch: { p: 出した人, color: 出す前の色, bluff: 持っていたか } }）。
+//   bluff は apply の中で出す前の局面から求めるので、手の一覧から必ず同じ結果になる。Claude の判断: 「重ねて返す」と一緒のときは、
+//   たまった枚数がちょうど4（最初のドロー4）のときだけチャレンジでき（重ねて返す・チャレンジ・受けるの3つ）、重ねられたらできない。
+//   CPU は場の色を持っていても3割ほどドロー4を出し（うそ）、チャレンジは3割前後（出した人の手札が少ない・自分の手札が多いと少し増える）。
+//   CPU は全員の札を見られる作りだが、bluff や出した人の手札は見ずに決める。
 
 import { mulberry32, shuffle } from './util.js';
 
@@ -91,12 +101,16 @@ export function cardName(c) {
 }
 
 function canPlay(s, p, card) {
-  if (s.pend) return kindOf(card) === s.pend.k; // 重ね返しの途中は同じ種類だけ
+  // 重ね返しの途中は同じ種類だけ（チャレンジの返事待ちで「重ねて返す」がなしなら、札は出せない）
+  if (s.pend) return !!s.rules?.stack && kindOf(card) === s.pend.k;
   if (card === 'W') return true;
-  if (card === 'W4') return !s.hands[p].some((c) => colorOf(c) === s.color);
+  if (card === 'W4') return !!s.rules?.challenge || !hasColor(s, p, s.color);
   const top = s.discard[s.discard.length - 1];
   return colorOf(card) === s.color || kindOf(card) === kindOf(top);
 }
+
+// p が色 color の札を持っているか（ワイルドは数えない）
+const hasColor = (s, p, color) => s.hands[p].some((c) => colorOf(c) === color);
 
 const clone = (s) => ({ ...s, deck: s.deck.slice(), discard: s.discard.slice(), hands: s.hands.map((h) => h.slice()) });
 
@@ -169,6 +183,12 @@ function logText(s, nameP) {
   if (L.t === 'draw') return (L.got ? `${nameP(L.p)}が山から${L.got}枚引いた${L.got > 1 && L.drew ? '（出せる札が来た）' : ''}` : '山札が無いので引けなかった') + outText(L, nameP);
   if (L.t === 'pass') return `${nameP(L.p)}は引いた札を出さずに次へ`;
   if (L.t === 'take') return `${nameP(L.p)}が${L.got}枚引いて1回休み` + outText(L, nameP);
+  if (L.t === 'challenge') { // チャレンジ（詳細設定）の結果。手札そのものは見せない
+    const t = `${nameP(L.p)}がチャレンジ → ${nameP(L.by)}は場の色（${COLOR_NAME[L.color]}）の札を`;
+    return (L.bluff
+      ? t + `持っていた。チャレンジ成功で、${nameP(L.by)}が${L.got}枚引いた`
+      : t + `持っていなかった。チャレンジ失敗で、${nameP(L.p)}が${L.got}枚引いて1回休み`) + outText(L, nameP);
+  }
   let t = L.n > 1 ? `${nameP(L.p)}が「${kindOf(L.card)}」を${L.n}枚まとめて出した（一番上は${COLOR_NAME[L.color]}）` : `${nameP(L.p)}が「${cardName(L.card)}」を出した`;
   if (L.card[0] === 'W') t += `（次の色: ${COLOR_NAME[L.color]}）`;
   const k = kindOf(L.card);
@@ -176,6 +196,7 @@ function logText(s, nameP) {
   else if (L.rotate) t += ' → 全員が手札を次の人へ渡した';
   else if (L.victim !== undefined && (k === 'S' || k === 'R')) t += ` → ${nameP(L.victim)}は1回休み`;
   else if (k === 'R') t += ' → 回る向きが反対に';
+  else if (L.ch) t += ` → 次の人は${s.rules?.stack ? '重ねて返すか、' : ''}チャレンジするか、${L.pend}枚引く`;
   else if (L.pend) t += ` → たまって${L.pend}枚。次の人は重ねて返すか、${L.pend}枚引く`;
   else if (L.victim !== undefined) t += ` → ${nameP(L.victim)}が${L.got}枚引いて1回休み`;
   if (L.call) t += '。「いろあわせ！」';
@@ -199,6 +220,7 @@ export default {
     { key: 'untilPlay', label: '出せるまで引く', desc: '山を1回押すと、出せる札が来るまでまとめて引く（来た札は出しても出さなくてもよい）', def: false },
     { key: 'cap', label: '手札の上限', desc: '手札が25枚を超えたら脱落（その人を飛ばして続け、最後に残った1人も勝ち）', def: false },
     { key: 'call', label: '最後の1枚の宣言', desc: '手札が1枚になる札を出すときは、先に「いろあわせ！」を押す。忘れたら2枚引く', def: false },
+    { key: 'challenge', label: 'チャレンジ', desc: 'ワイルドドロー4をいつでも出せる。出された人は「チャレンジ」できる。出した人が場の色の札を持っていたら出した人が4枚、持っていなかったらチャレンジした人が6枚引く', def: false },
     { key: 'sevenZero', label: '7で交換・0で回す', desc: '7を出したら、選んだ1人と手札を交換する。0を出したら、全員が手札を次の人へ渡す（回っている向き）', def: false },
   ],
 
@@ -218,6 +240,7 @@ export default {
   sound(a, b, m) {
     if (b.last?.call) return 'call';
     if (b.last?.forgot) return 'wrong';
+    if (m.t === 'challenge') return b.last?.bluff ? 'correct' : 'wrong';
     return m.t === 'draw' ? 'draw' : m.t === 'pass' ? 'pop' : 'card';
   },
 
@@ -268,9 +291,14 @@ export default {
       } else if (k === 'R') {
         s.dir = -s.dir;
         if (aliveCount(s) === 2) { last.victim = next(1); s.turn = p; } else s.turn = next(1);
-      } else if ((k === 'D' || k === 'W4') && s.rules?.stack) {
-        // 重ねて返す: 引かせるのは、重ねなかった人が決まってから
+      } else if (((k === 'D' || k === 'W4') && s.rules?.stack) || (k === 'W4' && s.rules?.challenge)) {
+        // 重ねて返す・チャレンジ: 引かせるのは、次の人の返事が決まってから
         s.pend = { k, n: (s0.pend?.n ?? 0) + (k === 'D' ? 2 : 4) };
+        // チャレンジできるのは最初のドロー4だけ（重ねられたらできない）。うそかどうかは出す前の局面で決める
+        if (k === 'W4' && s.rules?.challenge && !s0.pend) {
+          s.pend.ch = { p, color: s0.color, bluff: hasColor(s0, p, s0.color) };
+          last.ch = true;
+        }
         last.pend = s.pend.n;
         s.turn = next(1);
       } else if (k === 'D' || k === 'W4') {
@@ -313,6 +341,25 @@ export default {
       checkCap(s, p);
       if (card !== null && !isOut(s, p)) s.drawn = card;
       else s.turn = next(1);
+      return s;
+    }
+
+    if (m.t === 'challenge') { // チャレンジ（詳細設定）
+      const ch = s.pend?.ch;
+      if (!ch) return null;
+      const n = s.pend.n;
+      s.pend = null;
+      const last = { p, t: 'challenge', by: ch.p, color: ch.color, bluff: ch.bluff };
+      s.last = last;
+      if (ch.bluff) { // うそだった: 出した人が4枚引き、チャレンジした人はふつうに自分の番
+        last.got = drawInto(s, ch.p, n).length;
+        checkCap(s, ch.p);
+        s.turn = p;
+      } else { // うそではなかった: チャレンジした人が6枚引いて1回休み
+        last.got = drawInto(s, p, n + 2).length;
+        checkCap(s, p);
+        s.turn = next(1);
+      }
       return s;
     }
 
@@ -361,8 +408,20 @@ export default {
     };
     if (s.drawn !== null) return Math.random() < 0.15 ? { t: 'pass' } : play(hand.indexOf(s.drawn));
     const legal = hand.map((_, i) => i).filter((i) => canPlay(s, p, hand[i]));
+    if (s.pend) {
+      if (legal.length && Math.random() >= 0.2) return play(legal[0]); // 重ね返し: たいていは返す
+      // チャレンジ（詳細設定）: うそかどうか（ch.bluff や出した人の手札の中身）は見ずに、
+      // 出した人の手札の数と自分の手札の数だけで決める（3割前後）
+      if (s.pend.ch) {
+        const odds = 0.22 + (s.hands[s.pend.ch.p].length <= 2 ? 0.15 : 0) + (hand.length >= 8 ? 0.1 : 0);
+        if (Math.random() < odds) return { t: 'challenge' };
+      }
+      return { t: 'draw' };
+    }
     if (!legal.length) return { t: 'draw' };
-    if (s.pend) return Math.random() < 0.2 ? { t: 'draw' } : play(legal[0]); // 重ね返し: たいていは返す
+    // チャレンジ（詳細設定）: 場の色の札を持っていても、3割ほどドロー4を出す（うそ）
+    const w4 = hand.indexOf('W4');
+    if (s.rules?.challenge && w4 >= 0 && hasColor(s, p, s.color) && Math.random() < 0.3) return play(w4);
     if (Math.random() < 0.3) return play(legal[Math.floor(Math.random() * legal.length)]);
     const nextLeft = s.hands[stepAlive(s, p, 1)].length;
     const sameColor = (c) => hand.filter((x) => colorOf(x) === colorOf(c)).length;
@@ -457,7 +516,9 @@ export default {
       const hint = document.createElement('small');
       hint.textContent = s.drawn !== null
         ? '引いた札を出すか、「出さずに次へ」を押してください'
-        : s.pend
+        : s.pend?.ch
+          ? `${s.rules?.stack ? 'ドロー4を重ねて返すか、' : ''}下の「チャレンジ」か「受ける」を選んでください`
+          : s.pend
           ? `${s.pend.k === 'D' ? 'ドロー2' : 'ドロー4'}を重ねて返すか、山札をタップして${s.pend.n}枚引いてください`
           : '光っている札が出せます。出さないときは山札をタップ';
       head.append(hint);
@@ -518,6 +579,31 @@ export default {
         actions.append(pass);
       }
       root.append(actions);
+    }
+
+    if (myTurn && s.pend?.ch && !picking) {
+      // チャレンジ（詳細設定）: ドロー4を出された人が選ぶ
+      const by = s.pend.ch.p;
+      const ask = document.createElement('div');
+      ask.className = 'cc-picker cc-challenge';
+      const p1 = document.createElement('p');
+      p1.textContent = `${o.names[by]}のワイルドドロー4。出す前の場の色（${COLOR_NAME[s.pend.ch.color]}）の札を持っていたと思うなら「チャレンジ」`
+        + `（当たれば${o.names[by]}が${s.pend.n}枚、外れたらあなたが${s.pend.n + 2}枚引いて1回休み）`;
+      const row = document.createElement('div');
+      row.style.flexWrap = 'wrap';
+      const chal = document.createElement('button');
+      chal.type = 'button';
+      chal.className = 'btn';
+      chal.textContent = '🔍 チャレンジ';
+      chal.onclick = () => o.onMove({ t: 'challenge' });
+      const take = document.createElement('button');
+      take.type = 'button';
+      take.className = 'btn secondary';
+      take.textContent = `受ける（${s.pend.n}枚引く）`;
+      take.onclick = () => o.onMove({ t: 'draw' });
+      row.append(chal, take);
+      ask.append(p1, row);
+      root.append(ask);
     }
 
     if (picking?.multi) {

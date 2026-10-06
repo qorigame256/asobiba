@@ -649,6 +649,118 @@ console.log('colors stack OK');
   }
 }
 
+// いろあわせのチャレンジ: ドロー4はいつでも出せる・うそなら出した人が4枚・うそでなければチャレンジした人が6枚で1回休み・
+// 重ねられたらチャレンジできない・なしでは今と同じ・CPU はうそかどうかを見ずに決める
+{
+  const ch = (hands, rules = { challenge: true }, o = {}) => base({ rules, pend: null, deck: ['b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8', 'b9'], hands, ...o });
+  // 場の色（赤）を持っていても出せる。次の人の返事を待つ
+  s = ch([['W4', 'r1', 'g2'], ['y1', 'y2', 'yD'], ['g1', 'g3']]);
+  t = U.apply(s, { p: 0, t: 'play', i: 0, c: 'g' });
+  assert.ok(t, 'チャレンジありなら場の色を持っていてもドロー4を出せる');
+  assert.deepEqual([t.turn, t.hands[1].length, t.pend.n, t.pend.ch], [1, 3, 4, { p: 0, color: 'r', bluff: true }], 'すぐは引かせず、次の人の返事を待つ');
+  assert.equal(U.apply(t, { p: 1, t: 'play', i: t.hands[1].indexOf('yD') }), null, '返事を待つ間は札を出せない（重ねて返すなし）');
+  assert.equal(U.apply(t, { p: 2, t: 'challenge' }), null, '番でない人はチャレンジできない');
+  // チャレンジ成功（うそ）: 出した人が4枚、チャレンジした人はふつうに自分の番
+  let c = U.apply(t, { p: 1, t: 'challenge' });
+  assert.deepEqual([c.hands[0].length, c.hands[1].length, c.turn, c.pend, c.color, c.last.bluff, c.last.got], [6, 3, 1, null, 'g', true, 4], 'うそなら出した人が4枚引き、チャレンジした人の番');
+  assert.equal(total(c), total(s));
+  assert.equal(U.apply(c, { p: 1, t: 'challenge' }), null, '同じチャレンジが2回届いても2回目は反則');
+  assert.ok(U.apply(c, { p: 1, t: 'play', i: c.hands[1].indexOf('yD') }) === null && U.apply(c, { p: 1, t: 'draw' }), 'チャレンジのあとはふつうの番（場の色は選んだ色）');
+  // 受ける: 4枚引いて1回休み（今までと同じ）
+  c = U.apply(t, { p: 1, t: 'draw' });
+  assert.deepEqual([c.hands[1].length, c.turn, c.pend, c.last.t], [7, 2, null, 'take'], '受けたら4枚引いて1回休み');
+  // チャレンジ失敗（うそではない）: チャレンジした人が6枚で1回休み。選んだ色を手に持っていても、出す前の色で見る
+  s = ch([['W4', 'g2', 'g5'], ['y1', 'y2'], ['g1', 'g3']]);
+  t = U.apply(s, { p: 0, t: 'play', i: 0, c: 'g' });
+  assert.equal(t.pend.ch.bluff, false, '出す前の場の色（赤）を持っていなければうそではない');
+  c = U.apply(t, { p: 1, t: 'challenge' });
+  assert.deepEqual([c.hands[0].length, c.hands[1].length, c.turn, c.last.bluff, c.last.got], [2, 8, 2, false, 6], 'うそでなければチャレンジした人が6枚引いて1回休み');
+  assert.equal(total(c), total(s));
+  // 2人: 失敗なら出した人の番、成功ならチャレンジした人の番
+  s = ch([['W4', 'r1', 'g2'], ['y1', 'y2']], { challenge: true }, { n: 2 });
+  t = U.apply(s, { p: 0, t: 'play', i: 0, c: 'b' });
+  assert.equal(U.apply(t, { p: 1, t: 'challenge' }).turn, 1);
+  assert.equal(U.apply(t, { p: 1, t: 'draw' }).turn, 0);
+  // 引いたドロー4も出せる
+  assert.ok(U.apply({ ...ch([['W4', 'r1'], ['y1'], ['g1']]), drawn: 'W4' }, { p: 0, t: 'play', i: 0, c: 'g' }).pend.ch, '引いたドロー4も出せてチャレンジの対象');
+  // なし: 今と同じ（場の色を持っていると出せない・すぐ引かせる・チャレンジの手は反則）
+  s = ch([['W4', 'r1', 'g2'], ['y1'], ['g1']], {});
+  assert.equal(U.apply(s, { p: 0, t: 'play', i: 0, c: 'g' }), null, 'なしでは場の色を持っているとドロー4は出せない');
+  t = U.apply(ch([['W4', 'g1', 'g2'], ['y1'], ['g1']], {}), { p: 0, t: 'play', i: 0, c: 'g' });
+  assert.deepEqual([t.hands[1].length, t.turn, t.pend], [5, 2, null], 'なしではすぐ4枚引かせる');
+  assert.equal(U.apply({ ...t, turn: 2 }, { p: 2, t: 'challenge' }), null, 'なしではチャレンジできない');
+  assert.equal(U.init(3, 1).rules.challenge, undefined, '最初はなし');
+  // 重ねて返すと一緒: ちょうど4なら3つから選べる・重ねられたらチャレンジできない
+  s = ch([['W4', 'r1', 'g2'], ['W4', 'y1', 'y2'], ['g1', 'g3', 'W4']], { challenge: true, stack: true });
+  t = U.apply(s, { p: 0, t: 'play', i: 0, c: 'g' });
+  assert.ok(t.pend.ch && U.apply(t, { p: 1, t: 'challenge' }) && U.apply(t, { p: 1, t: 'draw' }), 'たまった枚数が4ならチャレンジも受けるもできる');
+  c = U.apply(t, { p: 1, t: 'play', i: t.hands[1].indexOf('W4'), c: 'y' });
+  assert.deepEqual([c.pend.n, c.pend.ch, c.turn], [8, undefined, 2], '重ねて返せる');
+  assert.equal(U.apply(c, { p: 2, t: 'challenge' }), null, '重ねられたらチャレンジできない');
+  assert.deepEqual(U.apply(c, { p: 2, t: 'draw' }).hands[2].length, 11, '重ねなければ8枚引く');
+  s = ch([['rD', 'g2'], ['bD', 'y1'], ['g1', 'g3']], { challenge: true, stack: true });
+  assert.equal(U.apply(s, { p: 0, t: 'play', i: 0 }).pend.ch, undefined, 'ドロー2はチャレンジの対象でない');
+  // 手札の上限と一緒: うそで4枚引いて26枚を超えたら出した人が脱落
+  const many = (k) => Array.from({ length: k }, (_, i) => 'y' + (i % 9 + 1));
+  s = ch([['W4', 'r1', ...many(23)], ['g1', 'g2'], ['b1', 'b2']], { challenge: true, cap: true });
+  t = U.apply(s, { p: 0, t: 'play', i: 0, c: 'g' });
+  c = U.apply(t, { p: 1, t: 'challenge' });
+  assert.deepEqual([c.out[0], c.hands[0].length, c.turn, c.winner, c.last.out], [true, 0, 1, null, [0]], 'うそで26枚を超えたら出した人が脱落');
+  assert.equal(total(c), total(s));
+  // 最後の1枚の宣言と一緒: 宣言せずに1枚になったら2枚引いたうえで、チャレンジはそのまま
+  t = U.apply(ch([['W4', 'r1'], ['y1', 'y2'], ['g1']], { challenge: true, call: true }), { p: 0, t: 'play', i: 0, c: 'g' });
+  assert.deepEqual([t.hands[0].length, t.pend.ch.bluff], [3, true]);
+  assert.equal(U.apply(t, { p: 1, t: 'challenge' }).hands[0].length, 7);
+  // CPU: うそ（ch.bluff）を見ずに決める。乱数をそろえれば、うそでもうそでなくても同じ答え
+  {
+    const { mulberry32 } = await import('../app/js/games/util.js');
+    const keep = Math.random;
+    s = ch([['W4', 'r1', 'g2'], ['y1', 'y2', 'y3'], ['g1', 'g3']]);
+    t = U.apply(s, { p: 0, t: 'play', i: 0, c: 'g' });
+    const honest = { ...t, hands: t.hands.map((h, q) => (q === 0 ? ['g2', 'g7'] : h)), pend: { ...t.pend, ch: { ...t.pend.ch, bluff: false } } };
+    let yes = 0;
+    try {
+      for (let k = 0; k < 2000; k++) {
+        Math.random = mulberry32(k);
+        const a = U.cpu(t, 1);
+        Math.random = mulberry32(k);
+        assert.deepEqual(U.cpu(honest, 1), a, 'CPU のチャレンジがうそかどうかで変わった');
+        if (a.t === 'challenge') yes++;
+      }
+    } finally { Math.random = keep; }
+    assert.ok(yes > 2000 * 0.15 && yes < 2000 * 0.45, `CPU のチャレンジは3割前後: ${yes / 2000}`);
+    // うそのドロー4: 場の色を持っていても3割ほど出す
+    s = ch([['W4', 'r1', 'g2', 'g3', 'b4'], ['y1', 'y2', 'y3', 'y4'], ['g1', 'g3', 'g4', 'g5']]);
+    let w4 = 0;
+    for (let k = 0; k < 2000; k++) if (U.cpu(s, 0).i === 0) w4++;
+    assert.ok(w4 > 2000 * 0.25 && w4 < 2000 * 0.5, `CPU は場の色を持っていても3割ほどドロー4を出す: ${w4 / 2000}`);
+    let w4none = 0;
+    for (let k = 0; k < 2000; k++) if (U.cpu({ ...s, rules: {} }, 0).i === 0) w4none++;
+    assert.equal(w4none, 0, 'なしでは場の色を持っているとドロー4を出さない');
+  }
+  // CPU どうしで最後まで（ほかの詳細設定とも混ぜる）: 反則なし・札は108枚のまま・チャレンジの成功と失敗が両方起きる
+  const seen = { ok: 0, ng: 0, take: 0 };
+  for (let k = 0; k < 200; k++) {
+    const n = 2 + (k % 9);
+    let st = U.init(n, k * 7877 + 11, { rules: { challenge: true, stack: k % 2 === 1, cap: k % 3 === 0, call: k % 4 === 0, untilPlay: k % 5 === 0, multi: k % 3 === 1, sevenZero: k % 7 < 3 } });
+    let steps = 0;
+    while (!U.result(st)) {
+      const p = U.turn(st);
+      assert.ok(!st.out?.[p], '脱落した人の番が来た');
+      const m = U.cpu(st, p);
+      const next = U.apply(st, { ...m, p });
+      assert.ok(next, 'チャレンジありで CPU が反則の手を出した');
+      assert.equal(total(next), 108, 'チャレンジありで札の枚数が変わった');
+      if (m.t === 'challenge') seen[next.last.bluff ? 'ok' : 'ng']++;
+      else if (st.pend?.ch && next.last.t === 'take') seen.take++;
+      st = next;
+      if (++steps > 6000) throw new Error('チャレンジありのいろあわせが終わらない');
+    }
+  }
+  assert.ok(seen.ok > 5 && seen.ng > 5 && seen.take > seen.ok + seen.ng, `チャレンジの成功・失敗・受ける: ${JSON.stringify(seen)}`);
+  console.log('colors challenge: CPU games', JSON.stringify(seen));
+}
+
 // ---------- 大富豪 ----------
 const D = GAMES.daifugo;
 const ALL = Object.fromEntries(D.settings.map((x) => [x.key, true]));
@@ -1466,6 +1578,92 @@ assert.ok(FL.result(s), '15問で終わる');
   };
   assert.deepEqual([pointsAt(0), pointsAt(5), pointsAt(10)], [3, 6, 9], '1位の点は 3・6・9');
 }
+// 黄色い旗（詳細設定 yellow）
+{
+  // なしのときは、お題の並びが前と全く同じ（seed 0〜99 のお題と正しい形をまとめた指紋。前の作りで取った値）
+  const print = (rules) => {
+    let all = '';
+    for (let k = 0; k < 100; k++) all += (k ? '|' : '') + JSON.stringify(FL.init(3, k, { rules }).cmds);
+    let h = 0;
+    for (const ch of all) h = (Math.imul(h, 31) + ch.codePointAt(0)) | 0;
+    return h;
+  };
+  assert.equal(print({}), -980746463, 'なしのときのお題が前と変わった');
+  assert.equal(print({ yellow: 'off' }), -980746463, 'なし（off）のときのお題が前と変わった');
+  // ありのお題: 文と3本の正しい形が合っている・黄色が出てくる
+  const readY = (text, pose) => {
+    const next = { ...pose };
+    for (const part of text.split('、')) {
+      const m = part.match(/^(赤|白|黄色)(上げ|下げ)(て|ないで|ない)$/);
+      assert.ok(m, 'お題の形 ' + text);
+      if (m[3] === 'て') next[{ 赤: 'r', 白: 'w', 黄色: 'y' }[m[1]]] = m[2] === '上げ' ? 1 : 0;
+    }
+    return next;
+  };
+  let yellows = 0;
+  for (let k = 0; k < 300; k++) {
+    const st = FL.init(3, k, { rules: { yellow: 'on' } });
+    assert.deepEqual(FL.init(3, k, { rules: { yellow: 'on' } }).cmds, st.cmds, '同じ種なら同じお題');
+    let pose = { r: 0, w: 0, y: 0 };
+    let hit = false;
+    for (const c of st.cmds) {
+      assert.deepEqual(c.pose, readY(c.text, pose), '黄色ありのお題と正しい形が食い違う: ' + c.text);
+      if (c.text.includes('黄色')) hit = true;
+      pose = c.pose;
+    }
+    if (hit) yellows++;
+  }
+  assert.ok(yellows >= 295, 'ありのお題にはほぼ毎回黄色が出てくる');
+  // 3本の形で正解を決める
+  let st = FL.init(3, 2, { rules: { yellow: 'on' } });
+  st.cmds = [{ text: '赤上げて、黄色下げないで', pose: { r: 1, w: 0, y: 0 } }, ...st.cmds.slice(1)];
+  st = ref(FL, st, 'next');
+  assert.equal(FL.apply(st, { p: 0, t: 'pose', q: 0, r: 1, w: 0, ms: 500, n: 1 }), null, 'ありでは黄色の形も要る');
+  st = FL.apply(st, { p: 0, t: 'pose', q: 0, r: 1, w: 0, y: 0, ms: 500, n: 1 });
+  assert.equal(FL.apply(st, { p: 0, t: 'pose', q: 0, r: 1, w: 0, y: 0, ms: 500, n: 1 }), null, 'ありでも同じ手の2回目は弾く');
+  st = FL.apply(st, { p: 1, t: 'pose', q: 0, r: 1, w: 0, y: 1, ms: 300, n: 1 });
+  st = FL.apply(st, { p: 2, t: 'pose', q: 0, r: 1, w: 0, y: 0, ms: 3800, n: 1 });
+  assert.ok(st, '黄色ありは制限時間が0.5秒長い（なしなら 3秒＋通信の分0.5秒を過ぎた 3.8秒の手も受け付ける）');
+  st = ref(FL, st, 'close');
+  assert.deepEqual(st.scores, [3, 0, 2], '赤だけ合っていて黄色がちがうのはまちがい');
+  assert.equal(FL.apply(ref(FL, FL.init(2, 1, { rules: {} }), 'next'), { p: 0, t: 'pose', q: 0, r: 1, w: 0, y: 1, ms: 500, n: 1 }), null, 'なしでは黄色の手を受け付けない');
+  // CPU どうしで最後まで（CPU は画面に出てからの時間で打つので、時計を偽物にして進める）
+  const realNow = performance.now;
+  let clock = 1e9;
+  Object.defineProperty(performance, 'now', { value: () => clock, configurable: true, writable: true });
+  try {
+    for (const [yellow, seed] of [['off', 7001], ['on', 7002]]) {
+      let g = FL.init(4, seed, { rules: { yellow } });
+      let steps = 0;
+      let rights = 0;
+      let answers = 0;
+      while (!FL.result(g)) {
+        const r = FL.referee(g);
+        assert.ok(r, '進行役の手がある');
+        if (g.phase === 'open') {
+          for (let p = 0; p < 4; p++) assert.equal(FL.cpu(g, p), null, 'CPU はすぐには打たない');
+          clock += 2300; // CPU が打つのは 0.8〜2.2秒（制限時間の9割まで）
+          for (let p = 0; p < 4; p++) {
+            const m = FL.cpu(g, p);
+            if (!m) continue; // 動かさないのが答え
+            if (yellow === 'on') assert.ok([0, 1].includes(m.y), 'ありの CPU は黄色も答える');
+            else assert.equal(m.y, undefined, 'なしの CPU は黄色を送らない');
+            const next = FL.apply(g, { ...m, p });
+            assert.ok(next, 'CPU の答えを受け付ける');
+            g = next;
+          }
+        }
+        g = ref(FL, g, r.move.t);
+        if (g.phase === 'shown') { answers += 4; rights += g.last.filter((x) => x.ok).length; }
+        if (++steps > 100) throw new Error('旗揚げが終わらない');
+      }
+      assert.equal(answers, 60, '15問で終わる: ' + yellow);
+      assert.ok(rights > 30 && rights < 60, `CPU はだいたい正解し、ときどき間違える（${yellow}: ${rights}/60）`);
+    }
+  } finally {
+    Object.defineProperty(performance, 'now', { value: realNow, configurable: true, writable: true });
+  }
+}
 
 // ---------- 難読漢字 ----------
 const KJ = GAMES.kanji;
@@ -1494,6 +1692,111 @@ assert.deepEqual(s.scores, [0, 0, 1], '届いた順ではなく、速く正解�
 for (const level of ['easy', 'hard', 'expert', 'mix']) {
   const st = KJ.init(2, 7, { rules: { level } });
   assert.equal(new Set(st.qs.map(([w]) => w)).size, 10, '10問とも違う漢字: ' + level);
+}
+// 答え方「4つから選ぶ」（詳細設定）
+{
+  const { choicesOf } = await import('../app/js/games/kanji.js');
+  const levelOf = (w) => Object.keys(KANJI).find((l) => KANJI[l].some(([x]) => x === w));
+  for (const level of ['easy', 'hard', 'expert', 'mix']) {
+    for (let k = 0; k < 40; k++) {
+      const seed = k * 7919 + 13;
+      const st = KJ.init(3, seed, { rules: { level, choice: true } });
+      assert.deepEqual(st.qs, KJ.init(3, seed, { rules: { level } }).qs, '答え方で出る漢字は変わらない');
+      assert.deepEqual(st.opts, KJ.init(3, seed, { rules: { level, choice: true } }).opts, '同じ種なら同じ4つ・同じ並び');
+      st.qs.forEach(([w, ys], i) => {
+        const o = st.opts[i];
+        assert.equal(o.length, 4, '4つ');
+        assert.equal(new Set(o).size, 4, '4つが重ならない: ' + o);
+        assert.equal(o.filter((x) => isRight(ys, x)).length, 1, '正解は1つだけ: ' + w + ' ' + o);
+        assert.ok(o.includes(ys[0]), '正解は最初の読み');
+        const pool = KANJI[levelOf(w)].map(([, y]) => y[0]);
+        assert.ok(o.every((x) => pool.includes(x)), 'まちがいは同じ難しさの問題の読み: ' + w);
+        assert.deepEqual(o, choicesOf(seed, i, [w, ys]), '種と何問目かから作る');
+      });
+    }
+  }
+  // 文字数の近いものを選ぶ・並び（正解の場所）はばらける
+  const where = [0, 0, 0, 0];
+  let near = 0, all = 0;
+  for (let k = 0; k < 200; k++) {
+    const st = KJ.init(2, k, { rules: { choice: true } });
+    st.qs.forEach(([, ys], i) => {
+      where[st.opts[i].indexOf(ys[0])] += 1;
+      for (const x of st.opts[i]) { all += 1; if (Math.abs(x.length - ys[0].length) <= 1) near += 1; }
+    });
+  }
+  assert.ok(where.every((v) => v > 350), '正解の場所がばらける ' + where);
+  assert.ok(near / all > 0.95, '文字数の近い読みが選ばれる ' + near / all);
+  // 1回だけ・まちがいは点にならない・4つ以外は弾く
+  let c = ref(KJ, KJ.init(3, 5, { rules: { choice: true } }), 'next');
+  const right = c.qs[0][1][0];
+  const wrong = c.opts[0].find((x) => x !== right);
+  assert.equal(KJ.apply(c, { p: 0, t: 'try', q: 0, text: 'ちがうよみ', ms: 2000, n: 1 }), null, '4つにない答えは弾く');
+  c = KJ.apply(c, { p: 0, t: 'try', q: 0, text: wrong, ms: 2000, n: 1 });
+  assert.equal(c.solved[0], null, 'まちがい');
+  assert.equal(c.said[0], wrong);
+  assert.equal(KJ.apply(c, { p: 0, t: 'try', q: 0, text: wrong, ms: 2000, n: 1 }), null, '同じ手が2回届いたら2回目を弾く');
+  assert.equal(KJ.apply(c, { p: 0, t: 'try', q: 0, text: right, ms: 2500, n: 2 }), null, 'まちがえたらその問題はもう答えられない');
+  assert.equal(KJ.referee(c).key, 'open0', 'まだ答えていない人がいれば待つ');
+  c = KJ.apply(c, { p: 2, t: 'try', q: 0, text: wrong, ms: 1500, n: 1 });
+  c = KJ.apply(c, { p: 1, t: 'try', q: 0, text: wrong, ms: 1800, n: 1 });
+  assert.equal(KJ.referee(c).key, 'all0', '全員が答えたら、正解がいなくても締め切る');
+  c = ref(KJ, c, 'close');
+  assert.deepEqual(c.scores, [0, 0, 0], 'まちがいは点にならない（速くても）');
+  c = ref(KJ, c, 'next');
+  const r1 = c.qs[1][1][0];
+  c = KJ.apply(c, { p: 1, t: 'try', q: 1, text: r1, ms: 5000, n: 1 });
+  assert.equal(KJ.referee(c).key, 'solved1', '誰かが正解したら少し待って締め切る');
+  c = KJ.apply(c, { p: 0, t: 'try', q: 1, text: r1, ms: 4000, n: 1 });
+  assert.equal(KJ.apply(c, { p: 0, t: 'try', q: 1, text: r1, ms: 4000, n: 1 }), null, '正解も2回目は弾く');
+  c = ref(KJ, c, 'close');
+  assert.deepEqual(c.scores, [1, 0, 0], '届いた順ではなく、速く正解した人に1点');
+  // 打ち込むときは前と同じ（4つの読みを持たず、何度でも答え直せる）
+  const t0 = KJ.init(3, 2, { rules: {} });
+  assert.equal(t0.opts, undefined, '打ち込むでは4つを作らない');
+  assert.deepEqual(t0, KJ.init(3, 2, { rules: { choice: false } }), '最初は打ち込む');
+  let t1 = ref(KJ, t0, 'next');
+  t1 = KJ.apply(t1, { p: 0, t: 'try', q: 0, text: 'ちがう', ms: 1000, n: 1 });
+  t1 = KJ.apply(t1, { p: 0, t: 'try', q: 0, text: 'まだちがう', ms: 1500, n: 2 });
+  assert.ok(t1 && t1.tries[0] === 2, '打ち込むでは何度でも答え直せる');
+  t1 = KJ.apply(t1, { p: 1, t: 'try', q: 0, text: 'ちがう', ms: 1000, n: 1 });
+  t1 = KJ.apply(t1, { p: 2, t: 'try', q: 0, text: 'ちがう', ms: 1000, n: 1 });
+  assert.equal(KJ.referee(t1).key, 'open0', '打ち込むでは、全員がまちがえても締め切らない');
+  // CPU どうしで最後まで（時計をずらして進める）
+  const realNow = performance.now;
+  let clock = 1e9;
+  performance.now = () => clock;
+  try {
+    // 種は問題ごとに別にする（CPU の予定と画面に出た時刻は種と何問目かで覚えているため）
+    for (const [choice, level, seed] of [[true, 'easy', 9101], [true, 'expert', 9202], [false, 'hard', 9303]]) {
+      let st = KJ.init(4, seed, { rules: { choice, level, time: '15' } });
+      let rights = 0, wrongs = 0, openedAt = clock;
+      for (let guard = 0; guard < 5000 && !KJ.result(st); guard++) {
+        if (st.phase === 'open') {
+          for (let p = 0; p < 4; p++) {
+            const m = KJ.cpu(st, p);
+            if (!m) continue;
+            const next = KJ.apply(st, { ...m, p });
+            assert.ok(next, 'CPU の手が通る ' + JSON.stringify(m));
+            if (next.solved[p] !== null) rights += 1; else wrongs += 1;
+            assert.equal(KJ.cpu(next, p), null, 'CPU は1問に1回だけ答える');
+            st = next;
+          }
+        }
+        const rf = KJ.referee(st);
+        clock += 250;
+        if (st.phase === 'open' && rf.key === 'open' + st.q && clock - openedAt < rf.ms) continue; // まだ時間がある
+        st = KJ.apply(st, { p: -1, ...rf.move });
+        if (st.phase === 'open') openedAt = clock;
+      }
+      assert.ok(KJ.result(st), 'CPU どうしで最後まで: ' + level);
+      assert.ok(rights > 0, 'CPU は正解することがある');
+      if (choice) assert.ok(wrongs > 0, '4つから選ぶ CPU はまちがえることもある');
+      else assert.equal(wrongs, 0, '打ち込む CPU は正解しか送らない');
+    }
+  } finally {
+    performance.now = realNow;
+  }
 }
 
 // ---------- ぴったりストップ ----------
