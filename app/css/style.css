@@ -115,10 +115,29 @@ p { margin: 0; }
 
 /* ---------- 対局画面 ---------- */
 .play-top { display: flex; align-items: center; gap: 8px; }
-.play-top h2 { margin: 0; }
+.play-top h2 { margin: 0; min-width: 0; font-size: clamp(.95rem, 4.3vw, 1.15rem); line-height: 1.25; } /* スマホ幅でも名前ができるだけ1行に収まるように */
+.play-top #btn-leave { white-space: nowrap; padding-left: 8px; padding-right: 8px; }
 .play-top .howto-btn { margin-left: auto; white-space: nowrap; }
 .play-top .howto-btn[hidden] + .sound-btn { margin-left: auto; }
-.play-top .sound-btn { font-size: 1.2rem; line-height: 1; padding-left: 6px; padding-right: 6px; }
+.play-top .sound-btn { font-size: 1.2rem; line-height: 1; padding-left: 4px; padding-right: 4px; }
+.play-top .beginner-btn:not(.on) { filter: grayscale(1); opacity: .45; } /* 初心者マーク（押すと付く） */
+
+/* 初心者マーク: いま選べる所を点滅する枠で光らせる（選べる所が限られるゲームだけ。main.js の BEG_GAMES と合わせる） */
+@keyframes beg-glow { 0%, 100% { outline-color: rgba(255, 140, 0, .95); } 50% { outline-color: rgba(255, 140, 0, .2); } }
+body.beginner #screen-play:is([data-game="reversi"]) .rv-cell.playable,
+body.beginner #screen-play:is([data-game="mancala"]) button.mc-pit.playable,
+body.beginner #screen-play:is([data-game="shogi"], [data-game="hasami"]) button.sg-cell,
+body.beginner #screen-play:is([data-game="shogi"], [data-game="hasami"]) .sg-hand-piece.playable,
+body.beginner #screen-play:is([data-game="colors"]) .ccard.playable,
+body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-game="doubt"], [data-game="sevens"]) .pcard.usable {
+  --beg: 1; /* main.js が「光っている所があるか」を見る目印 */
+  outline: 3px solid rgba(255, 140, 0, .95); outline-offset: -1px; animation: beg-glow 1.3s ease-in-out infinite; z-index: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  body.beginner #screen-play .board :is(.playable, .usable, button.sg-cell) { animation: none !important; }
+}
+.status-sub.streak { color: #c0541a; font-weight: 700; }
+.status-sub.beg-hint { color: #b06a00; }
 .howto { margin-top: 8px; background: var(--panel); border-radius: 12px; padding: 8px 14px; font-size: .9rem; line-height: 1.6; }
 .howto p { margin: 4px 0; }
 
@@ -304,6 +323,7 @@ p { margin: 0; }
 .c4-disc.p1 { background: #f4c430; }
 .c4-disc.p2 { background: #2e9a52; }
 .c4-disc.p3 { background: #8a4fc0; }
+.c4-disc.pn { background: repeating-linear-gradient(45deg, #8d949b 0 4px, #a3aab1 4px 8px); } /* じゃま石 */
 /* 3〜4人の広い盤（列が多いので、すき間を詰める） */
 .c4w { gap: 2px; padding: 6px 4px; }
 .c4w .c4-col { gap: 3px; padding: 2px; border-radius: 8px; }
@@ -1022,6 +1042,11 @@ p { margin: 0; }
 .mm-grid .pcard.open { box-shadow: 0 0 0 2px var(--accent); }
 .mm-grid .pcard.got { opacity: 1; box-shadow: 0 0 0 3px var(--win); }
 .mm-grid .pcard.pop { animation: pop .25s ease-out; }
+.mm-grid .mm-hint { /* 見た札のヒント（伏せた札の真ん中に小さく数字） */
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 42%; padding: 4% 3%;
+  background: rgba(255, 255, 255, .92); color: #2f4f7a; border-radius: 4px; text-align: center; line-height: 1;
+  font-family: Georgia, "Times New Roman", serif; font-size: 30cqw; pointer-events: none;
+}
 .board button.pcard.back.usable { background: repeating-linear-gradient(45deg, #2f6fb3 0 5px, #3d7fc4 5px 10px); border-color: #fff; cursor: pointer; }
 .board button.pcard.back.usable:hover { filter: brightness(1.12); }
 .board button.pcard.open.usable { cursor: pointer; }
@@ -1388,6 +1413,10 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .ks-cell.sunk, .ks-cell.ship.sunk.hit { background: #6b2d26; }
 .ks-cell.sunk::after { color: #ffd1c9; }
 .ks-cell.last { box-shadow: 0 0 0 2px var(--win); z-index: 1; }
+.ks-cell.sonar { box-shadow: inset 0 0 0 2px #f2c94c; } /* ソナーで調べた 3×3 */
+.ks-sonar-n { position: absolute; inset: 8%; display: grid; place-items: center; border-radius: 50%; background: #f2c94c; color: #3a2a00; font-weight: 900; font-size: clamp(.65rem, 3vw, 1rem); line-height: 1; z-index: 2; }
+.ks-cell.sonar.last { box-shadow: 0 0 0 2px var(--win), inset 0 0 0 2px #f2c94c; }
+.ks-grid.aiming { background: #c79a1e; } /* ソナーの場所を選んでいる間 */
 .ks-ships { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .board button.ks-ship { display: flex; gap: 2px; padding: 5px; border-radius: 8px; border: 2px solid var(--line); background: #fff; cursor: pointer; }
 .ks-ship i { width: 14px; height: 14px; border-radius: 3px; background: #7d8a96; }

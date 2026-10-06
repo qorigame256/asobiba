@@ -193,6 +193,51 @@ assert.equal(C.apply(C.init({ rules: { players: 3 } }), 9), null, '盤の外');
   assert.deepEqual([C.result(x), steps], [{ winner: null, cells: [] }, 8], '同じ盤面（次の番も同じ）が3回出たら引き分け');
 }
 
+// じゃま石: 種で置き場所が決まる・誰のものでもない・じゃま石をはさんだ並びでは勝てない・CPU が反則を出さない
+{
+  const { NEUTRAL } = await import('../app/js/games/connect4.js');
+  assert.equal(C.init().grid.some((v) => v === NEUTRAL), false, '最初はじゃま石なし');
+  const B = (seed, rules = {}) => C.init({ rules: { block: 'on', ...rules }, seed });
+  assert.deepEqual(B(7).grid, B(7).grid, '同じ種なら同じ置き場所');
+  let differ = 0;
+  for (let seed = 1; seed <= 40; seed++) {
+    const x = B(seed);
+    if (JSON.stringify(x.grid) !== JSON.stringify(B(1).grid)) differ++;
+    assert.equal(x.grid.filter((v) => v === NEUTRAL).length, 3, '2人は3個');
+    for (let c = 0; c < 7; c++) {
+      const col = [0, 1, 2, 3, 4, 5].map((r) => x.grid[r * 7 + c]);
+      assert.ok(col.filter((v) => v === NEUTRAL).length <= 2, '1列に2個まで');
+      const top = col.findIndex((v) => v !== null);
+      if (top >= 0) assert.ok(col.slice(top).every((v) => v === NEUTRAL), '下から積む');
+    }
+  }
+  assert.ok(differ > 30, '種で置き場所が変わる');
+  assert.equal(B(3, { players: 4 }).grid.filter((v) => v === NEUTRAL).length, 5, '3人以上は列の数の半分（11列なら5個）');
+  // 一番下の段: 0〜2列に赤、3列にじゃま石 → 赤は 0〜3 で並ばない
+  const g = Array(42).fill(null);
+  g[38] = NEUTRAL;
+  let x = { ...C.init({ rules: { block: 'on' } }), grid: g };
+  for (const m of [0, 0, 1, 1, 2, 2]) x = C.apply(x, m);
+  assert.equal(C.result(x), null, 'じゃま石の手前で3つ');
+  x = C.apply(x, 3); // 赤は 3列（じゃま石の上）へ
+  assert.equal(C.result(x), null, 'じゃま石をはさんだ並びでは勝てない');
+  // ポップアウトでじゃま石は抜けない
+  x = { ...C.init({ rules: { block: 'on', pop: 'on' } }), grid: g.slice() };
+  assert.equal(C.apply(x, { pop: 3 }), null, 'じゃま石は抜けない');
+  for (const rules of [{}, { players: 3 }, { players: 4 }, { pop: 'on' }]) {
+    for (let k = 0; k < 6; k++) {
+      let st = C.init({ rules: { block: 'on', ...rules }, seed: 100 + k });
+      let guard = 0;
+      while (!C.result(st)) {
+        const m = C.cpu(st, st.turn, { cpu: ['weak', 'normal', 'strong'][k % 3] });
+        st = C.apply(st, m);
+        assert.ok(st, 'じゃま石ありで CPU が反則を出した');
+        assert.ok(++guard < 250);
+      }
+    }
+  }
+}
+
 // リバーシ
 s = R.init();
 assert.equal(R.apply(s, 0), null);
@@ -2241,6 +2286,41 @@ for (let g = 0; g < 12; g++) {
     assert.ok(++guard < 210);
   }
 }
+// ソナー（詳細設定）
+assert.equal(KS.init().sonarOn, false, '最初はソナーなし');
+s = KS.init();
+s = KS.apply(KS.apply(s, { t: 'place', ships: fleet }), { t: 'place', ships: fleet });
+assert.equal(KS.apply(s, { t: 'sonar', c: 11 }), null, 'ソナーなしでは使えない');
+s = KS.init({ rules: { sonar: 'on' } });
+assert.equal(KS.apply(s, { t: 'sonar', c: 11 }), null, '並べる前は使えない');
+s = KS.apply(KS.apply(s, { t: 'place', ships: fleet }), { t: 'place', ships: fleet });
+s = KS.apply(s, 0); // 先手が (0,0) を撃って当たり
+s = KS.apply(s, 99);
+let sn = KS.apply(s, { t: 'sonar', c: 11 }); // (1,1) のまわり 3×3: 0段目 0〜2・1段目 0〜2・2段目 0〜2
+assert.ok(sn, 'ソナーを使える');
+assert.deepEqual([sn.last.n, sn.turn], [5, 1], '撃ったマスを除いて船のマスを数える（0段目の1・2、2段目の0〜2）・使ったら相手の番');
+assert.equal(sn.sonar[0].cells.includes(0), false, '撃ったマスは数えない');
+sn = KS.apply(sn, 98);
+assert.equal(KS.apply(sn, { t: 'sonar', c: 55 }), null, 'ソナーは1回だけ');
+assert.ok(KS.apply(sn, { t: 'sonar', c: 55 }) === null && KS.apply(KS.apply(sn, 50), { t: 'sonar', c: 0 }), '相手は自分のソナーを使える（盤の隅でもよい）');
+assert.equal(KS.apply(KS.apply(sn, 50), { t: 'sonar', c: 0 }).last.n, 2, '盤の隅は 2×2 だけ調べる（先手の (0,0) は後手がまだ撃っていない）');
+assert.equal(KS.apply(sn, { t: 'sonar', c: 100 }), null, '盤の外は選べない');
+s = KS.init({ rules: { sonar: 'on', again: 'on' } });
+s = KS.apply(KS.apply(s, { t: 'place', ships: fleet }), { t: 'place', ships: fleet });
+assert.equal(KS.apply(s, { t: 'sonar', c: 11 }).turn, 1, '当たったらもう一度でも、ソナーのあとは相手の番');
+let sonarUsed = 0;
+for (let g = 0; g < 30; g++) {
+  let st = KS.init({ rules: { sonar: 'on', again: g % 2 ? 'on' : 'off' } });
+  let guard = 0;
+  while (!KS.result(st)) {
+    const m = KS.cpu(st, st.turn, { cpu: ['weak', 'normal', 'strong'][g % 3] });
+    if (m?.t === 'sonar') sonarUsed++;
+    st = KS.apply(st, m);
+    assert.ok(st, 'ソナーありで CPU が反則を出した');
+    assert.ok(++guard < 220);
+  }
+}
+assert.ok(sonarUsed >= 40, 'CPU もソナーを使う: ' + sonarUsed);
 console.log('kaisen OK');
 
 // ---------- 弾幕回避 ----------

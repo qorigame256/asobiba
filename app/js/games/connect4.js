@@ -8,10 +8,14 @@
 //   抜いて相手の4つ並びができたら相手の勝ち（自分も同時に並んでも相手の勝ち）。同じ盤面（次の番も同じ）が3回出たら引き分け。
 //   盤が埋まっても抜ける手があれば続き、打てる手が無くなったら引き分け。
 //   Claude の判断: 終わらないのを防ぐため、200手でも引き分け（同じ盤面の3回で、ふつうはそれより先に終わる）。
+// 詳細設定「じゃま石」（2026-10-06 本人の決定。最初はなし）: 始めから誰のものでもない灰色の石が、ばらばらの列に落としてある。
+//   じゃま石を含む並びではだれも勝てない。Claude の判断: 数は 2人 3個・3人以上は 列の数の半分（切り捨て）。1列に2個まで（一番下から積む）。
+//   置き場所は対局の種（seed）から決める（全員の端末で同じ。init に seed が要る）。ポップアウトでは抜けない（自分のコマではないため）。
 
 const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
+export const NEUTRAL = -1; // じゃま石
 
-import { CPU_SETTING, boardCpu } from './util.js';
+import { CPU_SETTING, boardCpu, mulberry32 } from './util.js';
 
 // 盤（列 w・段 h）の4つ並びの窓の一覧。マスごとに、そのマスを含む窓の番号も持つ
 const WINDOWS = {};
@@ -41,15 +45,18 @@ function score(s, p) {
   const mid = (s.w - 1) / 2;
   for (let r = 0; r < s.h; r++) {
     const x = s.grid[r * s.w + mid];
-    if (x !== null) v += x === p ? 3 : -3;
+    if (x !== null && x !== NEUTRAL) v += x === p ? 3 : -3;
   }
   for (const win of windowsOf(s.w, s.h).list) {
     let mine = 0;
     let theirs = 0;
+    let dead = false;
     for (const i of win) {
       const x = s.grid[i];
-      if (x === p) mine++; else if (x !== null) theirs++;
+      if (x === NEUTRAL) dead = true;
+      else if (x === p) mine++; else if (x !== null) theirs++;
     }
+    if (dead) continue; // じゃま石を含む並びはだれも勝てない
     if (theirs === 0) v += mine === 3 ? 5 : mine === 2 ? 2 : 0;
     else if (mine === 0 && theirs === 3) v -= 4;
   }
@@ -74,7 +81,7 @@ function wideSize(v, n) {
 const POP_LIMIT = 200;
 
 // 盤面と次の番を表す文字（同じ盤面が何回出たか数えるため）
-const posKey = (grid, turn) => grid.map((v) => (v === null ? '.' : v)).join('') + turn;
+const posKey = (grid, turn) => grid.map((v) => (v === null ? '.' : v === NEUTRAL ? 'x' : v)).join('') + turn;
 
 // 打てる手（落とす列と、抜ける列）
 function popLegal(s) {
@@ -129,6 +136,22 @@ function popApply(s, m) {
   return popFinish(s, grid, null, true);
 }
 
+// じゃま石を置いた最初の盤（種から決める。乱数や時刻は使わない）
+function blockers(w, h, n, seed) {
+  const grid = Array(w * h).fill(null);
+  const rnd = mulberry32(seed ^ 0x5eed);
+  const count = n === 2 ? 3 : Math.floor(w / 2);
+  const height = Array(w).fill(0);
+  for (let k = 0; k < count; k++) {
+    const cols = [];
+    for (let c = 0; c < w; c++) if (height[c] < 2) cols.push(c);
+    const c = cols[Math.floor(rnd() * cols.length)];
+    height[c] += 1;
+    grid[(h - height[c]) * w + c] = NEUTRAL;
+  }
+  return grid;
+}
+
 // 列 c に落としたときに入るマス（満杯なら -1）
 function landing(s, c) {
   for (let r = s.h - 1; r >= 0; r--) if (s.grid[r * s.w + c] === null) return r * s.w + c;
@@ -178,6 +201,7 @@ function wideCpu(s, rules) {
       for (const x of list[wi]) {
         const b = s.grid[x];
         if (b === null) continue;
+        if (b === NEUTRAL) { mixed = true; break; } // じゃま石を含む並びはだれも勝てない
         if (owner === null) owner = b;
         else if (owner !== b) mixed = true;
         count++;
@@ -225,6 +249,11 @@ export default {
       choices: WIDE_CHOICES,
     },
     {
+      key: 'block', label: 'じゃま石', def: 'off',
+      desc: '始めから誰のものでもない灰色の石が、いくつかの列に落としてある（置き場所は毎回変わる）。じゃま石をはさんだ並びでは勝てない',
+      choices: [['off', 'なし'], ['on', 'あり']],
+    },
+    {
       key: 'pop', label: 'ポップアウト', def: 'off',
       desc: '落とす代わりに、一番下の段にある自分のコマを抜いてもよい（2人のときだけ）。同じ盤面が3回出たら引き分け',
       choices: [['off', 'なし'], ['on', 'あり']],
@@ -246,10 +275,11 @@ export default {
     });
   },
 
-  init({ rules = {} } = {}) {
+  init({ rules = {}, seed = 0 } = {}) {
     const n = rules.players ?? 2;
     const [w, h] = n >= 3 ? wideSize(rules.wide, n) : [7, 6];
     const st = { n, w, h, grid: Array(w * h).fill(null), turn: 0, last: null, won: null };
+    if (rules.block === 'on') st.grid = blockers(w, h, n, seed);
     if (n === 2 && rules.pop === 'on') Object.assign(st, { pop: true, moves: 0, hist: { key: posKey(st.grid, 0), prev: null } });
     return st;
   },
@@ -304,7 +334,8 @@ export default {
         const v = s.grid[i];
         if (v !== null) {
           const disc = document.createElement('span');
-          disc.className = 'c4-disc p' + v;
+          disc.className = 'c4-disc ' + (v === NEUTRAL ? 'pn' : 'p' + v);
+          if (v === NEUTRAL) disc.title = 'じゃま石';
           if (win.has(i)) disc.classList.add('win');
           if (i === s.last) {
             disc.classList.add('last');

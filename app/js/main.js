@@ -19,6 +19,8 @@
 //   carry = 次の対局へ持ち越す前の結果（人の id → 順位）。ホストが対局を始めるときに prev へ並べ替える。
 // 部屋を作る・同じ画面で遊ぶのは持ち主の端末だけ（owner.js）。ほかの人は招待された部屋に入るだけ。
 // banned = ホストが退出させた人の id。あいさつが来ても入れず、もう一度「退出」を送る。
+// streak = 連勝（2026-10-06 本人の決定）。{ key: ゲームと顔ぶれ, counted: 数え終えた対局, wins: 人の id → 連勝の数 }。ホストだけが数えて全員へ送る。
+// beg = 初心者マークを付けている人の id の一覧（各自が自分の端末で付け外しし、ホストが集めて全員へ送る）。
 // undo = この対局で「待った」をした回数（盤のゲームのオンライン）。待ったをすると手の一覧が短くなり、ふつうの同期（長い方が正）では
 //   戻せないので、ホストだけが手を削って undo を1つ進め、受け手は undo が大きい一覧をそのまま受け入れる。対局が替わると 0 に戻る。
 
@@ -58,7 +60,7 @@ function myName() {
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -89,7 +91,69 @@ const isCpu = (id) => typeof id === 'string' && id.startsWith('cpu');
 function nameOf(id) {
   if (!id) return '（空席）';
   if (isCpu(id)) return 'CPU' + id.slice(3);
-  return S.names?.[id] || 'ゲスト';
+  return (S.names?.[id] || 'ゲスト') + (S.beg?.includes(id) ? ' 🔰' : '');
+}
+
+/* ---------- 初心者マーク（2026-10-06 本人の決定）: 付けた人の画面では、いま選べる所（置ける所・出せる札）を強く光らせる ---------- */
+// 付け外しは各自の端末で（localStorage）。名前に 🔰 を付けて、部屋のみんなにも見せる（ホストが集めて state の beg で送る）。
+// 光らせるのは選べる所が限られるゲームだけ（全部のマスが置けるゲームで全部光ると、かえって分かりにくい。style.css の body.beginner）
+const BEG_KEY = 'bg-beginner';
+const BEG_GAMES = new Set(['reversi', 'mancala', 'hasami', 'shogi', 'colors', 'daifugo', 'speed', 'doubt', 'sevens']);
+let beginner = false;
+try { beginner = localStorage.getItem(BEG_KEY) === '1'; } catch { /* 覚えられなくても使える */ }
+
+function setBeginner(on) {
+  beginner = on;
+  try { localStorage.setItem(BEG_KEY, on ? '1' : '0'); } catch { /* 無視 */ }
+  document.body.classList.toggle('beginner', on);
+  showBeginnerBtn();
+  if (S?.mode === 'online') {
+    if (S.isHost) { setBeg(S.myId, on); sendState(); } else send({ type: 'hello', isHost: false, name: myName(), beg: on });
+  }
+  if (S) render();
+}
+
+// ホストが、だれが初心者マークを付けているかを覚える
+function setBeg(id, on) {
+  const now = (S.beg ?? []).filter((x) => x !== id && S.members.includes(x));
+  if (on) now.push(id);
+  S.beg = now;
+  saveRoom();
+}
+
+/* ---------- 連勝（2026-10-06 本人の決定）: 同じゲームを同じ顔ぶれで続けている間、だれが何連勝中かを出す ---------- */
+// Claude の判断: ゲームを変えたり顔ぶれ（CPU を含む）が変わったら数え直す。引き分けは全員の連勝が止まる。勝った人が2人以上（同点の1位）なら全員を数える。
+// オンラインだけ。ホストの端末が数えて全員へ送る（あとから入った人にも同じ数が見えるように）。
+
+const streakKey = () => `${S.gameId}:${[...roundOrder()].sort().join(',')}`;
+
+// 結果から勝った人のプレイヤー番号の一覧（引き分けは空）
+function winnersOf(res) {
+  if (Array.isArray(res.winners)) return res.winners.filter(Number.isInteger);
+  return Number.isInteger(res.winner) ? [res.winner] : [];
+}
+
+function countStreak(res) {
+  if (!S.isHost || S.mode !== 'online' || !S.order) return;
+  const counted = `${S.gameId}:${S.round}`;
+  if (S.streak?.counted === counted) return;
+  const key = streakKey();
+  const before = S.streak?.key === key ? S.streak.wins : {};
+  const won = new Set(winnersOf(res).map((p) => S.order[p]));
+  S.streak = { key, counted, wins: Object.fromEntries(S.order.map((id) => [id, won.has(id) ? (before[id] ?? 0) + 1 : 0])) };
+  saveRoom();
+  sendState();
+}
+
+// 状態の欄に出す「🔥 ◯◯ 3連勝中」（2連勝から）
+function streakHtml() {
+  if (S.mode !== 'online' || !S.order || S.streak?.key !== streakKey()) return '';
+  const list = S.order
+    .map((id) => [id, S.streak.wins?.[id]])
+    .filter(([, n]) => Number.isInteger(n) && n >= 2)
+    .sort((a, b) => b[1] - a[1]);
+  if (!list.length) return '';
+  return '🔥 ' + list.map(([id, n]) => `<b>${esc(id === S.myId ? 'あなた' : nameOf(id))}</b> ${n}連勝中`).join('・');
 }
 
 // この対局のプレイヤー番号 → 人の id。盤のゲームで相手がまだいない席は undefined
@@ -107,9 +171,9 @@ function rulesOf(gameId, rules) {
 }
 
 // 「おまかせ」（待合室でホストが押すと詳細設定を抽選する。2026-10-06 本人の決定）で抽選しない項目。本人が決めたのは
-// 人数・CPU の強さと速さ・盤の大きさ。時間・回数・長さ・難しさ・読み上げ・駒落ちも好みなので抽選しない（Claude の判断）。
+// 人数・CPU の強さと速さ・盤の大きさ。時間・回数・長さ・難しさ・読み上げ・駒落ち・神経衰弱のヒントも好みなので抽選しない（Claude の判断）。
 // マルバツ・将棋の size は盤の大きさでなく遊び方（スーパー・消える・5五将棋）なので抽選する。
-const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window']);
+const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint']);
 const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
 
 // 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、エアホッケーは 2〜3。ほかは2）
@@ -132,7 +196,7 @@ function replay(R) {
     st = game.init(R.order.length, R.seed, { rules: rulesOf(R.gameId, R.rules), prev: R.prev ?? null });
   } else {
     if (Array.isArray(R.order) && R.order.length !== boardSeats(R.gameId, R.rules)) return null;
-    st = game.init({ rules: rulesOf(R.gameId, R.rules) });
+    st = game.init({ rules: rulesOf(R.gameId, R.rules), seed: R.seed ?? 0 }); // seed は始めの盤を種で決めるゲーム（コネクトフォーのじゃま石）が使う
   }
   for (const m of R.moves) {
     st = game.apply(st, m);
@@ -443,6 +507,8 @@ function statusHtml(game, st, res) {
   if (!game.multi && S.clock) html += `<div id="think" class="status-sub think">${thinkHtml(game)}</div>`;
   const extra = game.info?.(st);
   if (extra) html += `<div class="status-sub">${extra}</div>`;
+  const streak = streakHtml();
+  if (streak) html += `<div class="status-sub streak">${streak}</div>`;
   return html;
 }
 
@@ -560,6 +626,7 @@ function renderPage() {
 
   const res = game.result(st);
   if (!game.multi) tickClock(game, st, res);
+  if (res) countStreak(res);
   status.innerHTML = statusHtml(game, st, res);
 
   // 新しく打たれた手だけ動きを付ける（接続表示の更新などで描き直したときは動かさない）
@@ -580,6 +647,9 @@ function renderPage() {
     });
   }
   game.render(board, st, opts);
+  if (beginner && opts.canMove && BEG_GAMES.has(S.gameId) && [...board.querySelectorAll('.playable, .usable, button')].some((e) => getComputedStyle(e).getPropertyValue('--beg').trim() === '1')) {
+    status.insertAdjacentHTML('beforeend', '<div class="status-sub beg-hint">🔰 光っている所が、いま選べる所です</div>');
+  }
   if (fresh) moveSound(game, st, res, prevLen, opts.canMove);
   if (!opts.canMove && S.couldMove !== false) S.waitFrom = Date.now();
   S.couldMove = opts.canMove;
@@ -987,14 +1057,14 @@ function startRound() {
 }
 
 function rematch() {
-  if (S.mode === 'local') { S.moves = []; render(); return; }
+  if (S.mode === 'local') { S.moves = []; S.seed = randomSeed(); render(); return; }
   if (S.isHost) newRound(S.gameId);
   else send({ type: 'rematch' }); // ホストが受け取って新しい対局を始める
 }
 
 function startLocal(gameId) {
   if (!isOwner()) return;
-  S = { mode: 'local', gameId, round: 1, first: 0, seed: 0, order: null, cpus: 0, moves: [], members: [], names: {}, rules: {}, prev: null, carry: null, pick: null };
+  S = { mode: 'local', gameId, round: 1, first: 0, seed: randomSeed(), order: null, cpus: 0, moves: [], members: [], names: {}, rules: {}, prev: null, carry: null, pick: null };
   enterPlay();
 }
 
@@ -1125,17 +1195,17 @@ function openNet() {
 
 function send(msg, qos) { S?.net?.send(msg, qos); }
 function sendState() {
-  const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, undo } = S;
-  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0 });
+  const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, undo, streak, beg } = S;
+  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [] });
 }
 function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves, u: S.undo ?? 0 }); }
-function askState() { send({ type: 'hello', isHost: false, name: myName() }); }
+function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner }); }
 
 function onConn(status) {
   S.conn = status;
   if (status === 'ready') {
-    send({ type: 'hello', isHost: S.isHost, name: myName() });
-    if (S.isHost) sendState();
+    send({ type: 'hello', isHost: S.isHost, name: myName(), beg: beginner });
+    if (S.isHost) { setBeg(S.myId, beginner); sendState(); }
   }
   render();
 }
@@ -1216,6 +1286,7 @@ function acceptMember(msg) {
     send({ type: 'full', to: msg.from });
     return;
   }
+  setBeg(msg.from, msg.beg === true);
   saveRoom();
   sendState();
 }
@@ -1229,6 +1300,8 @@ function adoptState(msg) {
   S.members = msg.members.slice();
   S.names = { ...msg.names };
   S.rules = msg.rules && typeof msg.rules === 'object' ? msg.rules : {};
+  S.beg = Array.isArray(msg.beg) ? msg.beg.filter((id) => typeof id === 'string') : [];
+  S.streak = msg.streak && typeof msg.streak === 'object' && msg.streak.wins && typeof msg.streak.wins === 'object' ? msg.streak : null;
   for (const id of S.members) S.seen[id] ??= Date.now();
   const sameRound = S.gameId === msg.gameId && S.round === msg.round;
   const mu = Number.isInteger(msg.u) ? msg.u : 0;
@@ -1462,6 +1535,20 @@ soundBtn.onclick = () => {
   if (!isMuted()) play('pop');
 };
 showSoundBtn();
+
+const begBtn = el('btn-beginner');
+function showBeginnerBtn() {
+  begBtn.classList.toggle('on', beginner);
+  begBtn.title = beginner ? '初心者マーク: オン（押すとオフ）' : '初心者マーク: オフ（押すとオン。いま選べる所を光らせ、名前に 🔰 を付けます）';
+  begBtn.setAttribute('aria-label', begBtn.title);
+  begBtn.setAttribute('aria-pressed', String(beginner));
+}
+begBtn.onclick = () => {
+  setBeginner(!beginner);
+  toast(beginner ? '🔰 初心者マークを付けました（いま選べる所が光ります）' : '初心者マークを外しました');
+};
+document.body.classList.toggle('beginner', beginner);
+showBeginnerBtn();
 
 const roomParam = new URL(location.href).searchParams.get('room');
 if (!(roomParam && joinRoom(roomParam))) {

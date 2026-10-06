@@ -1,11 +1,13 @@
 // 海戦ゲーム（バトルシップ）。2人。10×10 の自分の海に、5・4・3・3・2マスの船5隻をたてかよこに並べる（2026-10-05 本人承認）。
 // 先手が並べ終えたら後手が並べ、そのあと交代で相手の海のマスを1つずつ撃つ。当たっても外れても次は相手の番（本人承認）。
 // 詳細設定「当たったらもう一度」（2026-10-06 本人の決定。最初はなし）: 当たったら（沈めたときも）続けてもう1回撃てる。外れたら相手の番。
+// 詳細設定「ソナー」（2026-10-06 本人の決定。最初はなし）: 撃つ代わりに1回だけ、相手の海の 3×3（盤の端では欠ける）を調べて、
+//   まだ撃っていないマスのうち船のマスがいくつあるかが分かる（Claude の判断: 数まで出す・使ったら相手の番・相手にも場所と数が見える）。
 // 船のマスを全部撃たれたら、その船は沈む。相手の船を先に全部沈めた方の勝ち。
 // 決まりごと（Claude の判断）: 船どうしは となり合ってもよい（重なるのはだめ）。どの船を沈めたかは相手にも知らせる。
 // 相手の船は画面に出さないが、手札と同じ簡易の隠し方（全員の端末が全部の配置を知っている）。同じ画面の2人では隠せないので、オンラインだけ（noLocal）。
 // マスの番号 = 段*10+列（段0が一番上）。
-// 手: 並べる { t: 'place', ships: [[段, 列, たてか], …]（SHIPS の順） } / 撃つ = マスの番号
+// 手: 並べる { t: 'place', ships: [[段, 列, たてか], …]（SHIPS の順） } / 撃つ = マスの番号 / ソナー { t: 'sonar', c: 真ん中のマスの番号 }
 
 import { CPU_SETTING } from './util.js';
 
@@ -59,6 +61,15 @@ export function randomShips() {
 }
 
 // p が撃った結果から、沈めた船の番号の一覧
+// マス c を真ん中にした 3×3（盤の外は除く）
+export function sonarArea(c) {
+  const r0 = Math.floor(c / N);
+  const c0 = c % N;
+  const out = [];
+  for (let r = r0 - 1; r <= r0 + 1; r++) for (let k = c0 - 1; k <= c0 + 1; k++) if (r >= 0 && r < N && k >= 0 && k < N) out.push(r * N + k);
+  return out;
+}
+
 const sunkList = (s, p) => SHIPS.map((_, k) => k).filter((k) => s.grid[1 - p].every((g, i) => g !== k || s.shots[p][i]));
 const hitsOf = (s, p) => s.shots[p].filter((x, i) => x && s.grid[1 - p][i] >= 0).length;
 
@@ -76,7 +87,7 @@ function kaisenCpu(s, p, rules) {
   const open = [];
   for (let i = 0; i < N * N; i++) if (shot[i] && opp[i] >= 0 && !sunk.has(opp[i])) open.push(i);
   const free = (r, c) => r >= 0 && r < N && c >= 0 && c < N && !shot[r * N + c];
-  const untried = Array.from({ length: N * N }, (_, i) => i).filter((i) => !shot[i]);
+  let untried = Array.from({ length: N * N }, (_, i) => i).filter((i) => !shot[i]);
   const pick = (a) => a[Math.floor(Math.random() * a.length)];
 
   const target = () => {
@@ -100,22 +111,47 @@ function kaisenCpu(s, p, rules) {
     const t = target();
     if (t !== null) return t;
   }
-  if (level !== 'strong') return pick(untried);
-  // つよい: 残っている船が置ける並び方の数が多いマスを撃つ
-  const left = SHIPS.filter((_, k) => !sunk.has(k));
-  const score = Array(N * N).fill(0);
-  for (const len of left) {
-    for (let r = 0; r < N; r++) {
-      for (let c = 0; c < N; c++) {
-        for (const v of [false, true]) {
-          const cells = Array.from({ length: len }, (_, j) => (r + (v ? j : 0)) * N + c + (v ? 0 : j));
-          if (v ? r + len > N : c + len > N) continue;
-          if (cells.some((i) => shot[i])) continue;
-          for (const i of cells) score[i] += 1;
+  // 残っている船が置ける並び方の数（つよいが使う。ソナーの場所選びにも使う）
+  const scoreMap = () => {
+    const left = SHIPS.filter((_, k) => !sunk.has(k));
+    const score = Array(N * N).fill(0);
+    for (const len of left) {
+      for (let r = 0; r < N; r++) {
+        for (let c = 0; c < N; c++) {
+          for (const v of [false, true]) {
+            if (v ? r + len > N : c + len > N) continue;
+            const cells = Array.from({ length: len }, (_, j) => (r + (v ? j : 0)) * N + c + (v ? 0 : j));
+            if (cells.some((i) => shot[i])) continue;
+            for (const i of cells) score[i] += 1;
+          }
         }
       }
     }
+    return score;
+  };
+  // ソナー: 当たりを追っていないときに使う（6発撃ったあと。よわいは毎回3割の見込みで）。
+  // 場所は よわい 適当・ふつう まだ撃っていないマスが多い所・つよい 船が入れる見込みが大きい所。どれも盤の端に寄らない
+  const shots = shot.filter(Boolean).length;
+  if (s.sonarOn && !s.sonar[p] && shots >= 6 && (level !== 'weak' || Math.random() < 0.3)) {
+    const centers = [];
+    for (let r = 1; r < N - 1; r++) for (let c = 1; c < N - 1; c++) centers.push(r * N + c);
+    if (level === 'weak') return { t: 'sonar', c: pick(centers) };
+    const sc = level === 'strong' ? scoreMap() : null;
+    const val = (c) => sonarArea(c).reduce((a, i) => a + (shot[i] ? 0 : sc ? sc[i] : 1), 0);
+    const top = Math.max(...centers.map(val));
+    return { t: 'sonar', c: pick(centers.filter((c) => val(c) === top)) };
   }
+  // ソナーの結果を使う: まだ見つけていない船のマスが残っていればその中を撃ち、残っていなければその中は撃たない
+  const sn = s.sonar?.[p];
+  if (sn) {
+    const zone = sn.cells.filter((i) => !shot[i]);
+    const rest = sn.n - sn.cells.filter((i) => shot[i] && opp[i] >= 0).length;
+    if (rest > 0 && zone.length) untried = zone;
+    else if (zone.length && zone.length < untried.length) untried = untried.filter((i) => !zone.includes(i));
+  }
+  if (level !== 'strong') return pick(untried);
+  // つよい: 残っている船が置ける並び方の数が多いマスを撃つ
+  const score = scoreMap();
   const best = Math.max(...untried.map((i) => score[i]));
   return pick(untried.filter((i) => score[i] === best));
 }
@@ -123,6 +159,7 @@ function kaisenCpu(s, p, rules) {
 /* ---------- 画面 ---------- */
 
 let plc = { key: null, ships: [], sel: 0, vert: false }; // 並べている途中（描き直しで消えないよう外に持つ）
+let sonarMode = null; // ソナーで調べる所を選んでいる途中なら「手の数:自分の番号」（描き直しで消えないよう外に持つ）
 
 const game = {
   id: 'kaisen',
@@ -135,11 +172,12 @@ const game = {
   players: ['先手', '後手'],
   settings: [
     CPU_SETTING,
+    { key: 'sonar', label: 'ソナー', desc: '撃つ代わりに1回だけ、相手の海の 3×3 に船のマスがいくつあるか調べられる（使ったら相手の番）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'again', label: '当たったらもう一度', desc: '当たったら（沈めたときも）続けてもう1回撃てる。外れたら相手の番', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
   ],
 
   init({ rules = {} } = {}) {
-    return { again: rules.again === 'on', phase: 'place', turn: 0, grid: [null, null], shots: [Array(N * N).fill(false), Array(N * N).fill(false)], last: null, won: null, count: 0 };
+    return { again: rules.again === 'on', sonarOn: rules.sonar === 'on', sonar: [null, null], phase: 'place', turn: 0, grid: [null, null], shots: [Array(N * N).fill(false), Array(N * N).fill(false)], last: null, won: null, count: 0 };
   },
 
   turn(s) { return s.turn; },
@@ -157,8 +195,16 @@ const game = {
       else { t.phase = 'fire'; t.turn = 0; }
       return t;
     }
-    if (!Number.isInteger(m) || m < 0 || m >= N * N) return null;
     const p = s.turn;
+    if (m && m.t === 'sonar') {
+      if (!s.sonarOn || s.sonar?.[p] || !Number.isInteger(m.c) || m.c < 0 || m.c >= N * N) return null;
+      const cells = sonarArea(m.c).filter((i) => !s.shots[p][i]);
+      const n = cells.filter((i) => s.grid[1 - p][i] >= 0).length;
+      const sonar = s.sonar.slice();
+      sonar[p] = { c: m.c, n, cells };
+      return { ...s, sonar, turn: 1 - p, count: s.count + 1, last: { p, sonar: m.c, n } };
+    }
+    if (!Number.isInteger(m) || m < 0 || m >= N * N) return null;
     if (s.shots[p][m]) return null;
     const shots = s.shots.slice();
     shots[p] = shots[p].slice();
@@ -185,6 +231,7 @@ const game = {
   sound(a, b) {
     const l = b.last;
     if (!l || l.placed) return 'place';
+    if (l.sonar !== undefined) return 'question';
     return l.sunk !== null ? 'punch' : l.hit ? 'hit' : 'pop';
   },
 
@@ -192,6 +239,7 @@ const game = {
     const l = s.last;
     if (!l || l.placed || s.won !== null) return '';
     const who = `<b class="pl p${l.p}">${game.players[l.p]}</b>`;
+    if (l.sonar !== undefined) return `${who}がソナーを使った: まだ撃っていないマスのうち、船のマスが<b>${l.n}つ</b>`;
     const more = s.again && l.hit ? '（もう一度撃てる）' : '';
     if (l.sunk !== null) return `${who}が${SHIP_NAMES[l.sunk]}を沈めた！${more}`;
     return `${who}の弾は${l.hit ? '<b>命中！</b>' : 'はずれ'}${more}`;
@@ -227,13 +275,28 @@ const game = {
       root.append(sea(s, 0, { title: `${game.players[0]}の海（${game.players[1]}が撃つ）`, showShips: over, small: true }));
       return;
     }
-    root.append(sea(s, 1 - me, { title: o.canMove ? '相手の海 — 撃つマスを選ぶ' : '相手の海', showShips: over, onShoot: o.canMove ? (i) => o.onMove(i) : null }));
+    const canSonar = o.canMove && s.sonarOn && !s.sonar[me];
+    const aiming = canSonar && sonarMode === `${s.count}:${me}`;
+    const title = aiming ? '相手の海 — ソナーで調べる所（3×3の真ん中）を選ぶ' : o.canMove ? '相手の海 — 撃つマスを選ぶ' : '相手の海';
+    const shoot = aiming ? (i) => { sonarMode = null; o.onMove({ t: 'sonar', c: i }); } : o.canMove ? (i) => o.onMove(i) : null;
+    root.append(sea(s, 1 - me, { title, showShips: over, onShoot: shoot, aiming }));
+    if (canSonar) {
+      const acts = document.createElement('div');
+      acts.className = 'cc-actions ks-acts';
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn small ' + (aiming ? 'ghost' : 'secondary');
+      b.textContent = aiming ? 'ソナーをやめて撃つ' : '📡 ソナーを使う（1回だけ）';
+      b.onclick = () => { sonarMode = aiming ? null : `${s.count}:${me}`; game.render(root, s, o); };
+      acts.append(b);
+      root.append(acts);
+    }
     root.append(sea(s, me, { title: 'あなたの海', showShips: true, small: true }));
   },
 };
 
 // 海の盤。owner の海に、相手（1 - owner）が撃ったあとを出す
-function sea(s, owner, { title, showShips, onShoot = null, small = false }) {
+function sea(s, owner, { title, showShips, onShoot = null, small = false, aiming = false }) {
   const box = document.createElement('div');
   box.className = 'ks-sea' + (small ? ' small' : '');
   const head = document.createElement('div');
@@ -244,24 +307,35 @@ function sea(s, owner, { title, showShips, onShoot = null, small = false }) {
   const shooter = 1 - owner;
   const ships = s.grid[owner];
   const sunk = ships ? new Set(sunkList(s, shooter)) : new Set();
+  const sn = s.sonar?.[shooter] ?? null; // この海を調べたソナー
+  const zone = sn ? new Set(sonarArea(sn.c)) : null;
   for (let i = 0; i < N * N; i++) {
     const shot = s.shots[shooter][i];
     const k = ships ? ships[i] : -1;
-    const can = onShoot && !shot;
+    const can = onShoot && (aiming || !shot);
     const cell = document.createElement(can ? 'button' : 'div');
     let cls = 'ks-cell';
     if (k >= 0 && (showShips || sunk.has(k))) cls += ' ship' + (sunk.has(k) ? ' sunk' : '');
     if (shot) cls += k >= 0 ? ' hit' : ' miss';
-    if (s.last && !s.last.placed && s.last.cell === i && s.last.p === shooter) cls += ' last';
+    if (s.last && !s.last.placed && (s.last.cell === i || s.last.sonar === i) && s.last.p === shooter) cls += ' last';
+    if (zone?.has(i)) cls += ' sonar';
     if (can) {
       cell.type = 'button';
       cls += ' playable';
       cell.onclick = () => onShoot(i);
       cell.setAttribute('aria-label', `${Math.floor(i / N) + 1}段目 ${(i % N) + 1}列目`);
     }
+    if (sn && sn.c === i) {
+      const b = document.createElement('span');
+      b.className = 'ks-sonar-n';
+      b.textContent = sn.n;
+      b.title = `ソナー: 船のマスが${sn.n}つ`;
+      cell.append(b);
+    }
     cell.className = cls;
     grid.append(cell);
   }
+  if (aiming) grid.classList.add('aiming');
   box.append(head, grid);
   return box;
 }

@@ -1,5 +1,5 @@
 // ぴったりストップ。決められた秒数（5〜15秒）ちょうどで「ストップ」を押し、近い人ほど高い点。5回。
-// 時計は最初の3秒だけ見えて、あとは消える。毎回、近い順に 3・2・1点（同じずれは同じ点。押さなかった人は0点）。
+// 時計は最初の3秒だけ見えて、あとは消える（詳細設定「時計の見える時間」で 0秒・5秒にもできる。2026-10-06 本人の決定）。毎回、近い順に 3・2・1点（同じずれは同じ点。押さなかった人は0点）。
 // 時間は各自の端末で「画面に出てから押すまで」を測る（party.js の since）ので、通信の遅れで不利にならない。
 //
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open →（全員押した / 秒数＋5秒）→ close → shown → next …
@@ -12,7 +12,8 @@ const TOTAL = 5;
 const READY_MS = 3000;
 const SHOWN_MS = 4500;
 const GRACE_MS = 1500;
-const SHOW_CLOCK_MS = 3000; // 時計が見えている時間
+const PEEK_CHOICES = [[3, '3秒'], [0, '見えない'], [5, '5秒']]; // 時計が見えている秒数（詳細設定）
+const peekMs = (s) => (PEEK_CHOICES.some(([v]) => v === s.rules.peek) ? s.rules.peek : 3) * 1000;
 const EXTRA_MS = 5000; // 目標の秒数を過ぎても押せる時間
 
 const qKey = (s, q = s.q) => `pittari:${s.seed}:${q}`;
@@ -43,6 +44,7 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'fixed', label: 'いつも10秒', desc: '止める秒数を毎回10秒にする（いいえ なら5〜15秒で毎回変わる）', def: false },
+    { key: 'peek', label: '時計の見える時間', desc: '始めに時計が見えている時間。「見えない」は最初から自分の感覚だけで数える', def: 3, choices: PEEK_CHOICES },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -155,7 +157,8 @@ export default {
     root.append(wrap);
 
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">時計は最初の${SHOW_CLOCK_MS / 1000}秒だけ見えます</div>`;
+      const peek = peekMs(s);
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">${peek ? `時計は最初の${peek / 1000}秒だけ見えます` : '時計は見えません'}</div>`;
       return;
     }
     const q = s.q;
@@ -177,7 +180,7 @@ export default {
         const tick = () => {
           if (!clock.isConnected) return;
           const t = since(key);
-          if (t < SHOW_CLOCK_MS) {
+          if (t < peekMs(s)) {
             clock.textContent = sec(t);
             requestAnimationFrame(tick);
           } else {

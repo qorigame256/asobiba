@@ -4,10 +4,11 @@
 // 枚数（詳細設定）: 48 … A〜Q / 36 … A〜9 / 24 … A〜6（どれも4マーク分。ジョーカーなし）。
 //   すき間のない長方形に並べるため、並べやすい枚数にした（本人の決定・2026-10-03。前は 52枚・26枚）。並べ方は SIZES の cols 列。
 // 詳細設定「続けて取れる組」（2026-10-06 本人の決定）: 組を取って続けてめくれるのは決めた組の数まで。そこまで取ったら次の人へ。
+// 詳細設定「見た札のヒント」（2026-10-06 本人の決定。子ども向けに簡単にする）: 一度めくった札は、伏せたあとも真ん中に小さく数字が残る（マークは出さない）。
 // 手: { p, t: 'flip', i: 何枚目の札か }。めくった札がもう表なら反則なので、同じ手が2回来ても2回目は弾かれる。
 
 import { mulberry32, shuffle } from './util.js';
-import { makeDeck, rankOf, cardEl, backEl, cardLabel } from './cards.js';
+import { makeDeck, rankOf, rankLabel, cardEl, backEl, cardLabel } from './cards.js';
 
 const SIZES = { 48: { top: 12, cols: 8 }, 36: { top: 9, cols: 6 }, 24: { top: 6, cols: 6 } };
 
@@ -26,6 +27,7 @@ export default {
   maxPlayers: 8,
   settings: [
     { key: 'size', label: '枚数', desc: 'すき間のない長方形に並べる', def: 48, choices: [[48, '48枚（A〜Q・8×6）'], [36, '36枚（A〜9・6×6）'], [24, '24枚（A〜6・6×4）']] },
+    { key: 'hint', label: '見た札のヒント', desc: '一度めくった札は、伏せたあとも小さく数字が残る（覚えなくても取れるので、小さい子と遊ぶとき向け）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'streak', label: '続けて取れる組', desc: '組を取ったあと続けてめくれるのは、この数の組まで。覚えるのが得意な人の独走を防ぐ', def: 0, choices: [[0, '何組でも'], [2, '2組まで'], [3, '3組まで']] },
   ],
 
@@ -34,7 +36,7 @@ export default {
     const deck = makeDeck().filter((c) => rankOf(c) <= top);
     const cards = shuffle(deck, mulberry32(seed));
     return {
-      n, cards, limit: [2, 3].includes(rules.streak) ? rules.streak : 0, streak: 0, taken: Array(cards.length).fill(null), open: [], turn: 0, scores: Array(n).fill(0),
+      n, cards, hint: rules.hint === 'on', limit: [2, 3].includes(rules.streak) ? rules.streak : 0, streak: 0, taken: Array(cards.length).fill(null), open: [], turn: 0, scores: Array(n).fill(0),
       seen: Array(cards.length).fill(false), done: false, step: 0, last: null,
     };
   },
@@ -176,6 +178,12 @@ export default {
         e.onclick = () => o.onMove({ t: 'flip', i });
       } else {
         e = backEl();
+      }
+      if (s.hint && s.seen[i] && s.taken[i] === null && !s.open.includes(i)) {
+        const h = document.createElement('span');
+        h.className = 'mm-hint';
+        h.textContent = rankLabel(rankOf(card));
+        e.append(h);
       }
       if (o.fresh && s.last?.t === 'pair' && s.last.match && (s.last.a === i || s.last.b === i)) e.classList.add('got');
       grid.append(e);
