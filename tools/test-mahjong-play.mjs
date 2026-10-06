@@ -144,6 +144,23 @@ for (const n of [4, 3, 5]) {
   check('5人麻雀: 親から数えて東南西北、5人目は自風なし', JSON.stringify(winds) === JSON.stringify([[27, 28, 29, 30, -1], [-1, 27, 28, 29, 30], [30, -1, 27, 28, 29]]), JSON.stringify(winds));
   check('5人麻雀: 東風戦は東1〜東5局、持ち点25000点', s.scores.every((x) => x === 25000) && s.scores.length === 5);
 }
+// CPU の強さ「つよい」（詳細設定）: 全員つよいで3人・4人・5人を1局ずつ。反則を出さず、決まりごとが崩れない
+for (const n of [3, 4, 5]) {
+  let x = mahjong.init(n, 77 + n, { rules: { length: 'east', players: n, cpu: 'strong' } });
+  const start = x.scores[0];
+  const rng = mulberry32(n * 31);
+  let bad = x.rules.cpu === 'strong' ? null : 'つよいが局面に入っていない';
+  while (!bad && !mahjong.result(x)) {
+    const actors = [...Array(n).keys()].filter((p) => mahjong.canAct(x, p));
+    const p = actors.length ? actors[Math.floor(rng() * actors.length)] : -1;
+    const m = p >= 0 ? mahjong.cpu(x, p) : mahjong.referee(x).move;
+    const next = mahjong.apply(x, { ...m, p });
+    if (!next) { bad = `反則 ${JSON.stringify(m)}`; break; }
+    x = next;
+    bad = invariant(x, start);
+  }
+  check(`${n}人 CPU つよい: 最後まで反則なく打てる`, !bad, bad ?? '');
+}
 check(`${games}局を最後まで進めて決まりごとが崩れない`, failed === 0, JSON.stringify(sum));
 check('ロン・ツモ・流局・鳴き・リーチ・カン・抜きがどれも起きた', Object.values(sum).every((v) => v > 0));
 console.log(failed ? `\n${failed} 件の失敗` : '\nすべて OK');

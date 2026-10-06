@@ -17,7 +17,7 @@
 //   自分も並んでいても相手の勝ち。60手で引き分け。手 = 行き先のマス + 9 × 出どころ（0〜2 = 手元の小・中・大、3〜11 = 盤のマス + 3）。
 //   Claude の判断: 動かす駒は元のマスへ戻せない・打てる手が無ければ引き分け・下に隠れた駒の数は画面に小さく出す。
 
-import { CPU_SETTING, boardCpu, hintIs } from './util.js';
+import { CPU_SETTING, boardCpu, hintIs, TEAM_SETTING, teamOn, isMate, teamResult } from './util.js';
 
 const LINES = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
 const MARKS = [
@@ -387,6 +387,7 @@ function wideCpu(s, rules) {
   if (Math.random() < { weak: 0.5, normal: 0.1, strong: 0 }[level]) return any();
   if (level !== 'weak' || Math.random() < 0.5) {
     for (let d = 1; d < s.n; d++) {
+      if (isMate(s, p, (p + d) % s.n)) continue; // チーム戦: 味方はふさがない
       const threat = winningCells(s, (p + d) % s.n);
       if (threat.length) return threat[Math.floor(Math.random() * threat.length)];
     }
@@ -415,7 +416,7 @@ function wideCpu(s, rules) {
       else if (owner === p) {
         v += ATTACK[count];
         if (count === s.k - 2) near++;
-      } else {
+      } else if (!isMate(s, p, owner)) {
         const soon = (owner - p + s.n) % s.n; // 1 = 次の番の人
         v += GUARD[count] * (soon === 1 ? 1 : 0.7);
       }
@@ -511,6 +512,7 @@ export default {
       desc: '3人・4人で遊ぶときの盤の大きさ。どれも3つ並べたら勝ち',
       choices: WIDE_CHOICES,
     },
+    TEAM_SETTING,
     CPU_SETTING,
   ],
 
@@ -545,7 +547,7 @@ export default {
     const n = rules.players ?? 2;
     if (n >= 3) {
       const [w, k] = wideSize(rules.wide, n);
-      return { wide: true, n, w, k, board: Array(w * w).fill(null), turn: 0, last: null, won: null };
+      return { wide: true, n, w, k, board: Array(w * w).fill(null), turn: 0, last: null, won: null, team: teamOn(rules) };
     }
     if (rules.size === 'gobble') return { gob: true, stacks: Array.from({ length: 9 }, () => []), hand: [[2, 2, 2], [2, 2, 2]], turn: 0, last: null, from: null, n: 0, won: null };
     if (rules.size === 'vanish') return { vanish: true, board: Array(9).fill(null), hist: [[], []], turn: 0, last: null, n: 0, won: null };
@@ -568,7 +570,7 @@ export default {
 
   result(s) {
     if (s.big) return bigResult(s);
-    if (s.wide) return wideResult(s);
+    if (s.wide) return s.team ? teamResult(wideResult(s)) : wideResult(s);
     if (s.vanish) return vanishResult(s);
     if (s.gob) return gobResult(s);
     const line = lineOf(s.board);

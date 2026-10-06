@@ -65,12 +65,12 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'mode', label: '遊び方', desc: '順番に: 1人ずつ予想し、全員の予想が見える／同時に: 全員が一斉に予想する早当て', def: 'turn', choices: [['turn', '順番に当てる'], ['race', '同時に早当て']] },
-    { key: 'digits', label: '桁数', desc: '当てる数字の長さ。4桁のほうが難しい', def: 4, choices: [[3, '3桁'], [4, '4桁']] },
+    { key: 'digits', label: '桁数', desc: '当てる数字の長さ。長いほど難しい（5桁は数字が得意な人向け）', def: 4, choices: [[3, '3桁'], [4, '4桁'], [5, '5桁']] },
     { key: 'dup', label: '同じ数字', desc: '使ってよい: 答えにも予想にも同じ数字が何回も出てくる（例 1123）。難しくなる', def: 'off', choices: [['off', '使わない'], ['on', '使ってよい']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const digits = rules.digits === 3 ? 3 : 4;
+    const digits = [3, 5].includes(rules.digits) ? rules.digits : 4; // 5桁は 2026-10-06 本人の決定
     const mode = rules.mode === 'race' ? 'race' : 'turn';
     const dup = rules.dup === 'on';
     const rng = mulberry32(seed);

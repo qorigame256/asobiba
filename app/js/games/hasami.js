@@ -4,6 +4,8 @@
 // 相手の駒を5個取ったら勝ち。詳細設定で「全部取ったら勝ち」も選べる（2026-10-06 本人の決定）。
 // Claude の判断: 自分から相手の駒の間に入っても取られない。隅の駒は、となりの2マスをふさげば取れる。
 //   動かせる駒が無くなった人の負け。同じ局面（次の番も同じ）が3回出たら引き分け、300手でも引き分け。
+// 詳細設定「ななめにも動ける」（2026-10-06 本人の決定。最初はなし）: 駒がななめにも何マスでも動ける（角と飛車を合わせた動き）。
+//   取るのは今どおり、たて・よこではさんだときだけ（Claude の判断）。局面の diag。
 // 手 = 動かす駒のマス * 81 + 行き先のマス（マス = 段*9+列。段0が一番上）。
 
 import { CPU_SETTING, boardCpu, mulberry32 } from './util.js';
@@ -11,19 +13,20 @@ import { CPU_SETTING, boardCpu, mulberry32 } from './util.js';
 const N = 9;
 const CELLS = N * N;
 const DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+const DIAG = [[-1, -1], [-1, 1], [1, -1], [1, 1]]; // ななめにも動ける（詳細設定）ときに足す向き
 const CORNERS = [[0, [1, N]], [N - 1, [N - 2, 2 * N - 1]], [N * (N - 1), [N * (N - 2), N * (N - 1) + 1]], [CELLS - 1, [CELLS - 2, CELLS - 1 - N]]];
 const MAX_PLY = 300;
 const NAMES = ['歩', 'と'];
 
 const inside = (r, c) => r >= 0 && r < N && c >= 0 && c < N;
 
-function movesOf(board, p) {
+function movesOf(board, p, diag = false) {
   const list = [];
   for (let f = 0; f < CELLS; f++) {
     if (board[f] !== p) continue;
     const r0 = Math.floor(f / N);
     const c0 = f % N;
-    for (const [dr, dc] of DIRS) {
+    for (const [dr, dc] of diag ? [...DIRS, ...DIAG] : DIRS) {
       let r = r0 + dr;
       let c = c0 + dc;
       while (inside(r, c) && board[r * N + c] === null) {
@@ -37,12 +40,13 @@ function movesOf(board, p) {
 }
 
 // p に動かせる駒が1つでもあるか（movesOf より速い。apply が毎回使う）
-function canMoveAny(board, p) {
+function canMoveAny(board, p, diag = false) {
   for (let f = 0; f < CELLS; f++) {
     if (board[f] !== p) continue;
     const r = Math.floor(f / N);
     const c = f % N;
     if ((r > 0 && board[f - N] === null) || (r < N - 1 && board[f + N] === null) || (c > 0 && board[f - 1] === null) || (c < N - 1 && board[f + 1] === null)) return true;
+    if (diag && DIAG.some(([dr, dc]) => inside(r + dr, c + dc) && board[(r + dr) * N + c + dc] === null)) return true;
   }
   return false;
 }
@@ -106,13 +110,14 @@ export default {
   ready: true,
   players: ['先手（歩）', '後手（と）'],
   settings: [
+    { key: 'diag', label: 'ななめにも動ける', desc: '駒がななめにも何マスでも動ける。取るのは今どおり、たて・よこではさんだときだけ', def: false },
     { key: 'goal', label: '勝ち', desc: '何個取ったら勝ちか。「全部」は長くなる', def: 5, choices: [[5, '5個取ったら勝ち'], ['all', '全部（9個）取ったら勝ち']] },
     CPU_SETTING,
   ],
 
   // CPU: 何手先まで読むかで強さを変える（よわい1・ふつう2・つよい3）。弱いほど適当に打つことがある
   cpu(s, p, rules) {
-    return boardCpu(this, s, rules, (x) => movesOf(x.board, x.turn), score, {
+    return boardCpu(this, s, rules, (x) => movesOf(x.board, x.turn, x.diag), score, {
       depth: { weak: 1, normal: 2, strong: 3 }, mistake: { weak: 0.35, normal: 0.1, strong: 0 },
     });
   },
@@ -120,7 +125,7 @@ export default {
   init({ rules = {} } = {}) {
     const board = Array(CELLS).fill(null);
     for (let c = 0; c < N; c++) { board[c] = 1; board[(N - 1) * N + c] = 0; }
-    return { board, goal: rules.goal === 'all' ? N : 5, turn: 0, taken: [0, 0], last: null, ply: 0, won: null, hist: (([a, b]) => ({ a, b, prev: null, cap: true }))(hashOf(board, 0)) };
+    return { board, goal: rules.goal === 'all' ? N : 5, diag: rules.diag === true, turn: 0, taken: [0, 0], last: null, ply: 0, won: null, hist: (([a, b]) => ({ a, b, prev: null, cap: true }))(hashOf(board, 0)) };
   },
 
   turn(s) { return s.turn; },
@@ -131,7 +136,7 @@ export default {
     const t = m % CELLS;
     if (s.board[f] !== s.turn || s.board[t] !== null) return null;
     const [fr, fc, tr, tc] = [Math.floor(f / N), f % N, Math.floor(t / N), t % N];
-    if (fr !== tr && fc !== tc) return null;
+    if (fr !== tr && fc !== tc && !(s.diag && Math.abs(tr - fr) === Math.abs(tc - fc))) return null;
     const dr = Math.sign(tr - fr);
     const dc = Math.sign(tc - fc);
     for (let r = fr + dr, c = fc + dc; r !== tr || c !== tc; r += dr, c += dc) if (s.board[r * N + c] !== null) return null;
@@ -151,7 +156,7 @@ export default {
     const ply = s.ply + 1;
     let won = null;
     if (taken[p] >= s.goal) won = { winner: p };
-    else if (!canMoveAny(board, turn)) won = { winner: p, stuck: true };
+    else if (!canMoveAny(board, turn, s.diag)) won = { winner: p, stuck: true };
     else if (seenCount(hist, hist.a, hist.b) >= 3) won = { winner: null, repeat: true };
     else if (ply >= MAX_PLY) won = { winner: null, long: true };
     return { ...s, board, turn, taken, last: { f, t, cap }, ply, won, hist };
@@ -175,7 +180,7 @@ export default {
     const key = `${s.ply}:${o.me}`;
     if (ui.key !== key) ui = { key, from: null };
     const can = o.canMove && !s.won;
-    const legal = can ? movesOf(s.board, s.turn) : [];
+    const legal = can ? movesOf(s.board, s.turn, s.diag) : [];
     const movable = new Set(legal.map((m) => Math.floor(m / CELLS)));
     const targets = new Set(ui.from === null ? [] : legal.filter((m) => Math.floor(m / CELLS) === ui.from).map((m) => m % CELLS));
     const caught = new Set(o.fresh && s.last ? s.last.cap : []);

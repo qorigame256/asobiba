@@ -70,6 +70,17 @@ export function boardCpu(game, st, rules, legal, score, opts) {
 }
 
 // 人の名前など、外から来た文字を HTML に埋め込むときに使う
+// 4人のチーム戦（マルバツ・コネクトフォー・リバーシの詳細設定。2026-10-06 本人の決定）: 席 0・2 と 1・3 が味方（1つおき＝向かい合う2人）。
+export const TEAM_SETTING = { key: 'team', label: 'チーム戦', desc: '4人のとき、1・3番目と2・4番目がチーム。どちらかが勝てばチームの勝ち', def: false };
+export const teamOn = (rules) => rules?.team === true && rules?.players === 4;
+export const isMate = (s, p, q) => !!s.team && p !== q && (p - q) % 2 === 0; // q が p の味方か
+// 勝った人のチームの2人を winners に入れる（team = チームの番号 0 か 1）。引き分けはそのまま
+export function teamResult(res) {
+  if (!res || res.winner === null || res.winner === undefined) return res;
+  const t = res.winner % 2;
+  return { ...res, winners: [t, t + 2], team: t };
+}
+
 // おすすめの手（main.js。2026-10-06 本人の決定）: 盤のゲームの render に o.hint として渡る手と、m が同じ手か
 export const hintIs = (o, m) => o?.hint !== undefined && o.hint !== null && JSON.stringify(o.hint) === JSON.stringify(m);
 // 将棋の仲間の手（{ f, t } / { d, t }）で光らせるマス（動かす駒と行き先）

@@ -159,6 +159,26 @@ function tallyHtml() {
   const list = ids.map((id) => `<b>${esc(id === S.myId ? 'あなた' : nameOf(id))}</b> ${w(id)}勝`).join('・');
   return `🏆 この部屋の成績（${t.games}回）: ${list}`;
 }
+// 待合室の成績表。ホストには「0に戻す」も付ける（2026-10-06 本人の決定。連勝はそのまま）
+function tallyBlock() {
+  const html = tallyHtml();
+  if (!html) return null;
+  const p = document.createElement('p');
+  p.className = 'lobby-note tally';
+  p.innerHTML = html;
+  if (S.isHost) {
+    const b = makeButton('0に戻す', () => {
+      if (!confirm('この部屋の成績を0に戻しますか？')) return;
+      S.tally = null;
+      saveRoom();
+      sendState();
+      render();
+    }, 'ghost small');
+    b.classList.add('tally-reset');
+    p.append(' ', b);
+  }
+  return p;
+}
 
 /* ---------- 連勝（2026-10-06 本人の決定）: 同じゲームを同じ顔ぶれで続けている間、だれが何連勝中かを出す ---------- */
 // Claude の判断: ゲームを変えたり顔ぶれ（CPU を含む）が変わったら数え直す。引き分けは全員の連勝が止まる。勝った人が2人以上（同点の1位）なら全員を数える。
@@ -538,7 +558,10 @@ function statusHtml(game, st, res) {
       const id = roundOrder()[p];
       return esc(nameOf(id)) + (!isCpu(id) && !S.members.includes(id) ? '・CPU が代わりに' : '');
     };
-    if (res) {
+    if (res && res.team !== undefined && Array.isArray(res.winners)) { // 4人のチーム戦（マルバツ・コネクトフォー・リバーシの詳細設定）
+      const pair = res.winners.map(name).join('・');
+      main = me !== null && me !== SPECTATOR && S.mode !== 'local' ? (res.winners.includes(me) ? `あなたのチーム（${pair}）の勝ち！🎉` : `${pair}のチームの勝ち…`) : `${pair}のチームの勝ち！🎉`;
+    } else if (res) {
       if (res.winner === null) main = '引き分け！';
       else if (S.mode === 'local') main = `${name(res.winner)}の勝ち！🎉`;
       else if (me === SPECTATOR) main = `${name(res.winner)}（${who(res.winner)}）の勝ち！`;
@@ -570,6 +593,10 @@ function statusHtml(game, st, res) {
   if (!game.multi && S.clock) html += `<div id="think" class="status-sub think">${thinkHtml(game)}</div>`;
   const extra = game.info?.(st);
   if (extra) html += `<div class="status-sub">${extra}</div>`;
+  if (!game.multi && st.team && game.players.length >= 4) { // チーム戦の組み合わせ
+    const nm = (p) => `<b class="pl p${p}">${game.players[p]}</b>`;
+    html += `<div class="status-sub">チーム戦: ${nm(0)}・${nm(2)} 対 ${nm(1)}・${nm(3)}</div>`;
+  }
   const streak = streakHtml();
   if (streak) html += `<div class="status-sub streak">${streak}</div>`;
   const hints = game.multi ? '' : hintHtml(game);
@@ -959,10 +986,10 @@ function renderLobby(game) {
   html += short
     ? `<p class="lobby-total">あと${game.minPlayers - humans.length}人そろうと始められます</p>`
     : `<p class="lobby-total">${humans.length + cpus}人で遊びます</p>`;
-  const tally = tallyHtml();
-  if (tally) html += `<p class="lobby-note tally">${tally}</p>`;
   board.className = 'board lobby';
   board.innerHTML = html;
+  const tally = tallyBlock();
+  if (tally) board.append(tally);
   if (game.settings) board.append(rulesPanel(game));
 
   if (!S.isHost) return;
@@ -1034,8 +1061,8 @@ function renderBoardLobby(game) {
     w.textContent = '観戦: ' + watchers.map(nameOf).join('、');
     board.append(w);
   }
-  const tally = tallyHtml();
-  if (tally) board.insertAdjacentHTML('beforeend', `<p class="lobby-note tally">${tally}</p>`);
+  const tally = tallyBlock();
+  if (tally) board.append(tally);
   if (game.settings) board.append(rulesPanel(game));
   if (!S.isHost) return;
   const start = makeButton('始める', startRound);

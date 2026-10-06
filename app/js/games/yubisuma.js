@@ -4,6 +4,7 @@
 // 上がった親指の合計が親の言った数と同じなら当たりで、親は片手を下ろす。両手とも下ろした人は抜ける（勝ち抜け）。
 // 当たっても外れても、親は次の人（抜けていない人）へ回る。
 // 終わり方（詳細設定）: 'last' … 最後の1人が残るまで（その人の負け）。最初はこれ / 'first' … 最初に抜けた人が出たら終わり
+// 詳細設定「片手で始める」（2026-10-06 本人の決定。最初はなし）: 全員が片手（親指1本）から始める。1回当てたら抜けるので早く終わる。
 // 手: { p, t: 'pick', r: 何回目か, up: 上げる本数, call: 言う数（親のときだけ） }
 //   r と「この回はもう選んだか」で、同じ手が2回来ても2回目は反則になる。
 
@@ -41,10 +42,11 @@ export default {
   maxPlayers: 8,
   settings: [
     { key: 'end', label: '終わり方', desc: '人数が多いと「最後の1人まで」は長くなる', def: 'last', choices: [['last', '最後の1人まで（残った人の負け）'], ['first', '最初に抜けた人の勝ちで終わり']] },
+    { key: 'one', label: '片手で始める', desc: '全員が片手から始める。1回当てたら抜けるので早く終わる（人数が多いとき向け）', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    return { n, rules: { end: 'last', ...rules }, hands: Array(n).fill(2), parent: 0, round: 1, picks: Array(n).fill(null), out: [], last: null, step: 0 };
+    return { n, rules: { end: 'last', ...rules }, hands: Array(n).fill(rules.one === true ? 1 : 2), parent: 0, round: 1, picks: Array(n).fill(null), out: [], last: null, step: 0 };
   },
 
   turn() { return null; },

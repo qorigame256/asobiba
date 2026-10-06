@@ -555,8 +555,23 @@ function applyMove(s0, m) {
 
 // テンパイに近づく牌を切る。向聴数が同じなら受け入れ（向聴数が下がる牌の残り枚数）が多いほう、その次に字牌・端の牌から切る。
 // テンパイしたら門前ならリーチ。リーチした人がいて自分がまだ遠いときは、その人の捨て牌（安全な牌）を優先して切る。
-function cpuTurn(s) {
+// 詳細設定「CPU の強さ」（2026-10-06 本人の決定。最初は ふつう＝ここまでの CPU）。つよい（Claude の判断）:
+//   - 同じくらいの牌ならドラ（赤ドラも）を残す。
+//   - 降り: リーチした人がいて自分がテンパイしていなければ降りる（ふつうは2向聴以上のときだけ）。切る牌は、リーチした全員にとって
+//     安全な順（その人の捨て牌 → 筋 → 3枚見えている字牌 → 2枚見えている字牌 → 端の牌）で選ぶ。
+function safety(s, k, q, visible) {
+  const river = s.h.rivers[q];
+  if (river.some((x) => kindOf(x.id) === k)) return 5; // 捨て牌（現物）
+  if (E.isHonor(k)) return visible[k] >= 3 ? 4 : visible[k] === 2 ? 3 : 1;
+  const n = E.numberOf(k);
+  const has = (m) => river.some((x) => kindOf(x.id) === k + (m - n));
+  const suji = n <= 3 ? has(n + 3) : n >= 7 ? has(n - 3) : has(n - 3) && has(n + 3);
+  if (suji) return 3.5;
+  return E.isTerminal(k) ? 2 : 0;
+}
+function cpuTurn(s, strong = false) {
   const h = s.h;
+  const doraSet = new Set(Array.from({ length: 1 + h.kans }, (_, i) => E.doraKind(kindOf(doraInd(h, i)), s.n === 3)));
   const p = h.turn;
   const n = s.seq;
   const o = turnOptions(s);
@@ -582,16 +597,24 @@ function cpuTurn(s) {
       rest[t]--;
     }
     const isolated = E.isHonor(k) ? 2 : E.isTerminal(k) ? 1 : 0;
-    choices.push({ id: pickDiscardId(h.hands[p], k), k, sh, ukeire, isolated });
+    const out = pickDiscardId(h.hands[p], k);
+    const dora = strong ? (doraSet.has(k) ? 1 : 0) + (isRed(s, out) ? 1 : 0) : 0;
+    choices.push({ id: out, k, sh, ukeire, isolated, dora });
   }
   // 降り: 他家がリーチしていて自分が2向聴以上なら、その人の捨て牌を切る
   const threat = [...Array(s.n).keys()].find((q) => q !== p && h.riichi[q]);
   const best = Math.min(...choices.map((c) => c.sh));
+  if (strong && threat !== undefined && best >= 1) {
+    const threats = [...Array(s.n).keys()].filter((q) => q !== p && h.riichi[q]);
+    const safe = (c) => Math.min(...threats.map((q) => safety(s, c.k, q, visible)));
+    choices.sort((a, b) => safe(b) - safe(a) || a.sh - b.sh || b.ukeire - a.ukeire);
+    return { a: 'd', t: choices[0].id, n };
+  }
   if (threat !== undefined && best >= 2) {
     const safe = choices.filter((c) => h.rivers[threat].some((x) => kindOf(x.id) === c.k));
     if (safe.length) return { a: 'd', t: safe[0].id, n };
   }
-  choices.sort((a, b) => a.sh - b.sh || b.ukeire - a.ukeire || b.isolated - a.isolated);
+  choices.sort((a, b) => a.sh - b.sh || b.ukeire - a.ukeire || a.dora - b.dora || b.isolated - a.isolated);
   const pick = choices[0];
   const riichi = o.riichi.includes(pick.k) && pick.sh === 0;
   return { a: 'd', t: pick.id, n, ...(riichi ? { r: true } : {}) };
@@ -928,13 +951,14 @@ export default {
     { key: 'length', label: '長さ', desc: '東風戦は親が1周（4人なら4局ほど）、半荘戦は2周', def: 'east', choices: [['east', '東風戦'], ['south', '半荘戦']] },
     { key: 'red', label: '赤ドラ', desc: '赤い五（4人・5人は五萬・五筒・五索、3人は五筒・五索）を1枚ずつ入れ、持っているだけで1翻', def: true },
     { key: 'kuitan', label: '喰いタン', desc: '鳴いた手でも断幺九（2〜8だけの手）が役になる', def: true },
+    { key: 'cpu', label: 'CPU の強さ', desc: 'つよいは、リーチされたらテンパイしていなければ降り、安全な牌（捨て牌・筋）を選ぶ。ドラも大事にする', def: 'normal', choices: [['normal', 'ふつう'], ['strong', 'つよい']] },
     { key: 'players', label: '人数', desc: '3人麻雀は二萬〜八萬を抜いた108枚・チーなし・北は抜きドラ。5人麻雀は5人目に自風がなく、ツモは4人から受け取る', def: 4, choices: [[4, '4人'], [3, '3人（三人麻雀）'], [5, '5人（五人麻雀）']] },
   ],
   seats(rules) { return rules.players === 3 ? 3 : rules.players === 5 ? 5 : 4; },
 
   init(n, seed, { rules = {} } = {}) {
     const s = {
-      n, seed, rules: { length: rules.length === 'south' ? 'south' : 'east', red: rules.red !== false, kuitan: rules.kuitan !== false }, scores: Array(n).fill(n === 3 ? 35000 : 25000),
+      n, seed, rules: { length: rules.length === 'south' ? 'south' : 'east', red: rules.red !== false, kuitan: rules.kuitan !== false, cpu: rules.cpu === 'strong' ? 'strong' : 'normal' }, scores: Array(n).fill(n === 3 ? 35000 : 25000),
       kyoku: 0, honba: 0, kyotaku: 0, handNo: 0, seq: 0, over: false, ranking: null, h: null,
     };
     startHand(s);
@@ -964,7 +988,7 @@ export default {
     const h = s.h;
     if (h.phase === 'end') return { a: 'ok', n: s.seq };
     if (h.phase === 'claim') return cpuClaim(s, p);
-    return cpuTurn(s);
+    return cpuTurn(s, s.rules.cpu === 'strong');
   },
   cpuDelay(s) { return s.h.phase === 'claim' ? 350 : s.h.phase === 'end' ? 1000 : 450; },
   referee(s) {

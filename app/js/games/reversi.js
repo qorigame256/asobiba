@@ -10,7 +10,7 @@
 //   隅と、真ん中の 4×4 には置かない（始めの形と隅の取り合いは残す）。穴はいつも空きなので、はさむ線もそこで止まる（四隅封印と同じ）。
 //   人数・盤の大きさ・四隅封印と一緒に使える。
 
-import { CPU_SETTING, boardCpu, mulberry32, hintIs } from './util.js';
+import { CPU_SETTING, boardCpu, mulberry32, hintIs, TEAM_SETTING, teamOn, isMate } from './util.js';
 
 const N8 = 8; // 3〜4人はいつも 8×8
 const DIRS = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
@@ -162,10 +162,11 @@ function wideCpu(s, rules) {
     board[m] = p;
     for (const i of flipsFor(s.board, p, m, s.closed)) board[i] = p;
     let v = 0;
-    board.forEach((x, i) => { if (x === p) v += W[i]; });
+    board.forEach((x, i) => { if (x === p || isMate(s, p, x)) v += W[i]; }); // チーム戦: 味方の石も自分の点に数える
     const look = level === 'weak' ? 0 : level === 'normal' ? 1 : s.n - 1;
     for (let d = 1; d <= look; d++) {
       const q = (p + d) % s.n;
+      if (isMate(s, p, q)) continue; // 味方が隅を取るのはかまわない
       const opp = movesOf({ board, turn: q, n: s.n, closed: s.closed });
       const corners = opp.filter((i) => CORNERS.includes(i)).length;
       v -= corners * (d === 1 ? 120 : 60);
@@ -198,6 +199,7 @@ export default {
     },
     { key: 'corners', label: '四隅封印', desc: '四隅に石を置けない。「隅を取れば強い」が使えなくなる', def: false },
     { key: 'holes', label: '穴あき盤', desc: '石を置けないマス（穴）が数か所ある。置き場所は毎回変わる（先手と後手で同じ条件になるよう、点対称に置く）', def: false },
+    TEAM_SETTING,
     CPU_SETTING,
   ],
 
@@ -221,7 +223,7 @@ export default {
       board[(h - 1) * N + h] = 0; board[h * N + h - 1] = 0;
     }
     const holes = rules.holes ? makeHoles(N, seed) : [];
-    return { n, board, shut: !!rules.corners, holes, closed: closedOf(N, !!rules.corners, holes), turn: 0, last: null, flipped: [], passed: null, over: false };
+    return { n, team: teamOn(rules), board, shut: !!rules.corners, holes, closed: closedOf(N, !!rules.corners, holes), turn: 0, last: null, flipped: [], passed: null, over: false };
   },
 
   turn(s) { return s.turn; },
@@ -255,6 +257,13 @@ export default {
     if (!s.over) return null;
     if (s.n > 2) {
       const c = count(s.board, s.n);
+      if (s.team) { // チーム戦: 2人の石の合計で比べる
+        const a = c[0] + c[2];
+        const b = c[1] + c[3];
+        if (a === b) return { winner: null, cells: [] };
+        const t = a > b ? 0 : 1;
+        return { winner: t, winners: [t, t + 2], team: t, cells: [] };
+      }
       const most = Math.max(...c);
       const top = c.flatMap((v, p) => (v === most ? [p] : []));
       return { winner: top.length === 1 ? top[0] : null, cells: [] };

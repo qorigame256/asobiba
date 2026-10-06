@@ -17,7 +17,7 @@
 const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
 export const NEUTRAL = -1; // じゃま石
 
-import { CPU_SETTING, boardCpu, mulberry32, hintIs } from './util.js';
+import { CPU_SETTING, boardCpu, mulberry32, hintIs, TEAM_SETTING, teamOn, isMate, teamResult } from './util.js';
 
 // 盤（列 w・段 h）の4つ並びの窓の一覧。マスごとに、そのマスを含む窓の番号も持つ
 const WINDOWS = {};
@@ -195,6 +195,7 @@ function wideCpu(s, rules) {
   if (Math.random() < { weak: 0.5, normal: 0.1, strong: 0 }[level]) return cols[Math.floor(Math.random() * cols.length)];
   if (level !== 'weak' || Math.random() < 0.5) {
     for (let d = 1; d < s.n; d++) {
+      if (isMate(s, p, (p + d) % s.n)) continue; // チーム戦: 味方はふさがない
       const threat = cols.filter((c) => wins(s, at(c), (p + d) % s.n));
       if (threat.length) return threat[Math.floor(Math.random() * threat.length)];
     }
@@ -226,14 +227,17 @@ function wideCpu(s, rules) {
       else if (owner === p) {
         v += ATTACK[count];
         if (count === 2) near++;
-      } else {
+      } else if (!isMate(s, p, owner)) {
         const soon = (owner - p + s.n) % s.n; // 1 = 次の番の人
         v += GUARD[count] * (soon === 1 ? 1 : 0.7);
       }
     }
     if (level !== 'weak' && i >= s.w) {
       const above = i - s.w;
-      for (let d = 1; d < s.n; d++) if (wins(s, above, (p + d) % s.n)) v -= d === 1 ? 1000 : 600;
+      for (let d = 1; d < s.n; d++) {
+        const q = (p + d) % s.n;
+        if (wins(s, above, q)) v += isMate(s, p, q) ? 200 : d === 1 ? -1000 : -600; // チーム戦: 味方の勝ちのマスの下は埋めてよい
+      }
       if (wins(s, above, p)) v -= 30; // 自分の勝ちのマスの下を埋めると、ほかの人にふさがれる
     }
     if (level === 'strong' && near >= 2) v += 150;
@@ -273,6 +277,7 @@ export default {
       desc: '落とす代わりに、一番下の段にある自分のコマを抜いてもよい（2人のときだけ）。同じ盤面が3回出たら引き分け',
       choices: [['off', 'なし'], ['on', 'あり']],
     },
+    TEAM_SETTING,
     CPU_SETTING,
   ],
 
@@ -293,7 +298,7 @@ export default {
   init({ rules = {}, seed = 0 } = {}) {
     const n = rules.players ?? 2;
     const [w, h] = wideSize(rules.wide, n);
-    const st = { n, w, h, grid: Array(w * h).fill(null), turn: 0, last: null, won: null };
+    const st = { n, w, h, grid: Array(w * h).fill(null), turn: 0, last: null, won: null, team: teamOn(rules) };
     if (rules.block === 'on') st.grid = blockers(w, h, n, seed);
     if (n === 2 && rules.pop === 'on') Object.assign(st, { pop: true, moves: 0, hist: { key: posKey(st.grid, 0), prev: null } });
     return st;
@@ -314,7 +319,7 @@ export default {
   },
 
   result(s) {
-    if (s.won) return s.won;
+    if (s.won) return s.team ? teamResult(s.won) : s.won;
     if (s.pop) return popLegal(s).length ? null : { winner: null, cells: [] };
     if (s.grid.every((v) => v !== null)) return { winner: null, cells: [] };
     return null;

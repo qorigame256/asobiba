@@ -150,6 +150,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .hint-btn { white-space: nowrap; }
 .status-sub.streak { color: #c0541a; font-weight: 700; }
 .tally { color: #6b5a2e; } /* 部屋の成績表 */
+.tally-reset { padding: 2px 8px; font-size: .78rem; vertical-align: middle; }
 /* 勝った人に紙吹雪（main.js の confetti） */
 .confetti { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 50; }
 .confetti i { position: absolute; top: -12px; width: 8px; height: 13px; border-radius: 2px; opacity: .95; animation: confetti-fall 2.4s ease-in forwards; }

@@ -8,7 +8,8 @@
 //   - 1戦目は ♦3 を持っている人から。2戦目からは前の大貧民から。
 //   - 階段は同じマーク3枚以上の連番。K-A-2 はつながるが 2-3-4 はつながらない。
 //     階段どうしは一番弱い札で比べる（革命中・11バック中は一番強い札で比べる）。
-//   - 革命は同じ数字4枚以上（階段では起きない）。8切り・11バックは、出した組に 8・J が入っていれば起きる（階段も含む）。
+//   - 革命は同じ数字4枚以上（階段では起きない）。詳細設定「階段革命」（2026-10-06 本人の決定。最初はなし）では、4枚以上の階段でも起きる
+//     （「革命」がオフのときは起きない。Claude の判断）。8切り・11バックは、出した組に 8・J が入っていれば起きる（階段も含む）。
 //   - しばりは、ジョーカーを含まない組で、前の組とマークが全く同じときに掛かる（場が流れるまで続く）。
 //   - スペ3返しで ♠3 を出すと場が流れる。反則上がりと都落ちで下位になった人は、先になった人ほど下。
 //   - 5飛び（詳細設定。2026-10-06 本人の決定で、5の枚数だけ飛ばす）: 同じ数字の組は枚数（ジョーカーも5として数える）、階段は5が入っていれば1人。
@@ -249,6 +250,7 @@ let sel = { key: null, cards: [] }; // 選んでいる札（通信で描き直�
 
 const RULE_LIST = [
   { key: 'revolution', label: '革命', desc: '同じ数字4枚で、強さの順番が逆になる', def: true },
+  { key: 'stairRev', label: '階段革命', desc: '同じマークの4枚以上の階段でも革命が起きる（「革命」と「階段」がありのとき）', def: false },
   { key: 'eight', label: '8切り', desc: '8を出すと場が流れ、出した人から始める', def: true },
   { key: 'stairs', label: '階段', desc: '同じマークで3枚以上の連番を出せる', def: true },
   { key: 'shibari', label: 'しばり', desc: '前と同じマークを出すと、場が流れるまでそのマークしか出せない', def: true },
@@ -416,7 +418,7 @@ export default {
     }
     s.field = meld;
     s.by = p;
-    if (s.rules.revolution && meld.kind === 'set' && meld.n >= 4) { s.rev = !s.rev; effects.push(s.rev ? '革命' : '革命返し'); }
+    if (s.rules.revolution && meld.n >= 4 && (meld.kind === 'set' || (meld.kind === 'seq' && s.rules.stairRev))) { s.rev = !s.rev; effects.push(s.rev ? '革命' : '革命返し'); }
     if (s.rules.elevenBack && contains(meld, 11)) { s.back = !s.back; effects.push('11バック'); }
     if (s.rules.nine && contains(meld, 9)) { s.dir = -(s.dir ?? 1); effects.push('9リバース'); }
     let flow = false;

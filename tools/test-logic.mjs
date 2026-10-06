@@ -788,6 +788,14 @@ t = dpass(dpass(t, 1), 2);
 t = dplay(t, 0, ['c4']);
 assert.ok(dplay(t, 1, ['s3']), '革命中は3が4より強い');
 assert.equal(dplay(t, 1, ['d2']), null, '革命中は2が4より弱い');
+// 階段革命（詳細設定）: 4枚以上の階段でも革命。3枚の階段・設定なしでは起きない
+s = dbase([['s4', 's5', 's6', 's7', 'c4'], ['s3', 'd2'], ['c9']], { rules: { ...ALL, stairRev: false } });
+assert.equal(dplay(s, 0, ['s4', 's5', 's6', 's7']).rev, false, '設定なしでは階段で革命は起きない');
+s = dbase([['s4', 's5', 's6', 's7', 'c4'], ['s3', 'd2'], ['c9']], { rules: { ...ALL, stairRev: true } });
+assert.equal(dplay(s, 0, ['s4', 's5', 's6', 's7']).rev, true, '階段革命: 4枚の階段で革命');
+assert.equal(dplay(s, 0, ['s4', 's5', 's6']).rev, false, '3枚の階段では起きない');
+s = dbase([['s4', 's5', 's6', 's7', 'c4'], ['s3', 'd2'], ['c9']], { rules: { ...ALL, stairRev: true, revolution: false } });
+assert.equal(dplay(s, 0, ['s4', 's5', 's6', 's7']).rev, false, '革命がオフなら階段革命も起きない');
 s = dbase([['c2', 'c4'], ['JK', 's6'], ['s3', 'c9']]);
 t = dplay(s, 0, ['c2']);
 t = dplay(t, 1, ['JK']);
@@ -1113,6 +1121,23 @@ for (let k = 0; k < 100; k++) {
   hbRounds += st.round;
 }
 console.log('hitblow games 100, avg rounds', (hbRounds / 100).toFixed(1));
+// 5桁（詳細設定）: 同じ数字なし・ありとも CPU どうしで最後まで
+{
+  const t0 = Date.now();
+  let rounds = 0;
+  for (let k = 0; k < 12; k++) {
+    let st = HB.init(2, k * 7 + 1, { rules: { digits: 5, dup: k % 2 ? 'on' : 'off', mode: k % 3 ? 'race' : 'turn' } });
+    assert.equal(st.answer.length, 5, '5桁の答え');
+    while (!HB.result(st)) {
+      const p = [0, 1].find((q) => HB.canAct(st, q));
+      st = HB.apply(st, { ...HB.cpu(st, p), p });
+      assert.ok(st, '5桁で CPU が反則の手を出した');
+      if (st.round > 80) throw new Error('5桁のヒット＆ブローが終わらない');
+    }
+    rounds += st.round;
+  }
+  console.log('hitblow 5 digits avg rounds', (rounds / 12).toFixed(1), 'ms', Date.now() - t0);
+}
 // 同じ数字を使ってよい遊び方
 {
   const HBM = await import('../app/js/games/hitblow.js');
@@ -1228,6 +1253,26 @@ for (let k = 0; k < 200; k++) {
   ysRounds += st.round;
 }
 console.log('yubisuma games 200, avg rounds', (ysRounds / 200).toFixed(1));
+// 片手で始める（詳細設定）: 全員1本から。1回当てたら抜ける
+{
+  assert.deepEqual(YS.init(4, 1, { rules: {} }).hands, [2, 2, 2, 2]);
+  let st = YS.init(3, 1, { rules: { one: true } });
+  assert.deepEqual(st.hands, [1, 1, 1], '全員片手');
+  st = YS.apply(st, { p: 0, t: 'pick', r: 1, up: 1, call: 1 });
+  st = YS.apply(st, { p: 1, t: 'pick', r: 1, up: 0 });
+  st = YS.apply(st, { p: 2, t: 'pick', r: 1, up: 0 });
+  assert.deepEqual([st.hands[0], st.out], [0, [0]], '1回当てたら抜ける');
+  let rounds = 0;
+  for (let k = 0; k < 60; k++) {
+    let u = YS.init(2 + (k % 6), k, { rules: { one: true } });
+    while (!YS.result(u)) {
+      for (let p = 0; p < u.n; p++) if (YS.canAct(u, p)) { u = YS.apply(u, { ...YS.cpu(u, p), p }); assert.ok(u, '片手で CPU が反則を出した'); }
+      assert.ok(u.round < 300);
+    }
+    rounds += u.round;
+  }
+  console.log('yubisuma one hand avg rounds', (rounds / 60).toFixed(1));
+}
 
 // ---------- 神経衰弱 ----------
 const MM = GAMES.memory;
@@ -1873,6 +1918,24 @@ assert.notEqual(GM.cpu(s, 0, { cpu: 'strong' }), 3, 'ぴったり五目の CPU �
       assert.deepEqual([st.hist.a, st.hist.b], hashOf(st.board, st.turn), 'はさみ将棋: 足し引きで作った局面の目印が、盤から作り直したものと同じ');
     }
   }
+  // ななめにも動ける（詳細設定）: ななめに何マスでも。飛び越えられない。取るのはたて・よこだけ
+  {
+    let d = HS.init({ rules: { diag: true } });
+    assert.ok(HS.apply(d, mv(at(8, 0), at(5, 3))), 'ななめに何マスでも');
+    assert.equal(HS.apply(d, mv(at(8, 0), at(5, 2))), null, 'ななめでもまっすぐでもない所へは行けない');
+    const blk = hs({ [at(8, 0)]: 0, [at(7, 1)]: 1, [at(0, 8)]: 1 }, { rules: { diag: true } });
+    assert.equal(HS.apply(blk, mv(at(8, 0), at(6, 2))), null, 'ななめでも飛び越えられない');
+    // ななめにはさんでも取れない
+    const nocap = HS.apply(hs({ [at(4, 4)]: 1, [at(3, 3)]: 0, [at(6, 6)]: 0, [at(0, 8)]: 1 }, { rules: { diag: true } }), mv(at(6, 6), at(5, 5)));
+    assert.deepEqual([nocap.last.cap, nocap.board[at(4, 4)]], [[], 1], 'ななめにはさんでも取れない');
+    for (let g = 0; g < 12; g++) {
+      let u = HS.init({ rules: { diag: true } });
+      while (!HS.result(u)) {
+        u = HS.apply(u, HS.cpu(u, u.turn, { cpu: ['weak', 'normal', 'strong'][g % 3] }));
+        assert.ok(u, 'ななめありで CPU が反則を出した');
+      }
+    }
+  }
   console.log('hasami OK');
 }
 
@@ -2405,6 +2468,29 @@ for (let g = 0; g < 12; g++) {
   }
   assert.equal(st.pits[6] + st.pits[13] + st.pits[20], total, '3人: 石の数が崩れない');
 }
+// 穴の数 4つ（詳細設定）
+{
+  let st = MC.init({ rules: { pits: 4 } });
+  assert.deepEqual(st.pits, [4, 4, 4, 4, 0, 4, 4, 4, 4, 0], '4つの穴とゴールが2人ぶん');
+  assert.equal(MC.apply(st, 4), null, '0〜3 だけ');
+  st = MC.apply(st, 0);
+  assert.deepEqual([st.pits, st.turn], [[0, 5, 5, 5, 1, 4, 4, 4, 4, 0], 0], '4つ目の次がゴール・ゴールで止まったらもう1回');
+  const cap = MC.apply({ n: 2, k: 4, pits: [1, 0, 0, 0, 0, 0, 0, 3, 0, 0], turn: 0, last: null, over: false, count: 0 }, 0);
+  assert.deepEqual([cap.last.capture?.got, cap.last.capture?.opp], [4, [7]], '1番の穴で止まったら向かい（4×2−1 = 7）と合わせて取る');
+  assert.equal(MC.apply({ n: 2, k: 4, pits: [0, 0, 0, 9, 0, 0, 0, 0, 0, 0], turn: 0, last: null, over: false, count: 0 }, 3).pits[9], 0, '相手のゴールは飛ばす');
+  for (const players of [2, 3]) {
+    for (let g = 0; g < 20; g++) {
+      let u = MC.init({ rules: { pits: 4, players } });
+      let guard = 0;
+      while (!MC.result(u)) {
+        u = MC.apply(u, MC.cpu(u, u.turn, { cpu: ['weak', 'normal', 'strong'][g % 3] }));
+        assert.ok(u, '穴4つで CPU が反則を出した');
+        assert.ok(++guard < 400);
+      }
+      assert.equal(u.pits.reduce((a, b) => a + b, 0), 16 * players, '石の数が崩れない（穴4つ）');
+    }
+  }
+}
 console.log('mancala OK');
 
 // ---------- せりあい ----------
@@ -2824,6 +2910,39 @@ console.log('kaisen OK');
     assert.deepEqual([gone.has(bs[0]), gone.has(bs[1])], [true, false], '自機のまわりの弾だけ消える');
     assert.equal(D.init(2, 1).rules.bomb ?? 'off', 'off', '最初はボムなし');
   }
+}
+
+// ---------- 4人のチーム戦（マルバツ・コネクトフォー・リバーシの詳細設定） ----------
+{
+  const { teamResult, teamOn } = await import('../app/js/games/util.js');
+  assert.deepEqual(teamResult({ winner: 3, cells: [1] }), { winner: 3, cells: [1], winners: [1, 3], team: 1 }, '勝った人のチーム（1・3）');
+  assert.deepEqual(teamResult({ winner: null, cells: [] }), { winner: null, cells: [] }, '引き分けはそのまま');
+  assert.equal(teamOn({ team: true, players: 3 }), false, '3人ではチーム戦にしない');
+  for (const id of ['tictactoe', 'connect4', 'reversi']) {
+    const g = GAMES[id];
+    assert.equal(g.init({ rules: { players: 4 } }).team, false, id + ': 最初はチーム戦なし');
+    const wins = [0, 0];
+    let draws = 0;
+    for (let k = 0; k < 24; k++) {
+      let st = g.init({ rules: { players: 4, team: true }, seed: k });
+      assert.equal(st.team, true);
+      let guard = 0;
+      while (!g.result(st)) {
+        st = g.apply(st, g.cpu(st, g.turn(st), { cpu: ['weak', 'normal', 'strong'][k % 3] }));
+        assert.ok(st, id + ': チーム戦で CPU が反則を出した');
+        assert.ok(++guard < 500);
+      }
+      const r = g.result(st);
+      if (r.winner === null) { draws++; continue; }
+      assert.deepEqual([r.team, r.winners], [r.winners[0], [r.team, r.team + 2]], id + ': 勝ちはチームの2人');
+      wins[r.team]++;
+    }
+    console.log('team', id, 'wins', wins.join('-'), 'draws', draws);
+  }
+  // リバーシは2人の石の合計で比べる
+  const RV = GAMES.reversi;
+  const full = { ...RV.init({ rules: { players: 4, team: true } }), over: true, board: [...Array(20).fill(0), ...Array(10).fill(2), ...Array(17).fill(1), ...Array(17).fill(3)] };
+  assert.deepEqual(RV.result(full).winners, [1, 3], '黒20+赤10 < 白17+青17 なら白・青のチーム');
 }
 
 // ---------- 玉入れ ----------
