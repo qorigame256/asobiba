@@ -69,7 +69,7 @@ export function scoreChips(o, scores, { turn = null, won = [], extra = null } = 
       }
     }
     if (o.away[p]) chip.append(tag('away', '応答なし'));
-    else if (o.cpu[p] && !o.names[p].startsWith('CPU')) chip.append(tag('away', 'CPU が代わりに'));
+    else if (o.sub?.[p]) chip.append(tag('away', 'CPU が代わりに'));
     box.append(chip);
   });
   return box;

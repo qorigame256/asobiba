@@ -211,7 +211,7 @@ export default {
       if (res) chip.append(tag('rank', `${res.ranking.indexOf(p) + 1}位`));
       else if (s.done.includes(p)) chip.append(tag('rank', `${s.done.indexOf(p) + 1}位`));
       if (o.away[p]) chip.append(tag('away', '応答なし'));
-      else if (o.cpu[p] && !o.names[p].startsWith('CPU')) chip.append(tag('away', 'CPU が代わりに'));
+      else if (o.sub?.[p]) chip.append(tag('away', 'CPU が代わりに'));
       opps.append(chip);
     }
     root.append(opps);

@@ -21,6 +21,7 @@
 // banned = ホストが退出させた人の id。あいさつが来ても入れず、もう一度「退出」を送る。
 // streak = 連勝（2026-10-06 本人の決定）。{ key: ゲームと顔ぶれ, counted: 数え終えた対局, wins: 人の id → 連勝の数 }。ホストだけが数えて全員へ送る。
 // tally = 部屋の成績表（2026-10-06 本人の決定）。{ games: 決着した対局の数, wins: 人の id → 勝った回数 }。ゲームをまたいで数える。ホストが数えて全員へ送る。
+// preds = 勝敗予想（2026-10-06 本人の決定）。{ key: どの対局か, by: 人の id → 勝つと予想したプレイヤー番号 }。各自が全員へ送りっぱなしにし、受け取った端末がそれぞれ覚える。
 // beg = 初心者マークを付けている人の id の一覧（各自が自分の端末で付け外しし、ホストが集めて全員へ送る）。
 // undo = この対局で「待った」をした回数（盤のゲームのオンライン）。待ったをすると手の一覧が短くなり、ふつうの同期（長い方が正）では
 //   戻せないので、ホストだけが手を削って undo を1つ進め、受け手は undo が大きい一覧をそのまま受け入れる。対局が替わると 0 に戻る。
@@ -61,7 +62,7 @@ function myName() {
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -89,9 +90,18 @@ function setUrlRoom(code) {
 
 const isCpu = (id) => typeof id === 'string' && id.startsWith('cpu');
 
+// CPU の名前（2026-10-06 本人の決定）: 「CPU1」でなく、対局ごとに変わる名前と 🤖。対局の種（seed）と CPU の番号から決めるので、全員の端末で同じ名前になる。
+// 種がまだ無い待合室では「CPU1」のまま。同じ対局の CPU どうしで名前がかぶらないよう、名前の数（16）と互いに素な間（5）ずつずらす。
+const CPU_NAMES = ['ロボたろう', 'ピコ', 'ガジェ丸', 'ネジ子', 'ポンコツ号', 'ビット', 'メカ吉', 'ボルト', 'ちびロボ', 'カラクリ', 'デンデン', 'ギア助', 'プログラ', 'キカイ姫', 'ドット', 'テツ丸'];
+function cpuName(id) {
+  const n = Number(id.slice(3)) || 1;
+  if (!S?.seed) return 'CPU' + id.slice(3);
+  return '🤖' + CPU_NAMES[((S.seed % CPU_NAMES.length) + (n - 1) * 5) % CPU_NAMES.length];
+}
+
 function nameOf(id) {
   if (!id) return '（空席）';
-  if (isCpu(id)) return 'CPU' + id.slice(3);
+  if (isCpu(id)) return cpuName(id);
   return (S.names?.[id] || 'ゲスト') + (S.beg?.includes(id) ? ' 🔰' : '');
 }
 
@@ -529,6 +539,8 @@ function statusHtml(game, st, res) {
   if (extra) html += `<div class="status-sub">${extra}</div>`;
   const streak = streakHtml();
   if (streak) html += `<div class="status-sub streak">${streak}</div>`;
+  const preds = res ? predHtml(res) : '';
+  if (preds) html += `<div class="status-sub pred">${preds}</div>`;
   const tally = res ? tallyHtml() : '';
   if (tally) html += `<div class="status-sub tally">${tally}</div>`;
   return html;
@@ -664,6 +676,7 @@ function renderPage() {
     Object.assign(opts, {
       names: S.order.map(nameOf),
       cpu: S.order.map(cpuControlled),
+      sub: S.order.map((id) => !isCpu(id) && cpuControlled(id)), // 部屋を出た人の席を CPU が代わりに打っている
       away: S.order.map((id) => !isCpu(id) && S.members.includes(id) && !alive(id)),
       // 見た目だけの中身（ほかの人の位置など）を送りっぱなしにする。届いた側ではゲームの onStream が受け取る
       stream: (d) => { if (S.mode === 'online') send({ type: 'stream', gameId: S.gameId, round: S.round, d }, 0); },
@@ -689,6 +702,7 @@ function renderPage() {
   } else if (S.mode === 'online' && !game.multi) {
     appendUndo(game);
   }
+  appendPredict(game, res);
   appendReactions();
   if (S.mode === 'online' && S.isHost) controls.append(gameSelect());
   appendMemberPanel();
@@ -744,6 +758,80 @@ function appendReview() {
   ctl().append(bar);
 }
 
+/* ---------- 勝敗予想（2026-10-06 本人の決定）: 対局の始めに、観戦の人も含めて「だれが勝つか」を1回選べる ---------- */
+// Claude の判断: 選べるのは、対局の手が1巡する（打った手の数が対局する人数になる）まで。時間で進むゲームの進行役の手（p = -1）は数えない。
+// 1人1回・変えられない・自分を選んでもよい。送りっぱなし（type: 'pred'）で、受け取った端末がそれぞれ覚える（あとから入った人には届かない）。
+// 結果の画面に「予想が当たった人」を出す。オンラインの盤のゲームとカードゲームだけ（エアホッケーは結果が main.js を通らないので出さない）。
+const predKey = () => `${S.gameId}:${S.round}`;
+const predsNow = () => (S.preds?.key === predKey() ? S.preds.by : {});
+function predOpen(game, res) {
+  if (S.mode !== 'online' || !S.order || res || game.live) return false;
+  const played = game.multi ? S.moves.filter((m) => Number.isInteger(m?.p) && m.p >= 0).length : S.moves.length;
+  return played < S.order.length;
+}
+function setPred(id, p) {
+  if (S.preds?.key !== predKey()) S.preds = { key: predKey(), by: {} };
+  if (S.preds.by[id] !== undefined) return false;
+  S.preds.by[id] = p;
+  saveRoom();
+  return true;
+}
+function appendPredict(game, res) {
+  if (!predOpen(game, res)) return;
+  const mine = predsNow()[S.myId];
+  const bar = document.createElement('div');
+  bar.className = 'pred-bar';
+  const label = document.createElement('span');
+  if (mine !== undefined) {
+    label.textContent = `🔮 あなたの予想: ${nameOf(S.order[mine])}`;
+    bar.append(label);
+  } else {
+    label.textContent = '🔮 だれが勝つ？';
+    bar.append(label);
+    S.order.forEach((id, p) => {
+      bar.append(makeButton(id === S.myId ? 'あなた' : nameOf(id), () => {
+        if (!predOpen(game, null) || !setPred(S.myId, p)) return;
+        send({ type: 'pred', gameId: S.gameId, round: S.round, p });
+        render();
+      }, 'ghost small'));
+    });
+  }
+  ctl().append(bar);
+}
+// 結果の画面に出す「予想が当たった人」。だれも予想していなければ出さない
+function predHtml(res) {
+  const by = predsNow();
+  const ids = Object.keys(by).filter((id) => S.members.includes(id) || S.names[id]);
+  if (!ids.length) return '';
+  const won = winnersOf(res);
+  const hit = ids.filter((id) => won.includes(by[id]));
+  if (!hit.length) return `🔮 予想が当たった人はいません（${ids.length}人が予想）`;
+  return '🔮 予想が当たった: ' + hit.map((id) => `<b>${esc(id === S.myId ? 'あなた' : nameOf(id))}</b>`).join('・');
+}
+
+/* ---------- 勝った人に紙吹雪（2026-10-06 本人の決定） ---------- */
+// 対局が決着した手が届いたとき、勝ちの音を鳴らす画面（勝った人・観戦・同じ画面の対局。sound.js の endSound）に3秒ほど降らせる。
+// 動きを減らす設定の端末では出さない。画面を押すじゃまをしないよう pointer-events は切る。
+const CONFETTI_COLORS = ['#e04b3c', '#f4c430', '#3a9d55', '#2f6fb3', '#8a4fc0', '#ff8fb1'];
+function confetti() {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const box = document.createElement('div');
+  box.className = 'confetti';
+  box.setAttribute('aria-hidden', 'true');
+  for (let i = 0; i < 70; i++) {
+    const p = document.createElement('i');
+    p.style.left = `${Math.random() * 100}%`;
+    p.style.background = CONFETTI_COLORS[i % CONFETTI_COLORS.length];
+    p.style.animationDelay = `${Math.random() * 0.6}s`;
+    p.style.animationDuration = `${1.8 + Math.random() * 1.2}s`;
+    p.style.setProperty('--dx', `${(Math.random() - 0.5) * 160}px`);
+    p.style.setProperty('--rot', `${(Math.random() < 0.5 ? -1 : 1) * (360 + Math.random() * 540)}deg`);
+    box.append(p);
+  }
+  document.body.append(box);
+  setTimeout(() => box.remove(), 3600);
+}
+
 // 新しく打たれた手の音。何手かまとめて届いたときは最後の手の音だけ。対局が終わったら勝ち負けの音。
 // 音はゲームの sound(前の局面, 今の局面, 手, 自分の番号) が名前で返す（無ければ盤のゲームは place、カードゲームは card）
 function moveSound(game, st, res, prevLen, mine) {
@@ -755,7 +843,9 @@ function moveSound(game, st, res, prevLen, mine) {
     if (game.result(before)) return;
     let said = null; // 麻雀の最後の局の「ロン！」など
     try { said = game.sound?.(before, st, m, me); } catch { /* 終局の手に音の決めごとが合わなくても、勝ち負けの音は鳴らす */ }
-    if (isVoice(said)) { play(said); setTimeout(() => play(endSound(res, me)), 700); } else play(endSound(res, me));
+    const end = endSound(res, me);
+    if (isVoice(said)) { play(said); setTimeout(() => play(end), 700); } else play(end);
+    if (end === 'win') confetti(); // 勝ちの音を鳴らす画面には紙吹雪
     return;
   }
   const name = game.sound ? game.sound(before, st, m, me) : game.multi ? 'card' : 'place';
@@ -1326,6 +1416,9 @@ function onMessage(msg) {
     case 'undo':
       onUndo(msg);
       break;
+    case 'pred': // 勝敗予想。対局が同じで、番号が正しく、まだ予想していない人の分だけ覚える
+      if (msg.gameId === S.gameId && msg.round === S.round && S.order && Number.isInteger(msg.p) && msg.p >= 0 && msg.p < S.order.length && S.members.includes(msg.from)) setPred(msg.from, msg.p);
+      return;
     case 'rematch':
       if (S.isHost) {
         const st = replay(S);

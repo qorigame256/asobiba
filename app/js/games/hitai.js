@@ -204,7 +204,7 @@ export default {
       if (s.act[p] === 'bet') tags.push(['last', '勝負']);
       else if (s.act[p] === 'fold') tags.push(['away', '降りた']);
       if (o.away[p]) tags.push(['away', '応答なし']);
-      else if (o.cpu[p] && !o.names[p].startsWith('CPU')) tags.push(['away', 'CPU が代わりに']);
+      else if (o.sub?.[p]) tags.push(['away', 'CPU が代わりに']);
       for (const [cls, text] of tags) {
         const t = document.createElement('span');
         t.className = 'cc-tag ' + cls;

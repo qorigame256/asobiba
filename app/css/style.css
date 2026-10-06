@@ -138,6 +138,12 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 }
 .status-sub.streak { color: #c0541a; font-weight: 700; }
 .tally { color: #6b5a2e; } /* 部屋の成績表 */
+/* 勝った人に紙吹雪（main.js の confetti） */
+.confetti { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 50; }
+.confetti i { position: absolute; top: -12px; width: 8px; height: 13px; border-radius: 2px; opacity: .95; animation: confetti-fall 2.4s ease-in forwards; }
+@keyframes confetti-fall { to { transform: translate(var(--dx), 105vh) rotate(var(--rot)); opacity: .8; } }
+.pred-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; width: 100%; font-weight: 700; } /* 勝敗予想 */
+.status-sub.pred { color: #6a4fa0; }
 .review-bar { display: flex; gap: 8px; justify-content: center; width: 100%; } /* 対局のふりかえり */
 .review-bar .btn { min-width: 52px; font-size: 1rem; }
 .status-sub.beg-hint { color: #b06a00; }

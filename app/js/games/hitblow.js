@@ -176,7 +176,7 @@ export default {
       if (!done && s.mode === 'race') tags.push(s.pending[p] !== null ? ['ok', '出した✓'] : ['away', '考え中…']);
       if (!done && s.mode === 'turn' && s.turn === p) tags.push(['ok', '予想中…']);
       if (o.away[p]) tags.push(['away', '応答なし']);
-      else if (o.cpu[p] && !o.names[p].startsWith('CPU')) tags.push(['away', 'CPU が代わりに']);
+      else if (o.sub?.[p]) tags.push(['away', 'CPU が代わりに']);
       for (const [cls, text] of tags) {
         const t = document.createElement('span');
         t.className = 'cc-tag ' + cls;

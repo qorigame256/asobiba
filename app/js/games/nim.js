@@ -118,7 +118,7 @@ export default {
       name.className = 'cc-opp-name';
       name.textContent = nameP(p);
       chip.append(name);
-      if (o.away[p] || (o.cpu[p] && !o.names[p].startsWith('CPU'))) {
+      if (o.away[p] || (o.sub?.[p])) {
         const t = document.createElement('span');
         t.className = 'cc-tag away';
         t.textContent = o.away[p] ? '応答なし' : 'CPU が代わりに';

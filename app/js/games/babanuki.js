@@ -128,7 +128,7 @@ export default {
       if (res?.loser === p) chip.append(tag('last', '負け'));
       if (!res && p === from) chip.append(tag('prev', '引かれる人'));
       if (o.away[p]) chip.append(tag('away', '応答なし'));
-      else if (o.cpu[p] && !o.names[p].startsWith('CPU')) chip.append(tag('away', 'CPU が代わりに'));
+      else if (o.sub?.[p]) chip.append(tag('away', 'CPU が代わりに'));
       opps.append(chip);
     }
     root.append(opps);

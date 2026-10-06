@@ -1,8 +1,10 @@
 // コネクトフォー（四目並べ）。2人は7列×6段。手 = 列の番号（左から 0〜）。
 // マスの番号は 段*列の数+列（段0が一番上）。
 // 詳細設定「人数」で3人・4人にもできる（2026-10-04 本人の決定。決まりは Claude の推奨を本人が承認）:
-//   赤・黄・緑・紫で順番に、広い盤に落とす。並べるのは4つのまま。盤の大きさは詳細設定「3人以上の盤」で選ぶ。
+//   赤・黄・緑・紫で順番に、広い盤に落とす。並べるのは4つのまま。盤の大きさは詳細設定「盤の大きさ」で選ぶ。
 //   待合室では人数ぶんの席に人か CPU を選び、もう一回では打つ順番を1つずつ回す（マルバツと同じ）。
+// 詳細設定「盤の大きさ」（前の名前は「3人以上の盤」。2026-10-06 本人の決定で2人でも選べるようにした）: おまかせは 2人 7×6・3人 9×7・4人 11×9。
+//   Claude の判断: 2人の広い盤でも CPU は読み（boardCpu）で打つが、列が多いと読みが重いので、広いほど読む深さを減らす（twoDepth）。
 // 詳細設定「ポップアウト」（2026-10-05 本人の決定。決まりは Claude の推奨を本人が承認）: 2人のときだけ。
 //   落とす代わりに、一番下の段にある自分のコマを1つ抜いてもよい（上のコマが1段ずつ下がる）。手 = { pop: 列の番号 }。
 //   抜いて相手の4つ並びができたら相手の勝ち（自分も同時に並んでも相手の勝ち）。同じ盤面（次の番も同じ）が3回出たら引き分け。
@@ -42,10 +44,12 @@ function windowsOf(w, h) {
 // CPU の形勢判断（2人）: 4マスの並びごとに、自分の駒だけ3つ・2つなら加点、相手の駒だけ3つなら減点。真ん中の列は少し加点
 function score(s, p) {
   let v = 0;
-  const mid = (s.w - 1) / 2;
+  const mid = s.w % 2 ? [(s.w - 1) / 2] : [s.w / 2 - 1, s.w / 2]; // 真ん中の列（偶数の幅なら2列）
   for (let r = 0; r < s.h; r++) {
-    const x = s.grid[r * s.w + mid];
-    if (x !== null && x !== NEUTRAL) v += x === p ? 3 : -3;
+    for (const c of mid) {
+      const x = s.grid[r * s.w + c];
+      if (x !== null && x !== NEUTRAL) v += x === p ? 3 : -3;
+    }
   }
   for (const win of windowsOf(s.w, s.h).list) {
     let mine = 0;
@@ -65,15 +69,26 @@ function score(s, p) {
 
 /* ---------- 3〜4人（広い盤） ---------- */
 
-// 3人以上の盤の選択肢。値は「列-段」。auto は人数で決める。
+// 盤の大きさの選択肢。値は「列-段」。auto は人数で決める（2人は 7×6）。
 // CPU（つよい）どうしで400局ずつ打たせて決めた（2026-10-04。最初の1巡だけ適当に打たせて手順をばらけさせた）:
 // 席順の差はどの盤でも数%と小さい。広い盤ほど引き分けが減るが長くなる。3人: 8×7 で引き分け 30〜38%・9×7 で 25%（約58手）・
 // 10×8 で 17〜20%（約71手）。4人: 7×6〜9×7 は6割前後が引き分け・10×8 で 42〜50%・11×9 で 36〜45%（約93手）。
-const WIDE_AUTO = { 3: '9-7', 4: '11-9' };
-const WIDE_CHOICES = [['auto', 'おまかせ（3人は 9×7・4人は 11×9）'], ['8-7', '8列×7段'], ['9-7', '9列×7段'], ['10-8', '10列×8段'], ['11-9', '11列×9段']];
+const WIDE_AUTO = { 2: '7-6', 3: '9-7', 4: '11-9' };
+const WIDE_CHOICES = [['auto', 'おまかせ（2人は 7×6・3人は 9×7・4人は 11×9）'], ['8-7', '8列×7段'], ['9-7', '9列×7段'], ['10-8', '10列×8段'], ['11-9', '11列×9段']];
 function wideSize(v, n) {
   const key = WIDE_CHOICES.some(([c]) => c === v) && v !== 'auto' ? v : WIDE_AUTO[n];
   return key.split('-').map(Number);
+}
+
+// 列を真ん中から近い順に（CPU の読みは良い手から調べるほど速い）。7列なら 3, 2, 4, 1, 5, 0, 6
+const ORDER = {};
+const centerOrder = (w) => (ORDER[w] ??= Array.from({ length: w }, (_, c) => c).sort((a, b) => Math.abs(a - (w - 1) / 2) - Math.abs(b - (w - 1) / 2) || a - b));
+
+// 2人の CPU が読む深さ（列が多いほど浅く。読みの重さをそろえる）
+function twoDepth(w, pop) {
+  if (w <= 7) return pop ? { weak: 2, normal: 4, strong: 5 } : { weak: 2, normal: 4, strong: 6 };
+  if (w <= 9) return { weak: 2, normal: 4, strong: 5 };
+  return { weak: 2, normal: 3, strong: 4 };
 }
 
 /* ---------- ポップアウト ---------- */
@@ -85,8 +100,8 @@ const posKey = (grid, turn) => grid.map((v) => (v === null ? '.' : v === NEUTRAL
 
 // 打てる手（落とす列と、抜ける列）
 function popLegal(s) {
-  const out = [3, 2, 4, 1, 5, 0, 6].filter((c) => s.grid[c] === null);
-  for (const c of [3, 2, 4, 1, 5, 0, 6]) if (s.grid[(s.h - 1) * s.w + c] === s.turn) out.push({ pop: c });
+  const out = centerOrder(s.w).filter((c) => s.grid[c] === null);
+  for (const c of centerOrder(s.w)) if (s.grid[(s.h - 1) * s.w + c] === s.turn) out.push({ pop: c });
   return out;
 }
 
@@ -140,7 +155,7 @@ function popApply(s, m) {
 function blockers(w, h, n, seed) {
   const grid = Array(w * h).fill(null);
   const rnd = mulberry32(seed ^ 0x5eed);
-  const count = n === 2 ? 3 : Math.floor(w / 2);
+  const count = w === 7 ? 3 : Math.floor(w / 2); // 2人の 7×6 は3個、広い盤は列の数の半分
   const height = Array(w).fill(0);
   for (let k = 0; k < count; k++) {
     const cols = [];
@@ -240,12 +255,12 @@ export default {
   settings: [
     {
       key: 'players', label: '人数', def: 2,
-      desc: '3人・4人では、広い盤に 赤・黄・緑・紫 で順番に落とす（下の「3人以上の盤」）',
+      desc: '3人・4人では、広い盤に 赤・黄・緑・紫 で順番に落とす（下の「盤の大きさ」）',
       choices: [[2, '2人'], [3, '3人'], [4, '4人']],
     },
     {
-      key: 'wide', label: '3人以上の盤', def: 'auto',
-      desc: '3人・4人で遊ぶときの盤の大きさ。どれも4つ並べたら勝ち',
+      key: 'wide', label: '盤の大きさ', def: 'auto',
+      desc: '盤の大きさ（2人でも選べる）。どれも4つ並べたら勝ち。広いほど引き分けが減り、長くなる',
       choices: WIDE_CHOICES,
     },
     {
@@ -261,23 +276,23 @@ export default {
     CPU_SETTING,
   ],
 
-  // CPU（2人）: 何手先まで読むかで強さを変える（よわい2・ふつう4・つよい6）。弱いほど適当に打つことがある
+  // CPU（2人）: 何手先まで読むかで強さを変える（7列は よわい2・ふつう4・つよい6。広い盤は浅く。twoDepth）。弱いほど適当に打つことがある
   cpu(s, p, rules) {
     if (s.n > 2) return wideCpu(s, rules);
     if (s.pop) {
       return boardCpu(this, s, rules, popLegal, score, {
-        depth: { weak: 2, normal: 4, strong: 5 }, mistake: { weak: 0.35, normal: 0.12, strong: 0 },
+        depth: twoDepth(s.w, true), mistake: { weak: 0.35, normal: 0.12, strong: 0 },
       });
     }
-    const legal = (x) => [3, 2, 4, 1, 5, 0, 6].filter((c) => x.grid[c] === null);
+    const legal = (x) => centerOrder(x.w).filter((c) => x.grid[c] === null);
     return boardCpu(this, s, rules, legal, score, {
-      depth: { weak: 2, normal: 4, strong: 6 }, mistake: { weak: 0.35, normal: 0.12, strong: 0 },
+      depth: twoDepth(s.w, false), mistake: { weak: 0.35, normal: 0.12, strong: 0 },
     });
   },
 
   init({ rules = {}, seed = 0 } = {}) {
     const n = rules.players ?? 2;
-    const [w, h] = n >= 3 ? wideSize(rules.wide, n) : [7, 6];
+    const [w, h] = wideSize(rules.wide, n);
     const st = { n, w, h, grid: Array(w * h).fill(null), turn: 0, last: null, won: null };
     if (rules.block === 'on') st.grid = blockers(w, h, n, seed);
     if (n === 2 && rules.pop === 'on') Object.assign(st, { pop: true, moves: 0, hist: { key: posKey(st.grid, 0), prev: null } });
@@ -314,7 +329,7 @@ export default {
     const res = this.result(s);
     const win = new Set(res?.cells ?? []);
     root.innerHTML = '';
-    root.className = 'board c4' + (s.n > 2 ? ' c4w' : '');
+    root.className = 'board c4' + (s.w > 7 ? ' c4w' : '');
     root.style.setProperty('--cols', s.w);
     for (let c = 0; c < s.w; c++) {
       const col = document.createElement('button');

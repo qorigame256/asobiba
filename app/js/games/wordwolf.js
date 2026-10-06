@@ -173,7 +173,7 @@ export default {
       if (s.phase === 'vote') extra.textContent = p in s.votes ? '投票ずみ' : '考え中';
       else if (s.phase === 'end') extra.textContent = isWolf(s, p) ? `ウルフ（${s.words[1]}）` : s.words[0];
       if (extra.textContent) chip.append(extra);
-      if (o.away[p] || (o.cpu[p] && !o.names[p].startsWith('CPU'))) {
+      if (o.away[p] || (o.sub?.[p])) {
         const t = document.createElement('span');
         t.className = 'cc-tag away';
         t.textContent = o.away[p] ? '応答なし' : '部屋を出ました';

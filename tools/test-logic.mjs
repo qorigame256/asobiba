@@ -86,7 +86,20 @@ const c4 = (rules, moves) => { let x = C.init({ rules }); for (const m of moves)
 assert.deepEqual([C.init({ rules: { players: 3 } }).w, C.init({ rules: { players: 3 } }).h], [9, 7], '3人のおまかせは 9×7');
 assert.equal(C.init({ rules: { players: 4 } }).w, 11, '4人のおまかせは 11×9');
 assert.equal(C.init({ rules: { players: 3, wide: '8-7' } }).w, 8, '盤の大きさを選べる');
-assert.equal(C.init({ rules: { players: 2, wide: '11-9' } }).grid.length, 42, '2人なら3人以上の盤の設定は見ない');
+assert.equal(C.init({ rules: { players: 2 } }).grid.length, 42, '2人のおまかせは 7×6');
+assert.deepEqual([C.init({ rules: { players: 2, wide: '11-9' } }).w, C.init({ rules: { players: 2, wide: '11-9' } }).h], [11, 9], '2人でも盤の大きさを選べる');
+// 2人の広い盤: CPU が反則を出さず最後まで打てる（偶数の列でも）・ポップアウトとじゃま石も一緒に使える
+for (const wide of ['8-7', '9-7', '10-8', '11-9']) {
+  for (const extra of [{}, { pop: 'on' }, { block: 'on' }]) {
+    let x = C.init({ rules: { players: 2, wide, ...extra }, seed: 3 });
+    let guard = 0;
+    while (!C.result(x)) {
+      x = C.apply(x, C.cpu(x, x.turn, { cpu: ['weak', 'normal', 'strong'][guard % 3] }));
+      assert.ok(x, `2人の ${wide} で CPU が反則を出した`);
+      assert.ok(++guard < 260);
+    }
+  }
+}
 assert.equal(C.seatCount({ players: 3 }), 3);
 s = c4({ players: 3 }, [0, 1, 2]);
 assert.deepEqual([s.grid[54], s.grid[55], s.grid[56], s.turn], [0, 1, 2, 0], '3人で順番に回る');
@@ -574,6 +587,66 @@ console.log('colors stack OK');
     }
   }
   assert.ok(calls > 40 && forgot > 3 && forgot < calls, `CPU はたいてい宣言し、ときどき忘れる: ${calls} / ${forgot}`);
+}
+
+// いろあわせの手札の上限: 26枚になったら脱落（手札は山の下へ）・脱落した人を飛ばす・残り1人なら勝ち・札の数は108のまま
+{
+  const U = GAMES.colors;
+  const many = (k, c = 'y') => Array.from({ length: k }, (_, i) => c + (i % 9 + 1));
+  const capb = (hands, o = {}) => ({ ...U.init(3, 1, { rules: { cap: true } }), deck: ['b1', 'b2', 'b3', 'b4', 'b5', 'b6'], discard: ['r5'], hands, color: 'r', turn: 0, drawn: null, ...o });
+  // ドロー2で 24枚 → 26枚になって脱落。次の番は脱落した人を飛ばして、その次の人（=出した人）へ
+  let c = U.apply(capb([['rD', 'g1', 'g2'], many(24), many(3, 'g')]), { p: 0, t: 'play', i: 0 });
+  assert.deepEqual([c.out[1], c.hands[1].length, c.turn, c.winner], [true, 0, 2, null], 'ドロー2で26枚になったら脱落し、その人を飛ばす');
+  assert.equal(c.deck.length, 6 - 2 + 26, '脱落した人の手札は山へ戻る');
+  assert.ok(c.last.out.includes(1));
+  // 25枚までは脱落しない
+  c = U.apply(capb([['rD', 'g1', 'g2'], many(23), many(3, 'g')]), { p: 0, t: 'play', i: 0 });
+  assert.deepEqual([c.out?.[1] ?? false, c.hands[1].length, c.turn], [false, 25, 2], '25枚なら残る');
+  // 脱落した人は飛ばされる（スキップは脱落していない次の次へ）
+  c = { ...capb([['rS', 'g1'], [], many(3, 'g'), many(3, 'b')], { n: 4, out: [false, true, false, false] }) };
+  assert.equal(U.apply(c, { p: 0, t: 'play', i: 0 }).turn, 3, 'スキップは脱落した人を数えない');
+  assert.equal(U.apply({ ...c, hands: [['r1', 'g1'], [], many(3, 'g'), many(3, 'b')] }, { p: 0, t: 'play', i: 0 }).turn, 2, 'ふつうの札も脱落した人を飛ばす');
+  // 2人残りのリバースはスキップと同じ
+  assert.equal(U.apply({ ...c, out: [false, true, true, false], hands: [['rR', 'g1'], [], [], many(3, 'b')] }, { p: 0, t: 'play', i: 0 }).turn, 0, '2人残りのリバースはもう1回');
+  // 自分で引いて26枚になったら脱落。残りが1人ならその人の勝ち
+  c = U.apply(capb([many(25), ['g1', 'g2'], []], { n: 3, out: [false, false, true] }), { p: 0, t: 'draw' });
+  assert.deepEqual([c.out[0], c.winner], [true, 1], '最後に残った1人の勝ち');
+  assert.equal(U.apply(capb([many(25), ['g1'], ['g2']], { rules: { cap: false } }), { p: 0, t: 'draw' }).hands[0].length, 26, '設定なしなら脱落しない');
+  // CPU どうしで最後まで: 札は108枚のまま・脱落した人は手を打たない
+  let outs = 0;
+  for (let k = 0; k < 120; k++) {
+    let st = U.init(2 + (k % 6), k * 977 + 3, { rules: { cap: true, stack: k % 2 === 0, sevenZero: k % 3 === 0, untilPlay: k % 5 === 0, call: k % 4 === 0, multi: k % 7 === 0 } });
+    let steps = 0;
+    while (!U.result(st)) {
+      const p = U.turn(st);
+      assert.ok(!st.out?.[p], '脱落した人の番が来た');
+      const next = U.apply(st, { ...U.cpu(st, p), p });
+      assert.ok(next, '手札の上限ありで CPU が反則');
+      assert.equal(total(next), 108, '手札の上限ありで札の枚数が変わった');
+      st = next;
+      if (++steps > 6000) throw new Error('手札の上限ありのいろあわせが終わらない');
+    }
+    outs += (st.out ?? []).filter(Boolean).length;
+  }
+  console.log('colors cap: CPU games with someone out', outs);
+  // 脱落した人がいる局面から CPU どうしで最後まで（ふつうの対局では25枚を超えることがめったにないため、始めから1人脱落させておく）
+  for (let k = 0; k < 60; k++) {
+    let st = U.init(3 + (k % 4), k * 311 + 1, { rules: { cap: true, stack: k % 2 === 0, sevenZero: k % 3 !== 0, multi: k % 2 === 1 } });
+    const q = 1 + (k % (st.n - 1));
+    st = { ...st, out: st.hands.map((_, r) => r === q), deck: [...st.hands[q], ...st.deck], hands: st.hands.map((h, r) => (r === q ? [] : h)) };
+    let steps = 0;
+    while (!U.result(st)) {
+      const p = U.turn(st);
+      assert.ok(!st.out[p], '脱落した人の番が来た');
+      const next = U.apply(st, { ...U.cpu(st, p), p });
+      assert.ok(next, '脱落した人がいる局面で CPU が反則');
+      assert.equal(total(next), 108);
+      assert.equal(next.hands[q].length, 0, '脱落した人の手札は空のまま（交換・回しに入らない）');
+      st = next;
+      if (++steps > 6000) throw new Error('脱落した人がいるいろあわせが終わらない');
+    }
+    assert.notEqual(U.result(st).winner, q, '脱落した人は勝たない');
+  }
 }
 
 // ---------- 大富豪 ----------

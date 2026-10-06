@@ -19,7 +19,7 @@
 //   apply(局面, 手) → 次の局面 | null。手には打った人の番号 p が入っている（本体が足す）,
 //   result(局面) → null | { winner: p, …ゲームが使う情報 },
 //   cpu(局面, p) → p の手（p は付けなくてよい。いまは何もしないなら null）。ホストの端末だけで動く,
-//   render(要素, 局面, { me: 自分の番号（観戦は -1）, names: 各プレイヤーの名前, cpu: CPU が操作中か,
+//   render(要素, 局面, { me: 自分の番号（観戦は -1）, names: 各プレイヤーの名前, cpu: CPU が操作中か, sub: 部屋を出た人の席を CPU が代わりに打っているか,
 //     away: 応答が無いか, canMove, onMove, fresh })。names は外から来た文字なので textContent で出すか esc() を通す。
 //   任意: settings（詳細設定 [{ key, label, desc, def, choices?: [[値, 表示名]…] }]。choices が無ければ はい/いいえ）, carry(局面, p)（次の対局へ持ち越す値。終局後に呼ばれる）,
 //     resultText(result, 自分の番号, 名前→HTML) / phaseText(局面, 自分の番号, 名前→HTML)（手番が null のときの状態表示）,

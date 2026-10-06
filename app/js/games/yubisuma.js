@@ -151,7 +151,7 @@ export default {
       else if (p === s.parent) tags.push(['last', '親']);
       if (!res && !out) tags.push(s.picks[p] !== null ? ['ok', '選んだ✓'] : ['away', '考え中…']);
       if (o.away[p]) tags.push(['away', '応答なし']);
-      else if (o.cpu[p] && !o.names[p].startsWith('CPU')) tags.push(['away', 'CPU が代わりに']);
+      else if (o.sub?.[p]) tags.push(['away', 'CPU が代わりに']);
       for (const [cls, text] of tags) {
         const t = document.createElement('span');
         t.className = 'cc-tag ' + cls;

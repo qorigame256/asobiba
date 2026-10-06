@@ -163,7 +163,7 @@ export default {
       if (s.phase === 'doubt' && p in s.calls) chip.append(tag('last', 'ダウト！'));
       else if (s.phase === 'doubt' && s.passed.includes(p)) chip.append(tag('away', '通す'));
       if (o.away[p]) chip.append(tag('away', '応答なし'));
-      else if (o.cpu[p] && !o.names[p].startsWith('CPU')) chip.append(tag('away', 'CPU が代わりに'));
+      else if (o.sub?.[p]) chip.append(tag('away', 'CPU が代わりに'));
       opps.append(chip);
     }
     root.append(opps);

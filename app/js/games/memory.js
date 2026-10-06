@@ -139,7 +139,7 @@ export default {
       score.textContent = `${s.scores[p]}組`;
       chip.append(name, score);
       if (o.away[p]) chip.append(tag('away', '応答なし'));
-      else if (o.cpu[p] && !o.names[p].startsWith('CPU')) chip.append(tag('away', 'CPU が代わりに'));
+      else if (o.sub?.[p]) chip.append(tag('away', 'CPU が代わりに'));
       opps.append(chip);
     }
     root.append(opps);

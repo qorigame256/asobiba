@@ -187,7 +187,7 @@ export default {
       head.textContent = `${nameP(p)}${n === 2 ? (p === 0 ? '（赤）' : '（黒）') : ''}・残り${left}枚（山 ${s.decks[p].length}）`;
       if (s.place[p] !== null && n > 2) head.textContent = `${nameP(p)}・${s.place[p]}位${left ? `（残り${left}枚）` : 'で上がり'}`;
       if (o.away[p]) head.textContent += '・応答なし';
-      else if (o.cpu[p] && !o.names[p].startsWith('CPU')) head.textContent += '・CPU が代わりに';
+      else if (o.sub?.[p]) head.textContent += '・CPU が代わりに';
       const row = document.createElement('div');
       row.className = 'sp-row';
       for (const card of s.fields[p]) {

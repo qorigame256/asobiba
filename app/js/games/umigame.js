@@ -201,7 +201,7 @@ export default {
       role.className = 'pt-extra';
       role.textContent = p === s.setter ? '出題者' : '回答者';
       chip.append(role);
-      if (o.away[p] || (o.cpu[p] && !o.names[p].startsWith('CPU'))) {
+      if (o.away[p] || (o.sub?.[p])) {
         const t = document.createElement('span');
         t.className = 'cc-tag away';
         t.textContent = o.away[p] ? '応答なし' : '部屋を出ました';

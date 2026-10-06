@@ -29,6 +29,9 @@
 //   （手の call: true）。押さずに1枚になったら、その場で山から2枚引く。Claude の判断: ボタンは自分の番の間ずっと出す（1枚になるときだけ出すと
 //   覚えていなくても気づけてしまうため）。手札が何枚でも押してよい（1枚にならなければ何も起きない）。7で交換・0で回すのあとは、
 //   出し終わった時点で自分が持っている手札で数える。上がり（0枚）のときは要らない。CPU は1割5分の見込みで宣言を忘れる。
+// 詳細設定「手札の上限」（2026-10-06 本人の決定。最初はなし）: 手札が25枚を超えたら（26枚になったら）脱落。脱落した人の手札は山の下に戻し、
+//   その人を飛ばして続ける。残りが1人になったらその人の勝ち（Claude の判断）。2人が残っているときのリバースはスキップと同じ（今までの2人と同じ）。
+//   7で交換・0で回すは、脱落していない人の間だけで行う。
 
 import { mulberry32, shuffle } from './util.js';
 
@@ -38,6 +41,26 @@ const KINDS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'S', 'R', 'D'];
 const KIND_LABEL = { S: '⊘', R: '⇄', D: '+2', W: '', W4: '+4' };
 const KIND_NAME = { S: 'スキップ', R: 'リバース', D: 'ドロー2' };
 const HAND_SIZE = 7;
+const CAP = 25; // 手札の上限（詳細設定）。これを超えたら脱落
+
+const isOut = (s, q) => !!s.out?.[q];
+const aliveCount = (s) => s.hands.filter((_, q) => !isOut(s, q)).length;
+// from から dir の向きに、脱落していない人を k 人進んだ席
+const stepAlive = (s, from, k, dir = s.dir) => {
+  let q = from;
+  for (let i = 0; i < k;) { q = (((q + dir) % s.n) + s.n) % s.n; if (!isOut(s, q)) i++; }
+  return q;
+};
+// 手札の上限（詳細設定）を超えたら脱落させる（手札は山の下へ）。残りが1人ならその人の勝ち
+function checkCap(s, q) {
+  if (!s.rules?.cap || isOut(s, q) || s.hands[q].length <= CAP) return;
+  s.out = (s.out ?? Array(s.n).fill(false)).slice();
+  s.out[q] = true;
+  s.deck = [...s.hands[q], ...s.deck];
+  s.hands[q] = [];
+  if (s.last) s.last.out = [...(s.last.out ?? []), q];
+  if (aliveCount(s) === 1) s.winner = s.hands.findIndex((_, r) => !isOut(s, r));
+}
 
 const colorOf = (c) => (c[0] === 'W' ? null : c[0]);
 const kindOf = (c) => (c[0] === 'W' ? c : c.slice(1));
@@ -137,12 +160,15 @@ function cardEl(card, tag = 'div') {
   return e;
 }
 
+// 手札の上限（詳細設定）で脱落した人
+const outText = (L, nameP) => (L.out?.length ? `。${L.out.map(nameP).join('・')}は手札が${CAP}枚を超えたので脱落` : '');
+
 function logText(s, nameP) {
   const L = s.last;
   if (!L) return `最初の札は「${cardName(s.discard[0])}」`;
-  if (L.t === 'draw') return L.got ? `${nameP(L.p)}が山から${L.got}枚引いた${L.got > 1 && L.drew ? '（出せる札が来た）' : ''}` : '山札が無いので引けなかった';
+  if (L.t === 'draw') return (L.got ? `${nameP(L.p)}が山から${L.got}枚引いた${L.got > 1 && L.drew ? '（出せる札が来た）' : ''}` : '山札が無いので引けなかった') + outText(L, nameP);
   if (L.t === 'pass') return `${nameP(L.p)}は引いた札を出さずに次へ`;
-  if (L.t === 'take') return `${nameP(L.p)}が${L.got}枚引いて1回休み`;
+  if (L.t === 'take') return `${nameP(L.p)}が${L.got}枚引いて1回休み` + outText(L, nameP);
   let t = L.n > 1 ? `${nameP(L.p)}が「${kindOf(L.card)}」を${L.n}枚まとめて出した（一番上は${COLOR_NAME[L.color]}）` : `${nameP(L.p)}が「${cardName(L.card)}」を出した`;
   if (L.card[0] === 'W') t += `（次の色: ${COLOR_NAME[L.color]}）`;
   const k = kindOf(L.card);
@@ -154,7 +180,7 @@ function logText(s, nameP) {
   else if (L.victim !== undefined) t += ` → ${nameP(L.victim)}が${L.got}枚引いて1回休み`;
   if (L.call) t += '。「いろあわせ！」';
   else if (L.forgot) t += `。宣言を忘れたので${L.forgot}枚引いた`;
-  return t;
+  return t + outText(L, nameP);
 }
 
 export default {
@@ -171,6 +197,7 @@ export default {
     { key: 'stack', label: '重ねて返す', desc: 'ドロー2にはドロー2、ドロー4にはドロー4を重ねて次の人へ回せる。重ねなかった人が、たまった枚数を全部引く', def: false },
     { key: 'multi', label: '同じ数字まとめ出し', desc: '同じ数字の札を何枚でもまとめて出せる（数字の札だけ）。最後に置いた札の色が場の色になる', def: false },
     { key: 'untilPlay', label: '出せるまで引く', desc: '山を1回押すと、出せる札が来るまでまとめて引く（来た札は出しても出さなくてもよい）', def: false },
+    { key: 'cap', label: '手札の上限', desc: '手札が25枚を超えたら脱落（その人を飛ばして続け、最後に残った1人も勝ち）', def: false },
     { key: 'call', label: '最後の1枚の宣言', desc: '手札が1枚になる札を出すときは、先に「いろあわせ！」を押す。忘れたら2枚引く', def: false },
     { key: 'sevenZero', label: '7で交換・0で回す', desc: '7を出したら、選んだ1人と手札を交換する。0を出したら、全員が手札を次の人へ渡す（回っている向き）', def: false },
   ],
@@ -198,7 +225,7 @@ export default {
     if (!m || s0.winner !== null || m.p !== s0.turn) return null;
     const s = clone(s0);
     const p = m.p;
-    const next = (k) => (((p + s.dir * k) % s.n) + s.n) % s.n;
+    const next = (k) => stepAlive(s, p, k); // 脱落した人（手札の上限）は飛ばす
     s.step += 1;
 
     if (m.t === 'play') {
@@ -208,7 +235,7 @@ export default {
       const wild = card[0] === 'W';
       if (wild ? !COLORS.includes(m.c) : m.c !== undefined) return null;
       const swap = s.rules?.sevenZero && kindOf(card) === '7'; // 7で交換（詳細設定）
-      if (swap && s.n > 2 ? !Number.isInteger(m.to) || m.to < 0 || m.to >= s.n || m.to === p : m.to !== undefined) return null;
+      if (swap && aliveCount(s) > 2 ? !Number.isInteger(m.to) || m.to < 0 || m.to >= s.n || m.to === p || isOut(s, m.to) : m.to !== undefined) return null;
       let more = [];
       if (m.more !== undefined) { // 同じ数字まとめ出し（詳細設定）
         const hand = s.hands[p];
@@ -227,12 +254,12 @@ export default {
       if (!s.hands[p].length) { s.winner = p; return s; }
       const k = kindOf(card);
       if (swap) {
-        const to = s.n > 2 ? m.to : 1 - p;
+        const to = aliveCount(s) > 2 ? m.to : next(1);
         [s.hands[p], s.hands[to]] = [s.hands[to], s.hands[p]];
         last.swap = to;
       } else if (k === '0' && s.rules?.sevenZero) { // 0で回す（詳細設定）: 全員が次の人へ渡す
         const old = s.hands;
-        s.hands = old.map((_, q) => old[(((q - s.dir) % s.n) + s.n) % s.n]);
+        s.hands = old.map((h, q) => (isOut(s, q) ? h : old[stepAlive(s, q, 1, -s.dir)]));
         last.rotate = true;
       }
       if (k === 'S') {
@@ -240,7 +267,7 @@ export default {
         s.turn = next(2);
       } else if (k === 'R') {
         s.dir = -s.dir;
-        if (s.n === 2) { last.victim = 1 - p; s.turn = p; } else s.turn = next(1);
+        if (aliveCount(s) === 2) { last.victim = next(1); s.turn = p; } else s.turn = next(1);
       } else if ((k === 'D' || k === 'W4') && s.rules?.stack) {
         // 重ねて返す: 引かせるのは、重ねなかった人が決まってから
         s.pend = { k, n: (s0.pend?.n ?? 0) + (k === 'D' ? 2 : 4) };
@@ -249,15 +276,17 @@ export default {
       } else if (k === 'D' || k === 'W4') {
         last.victim = next(1);
         last.got = drawInto(s, last.victim, k === 'D' ? 2 : 4).length;
-        s.turn = next(2);
+        checkCap(s, last.victim);
+        s.turn = isOut(s, last.victim) ? next(1) : next(2);
       } else {
         s.turn = next(1);
       }
       // 最後の1枚の宣言（詳細設定）: 宣言せずに1枚になったら2枚引く
       if (s.rules?.call && s.hands[p].length === 1) {
         if (m.call === true) last.call = true;
-        else last.forgot = drawInto(s, p, 2).length;
+        else { last.forgot = drawInto(s, p, 2).length; checkCap(s, p); }
       }
+      if (s.winner === null && isOut(s, s.turn)) s.turn = stepAlive(s, s.turn, 1);
       return s;
     }
 
@@ -267,6 +296,7 @@ export default {
         // 重ねなかった: たまった枚数を全部引いて1回休み
         s.last = { p, t: 'take', got: drawInto(s, p, s.pend.n).length };
         s.pend = null;
+        checkCap(s, p);
         s.turn = next(1);
         return s;
       }
@@ -280,7 +310,8 @@ export default {
         if (canPlay(s, p, one[0])) card = one[0];
       } while (s.rules?.untilPlay && card === null);
       s.last = { p, t: 'draw', got, drew: card !== null };
-      if (card !== null) s.drawn = card;
+      checkCap(s, p);
+      if (card !== null && !isOut(s, p)) s.drawn = card;
       else s.turn = next(1);
       return s;
     }
@@ -309,7 +340,7 @@ export default {
     // 7で交換の相手は、手札がいちばん少ない人（同じなら近い席）
     const fewest = () => {
       let best = null;
-      for (let k = 1; k < s.n; k++) { const q = (p + k) % s.n; if (best === null || s.hands[q].length < s.hands[best].length) best = q; }
+      for (let k = 1; k < s.n; k++) { const q = (p + k) % s.n; if (!isOut(s, q) && (best === null || s.hands[q].length < s.hands[best].length)) best = q; }
       return best;
     };
     const play = (i) => {
@@ -325,7 +356,7 @@ export default {
           m.more = [...same.filter((j) => j !== top), top];
         }
       }
-      if (s.rules?.sevenZero && kindOf(hand[i]) === '7' && s.n > 2) m.to = fewest();
+      if (s.rules?.sevenZero && kindOf(hand[i]) === '7' && aliveCount(s) > 2) m.to = fewest();
       return m;
     };
     if (s.drawn !== null) return Math.random() < 0.15 ? { t: 'pass' } : play(hand.indexOf(s.drawn));
@@ -333,7 +364,7 @@ export default {
     if (!legal.length) return { t: 'draw' };
     if (s.pend) return Math.random() < 0.2 ? { t: 'draw' } : play(legal[0]); // 重ね返し: たいていは返す
     if (Math.random() < 0.3) return play(legal[Math.floor(Math.random() * legal.length)]);
-    const nextLeft = s.hands[(((p + s.dir) % s.n) + s.n) % s.n].length;
+    const nextLeft = s.hands[stepAlive(s, p, 1)].length;
     const sameColor = (c) => hand.filter((x) => colorOf(x) === colorOf(c)).length;
     const score = (c) => {
       if (c === 'W4') return nextLeft <= 2 ? 60 : -20;
@@ -375,9 +406,10 @@ export default {
       count.innerHTML = `<span class="ccard mini back"></span>×${s.hands[p].length}`;
       chip.append(name, count);
       const tags = [];
-      if (s.hands[p].length === 1) tags.push(['last', 'ラスト1枚']);
+      if (isOut(s, p)) tags.push(['away', '脱落']);
+      else if (s.hands[p].length === 1) tags.push(['last', 'ラスト1枚']);
       if (o.away[p]) tags.push(['away', '応答なし']);
-      else if (o.cpu[p] && !o.names[p].startsWith('CPU')) tags.push(['away', 'CPU が代わりに']);
+      else if (o.sub?.[p]) tags.push(['away', 'CPU が代わりに']);
       for (const [cls, text] of tags) {
         const t = document.createElement('span');
         t.className = 'cc-tag ' + cls;
@@ -420,7 +452,7 @@ export default {
 
     const head = document.createElement('div');
     head.className = 'cc-hand-head';
-    head.textContent = `あなたの手札（${s.hands[me].length}枚）`;
+    head.textContent = isOut(s, me) ? `あなたは手札が${CAP}枚を超えたので脱落しました` : `あなたの手札（${s.hands[me].length}枚）${s.rules?.cap ? `／上限 ${CAP}枚` : ''}`;
     if (myTurn) {
       const hint = document.createElement('small');
       hint.textContent = s.drawn !== null
@@ -439,7 +471,7 @@ export default {
     const sameAs = (i) => (s.rules?.multi && s.drawn === null && !s.pend && isNumber(mine[i])
       ? mine.map((_, j) => j).filter((j) => j !== i && isNumber(mine[j]) && kindOf(mine[j]) === kindOf(mine[i])) : []);
     const send = (i, more) => {
-      if (s.rules?.sevenZero && kindOf(mine[i]) === '7' && s.n > 2) { picking = { step: s.step, i, seven: true, more }; draw(); }
+      if (s.rules?.sevenZero && kindOf(mine[i]) === '7' && aliveCount(s) > 2) { picking = { step: s.step, i, seven: true, more }; draw(); }
       else { picking = null; play(more?.length ? { t: 'play', i, more } : { t: 'play', i }); }
     };
     mine.forEach((card, i) => {
@@ -513,6 +545,7 @@ export default {
       const row = document.createElement('div');
       for (let k = 1; k < s.n; k++) {
         const q = (me + k) % s.n;
+        if (isOut(s, q)) continue; // 脱落した人とは交換できない
         const b = document.createElement('button');
         b.type = 'button';
         b.className = 'btn secondary';
