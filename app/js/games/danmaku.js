@@ -8,6 +8,9 @@
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready →(3秒)→ go → play →(時間＋待ち)→ end
 // 詳細設定「残機」（2026-10-06 本人の決定。最初は 1機＝今までどおり当たったら脱落）: 2機・3機なら、その数だけ当たったら脱落。
 //   Claude の判断: 当たったあと2秒は当たらない（自機が点滅する）。その場で続ける。順位は脱落した時刻（最後の1機を失った時刻）で決める。
+// 詳細設定「ボム」（2026-10-06 本人の決定。最初はなし）: 1回だけ、押すと自機のまわり（半径 BOMB_R）の弾が消える。
+//   消えるのは押した人の画面と当たり判定だけ（弾の出方は全員同じのまま。ほかの人には関係ない）。手には入れない（当たりの手だけで勝ち負けが決まるため）。
+//   Claude の判断: ボタン（パソコンはスペースキーでも）。CPU は当たりそうになったとき半分の見込みで使う。
 // 手: { p: -1, t: 'go' | 'end' } / { p, t: 'hit', ms: もった時間, k: 何回目の当たりか（0から） } / { p, t: 'last', ms }
 //   k が局面の hits[p] と違う手は反則（同じ当たりが2回届いても1回だけ数える）。
 // CPU（と部屋を出た人の席）はホストの端末がよける動きを計算する（cpu の中の sim）。腕前はわざと鈍くしてある。
@@ -24,6 +27,15 @@ const SHIP_R = 0.02;
 const SEND_MS = 100;
 const START = { x: 0.5, y: H - 0.12 };
 const SAFE_SEC = 2; // 残機があって当たったあと、当たらない秒数
+export const BOMB_R = 0.3; // ボム（詳細設定）で弾が消える半径
+// ボム: 位置 (x, y) のまわりの弾を gone に入れる
+export function bombClear(active, sec, x, y, gone) {
+  for (const b of active) {
+    const [bx, by] = posOf(b, sec);
+    if (Math.hypot(bx - x, by - y) < BOMB_R + b.r) gone.add(b);
+  }
+}
+const bombOn = (s) => s.rules.bomb === 'on';
 
 /* ---------- 弾の作り方（全員同じ） ---------- */
 
@@ -169,7 +181,7 @@ function draw() {
   ctx.fillStyle = '#121a2e';
   ctx.fillRect(0, 0, k, k * H);
   // 弾
-  const active = ui.view(sec);
+  const active = ui.view(sec).filter((b) => !ui.gone.has(b)); // ボムで消した弾は出さない
   for (const b of active) {
     const [x, y] = posOf(b, sec);
     ctx.beginPath();
@@ -207,6 +219,15 @@ function draw() {
     g.dx = g.dx === undefined ? g.x : g.dx + (g.x - g.dx) * 0.3; // 届いた位置へなめらかに
     g.dy = g.dy === undefined ? g.y : g.dy + (g.y - g.dy) * 0.3;
     ship(g.dx, g.dy, p, 0.4, o.names[p]);
+  }
+  // ボムの広がる輪
+  if (ui.bombAt && now - ui.bombAt < 500) {
+    const t = (now - ui.bombAt) / 500;
+    ctx.beginPath();
+    ctx.arc(ui.bombX * k, ui.bombY * k, BOMB_R * t * k, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255, 230, 120, ${1 - t})`;
+    ctx.lineWidth = Math.max(2, k * 0.012);
+    ctx.stroke();
   }
   // 自分
   if (ui.me !== null) {
@@ -256,7 +277,14 @@ function step() {
   const ky = (ui.keys.has('ArrowDown') ? 1 : 0) - (ui.keys.has('ArrowUp') ? 1 : 0);
   if (kx || ky) { ui.x = clamp(ui.x + kx * 0.6 * dt, 0.02, 0.98); ui.y = clamp(ui.y + ky * 0.6 * dt, 0.02, H - 0.02); }
   if (s.dead[ui.me] !== null || ui.hit) return;
-  const active = ui.mine(sec);
+  if (ui.bombNow) { // ボムを押した（次の描き替えで消す）
+    ui.bombNow = false;
+    bombClear(ui.mine(sec), sec, ui.x, ui.y, ui.gone);
+    ui.bombAt = performance.now();
+    ui.bombX = ui.x;
+    ui.bombY = ui.y;
+  }
+  const active = ui.mine(sec).filter((b) => !ui.gone.has(b));
   if (sec >= ui.safeUntil && hitAt(active, sec, ui.x, ui.y)) {
     ui.boomAt = performance.now();
     o.onMove({ t: 'hit', ms: Math.round(sec * 1000), k: ui.hits });
@@ -275,6 +303,22 @@ function step() {
     ui.lastSend = now;
     o.stream({ a: [[ui.me, +ui.x.toFixed(3), +ui.y.toFixed(3)]] });
   }
+}
+
+// ボム（詳細設定）を使う。使えるのは遊んでいる間に1回だけ
+function useBomb() {
+  const { s, o } = ui.cur;
+  if (!ui.bomb || s.phase !== 'play' || !o.canMove || ui.hit || s.dead[ui.me] !== null || since(goKey(s)) / 1000 >= durOf(s)) return;
+  ui.bomb = false;
+  ui.bombNow = true;
+  syncBomb();
+}
+function syncBomb() {
+  const b = ui?.bombBtn;
+  if (!b) return;
+  const { s } = ui.cur;
+  b.disabled = !ui.bomb || s.phase !== 'play' || ui.hit || s.dead[ui.me] !== null;
+  b.textContent = ui.bomb ? '💣 ボム（1回だけ）' : '💣 ボムは使いました';
 }
 
 // ホストの端末では CPU の位置も送る（ほかの人の画面に出すため）
@@ -320,6 +364,7 @@ export default {
   settings: [
     { key: 'time', label: '時間', desc: 'この時間まで残った人は全員1位。後ほど弾が多く速くなる', def: '90', choices: [['60', '60秒'], ['90', '90秒'], ['120', '120秒']] },
     { key: 'lives', label: '残機', desc: '何回当たったら脱落するか。2機・3機なら、当たっても2秒は当たらずに続けられる', def: 1, choices: [[1, '1機（当たったら脱落）'], [2, '2機'], [3, '3機']] },
+    { key: 'bomb', label: 'ボム', desc: '1回だけ、押すと自分のまわりの弾が消える（消えるのは自分の画面だけ）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'level', label: '難しさ', desc: '弾の数と速さ。やさしいは少なく遅く、むずかしいは多く速い', def: 'normal', choices: [['easy', 'やさしい'], ['normal', 'ふつう'], ['hard', 'むずかしい']] },
   ],
 
@@ -399,15 +444,21 @@ export default {
     const now = Math.min(since(goKey(s)) / 1000, durOf(s));
     let c = sims.get(key);
     if (!c) {
-      c = { x: 0.2 + Math.random() * 0.6, y: H - 0.15, vx: 0, vy: 0, timer: 0, sec: now, dead: null, hitAt: [], safe: 0, view: tracker(bulletsOf(s)) };
+      c = { x: 0.2 + Math.random() * 0.6, y: H - 0.15, vx: 0, vy: 0, timer: 0, sec: now, dead: null, hitAt: [], safe: 0, view: tracker(bulletsOf(s)), bomb: bombOn(s), gone: new Set() };
       sims.set(key, c);
       if (sims.size > 40) sims.delete(sims.keys().next().value);
     }
     const dt = 1 / 30;
     while (!c.dead && c.sec + dt <= now) {
       c.sec += dt;
-      const active = c.view(c.sec);
+      let active = c.view(c.sec).filter((b) => !c.gone.has(b));
       cpuStep(c, active, c.sec, dt, Math.random);
+      // ボム（詳細設定）: 当たりそうになったら半分の見込みで使う（使わなければ取っておく）
+      if (c.bomb && c.sec >= c.safe && hitAt(active, c.sec, c.x, c.y) && Math.random() < 0.5) {
+        c.bomb = false;
+        bombClear(active, c.sec, c.x, c.y, c.gone);
+        active = active.filter((b) => !c.gone.has(b));
+      }
       if (c.sec >= c.safe && hitAt(active, c.sec, c.x, c.y)) {
         c.hitAt.push(Math.round(c.sec * 1000));
         c.safe = c.sec + SAFE_SEC;
@@ -448,6 +499,7 @@ export default {
       ui.chips = chips;
       ui.cur = { s, o };
       ui.wrap.classList.toggle('ac-live', s.phase === 'play' && me !== null && s.dead[me] === null);
+      syncBomb();
       return;
     }
     root.innerHTML = '';
@@ -460,14 +512,26 @@ export default {
     note.className = 'ac-note';
     note.textContent = '画面を指でなぞると、なぞった分だけ自機が動きます（パソコンはマウスか矢印キー）。当たるのは真ん中の白い点だけ。';
     wrap.append(canvas);
-    root.append(chips, wrap, note);
+    root.append(chips, wrap);
+    let bombBtn = null;
+    if (bombOn(s) && me !== null) {
+      bombBtn = document.createElement('button');
+      bombBtn.type = 'button';
+      bombBtn.className = 'btn secondary dm-bomb';
+      bombBtn.textContent = '💣 ボム（1回だけ）';
+      bombBtn.onclick = () => useBomb();
+      root.append(bombBtn);
+    }
+    root.append(note);
     if (s.phase !== 'end') window.scrollTo(0, 0);
     since(`danmaku:${s.seed}:ready`);
     ui = {
       key, canvas, ctx: canvas.getContext('2d'), chips, wrap, me, cur: { s, o }, scale: 300,
       x: START.x, y: START.y, hit: me !== null && s.hits[me] >= livesOf(s), hits: me !== null ? s.hits[me] : 0, safeUntil: 0, boomAt: 0, sentLast: false, lastSend: 0, lastCpuSend: 0, last: null,
       ghosts: new Map(), keys: new Set(), view: tracker(bulletsOf(s)), mine: tracker(bulletsOf(s)),
+      gone: new Set(), bomb: bombOn(s) && me !== null, bombNow: false, bombAt: 0, bombX: 0, bombY: 0, bombBtn,
     };
+    syncBomb();
     wrap.classList.toggle('ac-live', s.phase === 'play' && me !== null);
     resize();
     // なぞった分だけ動かす（指で自機が隠れないように）。マウスは押さなくても、その位置へ動く
@@ -493,7 +557,11 @@ export default {
     canvas.addEventListener('pointerup', up);
     canvas.addEventListener('pointercancel', up);
     const token = ui;
-    const kd = (e) => { if (ui !== token) { window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); return; } if (e.key.startsWith('Arrow')) { ui.keys.add(e.key); e.preventDefault(); } };
+    const kd = (e) => {
+      if (ui !== token) { window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); return; }
+      if (e.key.startsWith('Arrow')) { ui.keys.add(e.key); e.preventDefault(); }
+      if (e.key === ' ' && ui.bomb && e.target === document.body) { useBomb(); e.preventDefault(); }
+    };
     const ku = (e) => { if (ui === token) ui.keys.delete(e.key); };
     window.addEventListener('keydown', kd);
     window.addEventListener('keyup', ku);

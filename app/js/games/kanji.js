@@ -5,6 +5,9 @@
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open →（正解が出たら1.5秒 / 制限時間）→ close → shown → next …
 // 詳細設定「ヒント」（2026-10-06 本人の決定。最初はなし）: 制限時間の4割（25秒なら10秒）がたつと、読みの1文字目を見せる。
 //   見せるだけなので手の一覧には入れず、各自の端末で「画面に出てから」の時間で出す（Claude の判断）。読みが2つ以上あるときは最初の読みの1文字目。
+// 詳細設定「点の付け方」（2026-10-06 本人の決定。最初は「いちばん先」）: 「正解した人みんな」にすると、正解した人全員に速い順で 3・2・1点
+//   （4番目より後も1点。同じ速さは同じ点）。このときは最初の正解から8秒か、全員が正解したら1.5秒で締め切る（Claude の判断。
+//   ほかの人が答える時間を残すため。制限時間を過ぎた答えは今までどおり受け付けない）。CPU の答え方は同じ。
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'try', q: 問題番号, text: 答え, ms, n: その問題で何回目の答えか }
 
 import { mulberry32, shuffle } from './util.js';
@@ -15,7 +18,9 @@ const TOTAL = 10;
 const READY_MS = 3000;
 const SHOWN_MS = 3500;
 const GRACE_MS = 1500;
-const HINT_AT = 0.4; // ヒント（詳細設定）を出すのは、制限時間のこの割合がたったとき
+const HINT_AT = 0.4;
+const ALL_POINTS = [3, 2, 1]; // 正解した人みんなに点（詳細設定）の、速い順の点
+const ALL_WAIT_MS = 8000; // 正解した人みんなに点のとき、最初の正解から締め切るまで // ヒント（詳細設定）を出すのは、制限時間のこの割合がたったとき
 const LEVELS = { easy: 'ふつう', hard: 'むずかしい', expert: '超むずかしい', mix: 'ぜんぶまぜる' };
 const CPU_RATE = { easy: 0.55, hard: 0.4, expert: 0.3, mix: 0.4 };
 
@@ -45,6 +50,7 @@ export default {
   settings: [
     { key: 'level', label: '難しさ', desc: '出る漢字の難しさ', def: 'easy', choices: Object.entries(LEVELS) },
     { key: 'time', label: '制限時間', desc: '1問あたりの時間', def: '25', choices: [['15', '15秒'], ['25', '25秒'], ['40', '40秒']] },
+    { key: 'score', label: '点の付け方', desc: '正解した人みんな: 正解した人全員に速い順で 3・2・1点（最初の正解から8秒で締め切り）。読むのがゆっくりな人も点を取れる', def: 'first', choices: [['first', 'いちばん先の人に1点'], ['all', '正解した人みんな']] },
     { key: 'hint', label: 'ヒント', desc: '制限時間の4割（25秒なら10秒）がたつと、読みの1文字目を見せる', def: false },
   ],
 
@@ -76,7 +82,10 @@ export default {
   referee(s) {
     if (s.phase === 'ready') return { key: 'ready', ms: READY_MS, move: { t: 'next' } };
     if (s.phase === 'open') {
-      if (s.solved.some((v) => v !== null)) return { key: 'solved' + s.q, ms: GRACE_MS, move: { t: 'close' } };
+      if (s.rules.score === 'all') {
+        if (s.solved.every((v) => v !== null)) return { key: 'all' + s.q, ms: GRACE_MS, move: { t: 'close' } };
+        if (s.solved.some((v) => v !== null)) return { key: 'solved' + s.q, ms: ALL_WAIT_MS, move: { t: 'close' } };
+      } else if (s.solved.some((v) => v !== null)) return { key: 'solved' + s.q, ms: GRACE_MS, move: { t: 'close' } };
       return { key: 'open' + s.q, ms: limitOf(s) + GRACE_MS, move: { t: 'close' } };
     }
     if (s.phase === 'shown') return { key: 'shown' + s.q, ms: SHOWN_MS, move: { t: 'next' } };
@@ -104,8 +113,10 @@ export default {
         const times = s.solved.filter((v) => v !== null);
         const best = times.length ? Math.min(...times) : null;
         const winners = best === null ? [] : s.solved.map((v, p) => (v === best ? p : -1)).filter((p) => p >= 0);
-        for (const p of winners) s.scores[p] += 1;
-        s.last = { winners, best };
+        let pts = s.solved.map((v, p) => (winners.includes(p) ? 1 : 0));
+        if (s.rules.score === 'all') pts = s.solved.map((v) => (v === null ? 0 : ALL_POINTS[times.filter((t) => t < v).length] ?? 1));
+        pts.forEach((pt, p) => { s.scores[p] += pt; });
+        s.last = { winners, best, pts };
         return s;
       }
       return null;
@@ -148,7 +159,8 @@ export default {
     const extra = (p) => {
       if (s.phase === 'open') return s.solved[p] !== null ? '<span class="pt-ok">正解！</span>' : '';
       if (!shown || !s.last || s.q < 0) return '';
-      if (s.last.winners.includes(p)) return `<span class="pt-ok">○ ${secText(s.solved[p])} +1</span>`;
+      const pt = s.last.pts?.[p] ?? (s.last.winners.includes(p) ? 1 : 0);
+      if (pt) return `<span class="pt-ok">○ ${secText(s.solved[p])} +${pt}</span>`;
       if (s.solved[p] !== null) return `<span class="pt-ok">○ ${secText(s.solved[p])}</span>`;
       return s.tries[p] ? '<span class="pt-ng">×</span>' : '<span class="pt-ng">―</span>';
     };

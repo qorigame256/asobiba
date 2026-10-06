@@ -1451,6 +1451,19 @@ s = KJ.apply(s, { p: 2, t: 'try', q: 0, text: yomi, ms: 3500, n: 1 });
 assert.equal(KJ.apply(s, { p: 2, t: 'try', q: 0, text: yomi, ms: 100, n: 2 }), null, '正解したあとは答えられない');
 s = ref(KJ, s, 'close');
 assert.deepEqual(s.scores, [0, 0, 1], '届いた順ではなく、速く正解した人に1点');
+// 正解した人みんなに点（詳細設定）: 速い順に 3・2・1点、4番目より後も1点。最初の正解から8秒か、全員正解で締め切る
+{
+  let st = ref(KJ, KJ.init(5, 2, { rules: { score: 'all' } }), 'next');
+  const y = st.qs[0][1][0];
+  st = KJ.apply(st, { p: 3, t: 'try', q: 0, text: y, ms: 9000, n: 1 });
+  assert.deepEqual([KJ.referee(st).key, KJ.referee(st).ms], ['solved0', 8000], '最初の正解から8秒待つ');
+  for (const [p, ms] of [[0, 5000], [1, 7000], [2, 7000]]) st = KJ.apply(st, { p, t: 'try', q: 0, text: y, ms, n: 1 });
+  st = ref(KJ, st, 'close');
+  assert.deepEqual(st.scores, [3, 2, 2, 1, 0], '速い順に 3・2・1点（同じ速さは同じ点・4番目は1点・答えない人は0点）');
+  let u = ref(KJ, KJ.init(2, 2, { rules: { score: 'all' } }), 'next');
+  for (const p of [0, 1]) u = KJ.apply(u, { p, t: 'try', q: 0, text: y, ms: 3000 + p, n: 1 });
+  assert.equal(KJ.referee(u).key, 'all0', '全員正解したらすぐ締め切る');
+}
 for (const level of ['easy', 'hard', 'expert', 'mix']) {
   const st = KJ.init(2, 7, { rules: { level } });
   assert.equal(new Set(st.qs.map(([w]) => w)).size, 10, '10問とも違う漢字: ' + level);
@@ -1751,6 +1764,13 @@ assert.notEqual(GM.cpu(s, 0, { cpu: 'strong' }), 3, 'ぴったり五目の CPU �
     }
     console.log('kioku CPU longest (avg)', (lens.reduce((x, y) => x + y, 0) / lens.length).toFixed(1));
   } finally { performance.now = realNow; }
+  // だんだん速く（詳細設定）: 見せる時間（光り始めまで0.7秒 + 個数 × 間隔）が、長くなるほど1個あたり短くなる
+  {
+    const showAt = (rules, round) => KM.referee({ ...KM.init(2, 5, { rules }), phase: 'show', round }).ms;
+    assert.deepEqual([showAt({}, 0), showAt({}, 10)], [700 + 3 * 700, 700 + 13 * 700], '最初の設定はいつも0.7秒');
+    assert.deepEqual([showAt({ fast: true }, 0), showAt({ fast: true }, 5), showAt({ fast: true }, 10), showAt({ fast: true }, 20)],
+      [700 + 3 * 700, 700 + 8 * 525, 700 + 13 * 350, 700 + 23 * 350], 'だんだん速く: 3個 0.7秒 → 13個で 0.35秒、そこで止まる');
+  }
   console.log('kioku OK');
 }
 
@@ -2298,6 +2318,27 @@ for (let g = 0; g < 30; g++) {
   assert.ok(used >= 10, 'CPU もジョーカーを使う');
   console.log('sevens joker uses', used);
 }
+// 出せるならパス禁止（詳細設定）
+{
+  const { playable: svPlayable } = await import('../app/js/games/sevens.js');
+  let st = SV.init(4, 7, { rules: { noPass: true } });
+  assert.ok(svPlayable(st, st.turn).length, 'この配り方では最初の人が出せる');
+  assert.equal(SV.apply(st, { p: st.turn, t: 'pass' }), null, '出せる札があるとパスできない');
+  assert.ok(SV.apply(SV.init(4, 7, {}), { p: st.turn, t: 'pass' }), '設定なしなら出せてもパスできる');
+  const stuck = { ...st, hands: st.hands.map((h, p) => (p === st.turn ? ['h1', 's1'] : h)) };
+  assert.ok(SV.apply(stuck, { p: st.turn, t: 'pass' }), '出せないときはパスできる');
+  for (let g = 0; g < 40; g++) {
+    let u = SV.init(3 + (g % 4), 300 + g, { rules: { noPass: true, joker: g % 2 === 1 } });
+    let guard = 0;
+    while (!SV.result(u)) {
+      const m = SV.cpu(u, u.turn);
+      if (m.t === 'pass') assert.equal(svPlayable(u, u.turn).length, 0, 'パス禁止で CPU が出せるのにパスした');
+      u = SV.apply(u, { p: u.turn, ...m });
+      assert.ok(u, 'パス禁止で七並べの CPU が反則を出した');
+      assert.ok(++guard < 600);
+    }
+  }
+}
 console.log('sevens OK');
 
 // ---------- マンカラ ----------
@@ -2461,6 +2502,25 @@ oe = OE.apply(oe, { p: 2, t: 'giveup', k: 0 });
 oe = OE.apply(oe, { p: -1, t: 'next', turn: 2 });
 assert.ok(OE.result(oe), '全員が1回ずつ描いたら終わり');
 assert.deepEqual(OE.result(oe).winners, [2]);
+// お題を選ぶ（詳細設定）: 描く人に3つ出て、選んでから描く。15秒で選ばなければ1つ目
+{
+  let st = OE.init(3, 41, { rules: { pick: true } });
+  assert.equal(st.phase, 'pick');
+  assert.equal(new Set(st.cands.flat()).size, 9, '3回ぶん・9つのお題がすべて違う');
+  assert.equal(OE.apply(st, { p: 1, t: 'pick', i: 1 }), null, '描く人しか選べない');
+  assert.equal(OE.apply(st, { p: 1, t: 'guess', n: 0, text: 'x' }), null, '選んでいる間は答えられない');
+  assert.equal(OE.apply(st, { ...line }), null, '選ぶ前は描けない');
+  assert.equal(OE.apply(st, { p: 0, t: 'pick', i: 3 }), null, '4つ目は無い');
+  assert.deepEqual([OE.referee(st).key, OE.referee(st).ms], ['pick:0', 15000]);
+  const picked = OE.apply(st, { p: 0, t: 'pick', i: 2 });
+  assert.deepEqual([picked.phase, picked.topics[0], st.topics[0]], ['draw', st.cands[0][2], st.cands[0][0]], '選んだお題で描く（元の局面は変えない）');
+  assert.ok(OE.apply(picked, { p: 1, t: 'guess', n: 0, text: TOPICS[st.cands[0][2]][0] }).correct.includes(1), '選んだお題で当たる');
+  const auto = OE.apply(st, { p: -1, t: 'pick', turn: 0, i: 0 });
+  assert.deepEqual([auto.phase, auto.topics[0]], ['draw', st.cands[0][0]], '時間切れなら1つ目');
+  assert.deepEqual(OE.cpu(st, 0), { t: 'pick', i: 0 }, '描く人が部屋を出ていたら1つ目を選ぶ');
+  let u = OE.apply(OE.apply(picked, { p: 0, t: 'giveup', k: 0 }), { p: -1, t: 'next', turn: 0 });
+  assert.deepEqual([u.turn, u.phase], [1, 'pick'], '次の人も選ぶところから');
+}
 console.log('oekaki OK');
 
 // ---------- ブラックジャック ----------
@@ -2756,6 +2816,14 @@ console.log('kaisen OK');
   L = run(D.init(2, 5, { rules: { lives: 2 } }), [{ p: -1, t: 'go' }, { p: 0, t: 'hit', ms: 3000, k: 0 }]);
   assert.equal(L.dead[0], null, '2機なら1回目は残る');
   assert.equal(run(L, [{ p: 0, t: 'hit', ms: 5000, k: 1 }]).dead[0], 5000, '2機なら2回目で脱落');
+  // ボム（詳細設定）: まわりの弾だけ消える
+  {
+    const bs = [{ t: 0, x: 0.5, y: 0.5, vx: 0, vy: 0, r: 0.01, end: 9 }, { t: 0, x: 0.95, y: 0.1, vx: 0, vy: 0, r: 0.01, end: 9 }];
+    const gone = new Set();
+    DM.bombClear(bs, 1, 0.5, 0.6, gone);
+    assert.deepEqual([gone.has(bs[0]), gone.has(bs[1])], [true, false], '自機のまわりの弾だけ消える');
+    assert.equal(D.init(2, 1).rules.bomb ?? 'off', 'off', '最初はボムなし');
+  }
 }
 
 // ---------- 玉入れ ----------

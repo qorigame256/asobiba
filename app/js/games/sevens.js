@@ -8,6 +8,8 @@
 //   その本物の札を持っている人は、次の自分の番に必ずその札を出し（パスもほかの札も出せない）、ジョーカーを受け取る。
 //   作り（Claude の判断）: 自分が持っている札の場所には置けない。ジョーカーが最後の1枚なら置いて上がってよい。失格した人のジョーカーは場に並べず捨てる。
 //   置いたジョーカーは field[置いた所] = 'joker'、出さなければいけない人は jk = { at: 置いた所, owner }。
+// 詳細設定「出せるならパス禁止」（2026-10-06 本人の決定。最初はなし）: 出せる札（ジョーカーを置ける所も）があるときはパスできない。
+//   出せないときのパスは今までどおり回数に数え、回数を超えたら失格（Claude の判断）。
 // 手: { p, t: 'play', c: 札 } / { p, t: 'play', c: 'JK', at: 置く所 } / { p, t: 'pass' }
 
 import { mulberry32, shuffle } from './util.js';
@@ -60,6 +62,7 @@ export default {
   settings: [
     { key: 'passes', label: 'パスできる回数', desc: 'これを超えてパスすると失格（手札は全部場に並べる）', def: 3, choices: [[3, '3回'], [5, '5回']] },
     { key: 'tunnel', label: 'トンネル', desc: 'K と A をつながっているとみなす（K が出ていれば A を、A が出ていれば K を出せる）', def: false },
+    { key: 'noPass', label: '出せるならパス禁止', desc: '出せる札があるときはパスできない（わざと止めて相手を困らせられなくなる）', def: false },
     { key: 'joker', label: 'ジョーカー', desc: '1枚入れる。出せる所に本物の札の代わりに置ける。その札を持っている人は、次の番に必ずその札を出してジョーカーを受け取る', def: false },
   ],
 
@@ -76,7 +79,7 @@ export default {
       hands[p] = h.filter((x) => rankOf(x) !== 7).sort((a, b) => ORDER(a) - ORDER(b));
     });
     const s = {
-      n, maxPass: rules.passes === 5 ? 5 : 3, tunnel: rules.tunnel === true, joker, jk: null,
+      n, maxPass: rules.passes === 5 ? 5 : 3, tunnel: rules.tunnel === true, noPass: rules.noPass === true, joker, jk: null,
       hands, field, turn, passes: Array(n).fill(0), done: [], outs: [], last: null, step: 0,
     };
     // 7 しか持っていなかった人は配った時点で上がり
@@ -132,6 +135,7 @@ export default {
       s.last = { t: 'play', p, c: m.c };
       if (!s.hands[p].length) { s.done.push(p); s.last.up = true; }
     } else if (m.t === 'pass') {
+      if (s.noPass && playable(s0, p).length) return null; // 出せるならパス禁止（詳細設定）
       s.passes[p] += 1;
       if (s.passes[p] > s.maxPass) {
         for (const c of s.hands[p]) if (c !== JOKER) s.field[c] = 'out';
@@ -177,7 +181,7 @@ export default {
     const scored = ok.map((c) => ({ c, v: follow(c) * 2 + (rankOf(c) === 1 || rankOf(c) === 13 ? 3 : 0) + Math.random() }));
     scored.sort((a, b) => b.v - a.v);
     const left = s.maxPass - s.passes[p];
-    if (scored[0].v < 1 && left >= 2 && hand.length > 4 && Math.random() < 0.35) return { t: 'pass' };
+    if (!s.noPass && scored[0].v < 1 && left >= 2 && hand.length > 4 && Math.random() < 0.35) return { t: 'pass' };
     return { t: 'play', c: scored[0].c };
   },
 
@@ -293,7 +297,12 @@ export default {
         hand.append(e);
       }
       root.append(hand);
-      if (o.canMove && !forced) {
+      if (o.canMove && !forced && s.noPass && can.length) {
+        const note = document.createElement('p');
+        note.className = 'cc-log';
+        note.textContent = '出せる札があるのでパスできません（出せるならパス禁止）';
+        root.append(note);
+      } else if (o.canMove && !forced) {
         const act = document.createElement('div');
         act.className = 'cc-actions';
         const b = document.createElement('button');

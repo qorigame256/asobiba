@@ -90,6 +90,12 @@ p { margin: 0; }
   background: #fff;
 }
 .name-box + .join-form { margin-top: 10px; }
+/* 自分のマーク（main.js の renderMarks） */
+.mark-label { margin-top: 10px; font-size: .9rem; }
+.mark-label small { color: var(--muted); }
+.mark-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.mark-btn { font-size: 1.25rem; line-height: 1; width: 2.2rem; height: 2.2rem; border-radius: 8px; border: 1.5px solid var(--line); background: #fff; cursor: pointer; padding: 0; }
+.mark-btn.on { border-color: var(--accent); background: #fff3e6; box-shadow: 0 0 0 2px var(--accent); }
 
 .game-list {
   display: grid;
@@ -1475,6 +1481,8 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .ac .pt-score, .mg .pt-score { font-size: 1rem; }
 .ac-field { display: flex; justify-content: center; }
 .ac-canvas { display: block; border-radius: 12px; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.oe-picks { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 6px; } /* お絵描き当てのお題を選ぶ */
+.dm-bomb { display: block; margin: 8px auto; } /* 弾幕回避のボム */
 .ac-note { text-align: center; font-size: .82rem; color: var(--muted); margin: 0; }
 /* 遊んでいる間はページを動かさない（指でなぞるとページが動いてしまうため） */
 html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behavior: none; }

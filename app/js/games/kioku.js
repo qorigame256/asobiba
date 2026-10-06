@@ -3,6 +3,8 @@
 // Claude の判断: 時間内に押し終えなかったら間違いと同じ。残っていた全員が同じ回で脱落したら、その人たちが同点で1位。
 //   順番は seed から決めた30個（最長30個まで。そこまで残った人は全員1位）。点は「覚えられた一番長い数」。
 //   押した順番そのものを手として送り、正しいかは全員の端末で同じように確かめる。間違えたらその時点で送る。
+// 詳細設定「だんだん速く」（2026-10-06 本人の決定。最初はなし）: 光る間隔を、3個の 0.7秒から1個長くなるごとに 0.035秒ずつ縮め、0.35秒で止める
+//   （13個で一番速くなる。光っている長さも同じ割合で縮める。Claude の判断）。押す時間は今までと同じ。CPU の間違えやすさも同じ。
 //
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → go → show（光る）→ open → input →（全員押した / 時間切れ）→ close → shown → go …
 // 手: { p: -1, t: 'go' | 'open' | 'close' } / { p, t: 'in', r: 何回目, keys: [押したボタン 0〜3 …] }（1回に1人1度だけ）
@@ -17,12 +19,17 @@ const READY_MS = 2500;
 const LEAD_MS = 700; // 光り始めるまでの間
 const STEP_MS = 700; // 1つ光る間隔（光っているのは ON_MS）
 const ON_MS = 450;
+const FAST_MIN = 350; // だんだん速く（詳細設定）の一番短い間隔
+const FAST_STEP = 35; // 1個長くなるごとに縮める分
 const SHOWN_MS = 2600;
 const GRACE_MS = 1500;
 const COLORS = ['赤', '青', '黄', '緑'];
 
 const lenOf = (s) => FIRST + s.round;
-const showMs = (len) => LEAD_MS + len * STEP_MS;
+// 1つ光る間隔と光っている長さ（だんだん速くなら長いほど短い）
+const stepOf = (s, len) => (s.rules.fast ? Math.max(FAST_MIN, STEP_MS - (len - FIRST) * FAST_STEP) : STEP_MS);
+const onOf = (s, len) => Math.round((stepOf(s, len) * ON_MS) / STEP_MS);
+const showMs = (s, len) => LEAD_MS + len * stepOf(s, len);
 const inputMs = (len) => 4000 + len * 800;
 const keyOf = (s, part) => `kioku:${s.seed}:${s.round}:${part}`;
 const clone = (s) => ({ ...s, lives: s.lives.slice(), done: s.done.slice(), best: s.best.slice(), outAt: s.outAt.slice() });
@@ -58,6 +65,7 @@ export default {
   minPlayers: 2,
   maxPlayers: 10,
   settings: [
+    { key: 'fast', label: 'だんだん速く', desc: '長くなるほど光る間が短くなる（0.7秒から、13個で0.35秒まで）', def: false },
     { key: 'lives', label: '間違えられる回数', desc: '何回間違えたら脱落か', def: 1, choices: [[1, '1回で脱落'], [3, '3回まで']] },
   ],
 
@@ -66,7 +74,7 @@ export default {
     const rnd = mulberry32(seed);
     const seq = Array.from({ length: MAX }, () => Math.floor(rnd() * 4));
     return {
-      n, seed, rules: { lives }, seq, round: -1, phase: 'ready', lives: Array(n).fill(lives), done: Array(n).fill(null),
+      n, seed, rules: { lives, fast: rules.fast === true }, seq, round: -1, phase: 'ready', lives: Array(n).fill(lives), done: Array(n).fill(null),
       best: Array(n).fill(0), outAt: Array(n).fill(-1), last: null, step: 0,
     };
   },
@@ -96,7 +104,7 @@ export default {
 
   referee(s) {
     if (s.phase === 'ready') return { key: 'ready', ms: READY_MS, move: { t: 'go' } };
-    if (s.phase === 'show') return { key: 'show' + s.round, ms: showMs(lenOf(s)), move: { t: 'open' } };
+    if (s.phase === 'show') return { key: 'show' + s.round, ms: showMs(s, lenOf(s)), move: { t: 'open' } };
     if (s.phase === 'input') {
       if (aliveOf(s).every((p) => s.done[p] !== null)) return { key: 'all' + s.round, ms: 500, move: { t: 'close' } };
       return { key: 'in' + s.round, ms: inputMs(lenOf(s)) + GRACE_MS, move: { t: 'close' } };
@@ -225,12 +233,14 @@ export default {
     const showKey = keyOf(s, 'show');
     if (s.phase === 'show' || s.phase === 'input') {
       since(showKey);
-      const total = showMs(len);
+      const total = showMs(s, len);
+      const step = stepOf(s, len);
+      const on = onOf(s, len);
       const tick = () => {
         if (!pad.isConnected) return;
         const t = since(showKey) - LEAD_MS;
-        const i = Math.floor(t / STEP_MS);
-        btns.forEach((b, k) => b.classList.toggle('lit', t >= 0 && i < len && t - i * STEP_MS < ON_MS && s.seq[i] === k));
+        const i = Math.floor(t / step);
+        btns.forEach((b, k) => b.classList.toggle('lit', t >= 0 && i < len && t - i * step < on && s.seq[i] === k));
         if (since(showKey) < total) requestAnimationFrame(tick);
         else btns.forEach((b) => b.classList.remove('lit'));
       };
@@ -245,7 +255,7 @@ export default {
       else if (mine !== null) msg.textContent = mine ? 'せいかい！ほかの人を待っています' : 'まちがい…';
       else {
         const inKey = keyOf(s, 'in');
-        const wait = Math.max(0, showMs(len) - since(showKey));
+        const wait = Math.max(0, showMs(s, len) - since(showKey));
         const prog = document.createElement('div');
         prog.className = 'km-prog';
         const update = () => { prog.textContent = `${keys.length} / ${len}`; };

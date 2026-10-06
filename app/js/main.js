@@ -62,7 +62,7 @@ function myName() {
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'hints'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'hints', 'marks'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -102,8 +102,23 @@ function cpuName(id) {
 function nameOf(id) {
   if (!id) return '（空席）';
   if (isCpu(id)) return cpuName(id);
-  return (S.names?.[id] || 'ゲスト') + (S.beg?.includes(id) ? ' 🔰' : '');
+  const mark = S.marks?.[id];
+  return (MARKS.includes(mark) ? mark : '') + (S.names?.[id] || 'ゲスト') + (S.beg?.includes(id) ? ' 🔰' : '');
 }
+
+/* ---------- 自分のマーク（2026-10-06 本人の決定）: ホーム画面で名前の前に付ける絵文字を1つ選ぶ。部屋のみんなの画面で名前の前に出る ---------- */
+// Claude の判断: 選べるのは MARKS の20個だけ（外から届いた値は、この一覧にあるときだけ使う）。CPU の 🤖 とまぎれないよう 🤖 は入れない。
+// 各自の端末に覚え（localStorage の bg-mark）、hello の mark で知らせ、ホストが S.marks（人の id → マーク）に集めて state で送る（初心者マークと同じ流れ）。
+const MARKS = ['🐱', '🐶', '🐰', '🐻', '🐼', '🐸', '🐧', '🦊', '🦁', '🐯', '🐙', '🦄', '🍙', '🍓', '🍩', '🌸', '⭐', '🚀', '⚽', '🎸'];
+const MARK_KEY = 'bg-mark';
+function myMark() {
+  try { const m = localStorage.getItem(MARK_KEY); return MARKS.includes(m) ? m : ''; } catch { return ''; }
+}
+function setMark(id, mark) {
+  S.marks = { ...(S.marks ?? {}) };
+  if (MARKS.includes(mark)) S.marks[id] = mark; else delete S.marks[id];
+}
+const cleanMarks = (m) => (m && typeof m === 'object' ? Object.fromEntries(Object.entries(m).filter(([id, v]) => typeof id === 'string' && MARKS.includes(v))) : {});
 
 /* ---------- 初心者マーク（2026-10-06 本人の決定）: 付けた人の画面では、いま選べる所（置ける所・出せる札）を強く光らせる ---------- */
 // 付け外しは各自の端末で（localStorage）。名前に 🔰 を付けて、部屋のみんなにも見せる（ホストが集めて state の beg で送る）。
@@ -119,7 +134,7 @@ function setBeginner(on) {
   document.body.classList.toggle('beginner', on);
   showBeginnerBtn();
   if (S?.mode === 'online') {
-    if (S.isHost) { setBeg(S.myId, on); sendState(); } else send({ type: 'hello', isHost: false, name: myName(), beg: on });
+    if (S.isHost) { setBeg(S.myId, on); sendState(); } else send({ type: 'hello', isHost: false, name: myName(), beg: on, mark: myMark() });
   }
   if (S) render();
 }
@@ -1388,7 +1403,7 @@ function createRoom(gameId) {
   S = {
     mode: 'online', code: randomString(CODE_LEN, CODE_CHARS), myId, isHost: true,
     gameId, round: 1, first: crypto.getRandomValues(new Uint8Array(1))[0] & 1, seed: 0, order: null, cpus: 0, moves: [],
-    members: [myId], names: { [myId]: myName() || 'プレイヤー1' }, rules: savedRules(), prev: null, carry: null, pick: null, banned: [],
+    members: [myId], names: { [myId]: myName() || 'プレイヤー1' }, marks: myMark() ? { [myId]: myMark() } : {}, rules: savedRules(), prev: null, carry: null, pick: null, banned: [],
   };
   saveRoom();
   setUrlRoom(S.code);
@@ -1474,16 +1489,16 @@ function openNet() {
 function send(msg, qos) { S?.net?.send(msg, qos); }
 function sendState() {
   const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, undo, streak, beg } = S;
-  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null });
+  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, marks: S.marks ?? {} });
 }
 function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves, u: S.undo ?? 0 }); }
-function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner }); }
+function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner, mark: myMark() }); }
 
 function onConn(status) {
   S.conn = status;
   if (status === 'ready') {
-    send({ type: 'hello', isHost: S.isHost, name: myName(), beg: beginner });
-    if (S.isHost) { setBeg(S.myId, beginner); sendState(); }
+    send({ type: 'hello', isHost: S.isHost, name: myName(), beg: beginner, mark: myMark() });
+    if (S.isHost) { setBeg(S.myId, beginner); setMark(S.myId, myMark()); sendState(); }
   }
   render();
 }
@@ -1574,6 +1589,7 @@ function acceptMember(msg) {
     return;
   }
   setBeg(msg.from, msg.beg === true);
+  setMark(msg.from, msg.mark);
   saveRoom();
   sendState();
 }
@@ -1588,6 +1604,7 @@ function adoptState(msg) {
   S.names = { ...msg.names };
   S.rules = msg.rules && typeof msg.rules === 'object' ? msg.rules : {};
   S.beg = Array.isArray(msg.beg) ? msg.beg.filter((id) => typeof id === 'string') : [];
+  S.marks = cleanMarks(msg.marks);
   S.streak = msg.streak && typeof msg.streak === 'object' && msg.streak.wins && typeof msg.streak.wins === 'object' ? msg.streak : null;
   S.tally = msg.tally && Number.isInteger(msg.tally.games) && msg.tally.wins && typeof msg.tally.wins === 'object' ? msg.tally : null;
   for (const id of S.members) S.seen[id] ??= Date.now();
@@ -1800,6 +1817,26 @@ nameInput.value = myName();
 nameInput.addEventListener('input', () => {
   try { localStorage.setItem(NAME_KEY, cleanName(nameInput.value)); } catch { /* 無視 */ }
 });
+// 自分のマーク（ホーム画面）。押すと選ぶ、もう一度押すと外す
+function renderMarks() {
+  const box = el('my-mark');
+  if (!box) return;
+  box.innerHTML = '';
+  const cur = myMark();
+  for (const m of MARKS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'mark-btn' + (m === cur ? ' on' : '');
+    b.textContent = m;
+    b.setAttribute('aria-pressed', String(m === cur));
+    b.onclick = () => {
+      try { if (m === myMark()) localStorage.removeItem(MARK_KEY); else localStorage.setItem(MARK_KEY, m); } catch { /* 無視 */ }
+      renderMarks();
+    };
+    box.append(b);
+  }
+}
+renderMarks();
 el('join-form').addEventListener('submit', (e) => {
   e.preventDefault();
   joinRoom(el('join-code').value);
