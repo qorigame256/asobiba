@@ -10,6 +10,8 @@
 //   - 革命は同じ数字4枚以上（階段では起きない）。8切り・11バックは、出した組に 8・J が入っていれば起きる（階段も含む）。
 //   - しばりは、ジョーカーを含まない組で、前の組とマークが全く同じときに掛かる（場が流れるまで続く）。
 //   - スペ3返しで ♠3 を出すと場が流れる。反則上がりと都落ちで下位になった人は、先になった人ほど下。
+//   - 5飛び（詳細設定。2026-10-06 本人の決定で、5の枚数だけ飛ばす）: 同じ数字の組は枚数（ジョーカーも5として数える）、階段は5が入っていれば1人。
+//     飛ばされた人は「パスした」扱い（場が流れるまで出せない）。全員飛ばしたら場が流れて出した人から。8切りなどで場が流れるときは飛ばさない。
 //   - カード交換: 大貧民の一番強い2枚 → 大富豪、大富豪が選んだ2枚 → 大貧民。4人以上なら貧民と富豪で1枚ずつも。
 //     前の対局と顔ぶれが違うときは交換しない。
 
@@ -221,6 +223,7 @@ const RULE_LIST = [
   { key: 'stairs', label: '階段', desc: '同じマークで3枚以上の連番を出せる', def: true },
   { key: 'shibari', label: 'しばり', desc: '前と同じマークを出すと、場が流れるまでそのマークしか出せない', def: true },
   { key: 'exchange', label: 'カード交換', desc: '2戦目から、大富豪と大貧民（4人以上なら富豪と貧民も）が札を交換', def: true },
+  { key: 'five', label: '5飛び', desc: '5を出すと、出した5の枚数だけ次の人を飛ばす（飛ばされた人はパスと同じ）', def: false },
   { key: 'elevenBack', label: '11バック', desc: 'J を出すと、場が流れるまで強さの順番が逆になる', def: false },
   { key: 'spe3', label: 'スペ3返し', desc: 'ジョーカー1枚には ♠3 で勝てる', def: false },
   { key: 'miyako', label: '都落ち', desc: '大富豪が1番に上がれないと、その時点で大貧民になる', def: false },
@@ -366,6 +369,17 @@ export default {
         if (king !== p && isActive(s, king)) { s.fouls.push(king); last.miyako = king; }
       }
       if (finishIfOver(s)) return s;
+    }
+    if (!flow && s.rules.five && contains(meld, 5)) {
+      const k = meld.kind === 'set' ? meld.n : 1;
+      let done = 0;
+      for (let j = 1; j < s.n && done < k; j++) {
+        const q = (p + j) % s.n;
+        if (!isActive(s, q) || s.passed[q]) continue;
+        s.passed[q] = true;
+        done++;
+      }
+      if (done) effects.push(`5飛び（${done}人）`);
     }
     if (flow) {
       clearField(s);

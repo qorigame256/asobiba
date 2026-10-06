@@ -64,12 +64,13 @@ for (let k = 0; k < 10; k++) assert.equal(TS.cpu(s, 0, lv('strong')), 38, 'ス�
 // 消えるマルバツ・ポップアウト
 const TV = { ...T, id: 'tictactoe-vanish', init: () => T.init({ rules: { size: 'vanish' } }) };
 const CP = { ...C, id: 'connect4-pop', init: () => C.init({ rules: { pop: 'on' } }) };
+const RS = { ...R, id: 'reversi-corners', init: () => R.init({ rules: { corners: true } }) }; // 四隅封印
 s = TV.init();
 for (const m of [0, 3, 1, 4]) s = TV.apply(s, m); // ○ が 0・1、× が 3・4。○ の番
 for (let k = 0; k < 10; k++) assert.equal(TV.cpu(s, 0, lv('strong')), 2, '消えるマルバツ: 勝てる手があれば打つ');
 
 // 強い方が勝ち越す
-for (const [g, n] of [[C, 20], [R, 12], [TS, 12], [TV, 20], [CP, 12]]) {
+for (const [g, n] of [[C, 20], [R, 12], [RS, 12], [TS, 12], [TV, 20], [CP, 12]]) {
   const sw = tally(g, 'strong', 'weak', n);
   const nw = tally(g, 'normal', 'weak', n);
   results[g.id] = { strongVsWeak: sw, normalVsWeak: nw };
@@ -203,7 +204,8 @@ for (const [g, n] of [[C, 20], [R, 12], [TS, 12], [TV, 20], [CP, 12]]) {
   for (const m of [0, 4]) y = D.apply(y, m); // 左上の四角が2辺。20・21を引くと3辺目になる
   for (let k = 0; k < 20; k++) assert.ok(![20, 21].includes(D.cpu(y, 0, lv('strong'))), '点と線: 3辺目を引かない');
 
-  for (const [g, rules, n, games, id] of [[G, {}, 2, 80, 'gomoku'], [D, {}, 2, 100, 'dots'], [D, { players: 3 }, 3, 90, 'dots-3'], [D, { players: 4 }, 4, 80, 'dots-4'], [GAMES.mancala, {}, 2, 60, 'mancala'], [GAMES.mancala, { players: 3 }, 3, 60, 'mancala-3'], [GAMES.kaisen, {}, 2, 80, 'kaisen']]) {
+  for (const [g, rules, n, games, id] of [[G, {}, 2, 80, 'gomoku'], [D, {}, 2, 100, 'dots'], [D, { players: 3 }, 3, 90, 'dots-3'], [D, { players: 4 }, 4, 80, 'dots-4'], [GAMES.mancala, {}, 2, 60, 'mancala'], [GAMES.mancala, { players: 3 }, 3, 60, 'mancala-3'], [GAMES.kaisen, {}, 2, 80, 'kaisen'],
+    [G, { exact: true }, 2, 80, 'gomoku-exact'], [D, { swap: true }, 2, 100, 'dots-swap'], [GAMES.mancala, { nocap: true }, 2, 60, 'mancala-nocap'], [GAMES.hasami, {}, 2, 30, 'hasami']]) {
     // 3人以上の点と線は、つよいとふつうの差が小さい（適当に引く1割だけ）ので、よわいとの差だけを見る
     for (const [a, b] of n === 2 ? [['normal', 'weak'], ['strong', 'normal']] : [['normal', 'weak'], ['strong', 'weak']]) {
       let aw = 0;

@@ -106,6 +106,12 @@ function rulesOf(gameId, rules) {
   }));
 }
 
+// 「おまかせ」（待合室でホストが押すと詳細設定を抽選する。2026-10-06 本人の決定）で抽選しない項目。本人が決めたのは
+// 人数・CPU の強さと速さ・盤の大きさ。時間・回数・長さ・難しさ・読み上げ・駒落ちも好みなので抽選しない（Claude の判断）。
+// マルバツ・将棋の size は盤の大きさでなく遊び方（スーパー・消える・5五将棋）なので抽選する。
+const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window']);
+const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
+
 // 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、エアホッケーは 2〜3。ほかは2）
 const boardSeats = (gameId, rules) => GAMES[gameId]?.seatCount?.(rulesOf(gameId, rules)) ?? 2;
 
@@ -211,6 +217,53 @@ function toast(text) {
   t.classList.add('show');
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+/* ---------- リアクション（2026-10-06 本人の決定）: 対局中にだれでも短い言葉を送り、みんなの画面に少しだけ出す ---------- */
+
+const REACTIONS = ['ナイス！', 'おしい！', 'えー！', 'やった！', 'まって！', 'ｗ']; // 言葉は本人が選んだ
+const REACT_GAP_MS = 1200; // 1人がこれより短い間に送った分は出さない（連打で画面が埋まらないように）
+const reactAt = {}; // 人の id → 最後に出した時刻
+
+function showReaction(id, w) {
+  if (!Number.isInteger(w) || !REACTIONS[w]) return;
+  const now = Date.now();
+  if (now - (reactAt[id] ?? 0) < REACT_GAP_MS) return;
+  reactAt[id] = now;
+  let box = el('reactions');
+  if (!box) {
+    box = document.createElement('div');
+    box.id = 'reactions';
+    box.className = 'reactions';
+    box.setAttribute('aria-live', 'polite');
+    document.body.append(box);
+  }
+  const b = document.createElement('div');
+  b.className = 'react-bubble';
+  const who = document.createElement('small');
+  who.textContent = id === S?.myId ? 'あなた' : nameOf(id); // 名前は外から来た文字なので textContent
+  const word = document.createElement('b');
+  word.textContent = REACTIONS[w];
+  b.append(who, word);
+  box.append(b);
+  while (box.children.length > 5) box.firstChild.remove();
+  setTimeout(() => b.remove(), 2600);
+}
+
+// 対局の画面の下の段に出すリアクションのボタン（オンラインだけ。観戦の人も送れる）
+function appendReactions() {
+  if (S.mode !== 'online' || !S.order) return;
+  const bar = document.createElement('div');
+  bar.className = 'react-bar';
+  REACTIONS.forEach((t, w) => {
+    const b = makeButton(t, () => {
+      if (Date.now() - (reactAt[S.myId] ?? 0) < REACT_GAP_MS) return;
+      send({ type: 'react', w }, 0);
+      showReaction(S.myId, w);
+    }, 'ghost small');
+    bar.append(b);
+  });
+  ctl().append(bar);
 }
 
 const playersText = (g) => (g.minPlayers === g.maxPlayers ? `${g.minPlayers}人` : `${g.minPlayers}〜${g.maxPlayers}人`);
@@ -542,6 +595,7 @@ function renderPage() {
   } else if (S.mode === 'online' && !game.multi) {
     appendUndo(game);
   }
+  appendReactions();
   if (S.mode === 'online' && S.isHost) controls.append(gameSelect());
   appendMemberPanel();
   scheduleCpu(game, st, res);
@@ -690,6 +744,24 @@ function rulesPanel(game) {
     sendState();
     render();
   };
+  const luck = luckSettings(game);
+  if (S.isHost && luck.length) {
+    const btn = makeButton('🎲 おまかせ（ルールを抽選）', () => {
+      const next = { ...cur };
+      for (const x of luck) {
+        const opts = x.choices ? x.choices.map(([c]) => c) : [true, false];
+        next[x.key] = opts[Math.floor(Math.random() * opts.length)];
+      }
+      S.rules = { ...S.rules, [S.gameId]: next };
+      S.rulesOpen = true;
+      saveRoom();
+      sendState();
+      render();
+      toast('ルールを抽選しました。もう一度押すと引き直せます');
+    }, 'secondary small');
+    btn.classList.add('luck-btn');
+    det.append(btn);
+  }
   for (const x of game.settings) {
     const label = document.createElement('label');
     const text = document.createElement('span');
@@ -950,6 +1022,7 @@ function renderLive(game) {
       send: (d, important) => send({ type: 'live', gameId: S.gameId, round: S.round, d }, important ? 1 : 0),
     });
   }
+  appendReactions();
   if (S.mode === 'online' && S.isHost) ctl().append(gameSelect());
   if (S.mode === 'online') appendMemberPanel();
 }
@@ -1073,6 +1146,11 @@ function onMessage(msg) {
   S.seen[msg.from] = Date.now();
   if (msg.type === 'stream') { // 見た目だけの中身。手の一覧には入れず、描き直しもしない
     if (msg.gameId === S.gameId && msg.round === S.round) GAMES[S.gameId]?.onStream?.(msg.d, S.order?.indexOf(msg.from) ?? -1);
+    if (!wasAlive) render();
+    return;
+  }
+  if (msg.type === 'react') { // リアクション。描き直さない
+    showReaction(msg.from, msg.w);
     if (!wasAlive) render();
     return;
   }

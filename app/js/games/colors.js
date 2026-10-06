@@ -19,6 +19,9 @@
 // 詳細設定「7で交換・0で回す」（2026-10-06 本人の決定。最初はなし）: 7を出した人は、選んだ1人と手札をまるごと交換する（2人なら相手と）。
 //   0を出したら、全員が手札をいま回っている向きの次の人へ渡す。出してちょうど手札がなくなったときは交換も回しもせず上がり（Claude の判断）。
 //   CPU は手札がいちばん少ない人と交換する。
+// 詳細設定「同じ数字まとめ出し」（2026-10-06 本人の決定。最初はなし）: 数字の札は、同じ数字の札を何枚でもまとめて出せる（記号の札は1枚ずつ）。
+//   手の more に、いっしょに出す札の位置を出す順に入れる。最後に置いた札の色が場の色になる。Claude の判断: 引いた札は1枚だけ・
+//   7・0 をまとめて出しても交換・回しは1回。CPU は同じ数字を全部出し、手元に多く残る色を一番上にする。
 
 import { mulberry32, shuffle } from './util.js';
 
@@ -96,7 +99,7 @@ function pickColor(hand, skip) {
 
 /* ---------- 画面 ---------- */
 
-let picking = null; // ワイルドの色（7で交換なら相手）を選んでいる途中 { step, i, seven }（通信で描き直されても閉じないよう外に持つ）
+let picking = null; // ワイルドの色（7で交換なら相手、まとめ出しならいっしょに出す札）を選んでいる途中 { step, i, seven, multi: [位置…], more }（通信で描き直されても閉じないよう外に持つ）
 
 // 札の絵（2026-10-04 本人の希望で本家風に。ロゴや本家の絵は写さず、形だけ似せて自分で描いた）。
 // 色の札は「色の地・斜めの白い楕円・縁取りした大きな数字や記号・左上と右下に小さく同じもの」。6 と 9 は下線で見分ける。
@@ -132,7 +135,7 @@ function logText(s, nameP) {
   if (L.t === 'draw') return L.got ? `${nameP(L.p)}が山から1枚引いた` : '山札が無いので引けなかった';
   if (L.t === 'pass') return `${nameP(L.p)}は引いた札を出さずに次へ`;
   if (L.t === 'take') return `${nameP(L.p)}が${L.got}枚引いて1回休み`;
-  let t = `${nameP(L.p)}が「${cardName(L.card)}」を出した`;
+  let t = L.n > 1 ? `${nameP(L.p)}が「${kindOf(L.card)}」を${L.n}枚まとめて出した（一番上は${COLOR_NAME[L.color]}）` : `${nameP(L.p)}が「${cardName(L.card)}」を出した`;
   if (L.card[0] === 'W') t += `（次の色: ${COLOR_NAME[L.color]}）`;
   const k = kindOf(L.card);
   if (L.swap !== undefined) t += ` → ${nameP(L.p)}と${nameP(L.swap)}が手札を交換`;
@@ -156,6 +159,7 @@ export default {
 
   settings: [
     { key: 'stack', label: '重ねて返す', desc: 'ドロー2にはドロー2、ドロー4にはドロー4を重ねて次の人へ回せる。重ねなかった人が、たまった枚数を全部引く', def: false },
+    { key: 'multi', label: '同じ数字まとめ出し', desc: '同じ数字の札を何枚でもまとめて出せる（数字の札だけ）。最後に置いた札の色が場の色になる', def: false },
     { key: 'sevenZero', label: '7で交換・0で回す', desc: '7を出したら、選んだ1人と手札を交換する。0を出したら、全員が手札を次の人へ渡す（回っている向き）', def: false },
   ],
 
@@ -189,11 +193,20 @@ export default {
       if (wild ? !COLORS.includes(m.c) : m.c !== undefined) return null;
       const swap = s.rules?.sevenZero && kindOf(card) === '7'; // 7で交換（詳細設定）
       if (swap && s.n > 2 ? !Number.isInteger(m.to) || m.to < 0 || m.to >= s.n || m.to === p : m.to !== undefined) return null;
-      s.hands[p].splice(m.i, 1);
-      s.discard.push(card);
-      s.color = wild ? m.c : card[0];
+      let more = [];
+      if (m.more !== undefined) { // 同じ数字まとめ出し（詳細設定）
+        const hand = s.hands[p];
+        if (!s.rules?.multi || !isNumber(card) || s0.drawn !== null || !Array.isArray(m.more) || !m.more.length) return null;
+        if (new Set([m.i, ...m.more]).size !== m.more.length + 1) return null;
+        if (!m.more.every((j) => Number.isInteger(j) && isNumber(hand[j] ?? '') && kindOf(hand[j]) === kindOf(card))) return null;
+        more = m.more.map((j) => hand[j]);
+      }
+      for (const j of [m.i, ...(m.more ?? [])].sort((a, b) => b - a)) s.hands[p].splice(j, 1);
+      s.discard.push(card, ...more);
+      const topCard = more.length ? more[more.length - 1] : card;
+      s.color = wild ? m.c : topCard[0];
       s.drawn = null;
-      const last = { p, t: 'play', card, color: s.color };
+      const last = { p, t: 'play', card: topCard, color: s.color, n: 1 + more.length };
       s.last = last;
       if (!s.hands[p].length) { s.winner = p; return s; }
       const k = kindOf(card);
@@ -265,8 +278,19 @@ export default {
     };
     const play = (i) => {
       if (hand[i][0] === 'W') return { t: 'play', i, c: pickColor(hand, i) };
-      if (s.rules?.sevenZero && kindOf(hand[i]) === '7' && s.n > 2) return { t: 'play', i, to: fewest() };
-      return { t: 'play', i };
+      const m = { t: 'play', i };
+      if (s.rules?.multi && isNumber(hand[i]) && s.drawn === null) {
+        // 同じ数字を全部出す。一番上は、出したあと手元に多く残る色の札
+        const same = hand.map((_, j) => j).filter((j) => j !== i && isNumber(hand[j]) && kindOf(hand[j]) === kindOf(hand[i]));
+        if (same.length) {
+          const rest = hand.filter((c, j) => j !== i && !same.includes(j));
+          const left = (j) => rest.filter((c) => colorOf(c) === colorOf(hand[j])).length;
+          const top = same.reduce((a, b) => (left(b) > left(a) ? b : a));
+          m.more = [...same.filter((j) => j !== top), top];
+        }
+      }
+      if (s.rules?.sevenZero && kindOf(hand[i]) === '7' && s.n > 2) m.to = fewest();
+      return m;
     };
     if (s.drawn !== null) return Math.random() < 0.15 ? { t: 'pass' } : play(hand.indexOf(s.drawn));
     const legal = hand.map((_, i) => i).filter((i) => canPlay(s, p, hand[i]));
@@ -371,19 +395,32 @@ export default {
 
     const hand = document.createElement('div');
     hand.className = 'cc-hand';
-    s.hands[me].forEach((card, i) => {
-      const ok = myTurn && (s.drawn === null || card === s.drawn) && canPlay(s, me, card);
+    const mine = s.hands[me];
+    // 同じ数字まとめ出し: 押した札と同じ数字の札がほかにもあれば、いっしょに出す札を選ばせる
+    const sameAs = (i) => (s.rules?.multi && s.drawn === null && !s.pend && isNumber(mine[i])
+      ? mine.map((_, j) => j).filter((j) => j !== i && isNumber(mine[j]) && kindOf(mine[j]) === kindOf(mine[i])) : []);
+    const send = (i, more) => {
+      if (s.rules?.sevenZero && kindOf(mine[i]) === '7' && s.n > 2) { picking = { step: s.step, i, seven: true, more }; draw(); }
+      else { picking = null; o.onMove(more?.length ? { t: 'play', i, more } : { t: 'play', i }); }
+    };
+    mine.forEach((card, i) => {
+      const multi = picking?.multi;
+      const ok = multi ? i !== picking.i && sameAs(picking.i).includes(i)
+        : myTurn && (s.drawn === null || card === s.drawn) && canPlay(s, me, card);
       const e = cardEl(card, ok ? 'button' : 'div');
       if (ok) {
         e.type = 'button';
         e.classList.add('playable');
         e.onclick = () => {
-          if (card[0] === 'W') { picking = { step: s.step, i }; draw(); }
-          else if (s.rules?.sevenZero && kindOf(card) === '7' && s.n > 2) { picking = { step: s.step, i, seven: true }; draw(); }
-          else o.onMove({ t: 'play', i });
+          if (multi) { const k = multi.indexOf(i); if (k >= 0) multi.splice(k, 1); else multi.push(i); draw(); }
+          else if (card[0] === 'W') { picking = { step: s.step, i }; draw(); }
+          else if (sameAs(i).length) { picking = { step: s.step, i, multi: [] }; draw(); }
+          else send(i);
         };
       }
       if (picking?.i === i) e.classList.add('picked');
+      const order = multi ? multi.indexOf(i) : -1;
+      if (order >= 0) { e.classList.add('picked'); e.dataset.order = order + 2; } else if (multi && i === picking.i) e.dataset.order = 1;
       hand.append(e);
     });
     root.append(hand);
@@ -400,7 +437,25 @@ export default {
       root.append(actions);
     }
 
-    if (picking?.seven) {
+    if (picking?.multi) {
+      const pick = document.createElement('div');
+      pick.className = 'cc-picker';
+      pick.innerHTML = '<p>同じ数字の札をいっしょに出せます。出す札を順に押してください（最後に置いた札の色が場の色になります）</p>';
+      const row = document.createElement('div');
+      const go = document.createElement('button');
+      go.type = 'button';
+      go.className = 'btn';
+      go.textContent = picking.multi.length ? `${picking.multi.length + 1}枚まとめて出す` : '1枚だけ出す';
+      go.onclick = () => send(picking.i, picking.multi.slice());
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'btn ghost';
+      cancel.textContent = 'やめる';
+      cancel.onclick = () => { picking = null; draw(); };
+      row.append(go);
+      pick.append(row, cancel);
+      root.append(pick);
+    } else if (picking?.seven) {
       const pick = document.createElement('div');
       pick.className = 'cc-picker';
       pick.innerHTML = '<p>手札を交換する人を選んでください</p>';
@@ -411,7 +466,7 @@ export default {
         b.type = 'button';
         b.className = 'btn secondary';
         b.textContent = `${o.names[q]}（${s.hands[q].length}枚）`;
-        b.onclick = () => { const i = picking.i; picking = null; o.onMove({ t: 'play', i, to: q }); };
+        b.onclick = () => { const { i, more } = picking; picking = null; o.onMove(more?.length ? { t: 'play', i, more, to: q } : { t: 'play', i, to: q }); };
         row.append(b);
       }
       const cancel = document.createElement('button');

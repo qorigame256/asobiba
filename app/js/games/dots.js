@@ -1,5 +1,6 @@
 // 点と線（ドット＆ボックス）。2〜4人（詳細設定「人数」）。順番に、となりあう2つの点を線でつなぐ。
 // 四角の4辺目を引いた人がその四角をもらい、続けてもう1本引く。線を全部引いたら、四角がいちばん多い人の勝ち（同数なら引き分け）。
+// 詳細設定「四角を取っても交代」（2026-10-06 本人の決定）: 四角を取っても続けて引けず、次の人の番になる。
 // 盤の大きさ（四角の数）は詳細設定で選ぶ。「おまかせ」は 2人 4×4・3人 5×5・4人 6×6（Claude の判断。人が多いほど1人あたりの四角が減るため）。
 //
 // 線の番号: 横線が先で (段 0〜h) × (列 0〜w-1) → 段*w+列。そのあとに縦線 (段 0〜h-1) × (列 0〜w) → 横線の数 + 段*(w+1)+列。
@@ -50,10 +51,12 @@ export function scoresOf(s) {
 /* ---------- CPU ---------- */
 
 // 線 i を引いたあと、次の人が続けて取れる四角の数（取れる四角を順に取っていく）
+// 「四角を取っても交代」では続けて取れないので、3辺目になる四角の数だけを数える
 function giveaway(s, i) {
   const lines = s.lines.slice();
   lines[i] = -1;
   const t = { ...s, lines };
+  if (s.swap) return boxesOf(t, i).filter((b) => drawn(t, b) === 3).length;
   let got = 0;
   for (;;) {
     let took = false;
@@ -100,7 +103,7 @@ function dotsCpu(s, rules) {
   const free = s.lines.map((v, i) => (v === null ? i : -1)).filter((i) => i >= 0);
   const pick = (a) => a[Math.floor(Math.random() * a.length)];
   const take = free.filter((i) => boxesOf(s, i).some((b) => drawn(s, b) === 3));
-  if (lv.deal && s.n === 2 && take.length === 1) {
+  if (lv.deal && s.n === 2 && !s.swap && take.length === 1) {
     const m = handout(s, take[0]);
     if (m !== null) return m;
   }
@@ -128,6 +131,7 @@ export default {
   settings: [
     { key: 'players', label: '人数', desc: '順番に線を引く人数', def: 2, choices: [[2, '2人'], [3, '3人'], [4, '4人']] },
     { key: 'size', label: '盤', desc: '四角の数（よこ×たて）', def: 'auto', choices: SIZE_CHOICES },
+    { key: 'swap', label: '四角を取っても交代', desc: '四角を取っても続けて引けず、次の人の番になる', def: false },
     CPU_SETTING,
   ],
 
@@ -136,7 +140,7 @@ export default {
   init({ rules = {} } = {}) {
     const n = [2, 3, 4].includes(rules.players) ? rules.players : 2;
     const k = SIZE_CHOICES.some(([c]) => c === rules.size) && rules.size !== 'auto' ? rules.size : AUTO[n];
-    const s = { n, w: k, h: k, turn: 0, last: null, count: 0 };
+    const s = { n, w: k, h: k, swap: !!rules.swap, turn: 0, last: null, count: 0 };
     s.lines = Array(hCount(s) + s.h * (s.w + 1)).fill(null);
     s.boxes = Array(k * k).fill(null);
     return s;
@@ -152,7 +156,7 @@ export default {
     for (const b of boxesOf(s, i)) {
       if (drawn(s, b) === 4) { s.boxes[b] = s0.turn; got = true; }
     }
-    if (!got) s.turn = (s0.turn + 1) % s0.n; // 四角を取ったら続けてもう1本
+    if (!got || s0.swap) s.turn = (s0.turn + 1) % s0.n; // 四角を取ったら続けてもう1本（「四角を取っても交代」では次の人）
     return s;
   },
 

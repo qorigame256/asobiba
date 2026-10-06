@@ -14,9 +14,13 @@ const DIRS = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 
 // 盤の一辺（盤は正方形なので、マスの数から分かる）
 const sizeOf = (board) => Math.round(Math.sqrt(board.length));
 
-// 相手の石 = 空きでも自分でもない石（2人なら 1 - p と同じ）
-function flipsFor(board, p, i) {
+// 四隅封印（詳細設定。2026-10-06 本人の決定）: 四隅に置けない。隅はいつも空きなので、はさむ線もそこで止まる。
+const isCorner = (N, i) => i === 0 || i === N - 1 || i === N * (N - 1) || i === N * N - 1;
+
+// 相手の石 = 空きでも自分でもない石（2人なら 1 - p と同じ）。shut = 四隅封印
+function flipsFor(board, p, i, shut) {
   if (board[i] !== null) return [];
+  if (shut && isCorner(sizeOf(board), i)) return [];
   const N = sizeOf(board);
   const r0 = Math.floor(i / N);
   const c0 = i % N;
@@ -35,19 +39,19 @@ function flipsFor(board, p, i) {
   return all;
 }
 
-function legalMoves(board, p) {
+function legalMoves(board, p, shut) {
   const N = sizeOf(board);
   const list = [];
-  for (let i = 0; i < N * N; i++) if (flipsFor(board, p, i).length) list.push(i);
+  for (let i = 0; i < N * N; i++) if (flipsFor(board, p, i, shut).length) list.push(i);
   return list;
 }
 
 // 3人以上: はさめる所が無ければ、石のとなりの空いたマス
-function nearMoves(board) {
+function nearMoves(board, shut) {
   const N = sizeOf(board);
   const list = [];
   for (let i = 0; i < N * N; i++) {
-    if (board[i] !== null) continue;
+    if (board[i] !== null || (shut && isCorner(N, i))) continue;
     const r0 = Math.floor(i / N);
     const c0 = i % N;
     if (DIRS.some(([dr, dc]) => {
@@ -59,8 +63,8 @@ function nearMoves(board) {
   return list;
 }
 function movesOf(s) {
-  const list = legalMoves(s.board, s.turn);
-  return list.length || s.n <= 2 ? list : nearMoves(s.board);
+  const list = legalMoves(s.board, s.turn, s.shut);
+  return list.length || s.n <= 2 ? list : nearMoves(s.board, s.shut);
 }
 
 // 3人以上の最初の石（真ん中の4マス。番号はマス）。CPU（つよい）どうしで最初の1巡だけ適当に打たせ、各400〜600局で決めた（2026-10-04）:
@@ -75,21 +79,33 @@ const START = {
 // CPU の形勢判断: 隅は大きく加点、隅の隣は減点（相手に隅を取られやすい）。打てる場所の多さも少し見る
 // 8×8 では次の表と同じになる（ほかの大きさでも、端からの距離で同じ考え方の点を付ける）:
 //   100 -20 10  5  5 10 -20 100 / -20 -40 -2 -2 -2 -2 -40 -20 / 10 -2 1 1 1 1 -2 10 / 5 -2 1 0 0 1 -2 5 …
-function weightOf(n, i) {
+// 四隅封印では、隅のとなりの辺のマス（b === 1）が裏返らない「隅」になり、その1つ内側（b === 2）がそこを取られやすいマスになる。
+function weightOf(n, i, shut) {
   const d = (x) => Math.min(x, n - 1 - x);
   const [a, b] = [d(Math.floor(i / n)), d(i % n)].sort((x, y) => x - y);
+  if (shut) {
+    if (a === 0) return b === 0 ? 0 : b === 1 ? 100 : b === 2 ? -20 : 5;
+    if (a === 1) return b <= 2 ? -20 : -2;
+    return a === 2 ? 1 : 0;
+  }
   if (a === 0) return b === 0 ? 100 : b === 1 ? -20 : b === 2 ? 10 : 5;
   if (a === 1) return b === 1 ? -40 : -2;
   return a === 2 ? 1 : 0;
 }
 const WEIGHT_CACHE = {};
-const weights = (board) => (WEIGHT_CACHE[board.length] ??= Array.from({ length: board.length }, (_, i) => weightOf(sizeOf(board), i)));
+const weights = (board, shut) => (WEIGHT_CACHE[board.length + (shut ? 's' : '')] ??= Array.from({ length: board.length }, (_, i) => weightOf(sizeOf(board), i, shut)));
+
+// 「隅」にあたるマス（CPU が相手に取らせたくない所）
+function cornersOf(N, shut) {
+  if (!shut) return [0, N - 1, N * (N - 1), N * N - 1];
+  return [1, N - 2, N, 2 * N - 1, N * (N - 2), N * (N - 1) - 1, N * (N - 1) + 1, N * N - 2];
+}
 
 function score(s, p) {
-  const W = weights(s.board);
+  const W = weights(s.board, s.shut);
   let v = 0;
   s.board.forEach((x, i) => { if (x === p) v += W[i]; else if (x !== null) v -= W[i]; });
-  return v + (legalMoves(s.board, p).length - legalMoves(s.board, 1 - p).length) * 3;
+  return v + (legalMoves(s.board, p, s.shut).length - legalMoves(s.board, 1 - p, s.shut).length) * 3;
 }
 
 function count(board, n = 2) {
@@ -107,20 +123,20 @@ function wideCpu(s, rules) {
   if (moves.length === 1 || Math.random() < { weak: 0.5, normal: 0.1, strong: 0 }[level]) return moves[Math.floor(Math.random() * moves.length)];
   const p = s.turn;
   const N = N8;
-  const W = weights(s.board);
-  const CORNERS = [0, N - 1, N * (N - 1), N * N - 1];
+  const W = weights(s.board, s.shut);
+  const CORNERS = cornersOf(N, s.shut);
   let best = -Infinity;
   let top = [];
   for (const m of moves) {
     const board = s.board.slice();
     board[m] = p;
-    for (const i of flipsFor(s.board, p, m)) board[i] = p;
+    for (const i of flipsFor(s.board, p, m, s.shut)) board[i] = p;
     let v = 0;
     board.forEach((x, i) => { if (x === p) v += W[i]; });
     const look = level === 'weak' ? 0 : level === 'normal' ? 1 : s.n - 1;
     for (let d = 1; d <= look; d++) {
       const q = (p + d) % s.n;
-      const opp = movesOf({ board, turn: q, n: s.n });
+      const opp = movesOf({ board, turn: q, n: s.n, shut: s.shut });
       const corners = opp.filter((i) => CORNERS.includes(i)).length;
       v -= corners * (d === 1 ? 120 : 60);
     }
@@ -150,13 +166,14 @@ export default {
       desc: '2人のときだけ。6×6 は早く終わり、スマホでも押しやすい。3人・4人はいつも 8×8',
       choices: [[8, '8×8（ふつう）'], [6, '6×6（短い）'], [10, '10×10（長い）']],
     },
+    { key: 'corners', label: '四隅封印', desc: '四隅に石を置けない。「隅を取れば強い」が使えなくなる', def: false },
     CPU_SETTING,
   ],
 
   // CPU: 何手先まで読むかで強さを変える（よわい1・ふつう2・つよい4）。弱いほど適当に打つことがある
   cpu(s, p, rules) {
     if (s.n > 2) return wideCpu(s, rules);
-    return boardCpu(this, s, rules, (x) => legalMoves(x.board, x.turn), score, {
+    return boardCpu(this, s, rules, (x) => legalMoves(x.board, x.turn, x.shut), score, {
       depth: { weak: 1, normal: 2, strong: 4 }, mistake: { weak: 0.35, normal: 0.1, strong: 0 },
     });
   },
@@ -172,7 +189,7 @@ export default {
       board[(h - 1) * N + h - 1] = 1; board[h * N + h] = 1;
       board[(h - 1) * N + h] = 0; board[h * N + h - 1] = 0;
     }
-    return { n, board, turn: 0, last: null, flipped: [], passed: null, over: false };
+    return { n, board, shut: !!rules.corners, turn: 0, last: null, flipped: [], passed: null, over: false };
   },
 
   turn(s) { return s.turn; },
@@ -181,13 +198,13 @@ export default {
     if (s.over || !Number.isInteger(m) || m < 0 || m >= s.board.length) return null;
     if (s.n > 2) {
       if (!movesOf(s).includes(m)) return null;
-      const flips = flipsFor(s.board, s.turn, m);
+      const flips = flipsFor(s.board, s.turn, m, s.shut);
       const board = s.board.slice();
       board[m] = s.turn;
       for (const i of flips) board[i] = s.turn;
-      return { ...s, board, turn: (s.turn + 1) % s.n, last: m, flipped: flips, over: board.every((v) => v !== null) };
+      return { ...s, board, turn: (s.turn + 1) % s.n, last: m, flipped: flips, over: board.every((v, i) => v !== null || (s.shut && isCorner(sizeOf(board), i))) };
     }
-    const flips = flipsFor(s.board, s.turn, m);
+    const flips = flipsFor(s.board, s.turn, m, s.shut);
     if (!flips.length) return null;
     const board = s.board.slice();
     board[m] = s.turn;
@@ -196,8 +213,8 @@ export default {
     let turn = next;
     let passed = null;
     let over = false;
-    if (!legalMoves(board, next).length) {
-      if (legalMoves(board, s.turn).length) { turn = s.turn; passed = next; } else over = true;
+    if (!legalMoves(board, next, s.shut).length) {
+      if (legalMoves(board, s.turn, s.shut).length) { turn = s.turn; passed = next; } else over = true;
     }
     return { ...s, board, turn, last: m, flipped: flips, passed, over };
   },
@@ -218,7 +235,7 @@ export default {
     if (s.n > 2) {
       const c = count(s.board, s.n);
       let html = '<span class="rv-score">' + c.map((v, p) => `<span class="rv-mini p${p}"></span>${this.players[p]} ${v}`).join('　') + '</span>';
-      if (!s.over && !legalMoves(s.board, s.turn).length) html += `<br>${this.players[s.turn]}ははさめる所がないので、石のとなりならどこにでも置けます`;
+      if (!s.over && !legalMoves(s.board, s.turn, s.shut).length) html += `<br>${this.players[s.turn]}ははさめる所がないので、石のとなりならどこにでも置けます`;
       return html;
     }
     const [b, w] = count(s.board);
@@ -245,6 +262,7 @@ export default {
         cell.append(disc);
       }
       if (i === s.last) cell.classList.add('last');
+      if (s.shut && isCorner(sizeOf(s.board), i)) cell.classList.add('shut');
       if (legal.has(i)) {
         cell.classList.add('playable', 'p' + s.turn);
         cell.onclick = () => o.onMove(i);

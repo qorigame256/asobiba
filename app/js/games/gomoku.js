@@ -1,5 +1,6 @@
 // 五目並べ。2人（黒が先手）。交代で線の交わる点に石を置き、たて・よこ・ななめに5つ以上並べたら勝ち。
 // 禁じ手（連珠のルール）は無し。6つ以上並んでも勝ち（Claude の判断。ルールを覚えなくても遊べるように）。
+// 詳細設定「ぴったり五目」（2026-10-06 本人の決定）: ちょうど5つで勝ち。6つ以上つながっても勝ちにならない（置くことはできる）。両者とも同じ。
 // 盤は詳細設定で 15路（最初）か 13路。手 = 点の番号（段*路数+列。段0が一番上）。全部埋まったら引き分け。
 
 import { CPU_SETTING } from './util.js';
@@ -29,8 +30,8 @@ function run(s, i, p, dr, dc) {
 /* ---------- CPU ---------- */
 
 // 石を置いたときに、その方向でできる形の点数（count = つながる数、open = 空いている端の数）
-function shape(count, open) {
-  if (count >= 5) return 100000;
+function shape(count, open, exact) {
+  if (count >= 5) return exact && count > 5 ? 0 : 100000;
   if (open === 0) return 0;
   if (count === 4) return open === 2 ? 20000 : 1200; // 両端の空いた四は止められない
   if (count === 3) return open === 2 ? 1000 : 120;
@@ -57,7 +58,7 @@ function cellValue(s, i, p) {
       while (at(r0 + dr * k * sg, c0 + dc * k * sg) === p) { count++; k++; }
       if (at(r0 + dr * k * sg, c0 + dc * k * sg) === null) open++;
     }
-    v += shape(count, open);
+    v += shape(count, open, s.exact);
     let most = 0;
     for (let off = -4; off <= 0; off++) {
       let own = 0;
@@ -139,6 +140,7 @@ export default {
   players: ['黒', '白'],
   settings: [
     { key: 'size', label: '盤', desc: '13路はスマホで押しやすい', def: 15, choices: [[15, '15路（15×15）'], [13, '13路（13×13）']] },
+    { key: 'exact', label: 'ぴったり五目', desc: 'ちょうど5つで勝ち。6つ以上つながっても勝ちにならない', def: false },
     CPU_SETTING,
   ],
 
@@ -146,7 +148,7 @@ export default {
 
   init({ rules = {} } = {}) {
     const size = rules.size === 13 ? 13 : 15;
-    return { size, grid: Array(size * size).fill(null), turn: 0, last: null, won: null, count: 0 };
+    return { size, exact: !!rules.exact, grid: Array(size * size).fill(null), turn: 0, last: null, won: null, count: 0 };
   },
 
   turn(s) { return s.turn; },
@@ -159,7 +161,7 @@ export default {
     let won = null;
     for (const [dr, dc] of DIRS) {
       const { cells } = run(t, i, s.turn, dr, dc);
-      if (cells.length >= 5) { won = { winner: s.turn, cells }; break; }
+      if (s.exact ? cells.length === 5 : cells.length >= 5) { won = { winner: s.turn, cells }; break; }
     }
     return { ...t, turn: 1 - s.turn, last: i, won, count: s.count + 1 };
   },

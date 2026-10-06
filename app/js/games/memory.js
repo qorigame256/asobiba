@@ -3,6 +3,7 @@
 // 全部取り終わったとき、組の数が一番多い人の勝ち（同数なら同着）。
 // 枚数（詳細設定）: 48 … A〜Q / 36 … A〜9 / 24 … A〜6（どれも4マーク分。ジョーカーなし）。
 //   すき間のない長方形に並べるため、並べやすい枚数にした（本人の決定・2026-10-03。前は 52枚・26枚）。並べ方は SIZES の cols 列。
+// 詳細設定「続けて取れる組」（2026-10-06 本人の決定）: 組を取って続けてめくれるのは決めた組の数まで。そこまで取ったら次の人へ。
 // 手: { p, t: 'flip', i: 何枚目の札か }。めくった札がもう表なら反則なので、同じ手が2回来ても2回目は弾かれる。
 
 import { mulberry32, shuffle } from './util.js';
@@ -25,6 +26,7 @@ export default {
   maxPlayers: 8,
   settings: [
     { key: 'size', label: '枚数', desc: 'すき間のない長方形に並べる', def: 48, choices: [[48, '48枚（A〜Q・8×6）'], [36, '36枚（A〜9・6×6）'], [24, '24枚（A〜6・6×4）']] },
+    { key: 'streak', label: '続けて取れる組', desc: '組を取ったあと続けてめくれるのは、この数の組まで。覚えるのが得意な人の独走を防ぐ', def: 0, choices: [[0, '何組でも'], [2, '2組まで'], [3, '3組まで']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -32,7 +34,7 @@ export default {
     const deck = makeDeck().filter((c) => rankOf(c) <= top);
     const cards = shuffle(deck, mulberry32(seed));
     return {
-      n, cards, taken: Array(cards.length).fill(null), open: [], turn: 0, scores: Array(n).fill(0),
+      n, cards, limit: [2, 3].includes(rules.streak) ? rules.streak : 0, streak: 0, taken: Array(cards.length).fill(null), open: [], turn: 0, scores: Array(n).fill(0),
       seen: Array(cards.length).fill(false), done: false, step: 0, last: null,
     };
   },
@@ -81,8 +83,11 @@ export default {
         s.scores[m.p] += 1;
         s.open = [];
         if (s.taken.every((x) => x !== null)) s.done = true;
+        s.streak = (s.streak ?? 0) + 1;
+        if (!s.done && s.limit && s.streak >= s.limit) { s.turn = (s.turn + 1) % s.n; s.streak = 0; s.last.stop = true; }
       } else {
         s.turn = (s.turn + 1) % s.n;
+        s.streak = 0;
       }
     }
     return s;
@@ -191,6 +196,6 @@ function logText(s, nameP) {
   if (!l) return '裏向きの札を2枚めくって、同じ数字ならもらえます';
   if (l.t === 'flip') return `${nameP(l.p)}が ${cardLabel(s.cards[l.i])} をめくった。もう1枚…`;
   const pair = `${cardLabel(s.cards[l.a])} と ${cardLabel(s.cards[l.b])}`;
-  if (l.match) return s.done ? `${nameP(l.p)}が ${pair} をそろえた！ これで全部です` : `${nameP(l.p)}が ${pair} をそろえた！ もう1回`;
+  if (l.match) return s.done ? `${nameP(l.p)}が ${pair} をそろえた！ これで全部です` : `${nameP(l.p)}が ${pair} をそろえた！ ${l.stop ? `${s.limit}組続けて取ったので次の人へ` : 'もう1回'}`;
   return `${nameP(l.p)}は ${pair}… はずれ`;
 }

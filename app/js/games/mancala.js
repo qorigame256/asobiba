@@ -8,6 +8,7 @@
 // 3人（詳細設定「人数」。2026-10-05 本人の決定）: 三角形の盤。14〜19 = 三番手の穴、20 = 三番手のゴール（p * 7 + k の形はそのまま）。
 // 石はほかの2人のゴールを飛ばして配る。自分の空いた k 番目の穴で止まったら、ほかの2人の k 番目の穴の石を両方とる（どちらかに石があれば）。
 // 誰か1人の側が空になったら全員終わり。一番多い人が2人以上なら引き分け。
+// 詳細設定「捕獲なし」（2026-10-06 本人の決定）: 空いた穴で止まっても石をとらない（2人・3人とも）。
 
 import { CPU_SETTING, boardCpu } from './util.js';
 
@@ -30,6 +31,7 @@ const game = {
   settings: [
     { key: 'players', label: '人数', desc: '3人では三角形の盤で、ほかの2人のゴールを飛ばして配る', def: 2, choices: [[2, '2人'], [3, '3人']] },
     { key: 'stones', label: '最初の石の数', desc: '穴1つあたり。多いほど長くなる', def: 4, choices: [[3, '3個'], [4, '4個'], [5, '5個'], [6, '6個']] },
+    { key: 'nocap', label: '捕獲なし', desc: '自分の空いた穴で止まっても、向かいの石をとらない。ゴールに入れた石だけで勝負', def: false },
     CPU_SETTING,
   ],
 
@@ -38,7 +40,7 @@ const game = {
     const np = rules.players === 3 ? 3 : 2;
     const pits = Array(np * 7).fill(n);
     for (let p = 0; p < np; p++) pits[STORE[p]] = 0;
-    return { n: np, pits, turn: 0, last: null, over: false, count: 0 };
+    return { n: np, nocap: !!rules.nocap, pits, turn: 0, last: null, over: false, count: 0 };
   },
 
   turn(s) { return s.turn; },
@@ -68,14 +70,14 @@ const game = {
     if (i === STORE[p]) {
       last.extra = true;
       turn = p;
-    } else if (i >= p * 7 && i < p * 7 + 6 && pits[i] === 1 && opp.some((j) => pits[j] > 0)) {
+    } else if (!s.nocap && i >= p * 7 && i < p * 7 + 6 && pits[i] === 1 && opp.some((j) => pits[j] > 0)) {
       const got = opp.reduce((a, j) => a + pits[j], 1);
       last.capture = { at: i, opp, got };
       pits[STORE[p]] += got;
       pits[i] = 0;
       for (const j of opp) pits[j] = 0;
     }
-    const t = { n: np, pits, turn, last, over: false, count: s.count + 1 };
+    const t = { n: np, nocap: s.nocap, pits, turn, last, over: false, count: s.count + 1 };
     // 誰かの側が空になったら、残りをそれぞれのゴールへ
     if (Array.from({ length: np }, (_, q) => side(t, q).every((x) => !x)).some(Boolean)) {
       for (let q = 0; q < np; q++) {
