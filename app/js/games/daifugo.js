@@ -1,6 +1,7 @@
 // 大富豪。3〜8人。トランプ52枚＋ジョーカー1枚を全部配り、手札を早く出し切った順に順位が付く。
 // 強さ: 3 < 4 < … < K < A < 2。ジョーカーは1枚出しなら何にでも勝ち、組の中ではどの札の代わりにもなる。
 // 手: { p, t: 'play', cards: [札…] } / { p, t: 'pass' } / { p, t: 'give', cards }（カード交換で上位が渡す札）
+//     { p, t: 'seven', cards }（7渡しで次の人へ渡す札） / { p, t: 'ten', cards }（10捨てで捨てる札）
 //
 // ルールの細かい決めごと（どれも Claude の判断。変えるなら本人に確認）:
 //   - 1回パスした人は、場が流れるまで出せない。全員がパスしたら場が流れ、最後に出した人から（上がっていれば次の人から）。
@@ -12,6 +13,10 @@
 //   - スペ3返しで ♠3 を出すと場が流れる。反則上がりと都落ちで下位になった人は、先になった人ほど下。
 //   - 5飛び（詳細設定。2026-10-06 本人の決定で、5の枚数だけ飛ばす）: 同じ数字の組は枚数（ジョーカーも5として数える）、階段は5が入っていれば1人。
 //     飛ばされた人は「パスした」扱い（場が流れるまで出せない）。全員飛ばしたら場が流れて出した人から。8切りなどで場が流れるときは飛ばさない。
+//   - 7渡し・10捨て（詳細設定。2026-10-06 本人の決定）: 出した7（10）の枚数ぶん必ず、好きな札を次の人（上がっていない人）へ渡す（捨てる）。
+//     数え方は5飛びと同じ（同じ数字の組は枚数、階段は1枚）。手札が足りなければ全部。出した人が渡し終える（捨て終える）まで次へ進まない（s.pend）。
+//     階段に7と10が両方入っていたら、渡してから捨てる。渡す・捨てるで手札がなくなったら上がり（反則上がりにしない）。出して上がったときは何もしない。
+//     8切りなどで場が流れるときも、渡し終えてから流す。CPU は弱い札から渡す（捨てる）。
 //   - カード交換: 大貧民の一番強い2枚 → 大富豪、大富豪が選んだ2枚 → 大貧民。4人以上なら貧民と富豪で1枚ずつも。
 //     前の対局と顔ぶれが違うときは交換しない。
 
@@ -208,6 +213,26 @@ function validCards(cards, hand) {
 
 const removeCards = (hand, cards) => hand.filter((c) => !cards.includes(c));
 
+// p が上がる（都落ちも見る）
+function goOut(s, p, last) {
+  s.out.push(p);
+  last.done = true;
+  if (s.rules.miyako && s.prevRank && s.out.length === 1) {
+    const king = s.prevRank.indexOf(0);
+    if (king !== p && isActive(s, king)) { s.fouls.push(king); last.miyako = king; }
+  }
+}
+
+// 場に出したあとの「流す」か「次の人へ」
+function afterPlay(s, p, flow) {
+  if (flow) {
+    clearField(s);
+    s.turn = isActive(s, p) ? p : nextActive(s, p);
+  } else {
+    advance(s, p);
+  }
+}
+
 const clone = (s) => ({
   ...s, hands: s.hands.map((h) => h.slice()), passed: s.passed.slice(), out: s.out.slice(), fouls: s.fouls.slice(),
   gives: s.gives.slice(), swaps: s.swaps.slice(),
@@ -224,6 +249,8 @@ const RULE_LIST = [
   { key: 'shibari', label: 'しばり', desc: '前と同じマークを出すと、場が流れるまでそのマークしか出せない', def: true },
   { key: 'exchange', label: 'カード交換', desc: '2戦目から、大富豪と大貧民（4人以上なら富豪と貧民も）が札を交換', def: true },
   { key: 'five', label: '5飛び', desc: '5を出すと、出した5の枚数だけ次の人を飛ばす（飛ばされた人はパスと同じ）', def: false },
+  { key: 'seven', label: '7渡し', desc: '7を出すと、出した7の枚数だけ好きな札を次の人に渡す（必ず）', def: false },
+  { key: 'ten', label: '10捨て', desc: '10を出すと、出した10の枚数だけ好きな札を捨てる（必ず）', def: false },
   { key: 'elevenBack', label: '11バック', desc: 'J を出すと、場が流れるまで強さの順番が逆になる', def: false },
   { key: 'spe3', label: 'スペ3返し', desc: 'ジョーカー1枚には ♠3 で勝てる', def: false },
   { key: 'miyako', label: '都落ち', desc: '大富豪が1番に上がれないと、その時点で大貧民になる', def: false },
@@ -237,7 +264,8 @@ function logText(s, nameP) {
     return s.prevRank ? '前の大貧民から始めます' : '♦3 を持っている人から始めます';
   }
   let t;
-  if (L.t === 'give') t = `${nameP(L.p)}が${nameP(L.to)}に${L.n}枚渡した`;
+  if (L.t === 'give' || L.t === 'seven') t = `${nameP(L.p)}が${nameP(L.to)}に${L.n}枚渡した${L.t === 'seven' ? '（7渡し）' : ''}`;
+  else if (L.t === 'ten') t = `${nameP(L.p)}が${L.n}枚捨てた（10捨て）`;
   else if (L.t === 'pass') t = `${nameP(L.p)}はパス`;
   else t = `${nameP(L.p)}が ${L.cards.map(cardLabel).join(' ')} を出した`;
   if (L.effects?.length) t += `（${L.effects.join('・')}）`;
@@ -330,6 +358,32 @@ export default {
       return s;
     }
 
+    if (s.pend) {
+      // 7渡し・10捨て: 出した人が札を選ぶまで次へ進まない
+      const pd = s.pend[0];
+      const k = Math.min(pd.k, s.hands[p].length);
+      if (m.t !== pd.t || !validCards(m.cards, s.hands[p]) || m.cards.length !== k) return null;
+      s.hands[p] = removeCards(s.hands[p], m.cards);
+      const last = { p, t: pd.t, n: k };
+      if (pd.t === 'seven') {
+        last.to = nextActive(s, p);
+        s.hands[last.to] = sortHand([...s.hands[last.to], ...m.cards]);
+      }
+      s.last = last;
+      s.pend = s.pend.slice(1);
+      if (!s.hands[p].length) {
+        s.pend = [];
+        goOut(s, p, last);
+        if (finishIfOver(s)) return s;
+      }
+      if (s.pend.length) return s;
+      const flow = s.after;
+      s.pend = null;
+      s.after = null;
+      afterPlay(s, p, flow);
+      return s;
+    }
+
     if (m.t === 'pass') {
       if (!s.field) return null; // 場が空のときは何か出す
       s.passed[p] = true;
@@ -363,11 +417,7 @@ export default {
     if (f?.solo && meld.cards[0] === 's3') { flow = true; effects.push('スペ3返し'); }
 
     if (!s.hands[p].length) {
-      if (foul) { s.fouls.push(p); last.foul = true; } else { s.out.push(p); last.done = true; }
-      if (s.rules.miyako && s.prevRank && !foul && s.out.length === 1) {
-        const king = s.prevRank.indexOf(0);
-        if (king !== p && isActive(s, king)) { s.fouls.push(king); last.miyako = king; }
-      }
+      if (foul) { s.fouls.push(p); last.foul = true; } else goOut(s, p, last);
       if (finishIfOver(s)) return s;
     }
     if (!flow && s.rules.five && contains(meld, 5)) {
@@ -381,12 +431,18 @@ export default {
       }
       if (done) effects.push(`5飛び（${done}人）`);
     }
-    if (flow) {
-      clearField(s);
-      s.turn = isActive(s, p) ? p : nextActive(s, p);
-    } else {
-      advance(s, p);
+    // 7渡し・10捨て: 上がっていなければ、札を選ぶまで出した人の番のまま
+    const pend = [];
+    const count = meld.kind === 'set' ? meld.n : 1;
+    if (s.rules.seven && contains(meld, 7)) pend.push({ t: 'seven', k: count });
+    if (s.rules.ten && contains(meld, 10)) pend.push({ t: 'ten', k: count });
+    if (pend.length && s.hands[p].length) {
+      for (const x of pend) effects.push(x.t === 'seven' ? '7渡し' : '10捨て');
+      s.pend = pend;
+      s.after = flow;
+      return s;
     }
+    afterPlay(s, p, flow);
     return s;
   },
 
@@ -395,6 +451,13 @@ export default {
   cpu(s, p) {
     const hand = s.hands[p];
     if (s.phase === 'exchange') return { t: 'give', cards: hand.slice(0, s.gives[0].k) };
+    if (s.pend) {
+      // 弱い札から（革命中は強さが逆。ジョーカーは最後まで残す）
+      const k = Math.min(s.pend[0].k, hand.length);
+      const plain = hand.filter((c) => c !== JOKER);
+      const order = [...(reversed(s) ? plain.slice().reverse() : plain), ...hand.filter((c) => c === JOKER)];
+      return { t: s.pend[0].t, cards: order.slice(0, k) };
+    }
     const plays = legalPlays(s, p);
     if (!plays.length) return { t: 'pass' };
     const rev = reversed(s);
@@ -502,7 +565,8 @@ export default {
     if (me !== null) {
       const myTurn = o.canMove;
       const giving = myTurn && s.phase === 'exchange';
-      const legal = myTurn && s.phase === 'play' ? legalPlays(s, me) : [];
+      const pd = myTurn && s.pend ? { ...s.pend[0], k: Math.min(s.pend[0].k, s.hands[me].length) } : null; // 7渡し・10捨て
+      const legal = myTurn && s.phase === 'play' && !pd ? legalPlays(s, me) : [];
       const usable = new Set(legal.flatMap((m) => m.cards));
       const head = document.createElement('div');
       head.className = 'cc-hand-head';
@@ -518,6 +582,7 @@ export default {
         const hint = document.createElement('small');
         hint.textContent = giving
           ? `${nameP(s.gives[0].to)}に渡す札を${s.gives[0].k}枚選んで「渡す」`
+          : pd ? (pd.t === 'seven' ? `7渡し: ${nameP(nextActive(s, me))}に渡す札を${pd.k}枚選んで「渡す」` : `10捨て: 捨てる札を${pd.k}枚選んで「捨てる」`)
           : legal.length ? '出す札を選んで「出す」。光っている札が使えます' : '出せる札がありません。「パス」を押してください';
         head.append(hint);
       }
@@ -526,7 +591,7 @@ export default {
       const hand = document.createElement('div');
       hand.className = 'df-hand';
       for (const c of s.hands[me]) {
-        const can = giving || usable.has(c);
+        const can = giving || !!pd || usable.has(c);
         const e = cardEl(c, myTurn ? 'button' : 'div');
         if (can) e.classList.add('usable');
         if (sel.cards.includes(c)) e.classList.add('selected');
@@ -554,6 +619,8 @@ export default {
         };
         if (giving) {
           btn('渡す', 'primary', sel.cards.length === s.gives[0].k, () => o.onMove({ t: 'give', cards: sel.cards }));
+        } else if (pd) {
+          btn(pd.t === 'seven' ? '渡す' : '捨てる', 'primary', sel.cards.length === pd.k, () => o.onMove({ t: pd.t, cards: sel.cards }));
         } else {
           const ok = sel.cards.length > 0 && !!pickMeld(sel.cards, s);
           btn('出す', 'primary', ok, () => o.onMove({ t: 'play', cards: sel.cards }));

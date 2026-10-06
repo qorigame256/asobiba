@@ -9,6 +9,8 @@
 //   2人になるのは7人以上のときだけ（6人以下では1人）。2人のウルフは同じお題で、お互いがウルフだとは知らない。
 //   いちばん票の多い人がどちらかのウルフなら、そのウルフがみんなのお題を当てれば逆転（当てられなければウルフ以外の勝ち）。
 //   ウルフ側が勝てば2人とも勝ち。答え合わせはウルフ以外の人がする。
+// 詳細設定「ウルフのお題」でお題なしにもできる（2026-10-06 本人の決定。決まりは Claude の推奨を本人が承認）: ウルフ（2人なら2人とも）に白紙を配る。
+//   ウルフ本人は自分がウルフだと分かる（本人に説明済み）。勝ち負けの決まりは同じ（選ばれてもみんなのお題を当てれば逆転）。words[1] は 'お題なし' にする。
 const WOLF2_MIN = 7; // ウルフ2人になる最少の人数
 // 手: { p, t: 'tovote' }（p = -1 はホストの時間切れ）/ { p, t: 'vote', to, v: 何回目の投票か } / { p, t: 'guess', text } / { p, t: 'giveup' } / { p, t: 'judge', ok }
 
@@ -33,6 +35,7 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'wolves', label: 'ウルフの数', desc: '2人は7人以上のときだけ（6人以下では1人）。2人のウルフは同じお題で、お互いがウルフだとは知らない', def: 1, choices: [[1, '1人'], [2, '2人（7人以上）']] },
+    { key: 'wolfWord', label: 'ウルフのお題', desc: 'お題なしでは、ウルフには何も書かれていない（ウルフ本人は自分がウルフだと分かる）。話を合わせて隠れる', def: 'similar', choices: [['similar', '似た言葉'], ['blank', 'お題なし']] },
     { key: 'time', label: '話し合いの時間', desc: '時間が来たら投票に進む（その前に「投票へ」を押してもよい）', def: 3, choices: [[2, '2分'], [3, '3分'], [5, '5分']] },
   ],
 
@@ -45,8 +48,11 @@ export default {
       const k = Math.floor(rng() * (n - 1));
       wolves.push(k >= wolves[0] ? k + 1 : k);
     }
+    const blank = rules.wolfWord === 'blank';
+    const words = flip ? [pair[1], pair[0]] : [pair[0], pair[1]];
+    if (blank) words[1] = 'お題なし';
     return {
-      n, seed, words: flip ? [pair[1], pair[0]] : [pair[0], pair[1]], wolves, // words[0] = 多数派、words[1] = ウルフ
+      n, seed, words, wolves, blank, // words[0] = 多数派、words[1] = ウルフ
       phase: 'talk', minutes: [2, 3, 5].includes(rules.time) ? rules.time : 3,
       vote: 1, cands: Array.from({ length: n }, (_, p) => p), votes: {}, history: [],
       accused: null, guess: null, winSide: null, step: 0,
@@ -181,8 +187,10 @@ export default {
     if (me !== null && s.phase !== 'end') {
       const card = document.createElement('div');
       card.className = 'ww-card';
-      card.innerHTML = `<div class="um-label">あなたのお題</div><div class="ww-word">${esc(this.wordOf(s, me))}</div>`
-        + `<small>みんなと同じお題か、${s.wolves.length > 1 ? '2人だけ' : '1人だけ'}違うお題（ウルフ）かは分かりません</small>`;
+      const many = s.wolves.length > 1 ? '2人' : '1人';
+      const tip = !s.blank ? `みんなと同じお題か、${many}だけ違うお題（ウルフ）かは分かりません`
+        : isWolf(s, me) ? 'あなたがウルフです。みんなの話からお題を探り、話を合わせて隠れましょう' : `お題が書かれていない人（ウルフ）が${many}まぎれています`;
+      card.innerHTML = `<div class="um-label">あなたのお題</div><div class="ww-word">${esc(this.wordOf(s, me))}</div><small>${tip}</small>`;
       root.append(card);
     }
 
@@ -215,7 +223,7 @@ export default {
       note(`いちばん票が多かったのは ${b(s.accused)}… ウルフでした！`);
       if (s.phase === 'guess') {
         if (me === s.accused) {
-          note(`あなたのお題は「${esc(s.words[1])}」でした。みんなのお題は何だと思いますか？ 当てれば逆転勝ち`);
+          note(`${s.blank ? '' : `あなたのお題は「${esc(s.words[1])}」でした。`}みんなのお題は何だと思いますか？ 当てれば逆転勝ち`);
           const wrap = document.createElement('div');
           wrap.className = 'ww-guess';
           const input = document.createElement('input');

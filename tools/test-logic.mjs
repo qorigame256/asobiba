@@ -129,6 +129,31 @@ assert.equal(C.apply(C.init({ rules: { players: 3 } }), 9), null, '盤の外');
   assert.deepEqual([n, T.result(x)], [60, { winner: null, cells: [] }], '60手で引き分け');
 }
 
+// かぶせマルバツ: 小さい駒にかぶせる・同じ大きさにはかぶせられない・盤の駒を動かせる・動かして相手の並びが見えたら相手の勝ち（自分も並んでいても）
+{
+  const G = (moves) => { let x = T.init({ rules: { size: 'gobble' } }); for (const m of moves) { x = T.apply(x, m); assert.ok(x, 'illegal ' + m); } return x; };
+  const at = (to, src) => to + 9 * src; // src: 0〜2 手元の小・中・大、3〜11 盤のマス+3
+  assert.equal(T.init({ rules: { size: 'gobble', players: 3 } }).gob, undefined, '3人ではかぶせるにならない');
+  s = G([at(0, 0), at(0, 1)]); // ○ 小を 0、× 中を 0 にかぶせる
+  assert.deepEqual([s.stacks[0].length, s.stacks[0][1], s.hand], [2, { p: 1, z: 1 }, [[1, 2, 2], [2, 1, 2]]], '小さい駒にかぶせる');
+  assert.equal(T.apply(s, at(0, 0)), null, '小は中にかぶせられない');
+  assert.equal(T.apply(s, at(0, 1)), null, '同じ大きさにはかぶせられない');
+  assert.equal(T.apply(s, at(1, 3)), null, '一番上が相手の駒のマスからは動かせない');
+  s = T.apply(s, at(0, 2)); // ○ 大を 0 へ
+  s = T.apply(s, at(4, 0)); // × 小
+  assert.equal(T.apply(s, at(0, 3)), null, '同じマスへは動かせない');
+  s = T.apply(s, at(2, 3)); // ○ 大を 0 から 2 へ。0 には × 中が見える
+  assert.deepEqual([s.stacks[0].at(-1), s.stacks[2].at(-1), s.from], [{ p: 1, z: 1 }, { p: 0, z: 2 }, 0], '盤の駒を動かすと下の駒が見える');
+  // × 0・1・2 の上に ○ 大がかぶさっている形から、○ が大を動かして 6・7・8 を並べる → × の並びも見えるので × の勝ち
+  s = G([at(8, 0), at(2, 0), at(2, 2), at(0, 0), at(7, 0), at(1, 1)]);
+  assert.equal(T.result(s), null);
+  s = T.apply(s, at(6, 2 + 3));
+  assert.deepEqual(T.result(s), { winner: 1, cells: [0, 1, 2] }, '動かして相手の並びが見えたら、自分も並んでいても相手の勝ち');
+  s = G([at(0, 0), at(3, 0), at(1, 0), at(4, 0)]);
+  assert.deepEqual(T.result(T.apply(s, at(2, 1))), { winner: 0, cells: [0, 1, 2] }, '一番上の駒で3つ並べたら勝ち');
+  assert.equal(T.cpu(s, 0, { cpu: 'strong' }) % 9, 2, 'CPU は並べられる所に置く');
+}
+
 // ポップアウト: 自分のコマだけ抜ける・抜くと上が下がる・相手の並びができたら相手の勝ち・同じ盤面3回で引き分け
 {
   const P = () => C.init({ rules: { pop: 'on' } });
@@ -418,6 +443,21 @@ console.log('colors stack OK');
   console.log('colors seven-zero OK');
 }
 
+// いろあわせの出せるまで引く: 出せる札が来るまでまとめて引く・来た札は出すか次へ・設定なしなら1枚だけ
+{
+  const U = GAMES.colors;
+  const base = (deck, rules) => ({ ...U.init(2, 1, { rules }), deck, discard: ['r5'], hands: [['b1'], ['g2', 'g3']], color: 'r', turn: 0, drawn: null });
+  // 山は後ろから引く: y7 → b9 → r2 の順に出る
+  let c = U.apply(base(['g8', 'r2', 'b9', 'y7'], { untilPlay: true }), { p: 0, t: 'draw' });
+  assert.deepEqual([c.last.got, c.drawn, c.turn, c.hands[0].length], [3, 'r2', 0, 4], '出せる札（r2）が来るまで3枚引き、番はそのまま');
+  assert.ok(U.apply(c, { p: 0, t: 'pass' }), '来た札を出さずに次へも選べる');
+  assert.equal(U.apply(c, { p: 0, t: 'play', i: c.hands[0].indexOf('r2') }).color, 'r', '来た札を出せる');
+  c = U.apply(base(['g8', 'r2', 'b9', 'y7'], {}), { p: 0, t: 'draw' });
+  assert.deepEqual([c.last.got, c.drawn, c.turn], [1, null, 1], '設定なしなら1枚だけ引いて次へ');
+  c = U.apply({ ...base(['b9', 'y7'], { untilPlay: true }), discard: ['r5'] }, { p: 0, t: 'draw' });
+  assert.deepEqual([c.last.got, c.drawn, c.turn], [2, null, 1], '山と捨て札が尽きたらやめて次へ');
+}
+
 // ---------- 大富豪 ----------
 const D = GAMES.daifugo;
 const ALL = Object.fromEntries(D.settings.map((x) => [x.key, true]));
@@ -431,7 +471,7 @@ assert.ok(s.hands[s.turn].includes('d3'), '1戦目は ♦3 を持っている人
 assert.equal(s.phase, 'play');
 
 const dbase = (hands, o = {}) => ({
-  n: hands.length, rules: { ...ALL, five: false }, hands, field: null, by: null, passed: hands.map(() => false), out: [], fouls: [],
+  n: hands.length, rules: { ...ALL, five: false, seven: false, ten: false }, hands, field: null, by: null, passed: hands.map(() => false), out: [], fouls: [],
   rev: false, back: false, lock: null, turn: 0, phase: 'play', gives: [], swaps: [], prevRank: null, ranking: null, step: 0, last: null, ...o,
 });
 const dplay = (st, p, cards) => D.apply(st, { p, t: 'play', cards });
@@ -468,6 +508,38 @@ s = dbase([['s3', 's4', 's5', 'c9'], ['s6', 'c6'], ['h7', 'd7'], ['c10', 'c11']]
 assert.equal(dplay(s, 0, ['s3', 's4', 's5']).turn, 2, '階段に5が入っていれば1人飛ばす');
 s = dbase([['s5', 'c9'], ['s6', 'c6'], ['h7', 'd7']], { rules: { ...ALL, five: false } });
 assert.equal(dplay(s, 0, ['s5']).turn, 1, '5飛びなしなら飛ばさない');
+// 7渡し・10捨て: 枚数ぶん必ず・次の人へ渡す・選ぶまで番が進まない・渡して手札がなくなれば上がり・8切りは渡してから流す
+{
+  const R7 = { ...ALL, five: false, seven: true, ten: true };
+  s = dbase([['s7', 'h7', 'c3', 'd4', 'c9'], ['s6', 'c6', 'd13'], ['h8', 'd8', 'c13']], { rules: R7 });
+  t = dplay(s, 0, ['s7', 'h7']);
+  assert.deepEqual([t.turn, t.pend, t.last.effects], [0, [{ t: 'seven', k: 2 }], ['7渡し']], '7を2枚出したら2枚渡すまで番が進まない');
+  assert.equal(dpass(t, 0), null, '渡す前にパスはできない');
+  assert.equal(dplay(t, 1, ['s6', 'c6']), null, '渡す前にほかの人は出せない');
+  assert.equal(D.apply(t, { p: 0, t: 'seven', cards: ['c3'] }), null, '枚数が足りない');
+  assert.equal(D.apply(t, { p: 0, t: 'ten', cards: ['c3', 'd4'] }), null, '7では捨てられない');
+  assert.deepEqual(D.cpu(t, 0), { t: 'seven', cards: ['c3', 'd4'] }, 'CPU は弱い札から渡す');
+  const u = D.apply(t, { p: 0, t: 'seven', cards: ['c3', 'c9'] });
+  assert.deepEqual([u.hands[0], u.hands[1].includes('c3') && u.hands[1].includes('c9'), u.turn, u.pend], [['d4'], true, 1, null], '次の人に渡して番が進む');
+  s = dbase([['s10', 'c3', 'd4'], ['s6', 'c6'], ['h8', 'd8']], { rules: R7 });
+  t = D.apply(dplay(s, 0, ['s10']), { p: 0, t: 'ten', cards: ['d4'] });
+  assert.deepEqual([t.hands[0], dcount(t), t.last.t], [['c3'], 5, 'ten'], '10捨てで1枚捨てる');
+  s = dbase([['s7', 'c3'], ['s6', 'c6'], ['h8', 'd8']], { rules: R7 });
+  t = D.apply(dplay(s, 0, ['s7']), { p: 0, t: 'seven', cards: ['c3'] });
+  assert.deepEqual([t.out, t.last.done, t.last.foul], [[0], true, undefined], '渡して手札がなくなったら上がり');
+  s = dbase([['s7', 's8', 's9', 's10', 'c3', 'd4', 'c5'], ['s6', 'c6'], ['h8', 'd8']], { rules: R7 });
+  t = dplay(s, 0, ['s7', 's8', 's9', 's10']);
+  assert.deepEqual([t.pend.map((x) => x.t + x.k), t.field !== null], [['seven1', 'ten1'], true], '階段は7と10を1枚ずつ。8切りでもまだ流さない');
+  t = D.apply(D.apply(t, { p: 0, t: 'seven', cards: ['c3'] }), { p: 0, t: 'ten', cards: ['d4'] });
+  assert.deepEqual([t.field, t.turn, t.hands[0]], [null, 0, ['c5']], '渡して捨てたあとに8切りで流れて出した人から');
+  s = dbase([['s7', 'h7'], ['s6', 'c6'], ['h8', 'd8']], { rules: R7 });
+  assert.equal(dplay(s, 0, ['s7', 'h7']).pend, undefined, '出して上がったら渡さない');
+  s = dbase([['s7', 'h7', 'c3'], ['s6', 'c6'], ['h8', 'd8']], { rules: R7 });
+  t = dplay(s, 0, ['s7', 'h7']);
+  assert.ok(D.apply(t, { p: 0, t: 'seven', cards: ['c3'] }), '手札が足りなければ全部渡す');
+  s = dbase([['s7', 'c3'], ['s6', 'c6'], ['h8', 'd8']]);
+  assert.equal(dplay(s, 0, ['s7']).turn, 1, '7渡しなしなら渡さない');
+}
 // 階段・8切り・革命・ジョーカー
 s = dbase([['s3', 's4', 's5', 'h8', 'c8', 'd8', 's8', 'c2'], ['h6', 'h7', 'JK', 'd2'], ['c9', 'c10']]);
 t = dplay(s, 0, ['s3', 's4', 's5']);
@@ -538,7 +610,7 @@ for (let k = 0; k < 300; k++) {
       const move = { ...D.cpu(st, p), p };
       const next = D.apply(st, move);
       assert.ok(next, `大富豪の CPU が反則の手を出した（${n}人）`);
-      if (move.t === 'play') played += move.cards.length;
+      if (move.t === 'play' || move.t === 'ten') played += move.cards.length; // 10捨てで捨てた札も場から消える
       assert.equal(dcount(next) + played, 53, '札の枚数が合わない');
       st = next;
       if (++steps > 3000) throw new Error('大富豪が終わらない');
@@ -1227,6 +1299,33 @@ assert.equal(GM.cpu(s, 0, { cpu: 'strong' }), 4, 'ぴったり五目の CPU も5
 s = GM.init({ rules: { exact: true } });
 for (const m of [0, 30, 1, 31, 2, 32, 4, 33, 5, 61]) s = GM.apply(s, m);
 assert.notEqual(GM.cpu(s, 0, { cpu: 'strong' }), 3, 'ぴったり五目の CPU は勝てない6つを作りに行かない');
+// はさみ取り: ちょうど2つをはさむと取れる・3つは取れない・自分から入っても取られない・5組で勝ち
+{
+  const cap = { rules: { capture: true } };
+  let g = GM.init(cap);
+  for (const m of [109, 110, 0, 111]) g = GM.apply(g, m); // 黒 (7,4)、白 (7,5)(7,6)
+  g = GM.apply(g, 112);
+  assert.deepEqual([g.grid[110], g.grid[111], g.caps, g.taken.slice().sort((x, y) => x - y)], [null, null, [1, 0], [110, 111]], 'はさみ取り: 2つをはさんで取る');
+  assert.ok(GM.apply(g, 110), '取られた点にはまた置ける');
+  g = GM.init(); for (const m of [109, 110, 0, 111]) g = GM.apply(g, m);
+  assert.equal(GM.apply(g, 112).grid[110], 1, 'はさみ取りなしでは取らない');
+  g = GM.init(cap); for (const m of [109, 110, 0, 111, 1, 112]) g = GM.apply(g, m);
+  assert.equal(GM.apply(g, 113).grid[110], 1, '3つ並んだ石は取れない');
+  g = GM.init(cap); for (const m of [110, 109, 0, 112]) g = GM.apply(g, m);
+  g = GM.apply(g, 111);
+  assert.deepEqual([g.grid[110], g.grid[111], g.caps], [0, 0, [0, 0]], '自分から、はさまれる形に置いても取られない');
+  g = GM.init(cap); for (const m of [109, 110, 0, 111]) g = GM.apply(g, m);
+  g = { ...g, caps: [4, 0] };
+  assert.equal(GM.cpu(g, 0, { cpu: 'weak' }), 112, 'CPU は5組目を取って勝つ');
+  g = GM.apply(g, 112);
+  assert.deepEqual([GM.result(g).winner, g.won.byCap], [0, true], '5組取ったら勝ち');
+  assert.match(GM.info(g), /5組取った/);
+  // ななめにも取れる・ぴったり五目と同時に使える
+  g = GM.init({ rules: { capture: true, exact: true } });
+  for (const m of [0, 16, 100, 32]) g = GM.apply(g, m);
+  g = GM.apply(g, 48);
+  assert.deepEqual([g.grid[16], g.grid[32], g.caps[0]], [null, null, 1], 'ななめにも取れる');
+}
 
 // ---------- 記憶リレー ----------
 {
@@ -1611,6 +1710,13 @@ const town = [0, 1, 2, 3].filter((p) => p !== wolf);
 assert.notEqual(WW.wordOf(s, wolf), WW.wordOf(s, town[0]), 'ウルフだけ違うお題');
 assert.equal(WW.wordOf(s, town[0]), WW.wordOf(s, town[1]));
 assert.equal(WW.referee(s).ms, 3 * 60000, '話し合いは最初3分');
+{
+  // お題なし: ウルフだけ白紙・多数派のお題と配り方は同じ種なら似た言葉のときと同じ
+  const b = WW.init(4, 31, { rules: { wolfWord: 'blank' } });
+  assert.deepEqual([b.wolves, b.words[0], WW.wordOf(b, b.wolves[0]), b.blank], [s.wolves, s.words[0], 'お題なし', true], 'お題なしではウルフに白紙を配る');
+  const b2 = WW.init(8, 5, { rules: { wolfWord: 'blank', wolves: 2 } });
+  assert.deepEqual(b2.wolves.map((p) => WW.wordOf(b2, p)), ['お題なし', 'お題なし'], 'ウルフ2人なら2人とも白紙');
+}
 assert.equal(WW.apply(s, { p: 0, t: 'vote', to: 1, v: 1 }), null, '話し合いの間は投票できない');
 s = WW.apply(s, { p: -1, t: 'tovote' });
 assert.equal(s.phase, 'vote', '時間が来たら投票');

@@ -195,6 +195,28 @@ p { margin: 0; }
 .ttt .ttt-cell.win { background: #fff1c2; border-color: var(--win); }
 .ttt .pop svg { animation: pop .22s ease-out; }
 .ttt .ttt-cell.fade svg { opacity: .35; } /* 消えるマルバツ: 次に消える印 */
+/* かぶせマルバツ: 手元の駒の段（上下）と盤。駒の大きさは z0 小・z1 中・z2 大 */
+.gob { display: grid; gap: 10px; justify-items: center; }
+.gob .ttt-cell { position: relative; }
+.gob .ttt-cell.target { background: #fff6dd; border-color: var(--accent); }
+.gob .ttt-cell.sel, .gob .gob-slot.sel { box-shadow: 0 0 0 3px var(--accent); }
+.gob .ttt-cell.last { background: #fff6dd; }
+.gob .ttt-cell.gob-from { border-style: dashed; }
+.gob .ttt-cell.win { background: #fff1c2; border-color: var(--win); }
+.gob-pc { display: grid; place-items: center; }
+.gob-pc svg { width: 100%; height: 100%; fill: none; stroke-linecap: round; }
+.gob-pc.p0 svg { stroke: var(--p0); }
+.gob-pc.p1 svg { stroke: var(--p1); }
+.gob-pc.z0 { width: 40%; height: 40%; } .gob-pc.z0 svg { stroke-width: 14; }
+.gob-pc.z1 { width: 64%; height: 64%; } .gob-pc.z1 svg { stroke-width: 12; }
+.gob-pc.z2 { width: 90%; height: 90%; } .gob-pc.z2 svg { stroke-width: 10; }
+.gob .gob-pc.pop { animation: pop .22s ease-out; }
+.gob-under { position: absolute; right: 6px; bottom: 4px; font-size: 11px; color: var(--muted); }
+.gob-hand { display: flex; gap: 6px; align-items: center; justify-content: center; min-height: 52px; padding: 4px 10px; border-radius: 12px; border: 1.5px solid transparent; }
+.gob-hand.turn { border-color: var(--line); background: var(--panel); }
+.gob-slot { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 10px; }
+.gob-slot.playable:hover { background: #fff6ec; }
+.gob-empty { font-size: 13px; color: var(--muted); }
 /* 3〜4人のマルバツ（広い盤。--w = 1辺のマス数） */
 .tttw {
   display: grid;
@@ -351,6 +373,9 @@ p { margin: 0; }
 .gm-stone.last::after { content: ""; position: absolute; inset: 36%; border-radius: 50%; background: #e04b3c; }
 .gm-stone.win { box-shadow: 0 0 0 2px var(--win), 0 1px 2px rgba(0, 0, 0, .4); }
 .gm-stone.pop { animation: pop .2s ease-out; }
+/* はさみ取りで取られた点: 赤い輪が消えていく */
+.gm-ghost { width: 70%; height: 70%; border-radius: 50%; border: 3px solid #e04b3c; position: relative; z-index: 1; pointer-events: none; animation: gmTaken 1.4s ease-out forwards; }
+@keyframes gmTaken { to { opacity: 0; transform: scale(.4); } }
 .gm .gm-pt.playable:hover { background: radial-gradient(circle, rgba(0, 0, 0, .25) 0 30%, transparent 32%); }
 .gm .gm-pt.playable.p1:hover { background: radial-gradient(circle, rgba(255, 255, 255, .6) 0 30%, transparent 32%); }
 [data-game="gomoku"] { --p0: #111; --p1: #8a8a8a; }

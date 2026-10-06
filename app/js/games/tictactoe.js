@@ -11,6 +11,11 @@
 // 詳細設定「盤」で消えるマルバツにもできる（2026-10-05 本人の決定。決まりは Claude の推奨を本人が承認）:
 //   3×3・2人だけ。自分の印は3つまで。4つ目を置くと、自分の一番古い印が消える（消える印は薄く見せる）。60手で引き分け。
 //   置けるのは空いているマスだけ（Claude の判断: 消える印のマスにはその手では置けない。置いたあとで古い印が消える）。
+// 詳細設定「盤」でかぶせマルバツにもできる（2026-10-06 本人の決定。決まりは Claude の推奨を本人が承認）:
+//   3×3・2人だけ。大・中・小の駒を2つずつ持ち、空いたマスか、自分より小さい駒（どちらの駒でも）の上に置ける。
+//   盤の上の自分の一番上の駒を動かしてもよい。並びは各マスの一番上の駒で見る。動かしたあと相手の3つ並びが見えていたら、
+//   自分も並んでいても相手の勝ち。60手で引き分け。手 = 行き先のマス + 9 × 出どころ（0〜2 = 手元の小・中・大、3〜11 = 盤のマス + 3）。
+//   Claude の判断: 動かす駒は元のマスへ戻せない・打てる手が無ければ引き分け・下に隠れた駒の数は画面に小さく出す。
 
 import { CPU_SETTING, boardCpu } from './util.js';
 
@@ -138,6 +143,164 @@ function vanishScore(s, p) {
   }
   if (s.board[4] === p) v += 3; else if (s.board[4] === 1 - p) v -= 3;
   return v;
+}
+
+/* ---------- かぶせマルバツ ---------- */
+
+const GOB_LIMIT = 60;
+const GOB_SIZE = ['小', '中', '大'];
+const gobTop = (st) => (st.length ? st[st.length - 1] : null);
+// 各マスの一番上の駒の持ち主（無ければ null）
+const gobOwners = (stacks) => stacks.map((st) => gobTop(st)?.p ?? null);
+
+function gobLegal(s) {
+  if (gobResult(s)) return [];
+  const out = [];
+  const p = s.turn;
+  const fits = (to, z) => { const t = gobTop(s.stacks[to]); return !t || t.z < z; };
+  for (let z = 0; z < 3; z++) {
+    if (!s.hand[p][z]) continue;
+    for (let to = 0; to < 9; to++) if (fits(to, z)) out.push(to + 9 * z);
+  }
+  for (let from = 0; from < 9; from++) {
+    const t = gobTop(s.stacks[from]);
+    if (!t || t.p !== p) continue;
+    for (let to = 0; to < 9; to++) if (to !== from && fits(to, t.z)) out.push(to + 9 * (from + 3));
+  }
+  return out;
+}
+
+function gobApply(s, m) {
+  if (!Number.isInteger(m) || m < 0 || m >= 108 || gobResult(s)) return null;
+  const to = m % 9;
+  const src = Math.floor(m / 9);
+  const p = s.turn;
+  const stacks = s.stacks.map((st) => st.slice());
+  const hand = s.hand.map((h) => h.slice());
+  let piece;
+  if (src < 3) {
+    if (!hand[p][src]) return null;
+    hand[p][src]--;
+    piece = { p, z: src };
+  } else {
+    const from = src - 3;
+    piece = gobTop(stacks[from]);
+    if (from === to || !piece || piece.p !== p) return null;
+    stacks[from].pop();
+  }
+  const under = gobTop(stacks[to]);
+  if (under && under.z >= piece.z) return null;
+  stacks[to].push(piece);
+  const owners = gobOwners(stacks);
+  const lineFor = (q) => LINES.find((l) => l.every((i) => owners[i] === q)) ?? null;
+  const theirs = lineFor(1 - p);
+  const mine = lineFor(p);
+  const won = theirs ? { winner: 1 - p, cells: theirs } : mine ? { winner: p, cells: mine } : null;
+  const t = { ...s, stacks, hand, turn: 1 - p, last: to, from: src < 3 ? null : src - 3, n: s.n + 1, won };
+  if (!won && !gobLegal(t).length) t.stuck = true;
+  return t;
+}
+
+function gobResult(s) {
+  if (s.won) return s.won;
+  if (s.n >= GOB_LIMIT || s.stuck) return { winner: null, cells: [] };
+  return null;
+}
+
+// CPU の形勢の見積もり: 一番上の駒で2つ並んで、残り1マスが空いている（か、その人の手元の一番大きい駒でかぶせられる）列。手元の大きい駒も少し得
+function gobScore(s, p) {
+  const owners = gobOwners(s.stacks);
+  const biggest = (q) => (s.hand[q][2] ? 2 : s.hand[q][1] ? 1 : s.hand[q][0] ? 0 : -1);
+  let v = 0;
+  for (const line of LINES) {
+    for (const q of [p, 1 - p]) {
+      const own = line.filter((i) => owners[i] === q).length;
+      if (own !== 2) continue;
+      const rest = line.find((i) => owners[i] !== q);
+      const top = gobTop(s.stacks[rest]);
+      if (!top || top.z < biggest(q)) v += q === p ? 10 : -10;
+    }
+  }
+  if (owners[4] === p) v += 3; else if (owners[4] === 1 - p) v -= 3;
+  v += 2 * (s.hand[p][2] - s.hand[1 - p][2]);
+  return v;
+}
+
+// 画面で選んでいる駒（この端末だけ。手の一覧には入れない）。局面が変わったら選び直し
+let gobSel = null; // { n: 何手目の局面か, src: 出どころ（手の src と同じ） }
+
+function gobPiece(piece) {
+  const el = document.createElement('span');
+  el.className = `gob-pc z${piece.z} p${piece.p}`;
+  el.innerHTML = MARKS[piece.p];
+  return el;
+}
+
+function renderGob(root, s, o) {
+  const res = gobResult(s);
+  const legal = o.canMove ? gobLegal(s) : [];
+  if (gobSel && (gobSel.n !== s.n || !o.canMove)) gobSel = null;
+  const pick = (src) => { gobSel = gobSel?.src === src ? null : { n: s.n, src }; renderGob(root, s, { ...o, fresh: false }); };
+  const targets = new Set(gobSel ? legal.filter((m) => Math.floor(m / 9) === gobSel.src).map((m) => m % 9) : []);
+  root.innerHTML = '';
+  root.className = 'board gob';
+  const bottom = o.me === 1 ? 1 : 0; // 自分の手元を下に出す（観戦と同じ画面の対局は ○ が下）
+  const handRow = (q) => {
+    const row = document.createElement('div');
+    row.className = 'gob-hand' + (q === s.turn && !res ? ' turn' : '');
+    for (let z = 2; z >= 0; z--) {
+      for (let k = 0; k < s.hand[q][z]; k++) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'gob-slot';
+        b.append(gobPiece({ p: q, z }));
+        const can = q === s.turn && legal.some((m) => Math.floor(m / 9) === z);
+        if (can) {
+          b.classList.add('playable');
+          if (gobSel?.src === z && k === 0) b.classList.add('sel');
+          b.setAttribute('aria-label', `手元の${GOB_SIZE[z]}を選ぶ`);
+          b.onclick = () => pick(z);
+        } else b.tabIndex = -1;
+        row.append(b);
+      }
+    }
+    if (!row.children.length) row.innerHTML = '<span class="gob-empty">手元の駒なし</span>';
+    return row;
+  };
+  const grid = document.createElement('div');
+  grid.className = 'ttt';
+  s.stacks.forEach((st, i) => {
+    const cell = document.createElement('button');
+    cell.type = 'button';
+    cell.className = 'ttt-cell';
+    const top = gobTop(st);
+    if (top) {
+      const pc = gobPiece(top);
+      if (i === s.last && o.fresh) pc.classList.add('pop');
+      cell.append(pc);
+      if (st.length > 1) {
+        const hid = document.createElement('span');
+        hid.className = 'gob-under';
+        hid.textContent = '下に' + (st.length - 1);
+        cell.append(hid);
+      }
+    }
+    if (i === s.last && !res) cell.classList.add('last');
+    if (s.from === i && !res) cell.classList.add('gob-from');
+    if (res?.cells.includes(i)) cell.classList.add('win');
+    if (targets.has(i)) {
+      cell.classList.add('playable', 'target');
+      cell.setAttribute('aria-label', `${i + 1}番のマスへ`);
+      cell.onclick = () => { const src = gobSel.src; gobSel = null; o.onMove(i + 9 * src); };
+    } else if (top && legal.some((m) => Math.floor(m / 9) === i + 3)) {
+      cell.classList.add('playable');
+      if (gobSel?.src === i + 3) cell.classList.add('sel');
+      cell.setAttribute('aria-label', `${i + 1}番のマスの駒を動かす`);
+      cell.onclick = () => pick(i + 3);
+    } else cell.tabIndex = -1;
+    grid.append(cell);
+  });
+  root.append(handRow(1 - bottom), grid, handRow(bottom));
 }
 
 /* ---------- 3〜4人のマルバツ（広い盤） ---------- */
@@ -330,8 +493,8 @@ export default {
   settings: [
     {
       key: 'size', label: '盤', def: 'normal',
-      desc: 'スーパーは小さい盤（3×3）が9つ並んだ 9×9。置いたマスの位置で、次の人が置く小さい盤が決まる。消えるは自分の印が3つまで（4つ目を置くと一番古い印が消える）。どちらも2人のときだけ',
-      choices: [['normal', 'ふつう（3×3）'], ['super', 'スーパー（9×9）'], ['vanish', '消える（3×3）']],
+      desc: 'スーパーは小さい盤（3×3）が9つ並んだ 9×9。置いたマスの位置で、次の人が置く小さい盤が決まる。消えるは自分の印が3つまで（4つ目を置くと一番古い印が消える）。かぶせるは大・中・小の駒で、小さい駒の上にかぶせられる。どれも2人のときだけ',
+      choices: [['normal', 'ふつう（3×3）'], ['super', 'スーパー（9×9）'], ['vanish', '消える（3×3）'], ['gobble', 'かぶせる（3×3）']],
     },
     {
       key: 'players', label: '人数', def: 2,
@@ -350,6 +513,11 @@ export default {
   // スーパー: よわい＝1手先・4割は適当、ふつう＝2手先・1割は適当、つよい＝4手先（どこにでも置ける局面は3手先。重くなるため）
   cpu(s, p, rules) {
     if (s.wide) return wideCpu(s, rules);
+    if (s.gob) {
+      return boardCpu(this, s, rules, gobLegal, gobScore, {
+        depth: { weak: 1, normal: 2, strong: 3 }, mistake: { weak: 0.4, normal: 0.12, strong: 0 },
+      });
+    }
     if (s.vanish) {
       const legal = (x) => x.board.map((v, i) => (v === null ? i : -1)).filter((i) => i >= 0);
       return boardCpu(this, s, rules, legal, vanishScore, {
@@ -374,6 +542,7 @@ export default {
       const [w, k] = wideSize(rules.wide, n);
       return { wide: true, n, w, k, board: Array(w * w).fill(null), turn: 0, last: null, won: null };
     }
+    if (rules.size === 'gobble') return { gob: true, stacks: Array.from({ length: 9 }, () => []), hand: [[2, 2, 2], [2, 2, 2]], turn: 0, last: null, from: null, n: 0, won: null };
     if (rules.size === 'vanish') return { vanish: true, board: Array(9).fill(null), hist: [[], []], turn: 0, last: null, n: 0, won: null };
     if (rules.size === 'super') return { big: true, board: Array(81).fill(null), owner: Array(9).fill(null), next: 4, turn: 0, last: null };
     return { board: Array(9).fill(null), turn: 0, last: null };
@@ -385,6 +554,7 @@ export default {
     if (s.big) return bigApply(s, m);
     if (s.wide) return wideApply(s, m);
     if (s.vanish) return vanishApply(s, m);
+    if (s.gob) return gobApply(s, m);
     if (!Number.isInteger(m) || m < 0 || m > 8 || s.board[m] !== null || this.result(s)) return null;
     const board = s.board.slice();
     board[m] = s.turn;
@@ -395,6 +565,7 @@ export default {
     if (s.big) return bigResult(s);
     if (s.wide) return wideResult(s);
     if (s.vanish) return vanishResult(s);
+    if (s.gob) return gobResult(s);
     const line = lineOf(s.board);
     if (line) return { winner: s.board[line[0]], cells: line };
     if (s.board.every((v) => v !== null)) return { winner: null, cells: [] };
@@ -402,6 +573,13 @@ export default {
   },
 
   info(s) {
+    if (s.gob) {
+      if (s.won) return '';
+      if (s.stuck) return '打てる手が無くなったので引き分け';
+      if (s.n >= GOB_LIMIT) return `${GOB_LIMIT}手になったので引き分け`;
+      const left = GOB_LIMIT - s.n;
+      return '駒を選んでから、置くマスを押します。小さい駒にはかぶせられます' + (left <= 10 ? `・あと${left}手で引き分け` : '');
+    }
     if (s.vanish) {
       if (vanishResult(s)) return '';
       const left = VANISH_LIMIT - s.n;
@@ -414,6 +592,7 @@ export default {
   render(root, s, o) {
     if (s.big) { renderBig(root, s, o); return; }
     if (s.wide) { renderWide(root, s, o); return; }
+    if (s.gob) { renderGob(root, s, o); return; }
     const res = this.result(s);
     const fade = s.vanish && !res ? fading(s) : [];
     root.innerHTML = '';

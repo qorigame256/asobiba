@@ -1,11 +1,54 @@
 // 五目並べ。2人（黒が先手）。交代で線の交わる点に石を置き、たて・よこ・ななめに5つ以上並べたら勝ち。
 // 禁じ手（連珠のルール）は無し。6つ以上並んでも勝ち（Claude の判断。ルールを覚えなくても遊べるように）。
 // 詳細設定「ぴったり五目」（2026-10-06 本人の決定）: ちょうど5つで勝ち。6つ以上つながっても勝ちにならない（置くことはできる）。両者とも同じ。
+// 詳細設定「はさみ取り」（2026-10-06 本人の決定。決まりは Claude の推奨を本人が承認）: 相手の石がちょうど2つ並んだ両側を自分の石ではさむと取れる
+//   （置いた石の8方向それぞれで見る）。5組（10個）取っても勝ち。自分から、はさまれる形に置いても取られない。取られた点にはまた置ける。
+//   「ぴったり五目」と同時に使える。Claude の判断: 置いて取ったあとに5つ並びを見る。取って5組と5つ並びが同時なら5つ並びの光る石を出す。
 // 盤は詳細設定で 15路（最初）か 13路。手 = 点の番号（段*路数+列。段0が一番上）。全部埋まったら引き分け。
 
 import { CPU_SETTING } from './util.js';
 
 const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
+const DIRS8 = [...DIRS, ...DIRS.map(([r, c]) => [-r, -c])];
+const CAP_GOAL = 5; // はさみ取り: この組数を取ったら勝ち
+
+// はさみ取り: 点 i に p が置いたときに取れる相手の石（点の番号の一覧。2つずつ）
+function captures(grid, n, i, p) {
+  const r0 = Math.floor(i / n);
+  const c0 = i % n;
+  const at = (k, dr, dc) => {
+    const r = r0 + dr * k;
+    const c = c0 + dc * k;
+    return r >= 0 && r < n && c >= 0 && c < n ? r * n + c : -1;
+  };
+  const out = [];
+  for (const [dr, dc] of DIRS8) {
+    const a = at(1, dr, dc);
+    const b = at(2, dr, dc);
+    const e = at(3, dr, dc);
+    if (e >= 0 && grid[a] === 1 - p && grid[b] === 1 - p && grid[e] === p) out.push(a, b);
+  }
+  return out;
+}
+
+// はさみ取り: 点 i に p が置くと、置いた石が相手にすぐ取られる形（自分の2つ並びの片側が相手・もう片側が空き）になる数
+function exposed(grid, n, i, p) {
+  const r0 = Math.floor(i / n);
+  const c0 = i % n;
+  const v = (k, dr, dc) => {
+    const r = r0 + dr * k;
+    const c = c0 + dc * k;
+    return r >= 0 && r < n && c >= 0 && c < n ? grid[r * n + c] : 'x';
+  };
+  let k = 0;
+  for (const [dr, dc] of DIRS8) {
+    // 並び: (-1) i (+1) (+2)。i と +1 が自分で、両端の片方が相手・片方が空き
+    if (v(1, dr, dc) !== p || v(2, dr, dc) === p || v(-1, dr, dc) === p) continue;
+    const ends = [v(-1, dr, dc), v(2, dr, dc)];
+    if (ends.includes(1 - p) && ends.includes(null)) k++;
+  }
+  return k;
+}
 
 // 点 i に p の石があるとして、方向 [dr, dc] に何個つながるか（i を含む）と、両端が空いているか
 function run(s, i, p, dr, dc) {
@@ -25,6 +68,27 @@ function run(s, i, p, dr, dc) {
     if (r >= 0 && r < n && c >= 0 && c < n && s.grid[r * n + c] === null) open++;
   }
   return { cells, open };
+}
+
+// 点 i（空いている点）に手番の人が石を置いた局面（はさみ取りの取りと、勝ちの判定もする）
+function place(s, i) {
+  const grid = s.grid.slice();
+  grid[i] = s.turn;
+  let caps = s.caps ?? [0, 0];
+  let taken = [];
+  if (s.capture) {
+    taken = captures(grid, s.size, i, s.turn);
+    for (const j of taken) grid[j] = null;
+    if (taken.length) { caps = caps.slice(); caps[s.turn] += taken.length / 2; }
+  }
+  const t = { ...s, grid, caps, taken };
+  let won = null;
+  for (const [dr, dc] of DIRS) {
+    const { cells } = run(t, i, s.turn, dr, dc);
+    if (s.exact ? cells.length === 5 : cells.length >= 5) { won = { winner: s.turn, cells }; break; }
+  }
+  if (!won && s.capture && caps[s.turn] >= CAP_GOAL) won = { winner: s.turn, cells: [i], byCap: true };
+  return { ...t, turn: 1 - s.turn, last: i, won, count: s.count + 1 };
 }
 
 /* ---------- CPU ---------- */
@@ -105,12 +169,21 @@ const LEVEL = {
   normal: { guard: 0.9, slip: 0.18, top: 3 },
   strong: { guard: 1, slip: 0, top: 1, look: true },
 };
+// はさみ取りの点数: 取れる組の数（5組に届くなら勝ち・止めなければ負けと同じ重さ）
+function capValue(s, i, p) {
+  if (!s.capture) return 0;
+  const k = captures(s.grid, s.size, i, p).length / 2;
+  if (!k) return 0;
+  return s.caps[p] + k >= CAP_GOAL ? 100000 : k * (s.caps[p] >= 3 ? 1500 : 700);
+}
+
 function gomokuCpu(s, rules) {
   const lv = LEVEL[rules?.cpu] ?? LEVEL.weak;
   const p = s.turn;
   const list = candidates(s).map((i) => {
-    const mine = cellValue(s, i, p);
-    const theirs = cellValue(s, i, 1 - p);
+    let mine = cellValue(s, i, p) + capValue(s, i, p);
+    const theirs = cellValue(s, i, 1 - p) + capValue(s, i, 1 - p);
+    if (s.capture && mine < 100000) mine -= exposed(s.grid, s.size, i, p) * 400 * lv.guard; // 取られる形へ置くのを嫌う
     // 自分が勝てる手は必ず打つ。相手の五を止めるのも必ず（よわいでも）
     const v = mine >= 100000 ? 1e9 : theirs >= 100000 ? 1e8 : mine * 1.1 + theirs * lv.guard + Math.random();
     return { i, v };
@@ -119,13 +192,12 @@ function gomokuCpu(s, rules) {
     const pool = list.slice(0, lv.top);
     return pool[Math.floor(Math.random() * pool.length)].i;
   }
-  // つよい: 点数の高い順に、置いたあと相手に「止められない形」（両端の空いた四・四三など）を作らせない手を選ぶ（1手先読み）
+  // つよい: 点数の高い順に、置いたあと相手に「止められない形」（両端の空いた四・四三など）を作らせない手を選ぶ（1手先読み）。
+  // はさみ取りでは、相手に石を取られない手も条件にする（入れないと つよい が ふつう に 25勝55敗と負け越した。入れて 40勝20敗）
   if (lv.look && list[0].v < 1e8) {
     for (const { i } of list.slice(0, 8)) {
-      const grid = s.grid.slice();
-      grid[i] = p;
-      const t = { ...s, grid };
-      if (candidates(t).every((j) => cellValue(t, j, 1 - p) < 3000)) return i;
+      const t = place(s, i);
+      if (candidates(t).every((j) => cellValue(t, j, 1 - p) < 3000 && capValue(t, j, 1 - p) === 0)) return i;
     }
   }
   return list[0].i;
@@ -141,6 +213,7 @@ export default {
   settings: [
     { key: 'size', label: '盤', desc: '13路はスマホで押しやすい', def: 15, choices: [[15, '15路（15×15）'], [13, '13路（13×13）']] },
     { key: 'exact', label: 'ぴったり五目', desc: 'ちょうど5つで勝ち。6つ以上つながっても勝ちにならない', def: false },
+    { key: 'capture', label: 'はさみ取り', desc: '相手の石がちょうど2つ並んだ両側をはさむと取れる。5組（10個）取っても勝ち', def: false },
     CPU_SETTING,
   ],
 
@@ -148,28 +221,29 @@ export default {
 
   init({ rules = {} } = {}) {
     const size = rules.size === 13 ? 13 : 15;
-    return { size, exact: !!rules.exact, grid: Array(size * size).fill(null), turn: 0, last: null, won: null, count: 0 };
+    return { size, exact: !!rules.exact, capture: !!rules.capture, caps: [0, 0], taken: [], grid: Array(size * size).fill(null), turn: 0, last: null, won: null, count: 0 };
   },
 
   turn(s) { return s.turn; },
 
   apply(s, i) {
     if (!Number.isInteger(i) || i < 0 || i >= s.grid.length || s.grid[i] !== null || s.won) return null;
-    const grid = s.grid.slice();
-    grid[i] = s.turn;
-    const t = { ...s, grid };
-    let won = null;
-    for (const [dr, dc] of DIRS) {
-      const { cells } = run(t, i, s.turn, dr, dc);
-      if (s.exact ? cells.length === 5 : cells.length >= 5) { won = { winner: s.turn, cells }; break; }
-    }
-    return { ...t, turn: 1 - s.turn, last: i, won, count: s.count + 1 };
+    return place(s, i);
   },
 
   result(s) {
     if (s.won) return s.won;
-    if (s.count >= s.grid.length) return { winner: null, cells: [] };
+    if (s.grid.every((v) => v !== null)) return { winner: null, cells: [] };
     return null;
+  },
+
+  sound(a, b) { return b.taken?.length ? 'punch' : 'place'; },
+
+  info(s) {
+    if (!s.capture) return '';
+    let html = `取った組　<b>${this.players[0]} ${s.caps[0]}</b>　−　<b>${this.players[1]} ${s.caps[1]}</b>（${CAP_GOAL}組で勝ち）`;
+    if (s.won?.byCap) html += `<br>${this.players[s.won.winner]}が${CAP_GOAL}組取った`;
+    return html;
   },
 
   render(root, s, o) {
@@ -194,10 +268,12 @@ export default {
         cell.append(stone);
         cell.tabIndex = -1;
       } else if (o.canMove) {
+        if (o.fresh && s.taken?.includes(i)) cell.append(Object.assign(document.createElement('span'), { className: 'gm-ghost' }));
         cell.classList.add('playable', 'p' + s.turn);
         cell.setAttribute('aria-label', `${r + 1}段目 ${c + 1}列目`);
         cell.onclick = () => o.onMove(i);
       } else {
+        if (o.fresh && s.taken?.includes(i)) cell.append(Object.assign(document.createElement('span'), { className: 'gm-ghost' }));
         cell.tabIndex = -1;
       }
       root.append(cell);

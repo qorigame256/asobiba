@@ -22,6 +22,9 @@
 // 詳細設定「同じ数字まとめ出し」（2026-10-06 本人の決定。最初はなし）: 数字の札は、同じ数字の札を何枚でもまとめて出せる（記号の札は1枚ずつ）。
 //   手の more に、いっしょに出す札の位置を出す順に入れる。最後に置いた札の色が場の色になる。Claude の判断: 引いた札は1枚だけ・
 //   7・0 をまとめて出しても交換・回しは1回。CPU は同じ数字を全部出し、手元に多く残る色を一番上にする。
+// 詳細設定「出せるまで引く」（2026-10-06 本人の決定。決まりは Claude の推奨を本人が承認。最初はなし）: 山を1回押すと、出せる札が来るまでまとめて引く。
+//   来た札は「出す」か「出さずに次へ」を選べる（今までと同じ）。出せる札を持っていても引いてよい。山と捨て札が尽きたらそこでやめて次の人へ。
+//   重ね返しの途中（s.pend）で引くときは、今までどおりたまった枚数だけ引く。
 
 import { mulberry32, shuffle } from './util.js';
 
@@ -132,7 +135,7 @@ function cardEl(card, tag = 'div') {
 function logText(s, nameP) {
   const L = s.last;
   if (!L) return `最初の札は「${cardName(s.discard[0])}」`;
-  if (L.t === 'draw') return L.got ? `${nameP(L.p)}が山から1枚引いた` : '山札が無いので引けなかった';
+  if (L.t === 'draw') return L.got ? `${nameP(L.p)}が山から${L.got}枚引いた${L.got > 1 && L.drew ? '（出せる札が来た）' : ''}` : '山札が無いので引けなかった';
   if (L.t === 'pass') return `${nameP(L.p)}は引いた札を出さずに次へ`;
   if (L.t === 'take') return `${nameP(L.p)}が${L.got}枚引いて1回休み`;
   let t = L.n > 1 ? `${nameP(L.p)}が「${kindOf(L.card)}」を${L.n}枚まとめて出した（一番上は${COLOR_NAME[L.color]}）` : `${nameP(L.p)}が「${cardName(L.card)}」を出した`;
@@ -160,6 +163,7 @@ export default {
   settings: [
     { key: 'stack', label: '重ねて返す', desc: 'ドロー2にはドロー2、ドロー4にはドロー4を重ねて次の人へ回せる。重ねなかった人が、たまった枚数を全部引く', def: false },
     { key: 'multi', label: '同じ数字まとめ出し', desc: '同じ数字の札を何枚でもまとめて出せる（数字の札だけ）。最後に置いた札の色が場の色になる', def: false },
+    { key: 'untilPlay', label: '出せるまで引く', desc: '山を1回押すと、出せる札が来るまでまとめて引く（来た札は出しても出さなくてもよい）', def: false },
     { key: 'sevenZero', label: '7で交換・0で回す', desc: '7を出したら、選んだ1人と手札を交換する。0を出したら、全員が手札を次の人へ渡す（回っている向き）', def: false },
   ],
 
@@ -249,9 +253,17 @@ export default {
         s.turn = next(1);
         return s;
       }
-      const got = drawInto(s, p, 1);
-      s.last = { p, t: 'draw', got: got.length };
-      if (got.length && canPlay(s, p, got[0])) s.drawn = got[0];
+      // 出せるまで引く（詳細設定）: 1枚ずつ引き、出せる札が来るか山と捨て札が尽きたらやめる
+      let got = 0;
+      let card = null;
+      do {
+        const one = drawInto(s, p, 1);
+        if (!one.length) break;
+        got++;
+        if (canPlay(s, p, one[0])) card = one[0];
+      } while (s.rules?.untilPlay && card === null);
+      s.last = { p, t: 'draw', got, drew: card !== null };
+      if (card !== null) s.drawn = card;
       else s.turn = next(1);
       return s;
     }
