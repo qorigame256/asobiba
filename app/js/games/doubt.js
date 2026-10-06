@@ -3,6 +3,8 @@
 // 出したら決まった秒数（詳細設定）の間、ほかの人は誰でも「ダウト！」を押せる（2026-10-05 本人の決定）。
 //   いちばん速く押した人（各自の画面に出てから押すまでの時間で比べる。届いた順ではない）の「ダウト」になり、出した札を表にする。
 //   1枚でもうそなら出した人が、全部本当なら「ダウト」と言った人が、場の札を全部引き取る。
+// 詳細設定「ジョーカー」（2026-10-06 本人の決定。最初はなし）: 1枚入れて53枚を配る。ジョーカーはどの数字として出してもうそにならない
+//   （Claude の判断: ほかの札がうそなら、ジョーカーが混ざっていてもうそ）。
 // 手札がなくなった人の勝ち（最後の札がダウトでうそと分かれば引き取るので、まだ続く）。
 // 決まりごと（Claude の判断）: 全員が「ダウト」か「通す」を押したら秒数を待たずに締め切る。誰かがダウトを押したら、ほかの人の分を待つため1秒後に締め切る。
 //   同じ速さなら、出した人の次の席から近い人。決着しないまま手が 400回を超えたら、手札がいちばん少ない人の勝ち。
@@ -10,7 +12,7 @@
 // 全員が同時に動く（realtime）。同じ手が2回来ても、札はもう手札に無い・同じ回には1回しか押せないので2回目は弾かれる。
 
 import { mulberry32, shuffle, esc } from './util.js';
-import { makeDeck, rankOf, rankLabel, cardEl, backEl, cardLabel } from './cards.js';
+import { makeDeck, rankOf, rankLabel, cardEl, backEl, cardLabel, JOKER } from './cards.js';
 import { since, timeBar } from './party.js';
 
 const MAX_PLAYS = 400;
@@ -19,6 +21,7 @@ const WINDOWS = { 3: 3000, 4: 4000, 6: 6000 };
 const clone = (s) => ({ ...s, hands: s.hands.map((h) => h.slice()), pile: s.pile.slice(), calls: { ...s.calls }, passed: s.passed.slice() });
 const numOf = (s) => (s.plays % 13) + 1; // 次に出す数字
 const winKey = (s) => `dt:${s.seed}:${s.plays}`;
+const honest = (c, num) => c === JOKER || rankOf(c) === num; // ジョーカーはどの数字としても本当
 
 export default {
   id: 'doubt',
@@ -31,15 +34,16 @@ export default {
   minPlayers: 3,
   maxPlayers: 8,
   settings: [
+    { key: 'joker', label: 'ジョーカー', desc: '1枚入れる。どの数字として出してもうそにならない', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'window', label: 'ダウトの受付', desc: '札が出てから「ダウト！」を押せる秒数', def: 4, choices: [[3, '3秒'], [4, '4秒'], [6, '6秒']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const deck = shuffle(makeDeck(), mulberry32(seed));
+    const deck = shuffle(makeDeck(rules.joker === 'on' ? 1 : 0), mulberry32(seed));
     const hands = Array.from({ length: n }, () => []);
     deck.forEach((c, k) => hands[k % n].push(c));
     return {
-      n, seed, hands, pile: [], turn: 0, plays: 0, phase: 'play', played: null, calls: {}, passed: [],
+      n, seed, joker: rules.joker === 'on', hands, pile: [], turn: 0, plays: 0, phase: 'play', played: null, calls: {}, passed: [],
       reveal: null, winner: null, limit: WINDOWS[rules.window] ?? 4000, step: 0,
     };
   },
@@ -118,8 +122,10 @@ export default {
       const pl = s.played;
       const have = s.hands[p].filter((c) => rankOf(c) === pl.num).length;
       const left = s.hands[pl.p].length;
+      // 本当に出せる枚数の上限（4枚と、ジョーカーが山にあって自分が持っていなければもう1枚）
+      const most = 4 + (s.joker && !s.hands[p].includes(JOKER) ? 1 : 0);
       let chance = 0.06 + 0.06 * (pl.cards.length - 1);
-      if (have + pl.cards.length > 4) chance = 0.9; // 自分の手札と合わせて5枚以上になる＝うそ
+      if (have + pl.cards.length > most) chance = 0.9; // 自分の手札と合わせて上限を超える＝うそ
       else if (left === 0) chance = 0.6; // これで上がられてしまう
       else if (have === 3) chance = 0.5;
       if (Math.random() < chance) return { t: 'doubt', w: s.plays, ms: Math.round(since(winKey(s))) };
@@ -130,7 +136,12 @@ export default {
     const hand = s.hands[p];
     const real = hand.filter((c) => rankOf(c) === num);
     const wait = (c) => (rankOf(c) - num + 13) % 13; // その数字の出番まであと何回
-    const fake = hand.filter((c) => rankOf(c) !== num).sort((a, b) => wait(b) - wait(a));
+    const fake = hand.filter((c) => c !== JOKER && rankOf(c) !== num).sort((a, b) => wait(b) - wait(a));
+    // ジョーカーは本当の札が無いときにとっておきとして出す（ほかに札が無ければそれだけ）
+    if (hand.includes(JOKER) && (!real.length || hand.length === 1 + real.length)) {
+      if (!real.length && fake.length && Math.random() < 0.5) return { t: 'play', cards: [fake[0]] };
+      return { t: 'play', cards: [JOKER, ...real.slice(0, 3)] };
+    }
     if (real.length) {
       const cards = real.slice(0, 4);
       if (cards.length < 4 && fake.length && Math.random() < 0.2) cards.push(fake[0]);
@@ -189,7 +200,7 @@ export default {
     } else if (s.reveal && s.reveal.by !== null) {
       for (const c of s.reveal.cards) {
         const e = cardEl(c);
-        if (rankOf(c) !== s.reveal.num) e.classList.add('lie');
+        if (!honest(c, s.reveal.num)) e.classList.add('lie');
         cards.append(e);
       }
     }
@@ -230,7 +241,7 @@ export default {
       const num = numOf(s);
       for (const c of hand.slice().sort((a, b) => rankOf(a) - rankOf(b))) {
         const e = cardEl(c, can ? 'button' : 'div');
-        if (rankOf(c) === num && s.phase === 'play') e.classList.add('usable');
+        if (honest(c, num) && s.phase === 'play') e.classList.add('usable');
         if (picked.has(c)) e.classList.add('selected');
         if (can) {
           e.onclick = () => {
@@ -267,7 +278,7 @@ function close(s0) {
   const dist = (q) => (q - pl.p + s.n) % s.n; // 出した人の次の席から近い順
   callers.sort((a, b) => s.calls[a] - s.calls[b] || dist(a) - dist(b));
   const by = callers.length ? callers[0] : null;
-  const lie = pl.cards.some((c) => rankOf(c) !== pl.num);
+  const lie = pl.cards.some((c) => !honest(c, pl.num));
   let taker = null;
   if (by !== null) {
     taker = lie ? pl.p : by;

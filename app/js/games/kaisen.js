@@ -3,21 +3,25 @@
 // 詳細設定「当たったらもう一度」（2026-10-06 本人の決定。最初はなし）: 当たったら（沈めたときも）続けてもう1回撃てる。外れたら相手の番。
 // 詳細設定「ソナー」（2026-10-06 本人の決定。最初はなし）: 撃つ代わりに1回だけ、相手の海の 3×3（盤の端では欠ける）を調べて、
 //   まだ撃っていないマスのうち船のマスがいくつあるかが分かる（Claude の判断: 数まで出す・使ったら相手の番・相手にも場所と数が見える）。
+// 詳細設定「海の広さ」（2026-10-06 本人の決定。最初は ふつう）: 小さい海 = 8×8 に 4・3・3・2マスの船4隻（1回が短く、スマホでマスが押しやすい）。
 // 船のマスを全部撃たれたら、その船は沈む。相手の船を先に全部沈めた方の勝ち。
 // 決まりごと（Claude の判断）: 船どうしは となり合ってもよい（重なるのはだめ）。どの船を沈めたかは相手にも知らせる。
 // 相手の船は画面に出さないが、手札と同じ簡易の隠し方（全員の端末が全部の配置を知っている）。同じ画面の2人では隠せないので、オンラインだけ（noLocal）。
-// マスの番号 = 段*10+列（段0が一番上）。
+// マスの番号 = 段*盤の幅+列（段0が一番上）。
 // 手: 並べる { t: 'place', ships: [[段, 列, たてか], …]（SHIPS の順） } / 撃つ = マスの番号 / ソナー { t: 'sonar', c: 真ん中のマスの番号 }
 
 import { CPU_SETTING } from './util.js';
 
-export const N = 10;
-export const SHIPS = [5, 4, 3, 3, 2];
-const SHIP_NAMES = ['5マスの船', '4マスの船', '3マスの船', '3マスの船', '2マスの船'];
-const TOTAL = SHIPS.reduce((a, b) => a + b, 0);
+// 海の広さごとの盤の幅と船（詳細設定「海の広さ」）
+export const SEAS = { big: { n: 10, ships: [5, 4, 3, 3, 2] }, small: { n: 8, ships: [4, 3, 3, 2] } };
+export const N = SEAS.big.n;
+export const SHIPS = SEAS.big.ships;
+const seaOf = (s) => SEAS[s.size] ?? SEAS.big; // 前からの局面（size が無い）はふつうの海
+const shipName = (len) => `${len}マスの船`;
+const totalOf = (sp) => sp.ships.reduce((a, b) => a + b, 0);
 
 // 並べ方 → 各マスの船の番号（-1 は海）。並べられなければ null
-export function layout(ships) {
+export function layout(ships, { n: N, ships: SHIPS } = SEAS.big) {
   if (!Array.isArray(ships) || ships.length !== SHIPS.length) return null;
   const grid = Array(N * N).fill(-1);
   for (let k = 0; k < SHIPS.length; k++) {
@@ -36,7 +40,7 @@ export function layout(ships) {
 }
 
 // おまかせの並べ方（CPU と「おまかせ」ボタン。ホストか自分の端末だけで動くので Math.random を使ってよい）
-export function randomShips() {
+export function randomShips({ n: N, ships: SHIPS } = SEAS.big) {
   for (;;) {
     const ships = [];
     const grid = Array(N * N).fill(-1);
@@ -62,7 +66,7 @@ export function randomShips() {
 
 // p が撃った結果から、沈めた船の番号の一覧
 // マス c を真ん中にした 3×3（盤の外は除く）
-export function sonarArea(c) {
+export function sonarArea(c, N = SEAS.big.n) {
   const r0 = Math.floor(c / N);
   const c0 = c % N;
   const out = [];
@@ -70,7 +74,7 @@ export function sonarArea(c) {
   return out;
 }
 
-const sunkList = (s, p) => SHIPS.map((_, k) => k).filter((k) => s.grid[1 - p].every((g, i) => g !== k || s.shots[p][i]));
+const sunkList = (s, p) => seaOf(s).ships.map((_, k) => k).filter((k) => s.grid[1 - p].every((g, i) => g !== k || s.shots[p][i]));
 const hitsOf = (s, p) => s.shots[p].filter((x, i) => x && s.grid[1 - p][i] >= 0).length;
 
 /* ---------- CPU ---------- */
@@ -80,6 +84,7 @@ const hitsOf = (s, p) => s.shots[p].filter((x, i) => x && s.grid[1 - p][i] >= 0)
 // つよい: それに加えて、残っている船が入れるマスの数で狙いを決める（市松模様に近い撃ち方になる）
 function kaisenCpu(s, p, rules) {
   const level = rules?.cpu === 'strong' ? 'strong' : rules?.cpu === 'normal' ? 'normal' : 'weak';
+  const { n: N, ships: SHIPS } = seaOf(s);
   const shot = s.shots[p];
   const opp = s.grid[1 - p];
   const sunk = new Set(sunkList(s, p));
@@ -137,7 +142,7 @@ function kaisenCpu(s, p, rules) {
     for (let r = 1; r < N - 1; r++) for (let c = 1; c < N - 1; c++) centers.push(r * N + c);
     if (level === 'weak') return { t: 'sonar', c: pick(centers) };
     const sc = level === 'strong' ? scoreMap() : null;
-    const val = (c) => sonarArea(c).reduce((a, i) => a + (shot[i] ? 0 : sc ? sc[i] : 1), 0);
+    const val = (c) => sonarArea(c, N).reduce((a, i) => a + (shot[i] ? 0 : sc ? sc[i] : 1), 0);
     const top = Math.max(...centers.map(val));
     return { t: 'sonar', c: pick(centers.filter((c) => val(c) === top)) };
   }
@@ -173,20 +178,25 @@ const game = {
   settings: [
     CPU_SETTING,
     { key: 'sonar', label: 'ソナー', desc: '撃つ代わりに1回だけ、相手の海の 3×3 に船のマスがいくつあるか調べられる（使ったら相手の番）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
+    { key: 'size', label: '海の広さ', desc: '小さい海は 8×8 に船4隻（4・3・3・2マス）。1回が短くなり、スマホでもマスが押しやすい', def: 'big', choices: [['big', 'ふつう（10×10・5隻）'], ['small', '小さい（8×8・4隻）']] },
     { key: 'again', label: '当たったらもう一度', desc: '当たったら（沈めたときも）続けてもう1回撃てる。外れたら相手の番', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
   ],
 
   init({ rules = {} } = {}) {
-    return { again: rules.again === 'on', sonarOn: rules.sonar === 'on', sonar: [null, null], phase: 'place', turn: 0, grid: [null, null], shots: [Array(N * N).fill(false), Array(N * N).fill(false)], last: null, won: null, count: 0 };
+    const size = rules.size === 'small' ? 'small' : 'big';
+    const { n } = SEAS[size];
+    return { size, again: rules.again === 'on', sonarOn: rules.sonar === 'on', sonar: [null, null], phase: 'place', turn: 0, grid: [null, null], shots: [Array(n * n).fill(false), Array(n * n).fill(false)], last: null, won: null, count: 0 };
   },
 
   turn(s) { return s.turn; },
 
   apply(s, m) {
     if (s.won !== null) return null;
+    const sp = seaOf(s);
+    const N = sp.n;
     if (s.phase === 'place') {
       if (!m || m.t !== 'place') return null;
-      const grid = layout(m.ships);
+      const grid = layout(m.ships, sp);
       if (!grid) return null;
       const g = s.grid.slice();
       g[s.turn] = grid;
@@ -198,7 +208,7 @@ const game = {
     const p = s.turn;
     if (m && m.t === 'sonar') {
       if (!s.sonarOn || s.sonar?.[p] || !Number.isInteger(m.c) || m.c < 0 || m.c >= N * N) return null;
-      const cells = sonarArea(m.c).filter((i) => !s.shots[p][i]);
+      const cells = sonarArea(m.c, N).filter((i) => !s.shots[p][i]);
       const n = cells.filter((i) => s.grid[1 - p][i] >= 0).length;
       const sonar = s.sonar.slice();
       sonar[p] = { c: m.c, n, cells };
@@ -214,7 +224,7 @@ const game = {
     const before = sunkList(s, p);
     const after = k >= 0 ? sunkList(t, p) : before;
     t.last = { p, cell: m, hit: k >= 0, sunk: after.length > before.length ? k : null };
-    if (hitsOf(t, p) === TOTAL) t.won = p;
+    if (hitsOf(t, p) === totalOf(sp)) t.won = p;
     return t;
   },
 
@@ -224,7 +234,7 @@ const game = {
   },
 
   cpu(s, p, rules) {
-    if (s.phase === 'place') return { t: 'place', ships: randomShips() };
+    if (s.phase === 'place') return { t: 'place', ships: randomShips(seaOf(s)) };
     return kaisenCpu(s, p, rules);
   },
 
@@ -241,7 +251,7 @@ const game = {
     const who = `<b class="pl p${l.p}">${game.players[l.p]}</b>`;
     if (l.sonar !== undefined) return `${who}がソナーを使った: まだ撃っていないマスのうち、船のマスが<b>${l.n}つ</b>`;
     const more = s.again && l.hit ? '（もう一度撃てる）' : '';
-    if (l.sunk !== null) return `${who}が${SHIP_NAMES[l.sunk]}を沈めた！${more}`;
+    if (l.sunk !== null) return `${who}が${shipName(seaOf(s).ships[l.sunk])}を沈めた！${more}`;
     return `${who}の弾は${l.hit ? '<b>命中！</b>' : 'はずれ'}${more}`;
   },
 
@@ -264,7 +274,7 @@ const game = {
     const status = document.createElement('p');
     status.className = 'cc-log';
     if (me !== null) {
-      const left = (p) => SHIPS.length - sunkList(s, p).length;
+      const left = (p) => seaOf(s).ships.length - sunkList(s, p).length;
       status.textContent = `残りの船: あなた ${left(1 - me)}隻 ／ 相手 ${left(me)}隻`;
     }
     root.append(status);
@@ -302,13 +312,15 @@ function sea(s, owner, { title, showShips, onShoot = null, small = false, aiming
   const head = document.createElement('div');
   head.className = 'ks-title';
   head.textContent = title;
+  const N = seaOf(s).n;
   const grid = document.createElement('div');
   grid.className = 'ks-grid';
+  grid.style.gridTemplateColumns = `repeat(${N}, 1fr)`;
   const shooter = 1 - owner;
   const ships = s.grid[owner];
   const sunk = ships ? new Set(sunkList(s, shooter)) : new Set();
   const sn = s.sonar?.[shooter] ?? null; // この海を調べたソナー
-  const zone = sn ? new Set(sonarArea(sn.c)) : null;
+  const zone = sn ? new Set(sonarArea(sn.c, N)) : null;
   for (let i = 0; i < N * N; i++) {
     const shot = s.shots[shooter][i];
     const k = ships ? ships[i] : -1;
@@ -342,7 +354,9 @@ function sea(s, owner, { title, showShips, onShoot = null, small = false, aiming
 
 // 船を並べる画面
 function renderPlace(root, s, o) {
-  const key = `${s.count}:${s.turn}`;
+  const sp = seaOf(s);
+  const { n: N, ships: SHIPS } = sp;
+  const key = `${s.count}:${s.turn}:${s.size}`;
   if (plc.key !== key) plc = { key, ships: SHIPS.map(() => null), sel: 0, vert: false };
   const draw = () => game.render(root, s, o);
   const all = () => (plc.ships.every(Boolean) ? plc.ships : null);
@@ -358,7 +372,7 @@ function renderPlace(root, s, o) {
 
   const head = document.createElement('p');
   head.className = 'cc-log';
-  head.textContent = plc.sel === null ? '全部並べました。よければ「これで決める」' : `${SHIP_NAMES[plc.sel]}を置くマス（左上のはし）を選ぶ。置いた船を押すと持ち上げます`;
+  head.textContent = plc.sel === null ? '全部並べました。よければ「これで決める」' : `${shipName(SHIPS[plc.sel])}を置くマス（左上のはし）を選ぶ。置いた船を押すと持ち上げます`;
   root.append(head);
 
   const list = document.createElement('div');
@@ -368,7 +382,7 @@ function renderPlace(root, s, o) {
     b.type = 'button';
     b.className = 'ks-ship' + (plc.sel === k ? ' on' : '') + (plc.ships[k] ? ' done' : '');
     b.innerHTML = '<i></i>'.repeat(len);
-    b.setAttribute('aria-label', SHIP_NAMES[k]);
+    b.setAttribute('aria-label', shipName(len));
     b.onclick = () => { plc.ships[k] = null; plc.sel = k; draw(); };
     list.append(b);
   });
@@ -376,6 +390,7 @@ function renderPlace(root, s, o) {
 
   const grid = document.createElement('div');
   grid.className = 'ks-grid place';
+  grid.style.gridTemplateColumns = `repeat(${N}, 1fr)`;
   for (let i = 0; i < N * N; i++) {
     const b = document.createElement('button');
     b.type = 'button';
@@ -419,7 +434,7 @@ function renderPlace(root, s, o) {
     acts.append(b);
   };
   btn(plc.vert ? '向き: たて ↕' : '向き: よこ ↔', 'secondary', () => { plc.vert = !plc.vert; draw(); });
-  btn('おまかせ', 'secondary', () => { plc.ships = randomShips(); plc.sel = null; draw(); });
+  btn('おまかせ', 'secondary', () => { plc.ships = randomShips(sp); plc.sel = null; draw(); });
   btn('やり直す', 'ghost', () => { plc.ships = SHIPS.map(() => null); plc.sel = 0; draw(); });
   btn('これで決める', 'primary', () => { if (all()) o.onMove({ t: 'place', ships: all() }); }, !all());
   root.append(acts);

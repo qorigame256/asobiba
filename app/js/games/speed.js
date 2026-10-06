@@ -6,11 +6,13 @@
 // 手元が空いたら自分の山から自動で補充。まだ上がっていない全員が出せなくなったら「スピード！」で、それぞれ自分の山の一番上を
 // 自分の台札に出し直す（山が無ければ手元の札から出す）。札を全部出し切った順に順位が付く。
 // 2人なら先に出し切った方の勝ち。3人なら2人が出し切るまで続ける（本人の決定）。同時に出し切ったら同じ順位。
+// 詳細設定「ジョーカー」（2026-10-06 本人の決定。最初はなし）: 2枚入れる。ジョーカーはどの台札にも出せて、ジョーカーの上にはどの札でも出せる。
+//   2人なら1枚ずつ自分の山に入れて27枚ずつ、3人なら54枚を18枚ずつ配って余りが出ない（Claude の判断）。2枚目は 'JK2'（同じ札が2枚あると手で見分けられないため）。
 // 手: { p, t: 'play', card: 出す札, pile: 台札の番号 } / { p, t: 'flip' }（スピード！）
 // 札そのもので手を表すので、通信で同じ手が2回届いても2回目は反則として弾かれる（main.js の rebase が頼りにしている）。
 
 import { mulberry32, shuffle } from './util.js';
-import { rankOf, cardEl, cardLabel } from './cards.js';
+import { rankOf, cardEl, cardLabel, isJoker, JOKER, JOKER2 } from './cards.js';
 
 const SLOTS = 4;
 const DELAYS = { slow: 2400, normal: 1500, fast: 900 };
@@ -22,6 +24,7 @@ function makeHalf(suits) {
 }
 
 const fits = (card, top) => {
+  if (isJoker(card) || isJoker(top)) return true; // ジョーカーはどこにでも出せ、ジョーカーの上にはどれでも出せる
   const d = Math.abs(rankOf(card) - rankOf(top));
   return d === 1 || d === 12; // K と A もつながる
 };
@@ -72,6 +75,7 @@ export default {
   minPlayers: 2,
   maxPlayers: 3,
   settings: [
+    { key: 'joker', label: 'ジョーカー', desc: '2枚入れる。どの台札にも出せて、ジョーカーの上にはどの札でも出せる', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'cpu', label: 'CPU の速さ', desc: 'CPU が1枚出すまでの間。速いほど強い', def: 'slow', choices: [['slow', 'ゆっくり'], ['normal', 'ふつう'], ['fast', 'はやい']] },
   ],
 
@@ -79,12 +83,14 @@ export default {
     const rng = mulberry32(seed);
     let decks;
     let aside = null;
+    const jk = rules.joker === 'on';
     if (n === 3) {
-      const all = shuffle(makeHalf(['h', 'd', 's', 'c']), rng);
-      aside = all.pop();
-      decks = [0, 1, 2].map((i) => all.slice(i * 17, i * 17 + 17));
+      const all = shuffle([...makeHalf(['h', 'd', 's', 'c']), ...(jk ? [JOKER, JOKER2] : [])], rng);
+      const per = jk ? 18 : 17;
+      if (!jk) aside = all.pop();
+      decks = [0, 1, 2].map((i) => all.slice(i * per, i * per + per));
     } else {
-      decks = [shuffle(makeHalf(['h', 'd']), rng), shuffle(makeHalf(['s', 'c']), rng)];
+      decks = [shuffle([...makeHalf(['h', 'd']), ...(jk ? [JOKER] : [])], rng), shuffle([...makeHalf(['s', 'c']), ...(jk ? [JOKER2] : [])], rng)];
     }
     const fields = decks.map((d) => d.splice(-SLOTS));
     const piles = decks.map((d) => [d.pop()]);
@@ -155,10 +161,12 @@ export default {
     return s;
   },
 
-  // CPU: 出せる札から適当に1枚。速さは詳細設定の cpuDelay で決まる。自分だけ出せないときは待つ（null）
+  // CPU: 出せる札から適当に1枚（ジョーカーはほかに出せないときだけ）。速さは詳細設定の cpuDelay で決まる。自分だけ出せないときは待つ（null）
   cpu(s, p) {
     if (s.place[p] !== null) return null;
-    const list = movesOf(s, p);
+    const all = movesOf(s, p);
+    const plain = all.filter((m) => !isJoker(m.card));
+    const list = plain.length ? plain : all;
     if (!list.length) return stuck(s) ? { t: 'flip' } : null;
     const { card, pile } = list[Math.floor(Math.random() * list.length)];
     return { t: 'play', card, pile };

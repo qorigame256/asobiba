@@ -994,6 +994,34 @@ for (let k = 0; k < 600; k++) {
   }
   spGames++;
 }
+// ジョーカー（詳細設定）
+s = SP.init(2, 42, { rules: { joker: 'on' } });
+assert.equal(spCount(s), 54, '2人はジョーカーを1枚ずつ足して27枚ずつ');
+assert.deepEqual(s.decks.map((d, p) => [...d, ...s.fields[p], ...s.piles[p]].filter((c) => c.startsWith('JK')).length), [1, 1]);
+s = SP.init(3, 42, { rules: { joker: 'on' } });
+assert.deepEqual(s.decks.map((d, p) => d.length + s.fields[p].length + s.piles[p].length), [18, 18, 18], '3人は18枚ずつ');
+assert.equal(s.aside, null, '3人でジョーカーありなら余りは無い');
+assert.equal(new Set([...s.decks.flat(), ...s.fields.flat(), ...s.piles.flat()]).size, 54, '54枚・重なりなし（2枚目は JK2）');
+s = spBase({ fields: [['JK', 'h1', null, null], ['s9', null, null, null]], piles: [['d6'], ['c13']] });
+assert.ok(SP.apply(s, { p: 0, t: 'play', card: 'JK', pile: 0 }) && SP.apply(s, { p: 0, t: 'play', card: 'JK', pile: 1 }), 'ジョーカーはどの台札にも出せる');
+t = SP.apply(s, { p: 0, t: 'play', card: 'JK', pile: 0 });
+assert.ok(SP.apply(t, { p: 1, t: 'play', card: 's9', pile: 0 }), 'ジョーカーの上にはどの札でも出せる');
+assert.equal(SP.cpu(s, 0).card, 'h1', 'CPU はほかに出せる札があればジョーカーを取っておく');
+assert.equal(SP.apply(s, { p: 0, t: 'flip' }), null, 'ジョーカーを持っていれば出せなくならない');
+for (let k = 0; k < 200; k++) {
+  const np = k % 2 ? 3 : 2;
+  let st = SP.init(np, k * 11 + 5, { rules: { joker: 'on' } });
+  let steps = 0;
+  while (!SP.result(st)) {
+    const p = Math.floor(Math.random() * np);
+    const m = SP.cpu(st, p);
+    if (!m) continue;
+    st = SP.apply(st, { ...m, p });
+    assert.ok(st, 'ジョーカーありでスピードの CPU が反則の手を出した');
+    assert.equal(spCount(st), 54, 'ジョーカーありで札の枚数が変わった');
+    if (++steps > 2000) throw new Error('ジョーカーありのスピードが終わらない');
+  }
+}
 console.log('speed games', spGames);
 
 // ---------- ヒット＆ブロー ----------
@@ -1927,6 +1955,40 @@ for (let g = 0; g < 30; g++) {
     assert.equal(st.hands.flat().length + st.pile.length, 52, '札の数は52のまま');
   }
 }
+// ジョーカー（詳細設定）: どの数字として出してもうそにならない
+{
+  assert.equal(DB.init(3, 11, {}).hands.flat().includes('JK'), false, '最初はジョーカーなし');
+  let st = DB.init(3, 11, { rules: { joker: 'on' } });
+  assert.equal(st.hands.flat().length, 53, 'ジョーカーを入れて53枚');
+  const holder = st.hands.findIndex((h) => h.includes('JK'));
+  const other = st.hands[0].find((c) => c !== 'JK' && rk(c) !== 1);
+  st = { ...st, turn: 0, hands: st.hands.map((h, p) => (p === 0 ? ['JK', other, ...h.filter((c) => c !== 'JK' && c !== other)] : h.filter((c) => c !== 'JK'))) };
+  assert.ok(holder >= 0);
+  let t = DB.apply(st, { p: 0, t: 'play', cards: ['JK'] });
+  t = DB.apply(t, { p: 1, t: 'doubt', w: 0, ms: 300 });
+  t = DB.apply(t, { p: -1, t: 'close', w: 0 });
+  assert.deepEqual([t.reveal.lie, t.reveal.taker], [false, 1], 'ジョーカーだけならうそにならない');
+  t = DB.apply(st, { p: 0, t: 'play', cards: ['JK', other] });
+  t = DB.apply(t, { p: 1, t: 'doubt', w: 0, ms: 300 });
+  t = DB.apply(t, { p: -1, t: 'close', w: 0 });
+  assert.deepEqual([t.reveal.lie, t.reveal.taker], [true, 0], 'ほかの札がうそなら、ジョーカーが混ざってもうそ');
+  for (let g = 0; g < 30; g++) {
+    let u = DB.init(3 + (g % 6), 500 + g, { rules: { joker: 'on' } });
+    let guard = 0;
+    while (!DB.result(u)) {
+      let moved = false;
+      for (let p = 0; p < u.n; p++) {
+        if (!DB.canAct(u, p)) continue;
+        u = DB.apply(u, { p, ...DB.cpu(u, p) });
+        assert.ok(u, 'ジョーカーありでダウトの CPU が反則を出した');
+        moved = true;
+      }
+      if (!moved) { const r = DB.referee(u); u = DB.apply(u, { ...r.move, p: -1 }); }
+      assert.ok(++guard < 5000, 'ジョーカーありのダウトが終わらない');
+      assert.equal(u.hands.flat().length + u.pile.length, 53, '札の数は53のまま');
+    }
+  }
+}
 
 // ---------- ヨット ----------
 const YT = GAMES.yacht;
@@ -2271,6 +2333,16 @@ for (let g = 0; g < 20; g++) {
   const lost = st.last.lost ?? [];
   assert.equal(st.scores.reduce((a, b) => a + b, 0) + lost.reduce((a, b) => a + b, 0), 40, '点数の合計（+55 −15）が崩れない');
 }
+{
+  // 次の札が見える
+  assert.equal(SR.nextCard(SR.init(3, 11)), null, '最初の設定では次の札を見せない');
+  let st = SR.init(3, 11, { rules: { peek: 'on' } });
+  assert.equal(SR.nextCard(st), st.deck[1], '次の回の札が見える');
+  while (!SR.result(st)) {
+    for (let p = 0; p < st.n; p++) if (SR.canAct(st, p)) { st = SR.apply(st, { p, ...SR.cpu(st, p) }); assert.ok(st, '次の札ありで CPU が反則を出した'); }
+    if (st.round === 14) assert.equal(SR.nextCard(st), null, '最後の回には次の札が無い');
+  }
+}
 console.log('seri OK');
 
 // ---------- お絵描き当て ----------
@@ -2528,6 +2600,38 @@ assert.equal(KS.apply(sn, { t: 'sonar', c: 100 }), null, '盤の外は選べな�
 s = KS.init({ rules: { sonar: 'on', again: 'on' } });
 s = KS.apply(KS.apply(s, { t: 'place', ships: fleet }), { t: 'place', ships: fleet });
 assert.equal(KS.apply(s, { t: 'sonar', c: 11 }).turn, 1, '当たったらもう一度でも、ソナーのあとは相手の番');
+// 小さい海（詳細設定）
+{
+  const { SEAS } = await import('../app/js/games/kaisen.js');
+  assert.equal(KS.init().size, 'big', '最初はふつうの海');
+  let st = KS.init({ rules: { size: 'small' } });
+  assert.equal(st.shots[0].length, 64, '小さい海は 8×8');
+  assert.equal(KS.apply(st, { t: 'place', ships: fleet }), null, '小さい海に5隻は並べられない');
+  const small = [[0, 0, false], [2, 0, false], [4, 0, false], [6, 0, true]];
+  assert.equal(layout([[0, 5, false], ...small.slice(1)], SEAS.small), null, '8列からはみ出す');
+  st = KS.apply(KS.apply(st, { t: 'place', ships: small }), { t: 'place', ships: small });
+  assert.equal(st.phase, 'fire');
+  assert.equal(KS.apply(st, 64), null, '盤の外は撃てない');
+  const cells = [];
+  layout(small, SEAS.small).forEach((k, i) => { if (k >= 0) cells.push(i); });
+  assert.equal(cells.length, 12, '4・3・3・2マス');
+  let m = 63;
+  for (const i of cells) {
+    st = KS.apply(st, i);
+    if (!KS.result(st)) { while (layout(small, SEAS.small)[m] >= 0) m--; st = KS.apply(st, m--); }
+  }
+  assert.deepEqual(KS.result(st), { winner: 0, cells: [] }, '小さい海で4隻沈めたら勝ち');
+  for (let k = 0; k < 50; k++) assert.ok(layout(randomShips(SEAS.small), SEAS.small), '小さい海のおまかせも必ず並べられる');
+  for (let g = 0; g < 18; g++) {
+    let t = KS.init({ rules: { size: 'small', sonar: g % 2 ? 'on' : 'off', again: g % 3 ? 'off' : 'on' } });
+    let guard = 0;
+    while (!KS.result(t)) {
+      t = KS.apply(t, KS.cpu(t, t.turn, { cpu: ['weak', 'normal', 'strong'][g % 3] }));
+      assert.ok(t, '小さい海で CPU が反則を出した');
+      assert.ok(++guard < 140);
+    }
+  }
+}
 let sonarUsed = 0;
 for (let g = 0; g < 30; g++) {
   let st = KS.init({ rules: { sonar: 'on', again: g % 2 ? 'on' : 'off' } });

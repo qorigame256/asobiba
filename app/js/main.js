@@ -206,6 +206,24 @@ function rulesOf(gameId, rules) {
 const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint']);
 const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
 
+// 詳細設定を覚える（2026-10-06 本人の決定）: ホストが待合室で変えた詳細設定を、ゲームごとにこの端末へ覚えておき、次に部屋を作ったときもそこから始める。
+// 読むときは rulesOf と同じく、今のゲームに無い項目・おかしな値は使わない（ゲームの設定が変わっても困らないように）
+const RULES_KEY = 'bg-rules';
+function savedRules() {
+  try {
+    const all = JSON.parse(localStorage.getItem(RULES_KEY) ?? '{}');
+    if (!all || typeof all !== 'object') return {};
+    return Object.fromEntries(Object.keys(GAMES).filter((id) => all[id] && typeof all[id] === 'object').map((id) => [id, rulesOf(id, all)]));
+  } catch { return {}; }
+}
+function rememberRules(gameId, rules) {
+  try {
+    const all = JSON.parse(localStorage.getItem(RULES_KEY) ?? '{}') || {};
+    all[gameId] = rules;
+    localStorage.setItem(RULES_KEY, JSON.stringify(all));
+  } catch { /* 覚えられなくても遊べる */ }
+}
+
 // 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、エアホッケーは 2〜3。ほかは2）
 const boardSeats = (gameId, rules) => GAMES[gameId]?.seatCount?.(rulesOf(gameId, rules)) ?? 2;
 
@@ -976,6 +994,7 @@ function rulesPanel(game) {
   const cur = rulesOf(S.gameId, S.rules);
   const set = (key, value) => {
     S.rules = { ...S.rules, [S.gameId]: { ...cur, [key]: value } };
+    rememberRules(S.gameId, S.rules[S.gameId]);
     saveRoom();
     sendState();
     render();
@@ -989,6 +1008,7 @@ function rulesPanel(game) {
         next[x.key] = opts[Math.floor(Math.random() * opts.length)];
       }
       S.rules = { ...S.rules, [S.gameId]: next };
+      rememberRules(S.gameId, next);
       S.rulesOpen = true;
       saveRoom();
       sendState();
@@ -1024,6 +1044,19 @@ function rulesPanel(game) {
       label.append(cb, text);
     }
     det.append(label);
+  }
+  // 覚えた設定から始めるので、最初の設定へ戻す道も出す（最初の設定と違うときだけ）
+  if (S.isHost && game.settings.some((x) => cur[x.key] !== x.def)) {
+    const reset = makeButton('↺ 最初の設定に戻す', () => {
+      const def = Object.fromEntries(game.settings.map((x) => [x.key, x.def]));
+      S.rules = { ...S.rules, [S.gameId]: def };
+      rememberRules(S.gameId, def);
+      saveRoom();
+      sendState();
+      render();
+    }, 'ghost small');
+    reset.classList.add('luck-btn');
+    det.append(reset);
   }
   return det;
 }
@@ -1096,7 +1129,37 @@ function gameSelect() {
     newRound(sel.value, { lobby: true });
   };
   label.append(sel);
+  if (!S.order) { // 待合室だけ: ゲームのおまかせ
+    const luck = makeButton('🎲 ゲームをおまかせ', () => {
+      const pool = luckGames();
+      const id = pool[Math.floor(Math.random() * pool.length)];
+      newRound(id, { lobby: true });
+      toast(`「${GAMES[id].name}」に決まりました。もう一度押すと引き直せます`);
+    }, 'secondary small');
+    luck.title = '今の人数で遊べるゲームから1つを抽選します';
+    label.append(' ', luck);
+  }
   return label;
+}
+
+// ゲームのおまかせ（2026-10-06 本人の決定）で選ぶゲーム: 部屋の全員が遊ぶ側に入れて（観戦にならず）、CPU を入れられないゲームは人が足りるもの。
+// 今のゲームは除く。当てはまるものが無ければ、今のゲーム以外の全部から
+function luckGames() {
+  const n = S.members.length;
+  const others = GAME_ORDER.filter((id) => GAMES[id].ready && id !== S.gameId);
+  const room = (g) => {
+    if (g.multi) return g.maxPlayers;
+    const pl = (g.settings ?? []).find((x) => x.key === 'players');
+    return Math.max(2, ...(pl?.choices ?? []).map(([v]) => Number(v) || 0));
+  };
+  const fits = others.filter((id) => {
+    const g = GAMES[id];
+    if (n > room(g)) return false;
+    if (g.noCpu && n < g.minPlayers) return false;
+    if (g.live && n < 2) return false; // エアホッケーは最初の設定（2人）だと人が2人要る
+    return true;
+  });
+  return fits.length ? fits : others;
 }
 
 /* ---------- 操作 ---------- */
@@ -1276,7 +1339,7 @@ function createRoom(gameId) {
   S = {
     mode: 'online', code: randomString(CODE_LEN, CODE_CHARS), myId, isHost: true,
     gameId, round: 1, first: crypto.getRandomValues(new Uint8Array(1))[0] & 1, seed: 0, order: null, cpus: 0, moves: [],
-    members: [myId], names: { [myId]: myName() || 'プレイヤー1' }, rules: {}, prev: null, carry: null, pick: null, banned: [],
+    members: [myId], names: { [myId]: myName() || 'プレイヤー1' }, rules: savedRules(), prev: null, carry: null, pick: null, banned: [],
   };
   saveRoom();
   setUrlRoom(S.code);

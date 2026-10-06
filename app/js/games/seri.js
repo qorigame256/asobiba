@@ -5,6 +5,7 @@
 // 15回で終わり、取った点数の合計が多い人の勝ち。
 // 決まりごと（Claude の判断）: 持ち越した札がたまったときは、いちばん新しく表にした札の向き（プラスかマイナスか）で決め、
 // たまった札は全部まとめて取る。最後の回で持ち越しになった札は誰も取らない。
+// 詳細設定「次の札」（2026-10-06 本人承認）: 見える にすると、次の回の点数の札も表で見せる（山の順は対局の始めに決まっているので、見せるだけ）。
 // 手: { p, t: 'bid', r: 何回目か（0から）, v: 出す数 }。r と「この回はもう出したか」で、同じ手が2回来ても2回目は反則になる。
 
 import { mulberry32, shuffle, esc } from './util.js';
@@ -27,11 +28,14 @@ export default {
   realtime: true,
   minPlayers: 2,
   maxPlayers: 6,
+  settings: [
+    { key: 'peek', label: '次の札', desc: '次の回の点数の札も見える（先を読んで札を取っておく駆け引きが増える）', def: 'off', choices: [['off', '見えない'], ['on', '見える']] },
+  ],
 
-  init(n, seed) {
+  init(n, seed, { rules = {} } = {}) {
     const deck = shuffle(POINTS, mulberry32(seed));
     return {
-      n, deck, round: 0, pot: [deck[0]], bids: Array(n).fill(null),
+      n, deck, peek: rules.peek === 'on', round: 0, pot: [deck[0]], bids: Array(n).fill(null),
       hands: Array.from({ length: n }, () => Array.from({ length: BIDS }, (_, i) => i + 1)),
       scores: Array(n).fill(0), taken: Array.from({ length: n }, () => []), last: null, step: 0,
     };
@@ -94,13 +98,21 @@ export default {
   },
 
   // CPU: 点数の札の大きさ（の絶対値）に見合う強さの札を、手持ちの中からぶれを足して選ぶ
+  // 次の札が見えるときは、次の方が大きければ少し控える（強い札を取っておく）
   cpu(s, p) {
     const hand = s.hands[p];
-    const val = Math.abs(sum(s.pot));
+    let val = Math.abs(sum(s.pot));
+    const next = this.nextCard(s);
+    if (next !== null && Math.abs(next) > val) val *= 0.75;
     // みんなが一番強い札に集まると打ち消し合うので、大きい札のときも上の方で散らす
     const want = Math.min(0.85, val / 12) * (hand.length - 1) + (Math.random() * 2 - 1) * Math.max(1, hand.length / 3);
     const i = Math.max(0, Math.min(hand.length - 1, Math.round(want)));
     return { t: 'bid', r: s.round, v: hand[i] };
+  },
+
+  // 次の回の点数の札（見えない設定・最後の回なら null）
+  nextCard(s) {
+    return s.peek && s.round + 1 < POINTS.length ? s.deck[s.round + 1] : null;
   },
 
   render(root, s, o) {
@@ -149,8 +161,11 @@ export default {
     const now = document.createElement('div');
     now.className = 'sr-now';
     const card = s.pot[s.pot.length - 1];
+    const next = this.nextCard(s);
     now.innerHTML = `<div class="um-label">${s.round + 1}回目 / ${POINTS.length}</div>`
-      + `<div class="sr-pots">${s.pot.map((v) => `<span class="sr-point${v < 0 ? ' minus' : ''}">${potText(v)}</span>`).join('')}</div>`
+      + `<div class="sr-pots">${s.pot.map((v) => `<span class="sr-point${v < 0 ? ' minus' : ''}">${potText(v)}</span>`).join('')}`
+      + (next !== null ? `<span class="sr-next"><small>次の回</small><span class="sr-point small${next < 0 ? ' minus' : ''}">${potText(next)}</span></span>` : '')
+      + '</div>'
       + `<small>${s.pot.length > 1 ? `持ち越し込みで合計 ${potText(sum(s.pot))}。` : ''}${card > 0 ? '一番<b>大きい</b>数を出した人が取る' : '一番<b>小さい</b>数を出した人が取る（取りたくない札）'}</small>`;
     root.append(now);
 
