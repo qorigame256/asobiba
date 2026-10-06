@@ -12,6 +12,9 @@
 //   5×5 の盤に 王・金・銀・角・飛・歩 を1枚ずつ（公式の並べ方）。成れるのは相手側の一番奥の1段だけ。二歩・打ち歩詰めは禁止。
 //   千日手は本将棋と同じ。200手で引き分け。駒落ち・3人とは組み合わせない。マスの番号は 段 * 5 + 列（列0 が 5筋）。
 //   盤の大きさ N は盤の長さから決める（sizeOf）。
+// 詳細設定「持ち駒」（2026-10-06 本人の決定。最初は「使う」）: 「使わない」にすると、取った駒は盤から消えるだけで打てない（チェスのよう）。
+//   Claude の判断: 2人の本将棋と5五将棋だけ（3人・3×4 は今までどおり）。駒落ちとは一緒に使える。打ち歩詰めなどの決まりは打たないので関係なくなる。
+//   作り: 持ち駒の hands[p][0]（駒の番号0は使っていない）を NO_HAND にしておき、make() が取った駒を持ち駒に足さない（CPU の読みも同じ make を通る）。
 // 詳細設定「盤」の 3×4（動物の駒）は shogi34.js に任せる（2026-10-06 本人の決定。局面に zoo: true を持つ）。2人だけ・駒落ちとは組み合わせない。
 
 import { CPU_SETTING } from './util.js';
@@ -24,6 +27,7 @@ const KNIGHT = 3;
 const GOLD = 5;
 const KING = 8;
 const MAX_PLY = 300;
+const NO_HAND = -1; // hands[p][0] がこれなら、取った駒を持ち駒にしない（詳細設定「持ち駒」の「使わない」）
 const MINI_MAX_PLY = 200;
 const sizeOf = (board) => (board.length === 25 ? 5 : 9);
 
@@ -194,7 +198,7 @@ function make(board, hands, side, m) {
     h[side][m.d]--;
   } else {
     captured = Math.abs(b[m.t]);
-    if (captured) h[side][base(captured)]++;
+    if (captured && h[side][0] !== NO_HAND) h[side][base(captured)]++;
     const t = Math.abs(b[m.f]);
     b[m.t] = (m.pr ? t + 8 : t) * sgn;
     b[m.f] = 0;
@@ -330,6 +334,7 @@ export default {
   settings: [
     { key: 'players', label: '人数', desc: '3人では六角形の盤で3人が向き合う。王を取られた人は脱落（駒落ちは使わない）', def: 2, choices: [[2, '2人'], [3, '3人']] },
     { key: 'size', label: '盤', desc: '5五将棋は 5×5 の盤に 王・金・銀・角・飛・歩 が1枚ずつ。成れるのは一番奥の1段だけ。3×4 は動物の駒（ライオン・キリン・ゾウ・ヒヨコ）で、ライオンを取るか、ライオンが相手の奥の段に入って取られなければ勝ち（どちらも2人のときだけ。駒落ちは使わない）', def: 'full', choices: [['full', '本将棋（9×9）'], ['mini', '5五将棋（5×5）'], ['zoo', '3×4（動物の駒）']] },
+    { key: 'drops', label: '持ち駒', desc: '「使わない」にすると、取った駒は消えるだけで打てない（チェスのよう）。本将棋と5五将棋の2人だけ', def: 'on', choices: [['on', '使う'], ['off', '使わない']] },
     { key: 'handicap', label: '駒落ち', desc: '先手（上手）が駒を落として先に指す。腕の差があるときに', def: 'none', choices: Object.entries(HANDICAPS) },
     CPU_SETTING,
   ],
@@ -341,6 +346,7 @@ export default {
     const handicap = !mini && HANDICAPS[rules.handicap] ? rules.handicap : 'none';
     const board = mini ? miniBoard() : initialBoard(handicap);
     const hands = [Array(8).fill(0), Array(8).fill(0)];
+    if (rules.drops === 'off') { hands[0][0] = NO_HAND; hands[1][0] = NO_HAND; }
     return { board, hands, turn: 0, ply: 0, handicap, last: null, keys: [posKey(board, hands, 0)], checks: [false], result: null };
   },
 
@@ -393,6 +399,7 @@ export default {
     const parts = [];
     if (s.board.length === 25) parts.push('5五将棋');
     if (s.handicap !== 'none') parts.push(`${HANDICAPS[s.handicap]}（☗先手が上手）`);
+    if (s.hands[0][0] === NO_HAND) parts.push('持ち駒なし');
     if (s.last?.note) parts.push(`${s.ply}手目 ${s.last.note}`);
     if (s.result) parts.push(s.result.reason);
     else if (s.last?.check) parts.push('<b class="sg-check-text">王手！</b>');
@@ -464,7 +471,8 @@ export default {
       return row;
     };
 
-    root.append(handRow(1 - bottom));
+    const noHand = s.hands[0][0] === NO_HAND; // 持ち駒なし（詳細設定）では持ち駒の段を出さない
+    if (!noHand) root.append(handRow(1 - bottom));
 
     const wrap = document.createElement('div');
     wrap.className = 'sg-wrap';
@@ -517,7 +525,7 @@ export default {
     wrap.append(files, grid, ranks);
     root.append(wrap);
 
-    root.append(handRow(bottom));
+    if (!noHand) root.append(handRow(bottom));
 
     if (ui.promo) {
       const box = document.createElement('div');

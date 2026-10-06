@@ -9,6 +9,10 @@
 import { esc } from './util.js';
 import { PUZZLES } from './umigame-data.js';
 
+// 詳細設定「質問の数」（2026-10-06 本人の決定。最初は「決めない」＝今までどおり）: 20回・30回にすると、全員で合わせてその回数まで質問できる
+//   （数えるのは出題者が答えた質問だけ。解答・パスは数えない）。使い切ったら、回答者が1人1回ずつ順に最後の解答（パスも可）をして、
+//   だれも当てられなければ出題者の勝ち（Claude の判断。案では「使い切ったら出題者の勝ち」だったが、最後の質問をした人以外が解答できないまま終わらないように）。
+const LIMITS = [[0, '決めない'], [20, '20回'], [30, '30回']];
 const MAX_TEXT = 120;
 const MAX_PUZZLE = 300;
 export const REPLY = { yes: 'はい', no: 'いいえ', na: '関係ありません' };
@@ -22,6 +26,16 @@ function nextAsker(s, from) {
 }
 
 const clone = (s) => ({ ...s, log: s.log.slice() });
+
+// 最後の解答の番を1つ使う。全員使い終わったら出題者の勝ちで終わり（終わったら true）
+function finalStep(s) {
+  if (s.final === null) return false;
+  s.final -= 1;
+  if (s.final > 0) return false;
+  s.phase = 'end';
+  s.winner = s.setter;
+  return true;
+}
 
 /* ---------- 画面 ---------- */
 
@@ -60,12 +74,17 @@ export default {
   noCpu: true,
   minPlayers: 2,
   maxPlayers: 10,
+  settings: [
+    { key: 'limit', label: '質問の数', desc: '全員で合わせて何回まで質問できるか。使い切ったら1人1回ずつ最後の解答をして、だれも当てられなければ出題者の勝ち', def: 0, choices: LIMITS },
+  ],
 
-  init(n, seed, { prev = null } = {}) {
+  init(n, seed, { prev = null, rules = {} } = {}) {
+    const limit = LIMITS.some(([v]) => v && v === rules.limit) ? rules.limit : 0;
     const counts = Array.isArray(prev) && prev.length === n ? prev.slice() : Array(n).fill(0);
     const low = Math.min(...counts);
     const setter = counts.indexOf(low);
-    return { n, seed, counts, setter, phase: 'pick', puzzle: null, turn: nextAsker({ n, setter }, setter), pending: null, log: [], winner: null, step: 0 };
+    // limit = 質問できる回数（0 は決めない）・asked = 答えた質問の数・final = 最後の解答の残りの番の数（使い切るまでは null）
+    return { n, seed, counts, setter, limit, asked: 0, final: null, phase: 'pick', puzzle: null, turn: nextAsker({ n, setter }, setter), pending: null, log: [], winner: null, step: 0 };
   },
 
   turn(s) {
@@ -77,11 +96,12 @@ export default {
     if (s.phase === 'end') return false;
     return p === s.setter || (s.phase === 'ask' && p === s.turn);
   },
-  result(s) { return s.phase === 'end' ? { winner: s.winner } : null; },
+  result(s) { return s.phase === 'end' ? { winner: s.winner, setterWon: s.winner !== null && s.winner === s.setter } : null; },
   // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
   sound(a, b, m) { return m.t === 'pick' || m.t === 'custom' ? 'question' : m.t === 'judge' && !m.ok ? 'wrong' : 'pop'; },
   resultText(res, me, pn) {
     if (res.winner === null) return '出題者が答えを明かしました';
+    if (res.setterWon) return res.winner === me ? 'だれも当てられなかった。出題者のあなたの勝ち！🎉' : `だれも当てられなかった。出題者の${pn(res.winner)}の勝ち！`;
     return res.winner === me ? 'あなたが真相を当てた！🎉' : `${pn(res.winner)}が真相を当てた！`;
   },
   carry(s, p) { return s.counts[p] + (p === s.setter ? 1 : 0); },
@@ -105,12 +125,14 @@ export default {
       case 'ask':
       case 'guess':
         if (s.phase !== 'ask' || m.p !== s.turn || !okText(m.text, MAX_TEXT)) return null;
+        if (m.t === 'ask' && s.final !== null) return null; // 質問を使い切った
         s.pending = { p: m.p, kind: m.t, text: m.text.trim() };
         s.phase = 'reply';
         return s;
       case 'pass':
         if (s.phase !== 'ask' || m.p !== s.turn) return null;
         s.log.push({ p: m.p, kind: 'pass' });
+        if (finalStep(s)) return s;
         s.turn = nextAsker(s, s.turn);
         return s;
       case 'reply':
@@ -119,6 +141,8 @@ export default {
         s.pending = null;
         s.phase = 'ask';
         s.turn = nextAsker(s, s.turn);
+        s.asked += 1;
+        if (s.limit && s.asked >= s.limit) s.final = s.n - 1; // 使い切った: 回答者が1人1回ずつ最後の解答
         return s;
       case 'judge':
         if (!isSetter || s.phase !== 'reply' || s.pending.kind !== 'guess' || typeof m.ok !== 'boolean') return null;
@@ -126,6 +150,7 @@ export default {
         s.pending = null;
         if (m.ok) { s.phase = 'end'; s.winner = s.log[s.log.length - 1].p; return s; }
         s.phase = 'ask';
+        if (finalStep(s)) return s;
         s.turn = nextAsker(s, s.turn);
         return s;
       case 'reveal':
@@ -214,6 +239,14 @@ export default {
       }
       top.append(list);
     }
+    if (s.limit && s.phase !== 'pick') {
+      const left = document.createElement('p');
+      left.className = 'um-left';
+      left.textContent = s.final !== null
+        ? (s.phase === 'end' ? '質問を使い切りました' : `質問を使い切りました。最後の解答（あと${s.final}人）`)
+        : `残りの質問 ${s.limit - s.asked}回（全員で）`;
+      top.append(left);
+    }
     if (s.pending) {
       const p = document.createElement('p');
       p.className = 'um-pending';
@@ -270,15 +303,17 @@ export default {
       }
     } else if (s.phase === 'ask') {
       if (me === s.turn && o.canMove) {
-        note('「はい・いいえ」で答えられる質問をするか、真相が分かったら「答えを言う」');
-        const t = textArea('ask', '例: 男は泣いていましたか？', MAX_TEXT);
+        const last = s.final !== null; // 質問を使い切った: 最後の解答だけ
+        note(last ? '質問は使い切りました。最後の解答をするか、パス（あなたの番はこれが最後）' : '「はい・いいえ」で答えられる質問をするか、真相が分かったら「答えを言う」');
+        const t = textArea('ask', last ? '真相を書いてください' : '例: 男は泣いていましたか？', MAX_TEXT);
         act.append(t);
         const send = (kind) => () => {
           if (!t.value.trim()) return;
           draft.ask = '';
           o.onMove({ t: kind, text: t.value });
         };
-        row(button('パス', 'secondary', () => o.onMove({ t: 'pass' })), button('答えを言う', 'secondary', send('guess')), button('質問する', 'primary', send('ask')));
+        if (last) row(button('パス', 'secondary', () => o.onMove({ t: 'pass' })), button('答えを言う', 'primary', send('guess')));
+        else row(button('パス', 'secondary', () => o.onMove({ t: 'pass' })), button('答えを言う', 'secondary', send('guess')), button('質問する', 'primary', send('ask')));
       } else {
         note(`${nameP(s.turn)}が考えています…`);
       }

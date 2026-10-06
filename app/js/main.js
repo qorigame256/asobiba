@@ -650,6 +650,7 @@ function renderPage() {
   if (!game.multi) tickClock(game, st, res);
   if (res) countResult(res);
   status.innerHTML = statusHtml(game, st, res);
+  if (res && !game.multi && renderReview(game, st)) return; // ふりかえりで途中の局面を見ている
 
   // 新しく打たれた手だけ動きを付ける（接続表示の更新などで描き直したときは動かさない）
   const key = S.gameId + ':' + S.round;
@@ -677,6 +678,7 @@ function renderPage() {
   S.couldMove = opts.canMove;
 
   if (res) {
+    if (!game.multi) appendReview(game);
     controls.append(makeButton('もう一回', rematch));
     if (S.mode === 'online' && S.isHost) controls.append(makeButton('メンバーを変える', () => newRound(S.gameId, { lobby: true }), 'secondary'));
   } else if (S.mode === 'local' && S.moves.length) {
@@ -692,6 +694,54 @@ function renderPage() {
   appendMemberPanel();
   scheduleCpu(game, st, res);
   scheduleReferee(game, st, res);
+}
+
+/* ---------- 対局のふりかえり（2026-10-06 本人の決定）: 盤のゲームが終わったあと、最初から1手ずつ見返せる ---------- */
+// Claude の判断: 見ている所は各自の端末だけ（ほかの人とは合わせない。S.review = { key: どの対局か, k: 何手目まで }。保存しない）。
+// 途中の局面は手の一覧の先頭 k 手を当て直して作る（replay）。見ている間は盤を押せない。最後の手まで進めると、いつもの終わりの画面に戻る。
+// カードゲームは出さない（伏せた札が見えてしまうため）。
+const reviewKey = () => `${S.gameId}:${S.round}:${S.seed}`;
+const reviewing = () => S.review?.key === reviewKey() && S.review.k < S.moves.length;
+
+// 途中の局面を描く。描いたら true
+function renderReview(game) {
+  if (!reviewing()) return false;
+  const k = S.review.k;
+  const view = replay({ ...S, moves: S.moves.slice(0, k) });
+  if (!view) { S.review = null; return false; }
+  const extra = game.info?.(view);
+  el('status').innerHTML = `<div class="status-main">ふりかえり</div><div class="status-sub">${k}手目 / ${S.moves.length}手${k ? '' : '（始めの局面）'}</div>`
+    + (extra ? `<div class="status-sub">${extra}</div>` : '');
+  game.render(el('board'), view, { canMove: false, onMove: () => {}, fresh: false, me: myPlayer() });
+  appendReview(game);
+  ctl().append(makeButton('もう一回', rematch));
+  if (S.mode === 'online' && S.isHost) ctl().append(makeButton('メンバーを変える', () => newRound(S.gameId, { lobby: true }), 'secondary'));
+  appendReactions();
+  if (S.mode === 'online' && S.isHost) ctl().append(gameSelect());
+  appendMemberPanel();
+  return true;
+}
+
+// ふりかえりのボタン（見ていないときは「ふりかえり」1つだけ）
+function appendReview() {
+  const n = S.moves.length;
+  if (!n) return;
+  const go = (k) => { S.review = { key: reviewKey(), k: Math.max(0, Math.min(n, k)) }; render(); };
+  if (!reviewing()) {
+    ctl().append(makeButton('ふりかえり（最初から見る）', () => go(0), 'secondary'));
+    return;
+  }
+  const k = S.review.k;
+  const bar = document.createElement('div');
+  bar.className = 'review-bar';
+  const b = (text, label, to, off) => { const x = makeButton(text, () => go(to), 'secondary small'); x.disabled = off; x.setAttribute('aria-label', label); return x; };
+  bar.append(
+    b('⏮', '最初の局面へ', 0, k === 0),
+    b('◀', '1手戻る', k - 1, k === 0),
+    b('▶', '1手進む', k + 1, false),
+    b('⏭ 終わり', '終わりの局面へ', n, false),
+  );
+  ctl().append(bar);
 }
 
 // 新しく打たれた手の音。何手かまとめて届いたときは最後の手の音だけ。対局が終わったら勝ち負けの音。

@@ -5,6 +5,9 @@
 // 同じ的を何人も押したら、測った時間がいちばん短い人のもの（通信で遅れて届いても、速ければ取り返せる）。
 //
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready →(3秒)→ go → play →(時間＋待ち)→ end
+// 詳細設定「動く的」（2026-10-06 本人の決定。最初はなし）: 的が出ている間ゆっくり動き、場のふちで跳ね返る。
+//   動く向きと速さも seed から全員同じに作る（的の出方の乱数とは別の乱数にして、なしのときの的の出方は変えない）。
+//   見た目だけで、手（どの的を何秒で押したか）は変わらない（Claude の判断）。速さは 1秒に場の幅の 0.12〜0.24。CPU の反応は0.15秒遅くする。
 // 手: { p: -1, t: 'go' | 'end' } / { p, t: 'hit', id: 的の番号, ms } / { p, t: 'miss', n: 何回目か }
 
 import { mulberry32 } from './util.js';
@@ -48,6 +51,31 @@ function makeTargets(rng, durMs, bombs) {
     t += 550 + rng() * 700;
   }
   return list;
+}
+
+// 動く的（詳細設定）: 向きと速さを足す（的の出方とは別の乱数）
+function addMotion(list, seed) {
+  const rng = mulberry32(seed ^ 0x6d07e);
+  for (const tg of list) {
+    const a = rng() * Math.PI * 2;
+    const v = 0.12 + rng() * 0.12;
+    tg.vx = +(Math.cos(a) * v).toFixed(3);
+    tg.vy = +(Math.sin(a) * v).toFixed(3);
+  }
+  return list;
+}
+
+// 出てから ms たった的の真ん中の位置。動く的は場のふち（0.05〜0.95）で跳ね返る
+export function posOf(tg, ms) {
+  if (!tg.vx && !tg.vy) return { x: tg.x, y: tg.y };
+  const lo = 0.05;
+  const span = 0.9;
+  const bounce = (p, v) => {
+    let q = (((p - lo + v * ms / 1000) % (2 * span)) + 2 * span) % (2 * span); // 0〜2*span を行って戻る
+    if (q > span) q = 2 * span - q;
+    return lo + q;
+  };
+  return { x: bounce(tg.x, tg.vx), y: bounce(tg.y, tg.vy) };
 }
 
 export function scoresOf(s) {
@@ -102,6 +130,7 @@ function loop(token) {
     let e = ui.els.get(tg.id);
     if (live) {
       visible += 1;
+      const pos = posOf(tg, t - tg.at);
       if (!e) {
         e = document.createElement('button');
         e.type = 'button';
@@ -120,17 +149,20 @@ function loop(token) {
             ui.tapped.add(tg.id);
             e.remove();
             ui.els.delete(tg.id);
-            float(ui.field, tg.x, tg.y, tg.kind === 'bomb' ? '−2' : '+' + k.pt, tg.kind === 'bomb' ? 'bad' : 'good');
+            const at = posOf(tg, ms);
+            float(ui.field, at.x, at.y, tg.kind === 'bomb' ? '−2' : '+' + k.pt, tg.kind === 'bomb' ? 'bad' : 'good');
             o.onMove({ t: 'hit', id: tg.id, ms });
           };
         }
         ui.field.append(e);
         ui.els.set(tg.id, e);
       }
+      if (tg.vx || tg.vy) { e.style.left = (pos.x * 100) + '%'; e.style.top = (pos.y * 100) + '%'; } // 動く的
     } else if (e) {
       e.remove();
       ui.els.delete(tg.id);
-      if (best && best.p !== me) float(ui.field, tg.x, tg.y, o.names[best.p], 'other');
+      const end = posOf(tg, Math.min(t - tg.at, tg.life));
+      if (best && best.p !== me) float(ui.field, end.x, end.y, o.names[best.p], 'other');
     }
   }
   ui.visible = visible;
@@ -152,11 +184,13 @@ export default {
   settings: [
     { key: 'time', label: '時間', desc: '1回の勝負の長さ', def: '30', choices: [['20', '20秒'], ['30', '30秒'], ['45', '45秒']] },
     { key: 'bombs', label: 'ドクロの的を混ぜる', desc: '押すと2点減る的', def: true },
+    { key: 'move', label: '動く的', desc: '的が出ている間ゆっくり動き、ふちで跳ね返る', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { time: '30', bombs: true, ...rules };
+    const r = { time: '30', bombs: true, move: false, ...rules };
     const targets = makeTargets(mulberry32(seed), Number(r.time) * 1000, r.bombs);
+    if (r.move) addMotion(targets, seed);
     return { n, seed, rules: r, targets, phase: 'ready', best: {}, hits: Array.from({ length: n }, () => []), misses: Array(n).fill(0), step: 0 };
   },
 
@@ -227,7 +261,7 @@ export default {
       let plan = cpuPlan.get(key);
       if (!plan) {
         const rate = tg.kind === 'bomb' ? 0.08 : tg.kind === 'gold' ? 0.4 : 0.6;
-        plan = { hit: Math.random() < rate, react: 450 + Math.random() * 650 };
+        plan = { hit: Math.random() < rate, react: 450 + Math.random() * 650 + (tg.vx || tg.vy ? 150 : 0) }; // 動く的は少し遅れる
         cpuPlan.set(key, plan);
         if (cpuPlan.size > 2000) cpuPlan.delete(cpuPlan.keys().next().value);
       }

@@ -138,6 +138,8 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 }
 .status-sub.streak { color: #c0541a; font-weight: 700; }
 .tally { color: #6b5a2e; } /* 部屋の成績表 */
+.review-bar { display: flex; gap: 8px; justify-content: center; width: 100%; } /* 対局のふりかえり */
+.review-bar .btn { min-width: 52px; font-size: 1rem; }
 .status-sub.beg-hint { color: #b06a00; }
 .howto { margin-top: 8px; background: var(--panel); border-radius: 12px; padding: 8px 14px; font-size: .9rem; line-height: 1.6; }
 .howto p { margin: 4px 0; }
@@ -1208,6 +1210,7 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .um-r.na { background: #8a8a8a; }
 .um-muted { color: var(--muted); }
 .um-pending { text-align: center; background: #fff7ef; border: 1.5px solid var(--accent); border-radius: var(--radius); padding: 8px 12px; }
+.um-left { font-weight: 700; color: #b06a00; margin: 6px 0; } /* ウミガメの残りの質問（詳細設定「質問の数」） */
 .um-act { display: flex; flex-direction: column; gap: 8px; }
 .um-input, .um-select { width: 100%; font: inherit; padding: 8px 10px; border: 1.5px solid var(--line); border-radius: 10px; background: #fff; }
 .um-input { resize: vertical; }

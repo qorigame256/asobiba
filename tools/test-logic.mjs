@@ -1320,6 +1320,19 @@ const { isRight: tyRight, pointsOf: tyPoints, limitOf: tyLimit } = await import(
 const tyAll = [...TYPING.short, ...TYPING.mid, ...TYPING.long];
 assert.ok(tyAll.length >= 90, 'お題は90個以上');
 assert.equal(new Set(tyAll.map(([w]) => w)).size, tyAll.length, '同じお題が2回入っている');
+// お題の種類（詳細設定）: まぜるは今までどおり 短い3・ことわざなど4・長い3、ほかはその種類だけ10問（同じお題は出ない）
+{
+  const inPool = (lv, q) => TYPING[lv].some(([w]) => w === q[0]);
+  const mix = TY.init(2, 77).qs;
+  assert.deepEqual(mix, TY.init(2, 77, { rules: { kind: 'mix' } }).qs, '最初は まぜる');
+  assert.ok(mix.slice(0, 3).every((q) => inPool('short', q)) && mix.slice(3, 7).every((q) => inPool('mid', q)) && mix.slice(7).every((q) => inPool('long', q)), 'まぜるは短い → 長い');
+  for (const lv of ['short', 'mid', 'long']) {
+    const qs = TY.init(3, 5, { rules: { kind: lv } }).qs;
+    assert.equal(qs.length, 10, lv + ' も10問');
+    assert.ok(qs.every((q) => inPool(lv, q)), lv + ' だけが出る');
+    assert.equal(new Set(qs.map(([w]) => w)).size, 10, lv + ' で同じお題は出ない');
+  }
+}
 for (const [w, ys] of tyAll) for (const y of ys) assert.match(y, /^[ぁ-ゖー]+$/, '読みはひらがなだけ: ' + w);
 assert.ok(tyRight(['花より団子', ['はなよりだんご']], 'ハナヨリダンゴ'), 'カタカナでも正解');
 assert.ok(tyRight(['花より団子', ['はなよりだんご']], '花より団子'), '表示どおりの漢字でも正解');
@@ -1357,6 +1370,19 @@ for (let k = 0; k < 100; k++) {
   assert.ok(st.targets.every((x, i) => x.id === i && x.at + x.life <= 30000 && x.x > 0 && x.x < 1 && x.y > 0 && x.y < 1));
   if (k % 2) assert.ok(st.targets.every((x) => x.kind !== 'bomb'), 'ドクロなしの設定');
   assert.ok(st.targets.some((x, i) => i > 0 && x.at === st.targets[i - 1].at), '同時に出る的がある');
+}
+// 動く的（詳細設定）: なしのときと同じ的が出て、向きと速さだけ足される・跳ね返ってふちの内側にいる
+{
+  const { posOf } = await import('../app/js/games/targets.js');
+  const still = TG.init(2, 9, { rules: { move: false } }).targets;
+  const moving = TG.init(2, 9, { rules: { move: true } }).targets;
+  assert.deepEqual(moving.map(({ vx, vy, ...rest }) => rest), still, '動く的でも出る的・時刻・場所は同じ');
+  assert.ok(moving.every((tg) => Math.hypot(tg.vx, tg.vy) >= 0.11 && Math.hypot(tg.vx, tg.vy) <= 0.25), '速さは 0.12〜0.24');
+  assert.ok(still.every((tg) => tg.vx === undefined), 'なしなら動かない');
+  assert.deepEqual(posOf(still[0], 1500), { x: still[0].x, y: still[0].y }, '動かない的は同じ場所');
+  for (const tg of moving) for (let ms = 0; ms <= 2000; ms += 50) { const q = posOf(tg, ms); assert.ok(q.x >= 0.05 - 1e-9 && q.x <= 0.95 + 1e-9 && q.y >= 0.05 - 1e-9 && q.y <= 0.95 + 1e-9, 'ふちの内側'); }
+  const b = posOf({ x: 0.9, y: 0.5, vx: 0.2, vy: 0 }, 1000); // 0.9 → ふち 0.95 で跳ね返って 0.8
+  assert.ok(Math.abs(b.x - 0.8) < 1e-9 && Math.abs(b.y - 0.5) < 1e-9, 'ふちで跳ね返る ' + JSON.stringify(b));
 }
 s = TG.init(3, 4, { rules: { time: '30', bombs: true } });
 assert.equal(TG.apply(s, { p: 0, t: 'hit', id: 0, ms: 300 }), null, '始まる前は押せない');
@@ -1408,6 +1434,32 @@ assert.deepEqual([0, 1, 2].map((p) => UM.carry(s, p)), [1, 0, 0], '出題者を�
 assert.equal(UM.init(3, 2, { prev: [1, 0, 0] }).setter, 1, '次は出題者をしていない人');
 assert.equal(UM.result(UM.apply(UM.apply(UM.init(2, 3, {}), { p: 0, t: 'pick', idx: 0 }), { p: 0, t: 'reveal' })).winner, null, '答えを明かして終わる');
 assert.equal(UM.apply(UM.init(2, 3, {}), { p: 1, t: 'reveal' }), null, '出題者でない人は明かせない');
+// ウミガメの質問の数（詳細設定）: 答えた質問だけ数える・使い切ったら質問できず、回答者が1人1回ずつ最後の解答・だれも当てなければ出題者の勝ち
+{
+  const go = (st, ms) => ms.reduce((x, m) => { const y = UM.apply(x, m); assert.ok(y, JSON.stringify(m)); return y; }, st);
+  assert.equal(UM.init(3, 1, {}).limit, 0, '最初は決めない');
+  let u = go(UM.init(3, 1, { rules: { limit: 20 } }), [{ p: 0, t: 'pick', idx: 0 }]);
+  const asker = () => UM.turn(u);
+  for (let k = 0; k < 19; k++) u = go(u, [{ p: asker(), t: 'ask', text: 'しつもん' + k }, { p: 0, t: 'reply', r: 'no' }]);
+  u = go(u, [{ p: asker(), t: 'guess', text: 'はずれ' }, { p: 0, t: 'judge', ok: false }]);
+  u = go(u, [{ p: asker(), t: 'pass' }]);
+  assert.deepEqual([u.asked, u.final], [19, null], '解答とパスは数えない');
+  u = go(u, [{ p: asker(), t: 'ask', text: 'さいご' }, { p: 0, t: 'reply', r: 'yes' }]);
+  assert.deepEqual([u.asked, u.final], [20, 2], '20回目で使い切り、回答者2人が最後の解答');
+  assert.equal(UM.apply(u, { p: asker(), t: 'ask', text: 'もう1つ' }), null, '使い切ったら質問できない');
+  const before = u;
+  u = go(u, [{ p: asker(), t: 'guess', text: 'ちがう' }, { p: 0, t: 'judge', ok: false }]);
+  assert.equal(UM.result(u), null, 'まだ1人残っている');
+  const last = go(u, [{ p: asker(), t: 'pass' }]);
+  assert.deepEqual(UM.result(last), { winner: 0, setterWon: true }, 'だれも当てなければ出題者の勝ち');
+  const hit = go(before, [{ p: before.turn, t: 'guess', text: 'あたり' }, { p: 0, t: 'judge', ok: true }]);
+  assert.equal(UM.result(hit).setterWon, false, '最後の解答で当てたらその人の勝ち');
+  assert.equal(UM.result(hit).winner, before.turn);
+  u = go(UM.init(2, 1, { rules: { limit: 20 } }), [{ p: 0, t: 'pick', idx: 0 }]);
+  for (let k = 0; k < 20; k++) u = go(u, [{ p: 1, t: 'ask', text: 'q' + k }, { p: 0, t: 'reply', r: 'na' }]);
+  assert.equal(UM.result(go(u, [{ p: 1, t: 'pass' }])).winner, 0, '2人なら最後の解答は1回');
+  assert.equal(UM.init(3, 1, { rules: { limit: 7 } }).limit, 0, '選択肢にない数は決めない扱い');
+}
 console.log('party games OK');
 
 // ---------- 五目並べ ----------

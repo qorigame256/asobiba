@@ -395,5 +395,33 @@ function perft(board, hands, side, d) {
   }
 }
 
+// 持ち駒なし（詳細設定）: 取った駒は持ち駒にならず、打つ手が出ない。CPU どうしでも最後まで指せる
+{
+  const nd = shogi.init({ rules: { drops: 'off' } });
+  check('持ち駒なしは2人の本将棋の局面', nd.board.length === 81 && nd.hands[0][0] === -1);
+  // 先手の角で後手の歩を取る: 角道を開けて（7六歩・3四歩）、2二角成で角を取る
+  let x = play(nd, [{ f: sq(6, 2), t: sq(5, 2) }, { f: sq(2, 6), t: sq(3, 6) }, { f: sq(7, 1), t: sq(1, 7), pr: true }]);
+  check('持ち駒なしで駒を取れる', !!x && Math.abs(x.board[sq(1, 7)]) === 14);
+  check('取った駒は持ち駒にならない', !!x && x.hands[0].slice(1).every((v) => v === 0));
+  check('打つ手が出ない', !!x && !legalMoves(x.board, x.hands, 1).some((m) => m.d) && !legalMoves(x.board, x.hands, 0).some((m) => m.d));
+  const on = play(shogi.init(), [{ f: sq(6, 2), t: sq(5, 2) }, { f: sq(2, 6), t: sq(3, 6) }, { f: sq(7, 1), t: sq(1, 7), pr: true }]);
+  check('ふつうは取った角が持ち駒になる', !!on && on.hands[0][6] === 1);
+  check('5五将棋でも使える', shogi.init({ rules: { drops: 'off', size: 'mini' } }).hands[1][0] === -1);
+  check('3人・3×4 では使わない', shogi.init({ rules: { drops: 'off', players: 3 } }).hands?.[0]?.[0] !== -1 && !shogi.init({ rules: { drops: 'off', size: 'zoo' } }).hands?.[0]?.includes?.(-1));
+  let games = 0;
+  for (const [size, lv] of [['mini', 'strong'], ['mini', 'weak'], ['full', 'weak']]) {
+    let g = shogi.init({ rules: { drops: 'off', size } });
+    let guard = 0;
+    while (!g.result && guard++ < 400) {
+      const m = shogi.cpu(g, g.turn, { cpu: lv });
+      if (m.d) break;
+      g = shogi.apply(g, m);
+      if (!g) break;
+    }
+    if (g?.result && g.hands.every((h) => h.slice(1).every((v) => v === 0))) games++;
+  }
+  check('持ち駒なしで CPU どうしが最後まで指せる（打つ手なし）', games === 3, `${games}/3`);
+}
+
 console.log(failed ? `\n${failed} 件の失敗` : '\nすべて OK');
 process.exit(failed ? 1 : 0);

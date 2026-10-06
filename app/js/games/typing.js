@@ -1,7 +1,7 @@
 // タイピング早打ち。全員に同じお題（漢字まじりの文と、その読み）が出て、いちばん速く正しく打った人から 3・2・1点。10問。
 // 正解になるのは、読みをひらがな・カタカナで打ったもの、または表示どおりの漢字まじり（空白・記号は無視。party.js の kana）。
 // 打っている途中で正しくなったら自動で送る（送るのは正解だけ。まちがいは手元で知らせるだけで、何度でも打ち直せる）。
-// 1〜3問目は短い言葉、4〜7問目はことわざなど、8〜10問目は長い文（typing-data.js）。
+// 1〜3問目は短い言葉、4〜7問目はことわざなど、8〜10問目は長い文（typing-data.js）。詳細設定「お題の種類」で1種類だけにもできる（KINDS）。
 // 制限時間は読みの長さで決める: 8秒 ＋ 1文字 0.8秒 を、詳細設定の倍率（短め 0.7・ふつう 1・長め 1.5）でのばす。
 // 締め切り: 全員か3人が正解したら1.5秒待って（通信で遅れて届く、もっと速い正解を待つ）、だれも届かなければ制限時間で。
 //
@@ -18,6 +18,9 @@ const SHOWN_MS = 4000;
 const GRACE_MS = 1500;
 const LEVEL_OF = (q) => (q < 3 ? 'short' : q < 7 ? 'mid' : 'long');
 const COUNT = { short: 3, mid: 4, long: 3 };
+// 詳細設定「お題の種類」（2026-10-06 本人の決定。最初は「まぜる」＝今までどおり短い言葉3・短いことわざなど4・長い文3）。
+// ほかを選ぶと、その種類だけから10問（短い言葉 40・短いことわざと早口言葉 35・長いことわざと早口言葉 19 の中から）。制限時間は今までどおり読みの長さで決まる。
+const KINDS = [['mix', 'まぜる（短い → 長い）'], ['short', '短い言葉だけ'], ['mid', '短いことわざ・早口言葉だけ'], ['long', '長いことわざ・早口言葉だけ']];
 const SPEED = { short: 0.7, normal: 1, long: 1.5 };
 
 const qKey = (s, q = s.q) => `typing:${s.seed}:${q}`;
@@ -56,13 +59,16 @@ export default {
   minPlayers: 2,
   maxPlayers: 10,
   settings: [
+    { key: 'kind', label: 'お題の種類', desc: '出るお題の長さ。打つのが速い人どうしなら長い文、子どもと遊ぶなら短い言葉', def: 'mix', choices: KINDS },
     { key: 'time', label: '制限時間', desc: '1問あたりの時間（長い文ほど長くなる）', def: 'normal', choices: [['short', '短め'], ['normal', 'ふつう'], ['long', '長め']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { time: 'normal', ...rules };
+    const r = { time: 'normal', kind: 'mix', ...rules };
     const rnd = mulberry32(seed);
-    const qs = ['short', 'mid', 'long'].flatMap((lv) => shuffle(TYPING[lv], rnd).slice(0, COUNT[lv]));
+    const qs = TYPING[r.kind]
+      ? shuffle(TYPING[r.kind], rnd).slice(0, TOTAL)
+      : ['short', 'mid', 'long'].flatMap((lv) => shuffle(TYPING[lv], rnd).slice(0, COUNT[lv]));
     return { n, seed, rules: r, qs, q: -1, phase: 'ready', solved: Array(n).fill(null), scores: Array(n).fill(0), last: null, step: 0 };
   },
 
