@@ -593,5 +593,52 @@ function perft(board, hands, side, d) {
   }
 }
 
+// 王手の知らせ（詳細設定。最初は あり）: 王手をかけた手かを局面から決める。なしのときだけ局面に quiet が付く
+{
+  const G = _test.gaveCheck;
+  check('王手の知らせは最初は「あり」', shogi.settings.some((x) => x.key === 'check' && x.def === 'on'));
+  const plain = (r) => JSON.stringify(shogi.init({ rules: r, seed: 3 }));
+  check('王手の知らせ: ありは局面に何も足さない', [{}, { size: 'mini' }, { size: 'zoo' }, { players: 3 }].every((r) => plain({ ...r, check: 'on' }) === plain(r)));
+  check('王手の知らせ: なしは局面に quiet（本将棋・5五将棋・3×4・3人）', [{}, { size: 'mini' }, { size: 'zoo' }, { players: 3 }].every((r) => shogi.init({ rules: { ...r, check: 'off' } }).quiet === true));
+  // 本将棋: 飛を5筋へ回して王手
+  const p = position([[8, 8, 8], [0, 4, -8], [5, 0, 7]]);
+  const c1 = shogi.apply(p, { f: sq(5, 0), t: sq(5, 4) });
+  const c0 = shogi.apply(p, { f: sq(5, 0), t: sq(5, 1) });
+  check('王手の知らせ: 王手をかけた手は王手・ほかは違う', G(c1) && !G(c0) && !G(p));
+  check('王手の知らせ: 音は王手で「王手！」の読み上げ、ほかは駒の音', shogi.sound(p, c1) === 'oute' && shogi.sound(p, c0) === 'place');
+  const q = shogi.apply({ ...p, quiet: true }, { f: sq(5, 0), t: sq(5, 4) });
+  check('王手の知らせ: なしでは quiet が続き、読み上げない', q.quiet === true && shogi.sound(p, q) === 'place');
+  const { quiet, ...rest } = q;
+  check('王手の知らせ: なしでも apply の結果は同じ', JSON.stringify(rest) === JSON.stringify(c1));
+  // 詰み（決着）の手では出さない: 1段目を飛で、2段目をもう1枚の飛で押さえる
+  const mate = shogi.apply(position([[8, 8, 8], [0, 0, -8], [1, 5, 7], [4, 7, 7]]), { f: sq(4, 7), t: sq(0, 7) });
+  check('王手の知らせ: 詰みの手では出さない', mate?.result?.reason === '詰み' && !G(mate));
+  // 3×4: ライオンにキリンが利いたら王手
+  const zs = shogi.init({ rules: { size: 'zoo' } });
+  const zb = Array(12).fill(0);
+  zb[3 * 3 + 1] = 4; zb[0 * 3 + 1] = -4; zb[2 * 3 + 1] = 3; zb[3 * 3 + 0] = 2;
+  const zp = { ...zs, board: zb, keys: [] };
+  const zc = shogi.apply(zp, { f: 2 * 3 + 1, t: 1 * 3 + 1 });
+  const zn = shogi.apply(zp, { f: 3 * 3 + 1, t: 3 * 3 + 2 });
+  check('王手の知らせ: 3×4 はライオンに利いたら王手', G(zc) && !G(zn) && shogi.sound(zp, zc) === 'oute' && shogi.sound(zp, zn) === 'place');
+  check('王手の知らせ: 3×4 のなしでも quiet が続く', shogi.apply({ ...zp, quiet: true }, { f: 2 * 3 + 1, t: 1 * 3 + 1 }).quiet === true);
+  // 3人: 当てずっぽうに指して、王手の手（指した人の駒がほかの人の玉に利く）が出ること・なしでも局面は同じこと
+  let x3 = shogi.init({ rules: { players: 3 } });
+  let y3 = shogi.init({ rules: { players: 3, check: 'off' } });
+  let checks3 = 0;
+  let same3 = true;
+  for (let i = 0; i < 200 && !x3.result; i++) {
+    const ms = _test3.legalMoves(x3.board, x3.hands, x3.turn);
+    const m = ms[(i * 7919) % ms.length];
+    const before = x3;
+    x3 = shogi.apply(x3, m);
+    y3 = shogi.apply(y3, m);
+    if (G(x3)) { checks3++; if (shogi.sound(before, x3) !== 'oute' || shogi.sound(before, y3) !== 'place') same3 = false; }
+    const { quiet: qq, ...r3 } = y3;
+    if (JSON.stringify(r3) !== JSON.stringify(x3) || qq !== true) same3 = false;
+  }
+  check('王手の知らせ: 3人でも王手の手が分かり、なしでも局面は同じ', checks3 > 0 && same3, `王手 ${checks3}回`);
+}
+
 console.log(failed ? `\n${failed} 件の失敗` : '\nすべて OK');
 process.exit(failed ? 1 : 0);

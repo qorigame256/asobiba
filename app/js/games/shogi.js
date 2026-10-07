@@ -27,6 +27,11 @@
 //   角と飛の左右を、対局の種（seed）から毎回おまかせで決める（決まった序盤が使えない）。後手は先手と点対称の同じ並び。歩の段は今までどおり。
 //   Claude の判断: 本将棋の2人・平手だけ（駒落ちを選んだときは駒落ちを優先して、ふつうの並び）。ふつうと全く同じ並びになったら引き直す。
 //   局面に mixed: true を持つ（ふつうのときは今までと全く同じ形）。CPU の読みと点の付け方は駒の場所に頼らないので、そのまま。
+// 詳細設定「王手の知らせ」（2026-10-07 の19回目の案。最初は あり）: 王手をかけた手が届いたら、盤に大きく「王手！」を1.5秒出し、
+//   読み上げで「王手！」と言う（sound の 'oute'。🔊 がオフなら言わない）。なしでは今までどおり（状態の欄の「王手！」と赤いマスだけ）。
+//   Claude の判断: 王手かどうかは局面から決める（送らない）ので、観戦の人の画面にも出る。出すのは新しく届いた手だけ（入り直し・ふりかえりでは出さない）。
+//   詰み（決着）の手では出さない。本将棋・5五将棋・3人将棋（指した人の駒がほかの人の玉に利いた）・3×4（ライオンに利いた）のどれでも効く。
+//   なしのときだけ局面に quiet: true を持つ（ありのときは今までと全く同じ形）。CPU の読みと apply の結果は変えない。
 
 import { CPU_SETTING, mulberry32 } from './util.js';
 import * as three from './shogi3.js';
@@ -350,6 +355,34 @@ function notation(s, m, prevTo) {
   return `${mark}${sq}${NOTE_NAME[t]}${suffix}`;
 }
 
+/* ---------- 王手の知らせ（詳細設定。最初は あり） ---------- */
+
+// 最後の手で王手になったか（局面だけから決める。決着した局面では出さない）
+function gaveCheck(s) {
+  if (s.result || !s.last || s.last.resign) return false;
+  if (s.n === 3) return three.gaveCheck(s);
+  if (s.zoo) return zoo.gaveCheck(s);
+  return !!s.last.check;
+}
+
+const FLASH_MS = 1500;
+let flash = { key: null, at: 0 }; // いま出している「王手！」（どの局面か・出し始めた時刻）。描き直しても続きから出す
+// 新しく届いた手（fresh）で王手になったら、盤の上に大きく「王手！」を出す。駒を選ぶなどの描き直しでは出し直さない
+function checkFlash(root, s, fresh) {
+  if (s.quiet || !gaveCheck(s)) return;
+  const key = `${s.ply}|${s.keys[s.keys.length - 1]}`;
+  if (fresh && flash.key !== key) flash = { key, at: Date.now() };
+  const t = Date.now() - flash.at;
+  if (flash.key !== key || t >= FLASH_MS) return;
+  const e = document.createElement('div');
+  e.className = 'sg-oute';
+  e.setAttribute('aria-hidden', 'true'); // 状態の欄にも「王手！」が出る
+  e.textContent = '王手！';
+  e.style.animationDelay = `-${t}ms`;
+  root.append(e);
+  setTimeout(() => e.remove(), FLASH_MS - t);
+}
+
 /* ---------- 画面 ---------- */
 
 let ui = { key: null, from: null, drop: null, promo: null }; // 選んでいる駒・成るかの確認（描き直しで消えないよう外に持つ）
@@ -370,14 +403,16 @@ export default {
     { key: 'try', label: 'トライ', desc: '自分の玉が相手の玉の最初のマスに入ったら勝ち（入玉で長引かない）。本将棋と5五将棋の2人だけ', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'autopromo', label: 'いつも成る', desc: '成れるときは聞かずに自動で成る（わざと成らない手は指せない）。初めての人向け', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'mix', label: '駒の並び', desc: '「ばらばら」にすると、一番下の段の駒（玉は真ん中のまま）と角・飛の左右を毎回おまかせで並べる（先手と後手は同じ並び）。決まった序盤が使えない。本将棋の2人・平手だけ', def: 'off', choices: [['off', 'ふつう'], ['on', 'ばらばら']] },
+    { key: 'check', label: '王手の知らせ', desc: '王手をかけたとき、盤に大きく「王手！」と出して読み上げる（🔊 がオンのとき）。3人・3×4 でも出る', def: 'on', choices: [['on', 'あり'], ['off', 'なし']] },
     { key: 'handicap', label: '駒落ち', desc: '先手（上手）が駒を落として先に指す。腕の差があるときに', def: 'none', choices: Object.entries(HANDICAPS) },
     CPU_SETTING,
   ],
 
   init({ rules = {}, seed = 1 } = {}) {
     const auto = rules.autopromo === 'on';
-    if (rules.players === 3) return three.init(auto);
-    if (rules.size === 'zoo') return zoo.init();
+    const quiet = rules.check === 'off'; // 王手の知らせ「なし」
+    if (rules.players === 3) return three.init(auto, quiet);
+    if (rules.size === 'zoo') return zoo.init(quiet);
     const mini = rules.size === 'mini';
     const handicap = !mini && HANDICAPS[rules.handicap] ? rules.handicap : 'none';
     const mixed = !mini && handicap === 'none' && rules.mix === 'on'; // 駒の並び「ばらばら」
@@ -388,6 +423,7 @@ export default {
     if (auto) s.auto = true; // なしのときは局面に何も足さない（今までと同じ形）
     if (rules.try === 'on') s.trial = true; // トライも同じ
     if (mixed) s.mixed = true; // 駒の並びも同じ
+    if (quiet) s.quiet = true; // 王手の知らせも同じ（なしのときだけ足す）
     return s;
   },
 
@@ -418,6 +454,7 @@ export default {
     if (s.auto) n.auto = true;
     if (s.trial) n.trial = true;
     if (s.mixed) n.mixed = true;
+    if (s.quiet) n.quiet = true;
     if (s.trial && isTry(s.board, s.turn, mv)) {
       n.result = { winner: s.turn, cells: [mv.t], reason: 'トライ（玉が相手の玉の最初のマスに入った）' };
     } else if (!legalMoves(b, h, next, true, !!s.auto).length) {
@@ -437,6 +474,9 @@ export default {
   },
 
   // CPU: 駒の損得で何手先まで読むか（よわい1・ふつう2・つよい3）。読みは1.5秒で打ち切る。弱いほど適当に指すことがある
+  // 効果音: 王手の知らせが「あり」で王手をかけた手は読み上げの「王手！」、ほかはいつもの駒の音
+  sound(a, b) { return !b.quiet && gaveCheck(b) ? 'oute' : 'place'; },
+
   cpu(s, p, rules) { return s.n === 3 ? three.cpuMove(s, rules) : s.zoo ? zoo.cpuMove(s, rules) : cpuMove(s, rules); },
 
   info(s) {
@@ -456,8 +496,13 @@ export default {
   },
 
   render(root, s, o) {
-    if (s.n === 3) { three.render(root, s, o); return; }
-    if (s.zoo) { zoo.render(root, s, o, this.players); return; }
+    if (s.n === 3) three.render(root, s, o);
+    else if (s.zoo) zoo.render(root, s, o, this.players);
+    else this.renderBoard(root, s, o);
+    checkFlash(root, s, o.fresh);
+  },
+
+  renderBoard(root, s, o) {
     const draw = () => this.render(root, s, o);
     const N = sizeOf(s.board);
     const last = N * N - 1;
@@ -612,4 +657,4 @@ export default {
 };
 
 // テスト用
-export const _test = { legalMoves, attacked, kingSq, initialBoard, miniBoard, evaluate, trySq };
+export const _test = { gaveCheck, legalMoves, attacked, kingSq, initialBoard, miniBoard, evaluate, trySq };

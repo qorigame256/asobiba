@@ -518,6 +518,24 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .sg34 .sg-hand-piece { width: 44px; height: 44px; }
 .sg34 .sg-hand-piece .sg-piece { font-size: 1.5rem; }
 .sg-check-text { color: #c62d1f; }
+/* 将棋の「王手の知らせ」（詳細設定）: 王手をかけた手が届いたら盤の真ん中に大きく1.5秒（shogi.js の checkFlash） */
+.board.sg { position: relative; }
+.sg-oute {
+  position: absolute; left: 50%; top: 50%; z-index: 5; pointer-events: none; white-space: nowrap;
+  padding: .1em .5em; border-radius: 14px; background: rgba(255, 250, 240, .9); border: 3px solid #c62d1f;
+  color: #c62d1f; font-family: "Yu Mincho", "Hiragino Mincho ProN", serif; font-weight: 800; font-size: clamp(2.2rem, 13vw, 4rem);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .25); transform: translate(-50%, -50%); opacity: 0;
+  animation: sg-oute 1.5s ease-out forwards;
+}
+@keyframes sg-oute {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(.5); }
+  12% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
+  22% { transform: translate(-50%, -50%) scale(1); }
+  75% { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) { .sg-oute { animation-name: sg-oute-fade; } }
+@keyframes sg-oute-fade { 0%, 75% { opacity: 1; } 100% { opacity: 0; } }
 /* 3人将棋（六角形の盤。shogi3.js が SVG で描く） */
 .board.sg3 { width: min(100%, 560px, max(320px, calc((100dvh - 290px) * 1.1))); }
 .sg3-board { width: 100%; height: auto; display: block; touch-action: manipulation; }
@@ -903,6 +921,10 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .df.board .pcard.selected { transform: translateY(-10px); box-shadow: 0 0 0 3px var(--accent), 0 6px 10px rgba(0, 0, 0, .25); }
 .df .cc-actions { gap: 8px; flex-wrap: wrap; }
 .df .cc-actions .btn:disabled { opacity: .4; cursor: default; }
+.df .cc-actions.df-bomb { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; } /* 12ボンバーの数字 */
+.df .cc-actions.df-bomb .btn { min-width: 0; padding: 8px 0; display: flex; flex-direction: column; align-items: center; line-height: 1.1; font-weight: 700; }
+.df .cc-actions.df-bomb .btn small { font-size: .7rem; font-weight: 400; }
+.df-bomb-wait { margin: 0; text-align: center; font-weight: 700; color: #b06a00; }
 .df-ranking { margin: 0 auto; padding-left: 1.4em; font-weight: 700; }
 .df-rules { color: var(--muted); font-size: .8rem; text-align: center; }
 .cc-tag.rank { background: var(--win); color: #3b2a00; font-weight: 700; }
@@ -1138,6 +1160,19 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .nim-stone.taken.pop { animation: nimTake .35s ease-out; }
 @keyframes nimTake { from { background: var(--accent); transform: scale(1.2); } }
 .nim-actions { gap: 10px; }
+/* 山3つ（詳細設定「山の数」）: 山を横に3つ並べ、石は下から上へ積む（上の石から取る） */
+.nim-field.nim-three { flex-direction: row; gap: 8px; align-items: stretch; }
+.nim-three .nim-pile { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: center; padding: 8px 4px; }
+.nim-three .nim-label { text-align: center; margin-bottom: 6px; }
+.nim-three .nim-pile > .nim-stones { flex: 1; flex-direction: column-reverse; flex-wrap: nowrap; align-items: center; }
+.nim-three .nim-hpile { font: inherit; color: inherit; gap: 6px; justify-content: flex-start; }
+.board button.nim-hpile { cursor: pointer; background: var(--panel); border: 1.5px solid var(--line); padding: 8px 4px; }
+.board button.nim-hpile.picking { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent); }
+.nim-three .nim-hpile .nim-label { margin-bottom: 0; }
+.nim-three .nim-hpile > .nim-stones { flex: none; flex-direction: row; flex-wrap: wrap; justify-content: center; }
+.nim-hpile.empty { opacity: .55; }
+.nim-hidden-ball { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; font-size: 1.6rem; font-weight: 800; color: #fff; background: radial-gradient(circle at 35% 30%, #a7a29a, #6c665e 70%); }
+.nim-hidden-ball.empty { background: none; color: var(--muted); font-size: .9rem; box-shadow: inset 0 0 0 1.5px var(--line); }
 
 /* ---------- 旗揚げ ---------- */
 .fl { display: flex; flex-direction: column; gap: 14px; }
@@ -1526,6 +1561,11 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .ac-field { display: flex; justify-content: center; }
 .ac-canvas { display: block; border-radius: 12px; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .ac-note { text-align: center; font-size: .82rem; color: var(--muted); margin: 0; }
+/* 弾幕回避のスロー（詳細設定）。ボタンは盤の上の1行 */
+.dm-slow { display: flex; justify-content: center; }
+.dm-slow-btn { min-width: 13em; font-variant-numeric: tabular-nums; touch-action: manipulation; }
+.dm-slow-btn:disabled { opacity: .55; }
+.dm-slow-btn.dm-slowing { opacity: 1; background: #5b47b8; border-color: #5b47b8; color: #fff; }
 /* 遊んでいる間はページを動かさない（指でなぞるとページが動いてしまうため） */
 html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behavior: none; }
 #screen-play:has(.ac-live) { touch-action: none; }

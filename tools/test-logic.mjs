@@ -974,7 +974,7 @@ assert.ok(s.hands[s.turn].includes('d3'), '1戦目は ♦3 を持っている人
 assert.equal(s.phase, 'play');
 
 const dbase = (hands, o = {}) => ({
-  n: hands.length, rules: { ...ALL, five: false, seven: false, ten: false }, hands, field: null, by: null, passed: hands.map(() => false), out: [], fouls: [],
+  n: hands.length, rules: { ...ALL, five: false, seven: false, ten: false, bomber: false }, hands, field: null, by: null, passed: hands.map(() => false), out: [], fouls: [],
   rev: false, back: false, lock: null, turn: 0, phase: 'play', gives: [], swaps: [], prevRank: null, ranking: null, step: 0, last: null, ...o,
 });
 const dplay = (st, p, cards) => D.apply(st, { p, t: 'play', cards });
@@ -1114,6 +1114,8 @@ for (let k = 0; k < 300; k++) {
       const next = D.apply(st, move);
       assert.ok(next, `大富豪の CPU が反則の手を出した（${n}人）`);
       if (move.t === 'play' || move.t === 'ten') played += move.cards.length; // 10捨てで捨てた札も場から消える
+      // 12ボンバーで捨てた札も（上がっていない人の、選んだ数字の札）
+      if (move.t === 'bomb') played += st.hands.reduce((a, h, q) => a + (st.out.includes(q) || st.fouls.includes(q) ? 0 : h.filter((c) => c !== 'JK' && Number(c.slice(1)) === move.r).length), 0);
       assert.equal(dcount(next) + played, 53, '札の枚数が合わない');
       st = next;
       if (++steps > 3000) throw new Error('大富豪が終わらない');
@@ -1144,6 +1146,76 @@ for (let k = 0; k < 300; k++) {
   // 5飛びも逆回りの向きで飛ばす
   const fv = dplay(dbase([['s5', 'h3'], ['s10', 'h4'], ['s11', 'h6'], ['s12', 'h7']], { rules: { ...NONE, nine: true, five: true }, dir: -1 }), 0, ['s5']);
   assert.deepEqual([fv.passed, fv.turn], [[false, false, false, true], 2], '逆回りの5飛びは前の席の人を飛ばす');
+}
+// 12ボンバー: Q を出した人が数字を選び、上がっていない全員がその数字を全部捨てる
+{
+  const RB = { ...NONE, bomber: true };
+  const bb = (hands, o = {}) => dbase(hands, { rules: RB, ...o });
+  s = bb([['s12', 'h7', 'c7', 'c3'], ['s13', 'd7', 'h4'], ['c1', 'h2', 'd5'], ['s7', 'd9', 'h9']]);
+  t = dplay(s, 0, ['s12']);
+  assert.deepEqual([t.turn, t.pend, t.last.effects, t.field.cards], [0, [{ t: 'bomb' }], ['12ボンバー'], ['s12']], 'Q を出したら数字を選ぶまで番が進まない');
+  assert.equal(dpass(t, 0), null, '選ぶ前にパスはできない');
+  assert.equal(dplay(t, 1, ['s13']), null, '選ぶ前にほかの人は出せない');
+  assert.equal(D.apply(t, { p: 1, t: 'bomb', r: 7 }), null, 'ほかの人は選べない');
+  for (const r of [0, 14, 'x', 7.5, undefined]) assert.equal(D.apply(t, { p: 0, t: 'bomb', r }), null, `おかしな数字は弾く（${r}）`);
+  assert.equal(D.apply(t, { p: 0, t: 'ten', cards: ['c3'] }), null, 'ボンバーで札は捨てられない');
+  for (let i = 0; i < 20; i++) assert.ok(D.apply(t, { ...D.cpu(t, 0), p: 0 })?.last.t === 'bomb', 'CPU は数字を選ぶ');
+  let u = D.apply(t, { p: 0, t: 'bomb', r: 7 });
+  assert.deepEqual([u.hands, u.turn, u.pend, u.field.cards, u.last.hits, u.last.outs], [[['c3'], ['s13', 'h4'], ['c1', 'h2', 'd5'], ['d9', 'h9']], 1, null, ['s12'], [[0, 2], [1, 1], [3, 1]], undefined],
+    '全員（選んだ人も）が7を全部捨て、場の Q はそのまま次の人へ');
+  assert.equal(D.apply(u, { p: 0, t: 'bomb', r: 7 }), null, '2回目のボンバーは弾く');
+  assert.equal(D.apply(u, { p: 1, t: 'bomb', r: 7 }), null, '次の人もボンバーはできない');
+  assert.ok(dplay(u, 1, ['s13']), '場は続く（Q に K を出せる）');
+  u = D.apply(t, { p: 0, t: 'bomb', r: 6 });
+  assert.deepEqual([u.last.hits, u.turn, dcount(u)], [[], 1, dcount(t)], 'だれも持っていない数字も選べる');
+  // 捨てて手札がなくなったら上がり（選んだ人から順番の向きに）。反則上がりにしない
+  s = bb([['s12', 'h2', 'c4'], ['s2', 'd5'], ['c2'], ['d2', 'JK']], { rules: { ...RB, foul: true } });
+  u = D.apply(dplay(s, 0, ['s12']), { p: 0, t: 'bomb', r: 2 });
+  assert.deepEqual([u.out, u.fouls, u.last.outs, u.turn], [[2], [], [2], 1], '捨てて手札がなくなった人は上がり');
+  s = bb([['s12', 'h2'], ['s2', 'd5'], ['c2'], ['d2', 'JK']]);
+  u = D.apply(dplay(s, 0, ['s12']), { p: 0, t: 'bomb', r: 2 });
+  assert.deepEqual([u.out, u.last.outs, u.turn], [[0, 2], [0, 2], 1], '選んだ人が先に上がる');
+  s = bb([['s12', 'h2', 'c4'], ['s2', 'd5'], ['c2'], ['d2', 'JK']], { dir: -1, rules: { ...RB, nine: true } });
+  u = D.apply(dplay(s, 0, ['s12']), { p: 0, t: 'bomb', r: 2 });
+  assert.deepEqual([u.last.hits.map((x) => x[0]), u.turn], [[0, 3, 2, 1], 3], '逆回りでは数える順も逆');
+  s = bb([['s12', 'h2'], ['s2'], ['c2', 'c5']]);
+  u = D.apply(dplay(s, 0, ['s12']), { p: 0, t: 'bomb', r: 2 });
+  assert.deepEqual([D.result(u).ranking], [[0, 1, 2]], '残り1人になったら終わり');
+  // 都落ち: 最初に上がった人で見る
+  s = bb([['s12', 'h2', 'c4'], ['s2'], ['c2', 'c5'], ['d5', 'd6']], { rules: { ...RB, miyako: true }, prevRank: [1, 2, 0, 3] });
+  u = D.apply(dplay(s, 0, ['s12']), { p: 0, t: 'bomb', r: 2 });
+  assert.deepEqual([u.out, u.fouls, u.last.miyako], [[1], [2], 2], '大富豪より先に上がれば都落ち');
+  // 出して上がったら選ばない・8切り（階段）は選んでから流す・7渡しのあとに選ぶ
+  s = bb([['s12'], ['s13', 'd7'], ['c1', 'h2']]);
+  t = dplay(s, 0, ['s12']);
+  assert.deepEqual([t.pend, t.out, t.turn], [undefined, [0], 1], '出して上がったら選ばない');
+  s = bb([['s8', 's9', 's10', 's11', 's12', 'c3', 'h3'], ['d3', 'd7'], ['c1', 'h2']], { rules: { ...RB, stairs: true, eight: true, seven: true, ten: true } });
+  t = dplay(s, 0, ['s8', 's9', 's10', 's11', 's12']);
+  assert.deepEqual([t.pend, t.field !== null], [[{ t: 'ten', k: 1 }, { t: 'bomb' }], true], '階段は10捨てのあとにボンバー。8切りでもまだ流さない');
+  t = D.apply(t, { p: 0, t: 'ten', cards: ['h3'] });
+  assert.equal(t.turn, 0, '10捨てのあともボンバーを選ぶまで番のまま');
+  t = D.apply(t, { p: 0, t: 'bomb', r: 3 });
+  assert.deepEqual([t.out, t.field, t.turn, t.hands[1]], [[0], null, 1, ['d7']], '選んでから8切りで流れ、上がった人の次から');
+  s = bb([['h12', 'd12', 'JK', 'c4', 'c5'], ['s13', 'd7'], ['c1', 'h2']]);
+  t = dplay(s, 0, ['h12', 'd12', 'JK']);
+  assert.deepEqual(t.pend, [{ t: 'bomb' }], 'Q を何枚出しても（ジョーカー入りも）1回');
+  // CPU: 一番多い数字。同じなら弱い方（革命中は逆）
+  const orig = Math.random;
+  Math.random = () => 0.9;
+  try {
+    s = bb([['s12', 'h4', 'c4', 'h9', 'c9', 'd1'], ['s13'], ['c1']]);
+    assert.deepEqual(D.cpu(dplay(s, 0, ['s12']), 0), { t: 'bomb', r: 4 }, 'CPU は一番多い数字（同じなら弱い方）');
+    assert.deepEqual(D.cpu(dplay({ ...s, rev: true }, 0, ['s12']), 0), { t: 'bomb', r: 9 }, '革命中は 9 の方が弱い');
+    s = bb([['s12', 'h1', 'c1', 'd1', 'h9', 'c9'], ['s13'], ['c1']]);
+    assert.deepEqual(D.cpu(dplay(s, 0, ['s12']), 0), { t: 'bomb', r: 1 }, 'CPU は強い札でも一番多い数字');
+  } finally { Math.random = orig; }
+  // なし: 今までどおり
+  s = dbase([['s12', 'c3'], ['s13'], ['c1']], { rules: { ...NONE } });
+  t = dplay(s, 0, ['s12']);
+  assert.deepEqual([t.pend, t.turn, t.last.effects], [undefined, 1, []], '12ボンバーなしなら選ばない');
+  assert.equal(D.apply(t, { p: 1, t: 'bomb', r: 3 }), null, 'なしではボンバーの手は弾く');
+  assert.deepEqual(Object.keys(D.init(4, 5, { rules: DEF })).sort(), Object.keys(D.init(4, 5, { rules: { ...DEF, bomber: true } })).sort(), '局面の形は同じ');
+  assert.equal(DEF.bomber, false, '最初はなし');
 }
 console.log('daifugo games', dgames);
 
@@ -2003,6 +2075,130 @@ for (let k = 0; k < 300; k++) {
     assert.equal(st.piles[0], 0, '最後は山が空になる');
     if (rules.last === 'count') assert.equal(st.got.reduce((x, y) => x + y, 0), st.start[0], '取った数の合計は最初の山の数');
   }
+}
+// 山の数（rules.heaps。2026-10-07 の19回目）: 3つは3・5・7個。1つの山から好きなだけ（取った数で勝負だけ最大数まで）。1つでは前と全く同じ
+{
+  const { createHash } = await import('node:crypto');
+  const { mulberry32 } = await import('../app/js/games/util.js');
+  const { hiddenView } = await import('../app/js/games/nim.js');
+  assert.ok(NIM.settings.some((x) => x.key === 'heaps' && x.def === 1 && x.choices.map(([v]) => v).join() === '1,3'), '詳細設定に「山の数」（1つ・3つ。最初は1つ）がある');
+  // 1つ（と設定なし）: 決まった手順で最後まで打った局面の指紋が、山の数を足す前と同じ（rules の heaps は除いて比べる）
+  const h = createHash('sha256');
+  for (let k = 0; k < 120; k++) {
+    const rules = { last: ['lose', 'win', 'count'][k % 3], max: [0, 3, 4, 5][k % 4], hide: k % 5 === 0 };
+    if (k % 2) rules.heaps = 1;
+    let st = NIM.init(2 + (k % 5), k * 11 + 3, { rules });
+    const rnd = mulberry32(k + 7);
+    const strip = (x) => JSON.stringify({ ...x, rules: { ...x.rules, heaps: undefined } });
+    h.update(strip(st));
+    while (!NIM.result(st)) {
+      const cap = st.rules.hide ? st.max : Math.min(st.max, st.piles[0]);
+      st = NIM.apply(st, { p: st.turn, t: 'take', pile: 0, k: 1 + Math.floor(rnd() * cap) });
+      h.update(strip(st));
+    }
+    h.update(JSON.stringify(NIM.result(st)));
+  }
+  assert.equal(h.digest('hex').slice(0, 16), 'f35b3d147a198386', '山1つでは前と全く同じ局面');
+  // 3つ: 3・5・7個。局面の形は山1つと同じ欄だけ
+  const a = NIM.init(3, 4, { rules: { heaps: 3 } });
+  assert.deepEqual([a.piles, a.start], [[3, 5, 7], [3, 5, 7]], '山3つは3・5・7個');
+  assert.deepEqual(Object.keys(a).sort(), Object.keys(NIM.init(3, 4, { rules: {} })).sort(), '山3つでも局面の欄は同じ');
+  const p3 = (o) => ({ ...NIM.init(2, 1, { rules: { heaps: 3, ...(o.rules ?? {}) } }), ...o, rules: { last: 'lose', heaps: 3, ...(o.rules ?? {}) } });
+  const play = (st, list) => list.reduce((x, [p, pile, k]) => { const y = NIM.apply(x, { p, t: 'take', pile, k }); assert.ok(y, `山3つの手 ${p}:${pile}:${k}`); return y; }, st);
+  s = p3({ max: 3 });
+  t = NIM.apply(s, { p: 0, t: 'take', pile: 2, k: 7 });
+  assert.deepEqual([t.piles, t.last, t.turn], [[3, 5, 0], { p: 0, pile: 2, k: 7 }, 1], '1つの山を丸ごと取れる（最大数は使わない）');
+  assert.equal(NIM.apply(s, { p: 0, t: 'take', pile: 0, k: 4 }), null, '山より多くは取れない');
+  assert.equal(NIM.apply(t, { p: 1, t: 'take', pile: 2, k: 1 }), null, '空の山からは取れない');
+  assert.equal(NIM.apply(s, { p: 0, t: 'take', pile: 3, k: 1 }), null, 'ない山からは取れない');
+  assert.equal(NIM.apply(s, { p: 0, t: 'take', pile: '1', k: 1 }), null, '山の番号は整数だけ');
+  assert.equal(NIM.apply(s, { p: 0, t: 'take', k: 1 }), null, '山の番号が無い手は弾く');
+  assert.equal(NIM.apply(s, { p: 0, t: 'take', pile: 1, k: 0 }), null, '0個は取れない');
+  assert.equal(NIM.apply(s, { p: 1, t: 'take', pile: 1, k: 1 }), null, '手番でない人は取れない');
+  assert.equal(NIM.apply(t, { p: 0, t: 'take', pile: 2, k: 7 }), null, '同じ手が2回届いても2回目は弾く');
+  const seq = [[0, 2, 7], [1, 1, 4], [0, 0, 3], [1, 1, 1]];
+  t = play(s, seq);
+  assert.deepEqual(play(s, seq), t, '同じ手の一覧から同じ局面');
+  assert.deepEqual([t.piles, t.ender, NIM.result(t).loser, NIM.result(t).winner], [[0, 0, 0], 1, 1, 0], '負け: 山が全部なくなったとき、最後の1個を取った人の負け');
+  assert.equal(NIM.result(play(s, seq.slice(0, 3))), null, '山が残っている間は決着しない');
+  t = play(p3({ rules: { last: 'win' } }), seq);
+  assert.deepEqual([NIM.result(t).winner, NIM.result(t).loser], [1, null], '勝ち: 最後の1個を取った人の勝ち');
+  t = play(p3({ n: 3, rules: { last: 'lose' } }), [[0, 2, 7], [1, 1, 5], [2, 0, 3]]);
+  assert.deepEqual([NIM.result(t).loser, NIM.result(t).winner], [2, null], '3人の負けは1人');
+  // 取った数で勝負: 最大数まで（3）
+  const c = p3({ max: 3, rules: { last: 'count' }, got: [0, 0] });
+  assert.equal(NIM.apply(c, { p: 0, t: 'take', pile: 2, k: 4 }), null, '取った数で勝負では最大数より多くは取れない');
+  t = play(c, [[0, 2, 3], [1, 2, 3], [0, 1, 3], [1, 2, 1], [0, 1, 2], [1, 0, 3]]);
+  assert.deepEqual([t.got, NIM.result(t).winners], [[8, 7], [0]], '取った数で勝負: 山が全部なくなったら、多く取った人の勝ち');
+  // 筋の良い手（ニム和）: 負けの形を残す
+  const { goodMove: gm } = await import('../app/js/games/nim.js');
+  const xor = (ps) => ps.reduce((x, v) => x ^ v, 0);
+  assert.deepEqual(gm(p3({ rules: { last: 'win' } })), { pile: 0, k: 1 }, '勝ち・3・5・7: 山1から1個取って 2・5・7（ニム和0）');
+  assert.equal(gm(p3({ rules: { last: 'win' }, piles: [1, 2, 3] })), null, '勝ち・1・2・3（ニム和0）は筋の良い手が無い');
+  assert.deepEqual(gm(p3({ rules: { last: 'lose' }, piles: [0, 0, 5] })), { pile: 2, k: 4 }, '負け: 山1つだけなら1個残す');
+  assert.deepEqual(gm(p3({ rules: { last: 'lose' }, piles: [1, 1, 4] })), { pile: 2, k: 3 }, '負け: 1個の山を3つ（奇数）残す');
+  assert.equal(gm(p3({ rules: { last: 'lose' }, piles: [1, 1, 1] })), null, '負け: 1・1・1 は筋の良い手が無い');
+  for (let x = 0; x <= 3; x++) for (let y = 0; y <= 5; y++) for (let z = 0; z <= 7; z++) {
+    const g = gm(p3({ rules: { last: 'win' }, piles: [x, y, z] }));
+    assert.equal(g === null, xor([x, y, z]) === 0, `勝ち: 筋の良い手があるのはニム和が0でないとき ${x},${y},${z}`);
+    if (g) { const q = [x, y, z]; q[g.pile] -= g.k; assert.equal(xor(q), 0, '勝ち: ニム和0を残す'); }
+    const big = [x, y, z].some((v) => v > 1);
+    const ml = gm(p3({ rules: { last: 'lose' }, piles: [x, y, z] }));
+    if (x + y + z > 0) assert.equal(ml === null, big ? xor([x, y, z]) === 0 : [x, y, z].filter((v) => v === 1).length % 2 === 1, `負け: 筋の良い手の有無 ${x},${y},${z}`);
+  }
+  // 残りを隠す: 山の大きさは 2〜5・4〜7・6〜9。画面の中身に残りの数・最初の数を入れない。残りより多く選ぶと、その山の残りを全部取る
+  const seen = [new Set(), new Set(), new Set()];
+  for (let k = 0; k < 200; k++) {
+    const st = NIM.init(2, k, { rules: { heaps: 3, hide: true } });
+    st.piles.forEach((v, i) => seen[i].add(v));
+    assert.ok(st.piles[0] >= 2 && st.piles[0] <= 5 && st.piles[1] >= 4 && st.piles[1] <= 7 && st.piles[2] >= 6 && st.piles[2] <= 9, '隠すときの山の大きさ');
+  }
+  assert.deepEqual(seen.map((x) => x.size), [4, 4, 4], '隠すときの山の大きさはどれも出る');
+  const hd = p3({ rules: { hide: true }, piles: [2, 3, 4], start: [4, 6, 8] });
+  let hv = hiddenView(hd, 0);
+  assert.deepEqual(hv.heaps.map((x) => [x.taken, x.empty, x.buttons.length]), [[2, false, 5], [3, false, 7], [4, false, 9]], '各山の取られた数と押せる数（5・7・9）');
+  t = NIM.apply(hd, { p: 0, t: 'take', pile: 1, k: 7 });
+  assert.deepEqual([t.piles, t.last], [[2, 0, 4], { p: 0, pile: 1, k: 3, want: 7 }], '残りより多く選ぶと、その山の残りを全部取る');
+  hv = hiddenView(t, 1);
+  assert.deepEqual([hv.heaps[1].empty, hv.last], [true, { p: 0, pile: 1, k: 3, want: 7, you: false }], '空になった山は見せる');
+  assert.ok(!/"(piles|start)"/.test(JSON.stringify(hv)) && !hv.heaps.some((x) => 'left' in x), '残りの数・最初の数は入れない');
+  assert.equal(NIM.apply(hd, { p: 0, t: 'take', pile: 0, k: 6 }), null, '山1は5個までしか選べない');
+  assert.equal(NIM.apply(t, { p: 1, t: 'take', pile: 1, k: 1 }), null, '空の山は選べない');
+  assert.equal(hiddenView(p3({ max: 3, rules: { hide: true, last: 'count' }, got: [0, 0] }), 0).heaps[2].buttons.length, 3, '取った数で勝負では最大数まで');
+  // CPU どうしで最後まで（勝ち負け3つ・隠す・2〜6人）。手番の人がたまに一番大きい数を選ぶ
+  const tally = { lose: [0, 0], win: [0, 0] };
+  for (let k = 0; k < 600; k++) {
+    const rules = { heaps: 3, last: ['lose', 'win', 'count'][k % 3], hide: k % 4 === 1, max: [0, 3, 4, 5][k % 4] };
+    const n = 2 + (k % 5);
+    let st = NIM.init(n, k, { rules });
+    let steps = 0;
+    while (!NIM.result(st)) {
+      let m = NIM.cpu(st, st.turn);
+      if (st.turn === 0 && k % 7 === 0) { const pile = st.piles.findIndex((v) => v > 0); m = { t: 'take', pile, k: NIM.apply(st, { p: 0, t: 'take', pile, k: 9 }) ? 9 : 1 }; }
+      const next = NIM.apply(st, { ...m, p: st.turn });
+      assert.ok(next, '山3つの CPU が反則の手を出した: ' + JSON.stringify(m));
+      st = next;
+      if (++steps > 100) throw new Error('山3つが終わらない');
+    }
+    assert.ok(st.piles.every((v) => v === 0), '最後は山が全部空');
+    if (rules.last === 'count') assert.equal(st.got.reduce((x, y) => x + y, 0), st.start.reduce((x, y) => x + y, 0), '取った数の合計は最初の石の数');
+  }
+  // 強さの目安: 2人で、CPU（先手）が適当に打つ相手に勝つ数（5割より多く、全部ではない）
+  for (const last of ['lose', 'win']) {
+    for (let k = 0; k < 400; k++) {
+      let st = NIM.init(2, k, { rules: { heaps: 3, last } });
+      while (!NIM.result(st)) {
+        const list = [];
+        st.piles.forEach((v, pile) => { for (let j = 1; j <= v; j++) list.push({ pile, k: j }); });
+        const m = st.turn === k % 2 ? NIM.cpu(st, st.turn) : { t: 'take', ...list[Math.floor(Math.random() * list.length)] };
+        st = NIM.apply(st, { ...m, p: st.turn });
+      }
+      const res = NIM.result(st);
+      tally[last][res.winner === k % 2 ? 0 : 1]++;
+    }
+    assert.ok(tally[last][0] > 220 && tally[last][0] < 400, `山3つの CPU は適当な相手に勝ち越す（${last}: ${tally[last][0]}/400）`);
+  }
+  console.log('nim heaps3 CPU vs random (lose / win)', tally.lose.join(':'), tally.win.join(':'));
 }
 
 // ---------- 旗揚げ ----------
@@ -4729,6 +4925,58 @@ console.log('kaisen OK');
   L = run(D.init(2, 5, { rules: { lives: 2 } }), [{ p: -1, t: 'go' }, { p: 0, t: 'hit', ms: 3000, k: 0 }]);
   assert.equal(L.dead[0], null, '2機なら1回目は残る');
   assert.equal(run(L, [{ p: 0, t: 'hit', ms: 5000, k: 1 }]).dead[0], 5000, '2機なら2回目で脱落');
+  // スロー（2026-10-07 の19回目）: なしでは局面に slow を持たず手も弾く・ありなら1人1回
+  assert.equal(D.init(2, 1).rules.slow, 'off', '最初は なし');
+  assert.ok(!('slow' in D.init(2, 1)), 'なしの局面は前と同じ形');
+  const off = run(D.init(2, 5), [{ p: -1, t: 'go' }]);
+  assert.equal(D.apply(off, { p: 0, t: 'slow', ms: 3000 }), null, 'なしではスローを使えない');
+  const slowRules = { rules: { slow: 'on', lives: 2 } };
+  let W = D.init(3, 5, slowRules);
+  assert.deepEqual(W.slow, [null, null, null]);
+  assert.equal(D.apply(W, { p: 0, t: 'slow', ms: 0 }), null, '始まる前は使えない');
+  W = run(W, [{ p: -1, t: 'go' }]);
+  const W1 = run(W, [{ p: 0, t: 'slow', ms: 3000 }]);
+  assert.deepEqual([W.slow, W1.slow], [[null, null, null], [3000, null, null]], '使った時刻を覚える（前の局面は変えない）');
+  assert.equal(D.apply(W1, { p: 0, t: 'slow', ms: 3000 }), null, '同じスローが2回届いても1回だけ');
+  assert.equal(D.apply(W1, { p: 0, t: 'slow', ms: 9000 }), null, 'スローは1人1回');
+  assert.equal(D.apply(W1, { p: 1, t: 'slow', ms: 99999999 }), null, '時間より後には使えない');
+  const slowMoves = [{ p: -1, t: 'go' }, { p: 0, t: 'slow', ms: 3000 }, { p: 1, t: 'hit', ms: 4000, k: 0 }, { p: 1, t: 'slow', ms: 4500 }, { p: 1, t: 'hit', ms: 8000, k: 1 }];
+  const W2 = run(D.init(3, 5, slowRules), slowMoves);
+  assert.deepEqual(W2, run(D.init(3, 5, slowRules), slowMoves), '同じ手の一覧から同じ局面');
+  assert.deepEqual([W2.slow, W2.dead], [[3000, 4500, null], [null, 8000, null]], '当たったあとでも残機があれば使える');
+  assert.equal(D.apply(W2, { p: 1, t: 'slow', ms: 9000 }), null, '脱落した人は使えない');
+  assert.deepEqual(D.result(run(W2, [{ p: -1, t: 'end' }])).winners, [0, 2], 'スローは順位に関わらない');
+  // 弾の時計: 使う前は同じ・3秒のあいだ 0.4倍・そのあとは 1.8秒遅れたまま
+  assert.equal(DM.slowClock(10, null), 10);
+  assert.equal(DM.slowClock(10, 12), 10, '使う前は同じ');
+  assert.ok(Math.abs(DM.slowClock(13, 12) - 12.4) < 1e-9, 'スローの間は 0.4倍');
+  assert.ok(Math.abs(DM.slowClock(20, 12) - 18.2) < 1e-9, 'スローのあとは 1.8秒遅れ');
+  for (let t = 0, prev = -1; t < 30; t += 0.05) { const v = DM.slowClock(t, 12); assert.ok(v >= prev, '弾の時計は戻らない'); prev = v; }
+  // CPU どうしで最後まで（時計を偽物にして）: スローは1人1回まで・ありでは使う CPU がいる・なしでは使わない
+  const realNow = Object.getOwnPropertyDescriptor(performance, 'now');
+  let fake = 0;
+  performance.now = () => fake;
+  try {
+    let used = 0; let seed = 8800;
+    for (const slow of ['off', 'on']) for (const level of ['easy', 'normal', 'hard']) for (let g = 0; g < 2; g++) {
+      let st = run(D.init(4, ++seed, { rules: { slow, level, time: '60' } }), [{ p: -1, t: 'go' }]);
+      fake = 0;
+      for (; fake < 60500 && st.phase === 'play'; fake += 100) {
+        for (let p = 0; p < 4; p++) {
+          const m = D.cpu(st, p);
+          if (!m) continue;
+          if (m.t === 'slow') { assert.equal(slow, 'on', 'なしでは CPU もスローを使わない'); used++; }
+          const y = D.apply(st, { ...m, p });
+          assert.ok(y, 'CPU の手が弾かれた ' + JSON.stringify(m));
+          st = y;
+        }
+      }
+      if (slow === 'on') assert.ok(st.slow.filter((v) => v !== null).length <= 4);
+    }
+    assert.ok(used >= 4, 'スロー ありでは使う CPU がいる: ' + used);
+  } finally {
+    Object.defineProperty(performance, 'now', realNow);
+  }
 }
 
 // ---------- 玉入れ ----------

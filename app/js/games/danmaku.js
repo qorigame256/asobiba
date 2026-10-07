@@ -163,7 +163,7 @@ export function cpuStep(c, active, sec, dt, rnd) {
 
 const durOf = (s) => Number(s.rules.time);
 const goKey = (s) => `danmaku:${s.seed}:go`;
-const clone = (s) => ({ ...s, dead: s.dead.slice(), hits: s.hits.slice() });
+const clone = (s) => ({ ...s, dead: s.dead.slice(), hits: s.hits.slice(), ...(s.slow ? { slow: s.slow.slice() } : {}) });
 const livesOf = (s) => ([1, 2, 3].includes(Number(s.rules.lives)) ? Number(s.rules.lives) : 1);
 const aliveSeats = (s) => s.dead.map((v, p) => (v === null ? p : -1)).filter((p) => p >= 0);
 const maxDead = (s) => Math.max(0, ...s.dead.filter((v) => v !== null));
@@ -186,17 +186,59 @@ function bulletsOf(s) {
 
 let ui = null;
 
+// 自分がスローを使った実の秒（使っていなければ null）。押した端末では手が戻るのを待たずに使う
+function mySlow() {
+  if (!ui || ui.me === null) return null;
+  if (ui.slowAt !== null) return ui.slowAt;
+  const v = ui.cur.s.slow?.[ui.me];
+  return typeof v === 'number' ? v / 1000 : null;
+}
+function canSlow() {
+  if (!ui || ui.me === null) return false;
+  const { s, o } = ui.cur;
+  return slowOn(s) && s.phase === 'play' && o.canMove && s.dead[ui.me] === null && !ui.hit && mySlow() === null
+    && since(goKey(s)) / 1000 < durOf(s);
+}
+function useSlow() {
+  if (!canSlow()) return;
+  const sec = since(goKey(ui.cur.s)) / 1000;
+  ui.slowAt = sec;
+  ui.cur.o.onMove({ t: 'slow', ms: Math.round(sec * 1000) });
+}
+// ⏱ スローのボタン（スロー ありのときだけある）を、いまの様子に合わせる
+function slowButton() {
+  const b = ui.slowBtn;
+  if (!b) return;
+  const { s } = ui.cur;
+  const at = mySlow();
+  const real = s.phase === 'play' ? since(goKey(s)) / 1000 : 0;
+  const going = at !== null && s.phase === 'play' && real < at + SLOW_SEC;
+  const text = going ? `⏱ スロー中 あと${(at + SLOW_SEC - real).toFixed(1)}秒` : at !== null ? '⏱ スロー 使用済み' : '⏱ スロー（1回だけ）';
+  if (b.textContent !== text) b.textContent = text;
+  const off = !canSlow();
+  if (b.disabled !== off) b.disabled = off;
+  b.classList.toggle('dm-slowing', going);
+}
+
 function draw() {
   const { s, o } = ui.cur;
   const ctx = ui.ctx;
   const k = ui.scale;
   const sec = s.phase === 'ready' ? 0 : Math.min(since(goKey(s)) / 1000, durOf(s));
-  ctx.fillStyle = '#121a2e';
+  const slowAt = mySlow();
+  const bt = slowClock(sec, slowAt); // 弾の時計（自分がスローを使ったあとは遅れる）
+  const slowing = s.phase === 'play' && slowAt !== null && sec >= slowAt && sec < slowAt + SLOW_SEC;
+  ctx.fillStyle = slowing ? '#261d4d' : '#121a2e'; // スローの間は紫がかった色にする
   ctx.fillRect(0, 0, k, k * H);
+  if (slowing) {
+    ctx.strokeStyle = 'rgba(180,160,255,0.85)';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(2, 2, k - 4, k * H - 4);
+  }
   // 弾
-  const active = ui.view(sec);
+  const active = ui.view(bt);
   for (const b of active) {
-    const [x, y] = posOf(b, sec);
+    const [x, y] = posOf(b, bt);
     ctx.beginPath();
     ctx.arc(x * k, y * k, b.r * k, 0, Math.PI * 2);
     ctx.fillStyle = b.c;
@@ -267,6 +309,13 @@ function draw() {
     if (ui.me !== null && (s.dead[ui.me] !== null || ui.hit)) text += '（観戦中）';
   }
   if (text) ctx.fillText(text, k / 2, k * 0.06);
+  // スロー: 自分が使っている間の残り・ほかの人が使った知らせ
+  ctx.font = `bold ${Math.max(12, k * 0.04)}px sans-serif`;
+  ctx.fillStyle = '#d7ccff';
+  if (slowing) ctx.fillText(`⏱ スロー あと${(slowAt + SLOW_SEC - sec).toFixed(1)}秒`, k / 2, k * 0.115);
+  if (ui.slowNote && now - ui.slowNote.at < SLOW_NOTE_MS && s.phase === 'play') {
+    ctx.fillText(`⏱ ${o.names[ui.slowNote.p] ?? ''} がスロー！`, k / 2, k * (slowing ? 0.17 : 0.115));
+  }
 }
 
 function step() {
@@ -281,8 +330,9 @@ function step() {
   const ky = (ui.keys.has('ArrowDown') ? 1 : 0) - (ui.keys.has('ArrowUp') ? 1 : 0);
   if (kx || ky) { ui.x = clamp(ui.x + kx * 0.6 * dt, 0.02, 0.98); ui.y = clamp(ui.y + ky * 0.6 * dt, 0.02, H - 0.02); }
   if (s.dead[ui.me] !== null || ui.hit) return;
-  const active = ui.mine(sec);
-  if (sec >= ui.safeUntil && hitAt(active, sec, ui.x, ui.y)) {
+  const bt = slowClock(sec, mySlow()); // 弾の時計。当たった時刻（ms）は実の時計のまま
+  const active = ui.mine(bt);
+  if (sec >= ui.safeUntil && hitAt(active, bt, ui.x, ui.y)) {
     ui.boomAt = performance.now();
     o.onMove({ t: 'hit', ms: Math.round(sec * 1000), k: ui.hits });
     ui.hits += 1;
@@ -322,6 +372,7 @@ function loop(token) {
   step();
   sendCpus();
   draw();
+  slowButton();
   requestAnimationFrame(() => loop(token));
 }
 
@@ -346,11 +397,14 @@ export default {
     { key: 'time', label: '時間', desc: 'この時間まで残った人は全員1位。後ほど弾が多く速くなる', def: '90', choices: [['60', '60秒'], ['90', '90秒'], ['120', '120秒']] },
     { key: 'lives', label: '残機', desc: '何回当たったら脱落するか。2機・3機なら、当たっても2秒は当たらずに続けられる', def: 1, choices: [[1, '1機（当たったら脱落）'], [2, '2機'], [3, '3機']] },
     { key: 'level', label: '難しさ', desc: '弾の数と速さ。やさしいは少なく遅く、むずかしいは多く速い', def: 'normal', choices: [['easy', 'やさしい'], ['normal', 'ふつう'], ['hard', 'むずかしい']] },
+    { key: 'slow', label: 'スロー', desc: 'ありなら1人1回、⏱ スローを押すと3秒のあいだ自分の画面の弾がゆっくりになる（危ないときの切り札）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { time: '90', level: 'normal', lives: 1, ...rules };
-    return { n, seed, rules: r, phase: 'ready', dead: Array(n).fill(null), hits: Array(n).fill(0), step: 0 };
+    const r = { time: '90', level: 'normal', lives: 1, slow: 'off', ...rules };
+    const s = { n, seed, rules: r, phase: 'ready', dead: Array(n).fill(null), hits: Array(n).fill(0), step: 0 };
+    if (r.slow === 'on') s.slow = Array(n).fill(null); // スローを使った時刻（ms）。なしのときは持たない
+    return s;
   },
 
   turn() { return null; },
@@ -358,6 +412,7 @@ export default {
   sound(a, b, m, me) {
     if (m.p === -1) return 'question';
     if (m.t === 'hit') return m.p === me ? 'wrong' : 'pop';
+    if (m.t === 'slow') return 'call';
     return null;
   },
   result(s) {
@@ -399,6 +454,11 @@ export default {
     if (typeof m.ms !== 'number' || !(m.ms >= 0) || m.ms > durOf(s0) * 1000) return null;
     const s = clone(s0);
     s.step += 1;
+    if (m.t === 'slow') {
+      if (!slowOn(s0) || s0.slow[m.p] !== null) return null; // なし・2回目は弾く
+      s.slow[m.p] = Math.round(m.ms);
+      return s;
+    }
     if (m.t === 'hit') {
       if ((m.k ?? 0) !== s0.hits[m.p]) return null; // 同じ当たりが2回届いた
       s.hits[m.p] += 1;
@@ -424,21 +484,27 @@ export default {
     const now = Math.min(since(goKey(s)) / 1000, durOf(s));
     let c = sims.get(key);
     if (!c) {
-      c = { x: 0.2 + Math.random() * 0.6, y: H - 0.15, vx: 0, vy: 0, timer: 0, sec: now, dead: null, hitAt: [], safe: 0, view: tracker(bulletsOf(s)) };
+      // slowAt: スローを使った実の秒（部屋を出た人がもう使っていたら、それを引き継ぐ）
+      const used = slowOn(s) && s.slow[p] !== null ? s.slow[p] / 1000 : null;
+      c = { x: 0.2 + Math.random() * 0.6, y: H - 0.15, vx: 0, vy: 0, timer: 0, sec: now, dead: null, hitAt: [], safe: 0, slowAt: used, view: tracker(bulletsOf(s)) };
       sims.set(key, c);
       if (sims.size > 40) sims.delete(sims.keys().next().value);
     }
     const dt = 1 / 30;
     while (!c.dead && c.sec + dt <= now) {
       c.sec += dt;
-      const active = c.view(c.sec);
-      cpuStep(c, active, c.sec, dt, Math.random);
-      if (c.sec >= c.safe && hitAt(active, c.sec, c.x, c.y)) {
+      const bt = slowClock(c.sec, c.slowAt); // 弾の時計（スローを使ったあとは遅れる）
+      const active = c.view(bt);
+      cpuStep(c, active, bt, dt, Math.random);
+      // スロー: 弾がすぐそばに来たとき、ときどき使う（1回だけ）
+      if (slowOn(s) && c.slowAt === null && c.sec >= c.safe && Math.random() < 0.15 && dangerAt(active, bt, c.x, c.y)) { c.slowAt = c.sec; c.timer = 0; } // すぐよけ直す
+      if (c.sec >= c.safe && hitAt(active, bt, c.x, c.y)) {
         c.hitAt.push(Math.round(c.sec * 1000));
         c.safe = c.sec + SAFE_SEC;
         if (c.hitAt.length >= livesOf(s)) c.dead = c.hitAt[c.hitAt.length - 1];
       }
     }
+    if (slowOn(s) && s.slow[p] === null && c.slowAt !== null) return { t: 'slow', ms: Math.round(c.slowAt * 1000) }; // 当たりより先に送る
     const k = s.hits[p];
     if (k < c.hitAt.length) return { t: 'hit', ms: c.hitAt[k], k }; // まだ送っていない当たり（1回に1つずつ）
     const others = s.dead.filter((v, q) => q !== p);
@@ -463,7 +529,10 @@ export default {
     const sc = s.dead.map((v) => (v === null ? '' : (v / 1000).toFixed(1)));
     const lives = livesOf(s);
     const chips = scoreChips(o, s.dead.map(() => 0), {
-      extra: (p) => (s.dead[p] === null ? (s.phase === 'end' ? '最後まで' : lives > 1 ? `残機 ${lives - s.hits[p]}` : '') : `${esc(sc[p])}秒で脱落`),
+      extra: (p) => {
+        const t = s.dead[p] === null ? (s.phase === 'end' ? '最後まで' : lives > 1 ? `残機 ${lives - s.hits[p]}` : '') : `${esc(sc[p])}秒で脱落`;
+        return slowOn(s) && s.slow[p] !== null && s.phase !== 'end' ? `${t}${t ? '・' : ''}⏱済` : t; // スローを使った人
+      },
     });
     chips.querySelectorAll('.pt-score').forEach((e) => e.remove());
     const key = `${s.seed}:${me}`;
@@ -473,6 +542,13 @@ export default {
       ui.chips = chips;
       ui.cur = { s, o };
       ui.wrap.classList.toggle('ac-live', s.phase === 'play' && me !== null && s.dead[me] === null);
+      if (slowOn(s)) { // ほかの人がスローを使ったら知らせる
+        s.slow.forEach((v, p) => {
+          if (v === null || ui.slowSeen[p]) return;
+          ui.slowSeen[p] = true;
+          if (p !== me) ui.slowNote = { p, at: performance.now() };
+        });
+      }
       return;
     }
     root.innerHTML = '';
@@ -485,13 +561,28 @@ export default {
     note.className = 'ac-note';
     note.textContent = '画面を指でなぞると、なぞった分だけ自機が動きます（パソコンはマウスか矢印キー）。当たるのは真ん中の白い点だけ。';
     wrap.append(canvas);
-    root.append(chips, wrap, note);
+    let slowBtn = null;
+    if (slowOn(s)) {
+      note.textContent += ' ⏱ スローは1回だけ（パソコンはスペースキーでも）。';
+      const bar = document.createElement('div');
+      bar.className = 'dm-slow';
+      slowBtn = document.createElement('button');
+      slowBtn.type = 'button';
+      slowBtn.className = 'btn small secondary dm-slow-btn';
+      slowBtn.textContent = '⏱ スロー（1回だけ）';
+      slowBtn.disabled = true;
+      slowBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); useSlow(); }); // 押した瞬間に効かせる
+      slowBtn.addEventListener('click', useSlow); // キーボードで押したとき（2回目は canSlow が弾く）
+      bar.append(slowBtn);
+      root.append(chips, bar, wrap, note);
+    } else root.append(chips, wrap, note);
     if (s.phase !== 'end') window.scrollTo(0, 0);
     since(`danmaku:${s.seed}:ready`);
     ui = {
       key, canvas, ctx: canvas.getContext('2d'), chips, wrap, me, cur: { s, o }, scale: 300,
       x: START.x, y: START.y, hit: me !== null && s.hits[me] >= livesOf(s), hits: me !== null ? s.hits[me] : 0, safeUntil: 0, boomAt: 0, sentLast: false, lastSend: 0, lastCpuSend: 0, last: null,
       ghosts: new Map(), keys: new Set(), view: tracker(bulletsOf(s)), mine: tracker(bulletsOf(s)),
+      slowBtn, slowAt: null, slowNote: null, slowSeen: slowOn(s) ? s.slow.map((v) => v !== null) : [],
     };
     wrap.classList.toggle('ac-live', s.phase === 'play' && me !== null);
     resize();
@@ -518,7 +609,7 @@ export default {
     canvas.addEventListener('pointerup', up);
     canvas.addEventListener('pointercancel', up);
     const token = ui;
-    const kd = (e) => { if (ui !== token) { window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); return; } if (e.key.startsWith('Arrow')) { ui.keys.add(e.key); e.preventDefault(); } };
+    const kd = (e) => { if (ui !== token) { window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); return; } if (e.key.startsWith('Arrow')) { ui.keys.add(e.key); e.preventDefault(); } else if (e.key === ' ' && ui.slowBtn) { e.preventDefault(); useSlow(); } };
     const ku = (e) => { if (ui === token) ui.keys.delete(e.key); };
     window.addEventListener('keydown', kd);
     window.addEventListener('keyup', ku);
