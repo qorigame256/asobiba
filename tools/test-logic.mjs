@@ -347,6 +347,76 @@ for (const players of [2, 3]) {
     }
   }
 }
+// 角でもう1手: 角に置いたら同じ人がもう1回（また角ならさらに）・続けて置けなければ次の人・3〜4人でも・なしでは今と同じ・CPU どうしで最後まで
+{
+  assert.ok(R.settings.some((x) => x.key === 'corner' && x.def === false), '角でもう1手の設定（最初はなし）');
+  const at = (rules, o, turn = 0) => ({ ...R.init({ rules }), board: Object.assign(Array(64).fill(null), { 27: 1, 28: 0, 35: 0, 36: 1 }, o), turn });
+  let g = R.apply(at({ corner: true }, { 1: 1, 2: 0 }), 0); // 黒が隅 0 で 1 を返す
+  assert.deepEqual([g.board[1], g.turn, g.again], [0, 0, true], '角に置いたら、黒がもう1回');
+  assert.match(R.info(g), /黒は角を取ったので、もう1回！/, '状態の欄に「もう1回」');
+  assert.equal(R.apply(g, 19).turn, 1, '続けて置いた手が角でなければ白へ');
+  assert.equal(R.apply(g, 19).again, false);
+  g = R.apply(R.apply(at({ corner: true }, { 1: 1, 2: 0, 6: 1, 5: 0 }), 0), 7); // 0 のあと、続けて 7 も角
+  assert.deepEqual([g.board[6], g.turn, g.again], [0, 0, true], '続けて置いた手がまた角なら、さらにもう1回');
+  assert.equal(R.apply(at({}, { 1: 1, 2: 0 }), 0).turn, 1, 'なしなら角でも白へ');
+  assert.equal(R.apply(at({}, { 1: 1, 2: 0 }), 0).again, false);
+  // 黒が隅 0 で 8 を返すと、黒はもう置ける所が無い（白は 18 に置ける）→ 白の番
+  const none = { ...R.init({ rules: { corner: true } }), board: Object.assign(Array(64).fill(null), { 4: 1, 8: 1, 9: 0, 11: 0, 16: 0 }), turn: 0 };
+  g = R.apply(none, 0);
+  assert.deepEqual([g.turn, g.again, g.missed, g.over], [1, false, 0, false], '続けて置ける所が無ければ、次の人へ');
+  assert.match(R.info(g), /続けて置ける場所がないので白の番/);
+  assert.equal(R.apply({ ...none, board: Object.assign(none.board.slice(), { 4: null }) }, 0).over, true, '両方とも置けなければ終局');
+  // 3〜4人
+  for (const players of [3, 4]) {
+    const w = { ...R.init({ rules: { players, corner: true } }), board: Object.assign(Array(64).fill(null), { 1: 1, 2: players - 1, 3: 0, 20: 1 }), turn: 0 };
+    g = R.apply(w, 0);
+    assert.deepEqual([g.board[1], g.board[2], g.turn, g.again], [0, 0, 0, true], `${players}人でも角に置いたらもう1回`);
+    const near = R.apply(g, [...Array(64).keys()].find((i) => R.apply(g, i) && ![0, 7, 56, 63].includes(i)));
+    assert.equal(near.turn, 1, `${players}人: 続けて置いた手が角でなければ次の人へ`);
+    assert.equal(R.apply({ ...w, bonus: false }, 0).turn, 1, `${players}人: なしなら次の人へ`);
+  }
+  const full = { ...R.init({ rules: { players: 3, corner: true } }), board: Array.from({ length: 64 }, (_, i) => (i === 0 ? null : i < 30 ? 0 : i < 45 ? 1 : 2)), turn: 2 };
+  g = R.apply(full, 0);
+  assert.ok(g.over && !g.again && R.result(g), '3人: 最後の1マスが角なら、そのまま終わり');
+  // CPU どうしで最後まで（人数・盤の大きさ・穴あき盤・四隅封印と一緒に）。同じ人が続けて打つのは、角に置いてもう1回のときかパスだけ。
+  // 同じ手の一覧から同じ局面になる
+  const sizeOfBoard = (st) => Math.round(Math.sqrt(st.board.length));
+  let bonus = 0;
+  for (const rules of [{}, { players: 3 }, { players: 4 }, { size: 6 }, { size: 10 }, { holes: true }, { corners: true }, { players: 3, holes: true }]) {
+    for (let k = 0; k < 3; k++) {
+      const all = { ...rules, corner: true, cpu: ['weak', 'normal', rules.size === 10 ? 'normal' : 'strong'][k] };
+      let st = R.init({ rules: all, seed: 70 + k });
+      const moves = [];
+      while (!R.result(st)) {
+        const m = R.cpu(st, st.turn, all);
+        const next = R.apply(st, m);
+        assert.ok(next, '角でもう1手で CPU が反則を出した ' + JSON.stringify(rules));
+        if (next.again) {
+          bonus++;
+          assert.ok([0, sizeOfBoard(st) - 1, sizeOfBoard(st) * (sizeOfBoard(st) - 1), st.board.length - 1].includes(m) && next.turn === st.turn, 'もう1回は角に置いたときだけ');
+        } else if (!next.over && next.turn === st.turn) assert.ok(st.n === 2 && next.passed !== null, '続けて同じ人はパスのときだけ');
+        moves.push(m);
+        st = next;
+        assert.ok(moves.length <= 100);
+      }
+      if (rules.corners) assert.ok(moves.every((m) => ![0, 7, 56, 63].includes(m)), '四隅封印では角に置けない（もう1回も起きない）');
+      let again = R.init({ rules: all, seed: 70 + k });
+      for (const m of moves) again = R.apply(again, m);
+      assert.equal(JSON.stringify({ ...again, closed: [...(again.closed ?? [])] }), JSON.stringify({ ...st, closed: [...(st.closed ?? [])] }), '同じ手の一覧から同じ局面');
+    }
+  }
+  assert.ok(bonus > 10, '角でもう1手が CPU どうしの対局で起きる ' + bonus);
+  // なしでは、同じ人が続けて打つのはパスのときだけ（今と同じ）
+  for (let k = 0; k < 20; k++) {
+    let st = R.init();
+    while (!R.result(st)) {
+      const c = [...Array(64).keys()].filter((i) => R.apply(st, i));
+      const next = R.apply(st, c[k % c.length]);
+      assert.ok(!next.again && next.missed === null && (next.over || next.turn !== st.turn || next.passed !== null), 'なしでは今と同じ');
+      st = next;
+    }
+  }
+}
 
 // ランダム対局で落ちないこと・必ず終わること
 function randomGame(g, legalOf) {
@@ -1388,6 +1458,71 @@ console.log('hitblow games 100, avg rounds', (hbRounds / 100).toFixed(1));
     for (const p of HB.result(st).winners) assert.equal(st.hist[p].at(-1).g, st.secrets[(p + 1) % n], '勝った人は次の席の人の答えを当てた');
   }
 }
+// 桁数「5桁」（2026-10-07 の16回目）: 3桁・4桁は前と全く同じ・5桁の答えと結果・同じ数字ありなし・CPU どうしで最後まで
+{
+  const { createHash } = await import('node:crypto');
+  const fp = [];
+  for (const digits of [3, 4]) for (const dup of ['off', 'on']) for (const secret of ['same', 'own']) for (let k = 0; k < 100; k++) {
+    const st = HB.init(3, k, { rules: { digits, dup, secret } });
+    fp.push((st.answer ?? '') + ':' + (st.auto ?? []).join(','));
+  }
+  // 5桁を足す前の hitblow.js で取った指紋（seed 0〜99・桁数・同じ数字・答えの組み合わせ全部）
+  assert.equal(createHash('sha256').update(fp.join('|')).digest('hex').slice(0, 16), '15bc3bbdace3438b', '3桁・4桁の答えは5桁を足す前と全く同じ');
+  assert.equal(HB.init(2, 99, { rules: { digits: 6 } }).digits, 4, 'おかしな桁数は4桁');
+  const five = Array.from({ length: 200 }, (_, k) => HB.init(2, k, { rules: { digits: 5 } }).answer);
+  assert.ok(five.every((a) => /^\d{5}$/.test(a) && new Set(a).size === 5), '5桁・同じ数字なし');
+  assert.equal(new Set(five).size > 190, true, '5桁の答えがばらける');
+  const fiveDup = Array.from({ length: 200 }, (_, k) => HB.init(2, k, { rules: { digits: 5, dup: 'on' } }).answer);
+  assert.ok(fiveDup.every((a) => /^\d{5}$/.test(a)) && fiveDup.some((a) => new Set(a).size < 5), '5桁・同じ数字ありでは同じ数字が出る答えもある');
+  // 結果（同時に早当て）
+  s = { ...HB.init(3, 1, { rules: { digits: 5, mode: 'race' } }), answer: '12345' };
+  assert.equal(HB.apply(s, { p: 0, t: 'guess', g: '1234', r: 1 }), null, '5桁では4桁は出せない');
+  assert.equal(HB.apply(s, { p: 0, t: 'guess', g: '123456', r: 1 }), null, '6桁も出せない');
+  assert.equal(HB.apply(s, { p: 0, t: 'guess', g: '11234', r: 1 }), null, '同じ数字なしでは同じ数字は使えない');
+  t = HB.apply(s, { p: 0, t: 'guess', g: '12354', r: 1 });
+  assert.equal(HB.apply(t, { p: 0, t: 'guess', g: '12354', r: 1 }), null, '同じ手が2回届いても2回目は弾く');
+  t = HB.apply(t, { p: 1, t: 'guess', g: '67890', r: 1 });
+  t = HB.apply(t, { p: 2, t: 'guess', g: '54321', r: 1 });
+  assert.deepEqual(t.hist.map((h) => h[0]), [{ g: '12354', hit: 3, blow: 2 }, { g: '67890', hit: 0, blow: 0 }, { g: '54321', hit: 1, blow: 4 }], '5桁の結果');
+  for (const [p, g] of [[0, '12345'], [1, '13245'], [2, '12345']]) t = HB.apply(t, { p, t: 'guess', g, r: 2 });
+  assert.deepEqual(HB.result(t).winners, [0, 2], '5桁を全部ヒットした人の勝ち（同じ回なら同着）');
+  // 同じ数字あり・順番に当てる
+  s = { ...HB.init(2, 1, { rules: { digits: 5, dup: 'on' } }), answer: '11223' };
+  t = HB.apply(s, { p: 0, t: 'guess', g: '11111', r: 1 });
+  assert.deepEqual(t.log[0], { p: 0, g: '11111', hit: 2, blow: 0 }, '同じ数字ありの5桁: 答えにある個数まで');
+  t = HB.apply(t, { p: 1, t: 'guess', g: '32211', r: 2 });
+  assert.deepEqual(t.log[1], { p: 1, g: '32211', hit: 1, blow: 4 });
+  t = HB.apply(t, { p: 0, t: 'guess', g: '11223', r: 3 });
+  assert.deepEqual(HB.result(t).winners, [0]);
+  // 答えを自分で決める: 5桁の答え
+  s = HB.init(2, 4, { rules: { digits: 5, secret: 'own' } });
+  assert.ok(s.auto.every((a) => /^\d{5}$/.test(a) && new Set(a).size === 5), 'CPU の5桁の答え');
+  assert.equal(HB.apply(s, { p: 0, t: 'secret', g: '1234' }), null, '答えも5桁');
+  assert.equal(HB.apply(s, { p: 0, t: 'secret', g: '11234' }), null, '答えも同じ数字なし');
+  assert.ok(HB.apply(s, { p: 0, t: 'secret', g: '13579' }));
+  assert.ok(HB.apply(HB.init(2, 4, { rules: { digits: 5, secret: 'own', dup: 'on' } }), { p: 0, t: 'secret', g: '11111' }), '同じ数字ありなら答えにも使える');
+  // CPU どうしで最後まで（遊び方・同じ数字・答えの組み合わせ全部。CPU が1回に考える時間も測る）
+  let slow = 0;
+  for (let k = 0; k < 24; k++) {
+    const n = 2 + (k % 4);
+    const rules = { digits: 5, mode: k % 2 ? 'race' : 'turn', dup: (k >> 1) % 2 ? 'on' : 'off', secret: (k >> 2) % 2 ? 'own' : 'same' };
+    let st = HB.init(n, k * 17 + 2, { rules });
+    let steps = 0;
+    while (!HB.result(st)) {
+      const ps = Array.from({ length: n }, (_, p) => p).filter((p) => HB.canAct(st, p));
+      const p = ps[Math.floor(Math.random() * ps.length)];
+      const t0 = performance.now();
+      const m = HB.cpu(st, p);
+      slow = Math.max(slow, performance.now() - t0);
+      const next = HB.apply(st, { ...m, p });
+      assert.ok(next, '5桁で CPU が反則の手を出した ' + JSON.stringify(rules));
+      st = next;
+      if (++steps > 3000) throw new Error('5桁のヒット＆ブローが終わらない ' + JSON.stringify(rules));
+    }
+    for (const p of HB.result(st).winners) assert.equal(st.hist[p].at(-1).hit, 5, '勝った人は5ヒット');
+  }
+  console.log('hitblow 5 digits: CPU slowest move', slow.toFixed(0), 'ms');
+}
 
 // ---------- 戦争（指の遊び） ----------
 const SS = GAMES.sensou;
@@ -2065,6 +2200,75 @@ for (const level of ['easy', 'hard', 'expert', 'mix']) {
     performance.now = realNow;
   }
 }
+// 詳細設定「問題の数」（2026-10-07 の16回目）: 10・15・20問。10問は前と全く同じ・同じ問題は出ない・選んだ数で終わる
+{
+  const { createHash } = await import('node:crypto');
+  const { choicesOf } = await import('../app/js/games/kanji.js');
+  for (const extra of [{}, { rounds: 10 }]) {
+    const fp = [];
+    for (const level of ['easy', 'hard', 'expert', 'mix']) for (const choice of [false, true]) for (let k = 0; k < 100; k++) {
+      const st = KJ.init(3, k, { rules: { level, choice, ...extra } });
+      fp.push(st.qs.map(([w]) => w).join(',') + (st.opts ? st.opts.flat().join(',') : ''));
+    }
+    // 「問題の数」を足す前の kanji.js で取った指紋（seed 0〜99・難しさ4つ・答え方2つの問題と4つの読み）
+    assert.equal(createHash('sha256').update(fp.join('|')).digest('hex').slice(0, 16), '503492210e95d4be', '10問は前と全く同じ問題 ' + JSON.stringify(extra));
+  }
+  for (const level of ['easy', 'hard', 'expert']) assert.ok(KANJI[level].length >= 20, 'どの難しさも20問出せる: ' + level);
+  assert.equal(KJ.init(2, 3, { rules: { rounds: 12 } }).qs.length, 10, 'おかしな数は10問');
+  assert.equal(KJ.init(2, 3, { rules: { rounds: '15' } }).qs.length, 10, '文字の15は使わない（詳細設定の値は数）');
+  for (const rounds of [15, 20]) for (const level of ['easy', 'hard', 'expert', 'mix']) for (const choice of [false, true]) {
+    for (let k = 0; k < 10; k++) {
+      const seed = k * 271 + 5;
+      const st = KJ.init(3, seed, { rules: { level, choice, rounds } });
+      assert.equal(st.qs.length, rounds, `${rounds}問`);
+      assert.equal(new Set(st.qs.map(([w]) => w)).size, rounds, '同じ問題は出ない');
+      assert.deepEqual(st.qs.slice(0, 10), KJ.init(3, seed, { rules: { level, choice } }).qs, '始めの10問は10問のときと同じ');
+      if (choice) st.qs.forEach((x, i) => assert.deepEqual(st.opts[i], choicesOf(seed, i, x), '4つの読みも全部の問題にある'));
+      else assert.equal(st.opts, undefined);
+    }
+  }
+  // 選んだ数で終わる（進行役の手だけで進める）
+  for (const rounds of [10, 15, 20]) {
+    let st = KJ.init(2, 11, { rules: { rounds } });
+    let qs = 0;
+    while (!KJ.result(st)) {
+      st = ref(KJ, st, 'next');
+      if (KJ.result(st)) break;
+      qs += 1;
+      assert.equal(KJ.phaseText(st), `第${qs}問 / ${rounds}`);
+      st = ref(KJ, st, 'close');
+    }
+    assert.equal(qs, rounds, `${rounds}問で終わる`);
+  }
+  // CPU どうしで最後まで（20問・打ち込む／15問・4つから選ぶ・ぜんぶまぜる）
+  const realNow = performance.now;
+  let clock = 2e9;
+  performance.now = () => clock;
+  try {
+    for (const [rounds, choice, level, seed] of [[20, false, 'easy', 9401], [15, true, 'mix', 9502]]) {
+      let st = KJ.init(4, seed, { rules: { rounds, choice, level, time: '15' } });
+      let opened = 0, openedAt = clock;
+      for (let guard = 0; guard < 8000 && !KJ.result(st); guard++) {
+        if (st.phase === 'open') {
+          for (let p = 0; p < 4; p++) {
+            const m = KJ.cpu(st, p);
+            if (m) { st = KJ.apply(st, { ...m, p }); assert.ok(st, 'CPU の手が通る'); }
+          }
+        }
+        const rf = KJ.referee(st);
+        clock += 250;
+        if (st.phase === 'open' && rf.key === 'open' + st.q && clock - openedAt < rf.ms) continue;
+        st = KJ.apply(st, { p: -1, ...rf.move });
+        if (st.phase === 'open') { openedAt = clock; opened += 1; }
+      }
+      assert.ok(KJ.result(st), `CPU どうしで ${rounds}問 最後まで`);
+      assert.equal(opened, rounds, `${rounds}問 出た`);
+      assert.ok(st.scores.some((v) => v > 0), 'CPU も点を取る');
+    }
+  } finally {
+    performance.now = realNow;
+  }
+}
 
 // ---------- ぴったりストップ ----------
 const PZ = GAMES.pittari;
@@ -2092,6 +2296,54 @@ assert.deepEqual(s.scores, [1, 3, 3], '前後どちらにずれても、近い�
 for (let i = 1; i < 5; i++) s = ref(PZ, ref(PZ, s, 'next'), 'close');
 s = ref(PZ, s, 'next');
 assert.ok(PZ.result(s), '5回で終わる');
+// 詳細設定「回数」（2026-10-07 の16回目）: 5・10回。5回は前と全く同じ秒数・10回の始めの5回も同じ・選んだ数で終わる
+{
+  const { createHash } = await import('node:crypto');
+  for (const extra of [{}, { rounds: 5 }]) {
+    const fp = [];
+    for (const fixed of [false, true]) for (let k = 0; k < 100; k++) fp.push(PZ.init(2, k, { rules: { fixed, ...extra } }).targets.join(','));
+    // 「回数」を足す前の pittari.js で取った指紋（seed 0〜99・いつも10秒のあり・なし）
+    assert.equal(createHash('sha256').update(fp.join('|')).digest('hex').slice(0, 16), 'bc240c5e5df654dd', '5回は前と全く同じ秒数 ' + JSON.stringify(extra));
+  }
+  assert.equal(PZ.init(2, 1, { rules: { rounds: 7 } }).targets.length, 5, 'おかしな回数は5回');
+  for (let k = 0; k < 50; k++) {
+    const st = PZ.init(2, k, { rules: { rounds: 10 } });
+    assert.ok(st.targets.length === 10 && st.targets.every((x) => Number.isInteger(x) && x >= 5 && x <= 15), '10回・秒数は5〜15');
+    assert.deepEqual(st.targets.slice(0, 5), PZ.init(2, k, { rules: {} }).targets, '始めの5回は5回のときと同じ秒数');
+  }
+  assert.ok(PZ.init(2, 1, { rules: { fixed: true, rounds: 10 } }).targets.every((x) => x === 10), '10回でもいつも10秒');
+  assert.ok(new Set(PZ.init(2, 3, { rules: { rounds: 10 } }).targets).size > 1, '10回でも秒数は変わる');
+  // CPU どうしで最後まで（時計をずらして進める。進行役の手は referee のとおり）
+  const realNow = performance.now;
+  let clock = 3e9;
+  performance.now = () => clock;
+  try {
+    for (const [rounds, seed] of [[5, 7701], [10, 7802]]) {
+      let st = PZ.init(3, seed, { rules: { rounds } });
+      let opened = 0, waitFrom = clock;
+      for (let guard = 0; guard < 20000 && !PZ.result(st); guard++) {
+        if (st.phase === 'open') {
+          for (let p = 0; p < 3; p++) {
+            const m = PZ.cpu(st, p);
+            if (m) { st = PZ.apply(st, { ...m, p }); assert.ok(st, 'CPU の手が通る'); }
+          }
+        }
+        const rf = PZ.referee(st);
+        clock += 100;
+        if (clock - waitFrom < rf.ms) continue;
+        st = ref(PZ, st, rf.move.t);
+        waitFrom = clock;
+        if (st.phase === 'open') opened += 1;
+      }
+      assert.ok(PZ.result(st), `CPU どうしで ${rounds}回 最後まで`);
+      assert.equal(opened, rounds, `${rounds}回 止めた`);
+      assert.ok(st.scores.every((v) => v > 0), '全員押しているので点が入る');
+      assert.equal(st.scores.reduce((a, b) => a + b, 0) >= rounds * 6, true, '毎回 3・2・1点（同じずれなら多め）');
+    }
+  } finally {
+    performance.now = realNow;
+  }
+}
 console.log('pittari OK');
 
 // ---------- タイピング早打ち ----------

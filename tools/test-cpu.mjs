@@ -66,12 +66,13 @@ const TV = { ...T, id: 'tictactoe-vanish', init: () => T.init({ rules: { size: '
 const TG = { ...T, id: 'tictactoe-gobble', init: () => T.init({ rules: { size: 'gobble' } }) };
 const CP = { ...C, id: 'connect4-pop', init: () => C.init({ rules: { pop: 'on' } }) };
 const RS = { ...R, id: 'reversi-corners', init: () => R.init({ rules: { corners: true } }) }; // 四隅封印
+const RC = { ...R, id: 'reversi-corner', init: () => R.init({ rules: { corner: true } }) }; // 角でもう1手
 s = TV.init();
 for (const m of [0, 3, 1, 4]) s = TV.apply(s, m); // ○ が 0・1、× が 3・4。○ の番
 for (let k = 0; k < 10; k++) assert.equal(TV.cpu(s, 0, lv('strong')), 2, '消えるマルバツ: 勝てる手があれば打つ');
 
 // 強い方が勝ち越す
-for (const [g, n] of [[C, 20], [R, 12], [RS, 12], [TS, 12], [TV, 20], [CP, 12], [TG, 20]]) {
+for (const [g, n] of [[C, 20], [R, 12], [RS, 12], [RC, 12], [TS, 12], [TV, 20], [CP, 12], [TG, 20]]) {
   const sw = tally(g, 'strong', 'weak', n);
   const nw = tally(g, 'normal', 'weak', n);
   results[g.id] = { strongVsWeak: sw, normalVsWeak: nw };
@@ -140,7 +141,7 @@ for (const [g, n] of [[C, 20], [R, 12], [RS, 12], [TS, 12], [TV, 20], [CP, 12], 
     assert.ok(strongWins / G > 1.5 / n, `${n}人コネクトフォー: つよいが よわい より多く勝つ ${strongWins}/${G}`);
   }
 }
-// 3〜4人のリバーシ: 隅を取る・次の人に隅を渡さない・つよい1人が よわい2人より多く勝つ
+// 3〜4人のリバーシ: 隅を取る・次の人に隅を渡さない・つよい1人が よわい2人より多く勝つ（角でもう1手でも）
 {
   const base = R.init({ rules: { players: 3 } });
   const at = (o) => ({ ...base, board: Object.assign(Array(64).fill(null), o), turn: 0 });
@@ -150,26 +151,28 @@ for (const [g, n] of [[C, 20], [R, 12], [RS, 12], [TS, 12], [TV, 20], [CP, 12], 
   // 置いた後の石の点数だけなら 43 を選ぶが、43 に置くと次の白が隅を取れるようになる局面（機械で探した）
   w = at({ 11: 0, 20: 0, 21: 1, 27: 0, 28: 2, 29: 1, 35: 2, 36: 1, 37: 1, 42: 2, 44: 2, 45: 0, 49: 2 });
   for (let k = 0; k < 20; k++) assert.notEqual(R.cpu(w, 0, lv('strong')), 43, '3人リバーシ: 次の人に隅を渡さない');
-  for (const n of [3, 4]) {
+  // 角でもう1手では、つよいの勝ちが 3人 7割ほど・4人 5割強（隅の値打ちが上がるので差が広がる）
+  for (const [n, corner] of [[3, false], [4, false], [3, true], [4, true]]) {
     const G = 150;
+    const id = 'reversi-' + n + (corner ? '-corner' : '');
     let strongWins = 0;
     for (let g = 0; g < G; g++) {
       const seat = g % n;
-      let x = R.init({ rules: { players: n } });
+      let x = R.init({ rules: { players: n, corner } });
       let guard = 0;
       while (!R.result(x)) {
         const t0 = performance.now();
-        const m = R.cpu(x, x.turn, { players: n, cpu: x.turn === seat ? 'strong' : 'weak' });
+        const m = R.cpu(x, x.turn, { players: n, corner, cpu: x.turn === seat ? 'strong' : 'weak' });
         const ms = performance.now() - t0;
-        if (ms > slowest.ms) slowest = { ms, id: 'reversi-' + n };
+        if (ms > slowest.ms) slowest = { ms, id };
         x = R.apply(x, m);
-        assert.ok(x, n + '人リバーシ: 反則を出さない');
+        assert.ok(x, id + ': 反則を出さない');
         assert.ok(++guard <= 64);
       }
       if (R.result(x).winner === seat) strongWins++;
     }
-    results['reversi-' + n] = { strongWinRate: Math.round(strongWins / G * 100) + '%' };
-    assert.ok(strongWins / G > 1.5 / n, `${n}人リバーシ: つよいが よわい より多く勝つ ${strongWins}/${G}`);
+    results[id] = { strongWinRate: Math.round(strongWins / G * 100) + '%' };
+    assert.ok(strongWins / G > 1.5 / n, `${id}: つよいが よわい より多く勝つ ${strongWins}/${G}`);
   }
 }
 

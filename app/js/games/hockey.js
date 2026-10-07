@@ -13,6 +13,10 @@
 // ゴールの広さ（2026-10-06 の9回目。Claude が出した案から本人が推奨どおり選んだ）: 詳細設定（同じ画面は始める前の設定）で
 //   せまい・ふつう（最初。前と同じ）・ひろい。ゴールの幅（GOAL・GOAL3）に倍率（GOAL_SIZES）を掛ける。全員のゴールが同じ幅。
 //   CPU の狙いのずれと守る範囲もゴールの幅に合わせる（台を作る table に幅を渡す）。
+// じゃまブロック（2026-10-07 の16回目。Claude が出した案のおすすめをそのまま作った）: 詳細設定（同じ画面は始める前の設定）で なし（最初）・あり。
+//   Claude の判断: 2人は真ん中の線の上に角の丸い横長のブロック、3人は真ん中に丸いブロック（大きさは BLOCK2・BLOCK3）。
+//   パックは壁と同じように跳ね返り、マレットはブロックに入れない（押し出されて回り込む）。CPU はまっすぐ打つとブロックに当たるときだけ横へずらす（aimPast）。
+//   ブロックは台（table）が持つので、オンラインのパックの持ち主の作りは変わらない（どの端末も同じ台で計算する）。
 // Claude の判断: 2人の盤は縦長（幅1・高さ1.6）。マレット（打つ道具）は自分の陣地から出られない（2人は半分、3人は中心から見た扇形）。
 //   ゴールされた側から打ち始める。最初は赤（席0）から。
 //
@@ -58,6 +62,22 @@ export const GOAL_SIZES = {
 };
 const goalKeyOf = (k) => (Object.hasOwn(GOAL_SIZES, k) ? k : 'normal');
 const PAD = 0.03; // 縁の線を描く余白
+// じゃまブロック（詳細設定 block）。線分 a〜b のまわり r の所までがブロック（角の丸い横長の形。a と b が同じなら丸）。
+// Claude の判断: 2人は真ん中の線の上に、横 0.18（ふつうのゴールの幅 0.36 の半分）・縦 0.07。両側の道は 0.41 ずつで、パック（直径 0.084）が楽に通れる。
+//   3人は真ん中に半径 0.07（マレットと同じ大きさ）の丸。パックの置き場所（中心から 0.3）とは重ならない。
+//   どちらもゴールの広さによらず同じ大きさ（せまいゴールでも、柱やゴールの前には届かない）。
+export const BLOCK2 = { ax: W / 2 - 0.055, ay: H / 2, bx: W / 2 + 0.055, by: H / 2, r: 0.035 };
+export const BLOCK3 = { ax: 0, ay: 0, bx: 0, by: 0, r: 0.07 };
+// ブロックの線分の上で、点 (x, y) にいちばん近い所
+function nearOnBlock(b, x, y) {
+  const dx = b.bx - b.ax;
+  const dy = b.by - b.ay;
+  const l2 = dx * dx + dy * dy;
+  const t = l2 ? Math.min(1, Math.max(0, ((x - b.ax) * dx + (y - b.ay) * dy) / l2)) : 0;
+  return { x: b.ax + dx * t, y: b.ay + dy * t };
+}
+// ブロックの線分から点までの距離（自動確認でも使う）
+export const blockDist = (b, x, y) => { const c = nearOnBlock(b, x, y); return Math.hypot(x - c.x, y - c.y); };
 
 export const CPU_LEVELS = {
   weak: { name: 'よわい', speed: 1.4, react: 0.32, err: 0.14 },
@@ -80,14 +100,16 @@ export function clampMallet(p, x, y) {
   };
 }
 
-function moveMallet(m, p, target, maxV, dt, clamp = clampMallet) {
+// keep（じゃまブロックがあるときだけ）: 動いた先がブロックに入っていたら押し出す（ブロックを回り込んで動く）
+export function moveMallet(m, p, target, maxV, dt, clamp = clampMallet, keep = null) {
   const t = clamp(p, target.x, target.y);
   const dx = t.x - m.x;
   const dy = t.y - m.y;
   const d = Math.hypot(dx, dy);
   const step = Math.min(d, maxV * dt);
-  const nx = d > 0 ? m.x + (dx / d) * step : m.x;
-  const ny = d > 0 ? m.y + (dy / d) * step : m.y;
+  let nx = d > 0 ? m.x + (dx / d) * step : m.x;
+  let ny = d > 0 ? m.y + (dy / d) * step : m.y;
+  if (keep) ({ x: nx, y: ny } = keep(p, nx, ny));
   m.vx = (nx - m.x) / dt;
   m.vy = (ny - m.y) / dt;
   m.x = nx;
@@ -107,6 +129,23 @@ function bounceCircle(puck, cx, cy, rad, vx = 0, vy = 0, e = E_HIT) {
   const vn = (puck.vx - vx) * nx + (puck.vy - vy) * ny;
   if (vn < 0) { puck.vx -= (1 + e) * vn * nx; puck.vy -= (1 + e) * vn * ny; }
   return vn < 0 ? -vn : 0;
+}
+
+// じゃまブロックでパックを跳ね返す（壁と同じ跳ね返り方）。当たった強さを返す（効果音用）。
+// パックが1歩で進むのは最高速度でも 3.4 / 240 ≒ 0.014 で、ブロックの厚み（パックの中心が入れない幅）より十分小さいので抜けない
+function bounceBlock(puck, b) {
+  const c = nearOnBlock(b, puck.x, puck.y);
+  return bounceCircle(puck, c.x, c.y, R_P + b.r, 0, 0, E_WALL);
+}
+// 点 (x, y) を、ブロックから rad 以上離れた所へ押し出す（マレットをブロックに入れない）
+function pushOut(b, x, y, rad) {
+  const c = nearOnBlock(b, x, y);
+  const dx = x - c.x;
+  const dy = y - c.y;
+  const d = Math.hypot(dx, dy);
+  if (d >= rad) return { x, y };
+  if (d === 0) return { x, y: y + rad }; // ちょうど線の上（陣地の外なので起きない）
+  return { x: c.x + (dx / d) * rad, y: c.y + (dy / d) * rad };
 }
 
 function friction(puck, dt) {
@@ -143,13 +182,14 @@ export function bouncePucks(a, b, e = E_HIT) {
 
 // パックを dt 秒進める。ゴールに入ったら点を取った側（0 / 1）を返す。mallets は当たりを見るマレット。
 // ev（任意）を渡すと、マレットに当たった強さ（ev.hit）と壁に当たった強さ（ev.wall）のいちばん大きいものを書き込む（効果音用）。
-// goal = ゴールの幅（ゴールの広さの設定で変わる）
-export function stepPuck(puck, mallets, dt, ev = null, goal = GOAL) {
+// goal = ゴールの幅（ゴールの広さの設定で変わる）。block = じゃまブロック（なしなら null）
+export function stepPuck(puck, mallets, dt, ev = null, goal = GOAL, block = null) {
   friction(puck, dt);
-  // マレットに押されて壁へめり込むことがあるので、マレットの当たりを先に、壁を後に見る
+  // マレットに押されて壁へめり込むことがあるので、マレットの当たりを先に、壁（とじゃまブロック）を後に見る
   let hit = 0;
   let wall = 0;
   for (const m of mallets) hit = Math.max(hit, bounceCircle(puck, m.x, m.y, R_P + R_M, m.vx, m.vy));
+  if (block) wall = Math.max(wall, bounceBlock(puck, block));
   if (puck.x < R_P) { wall = Math.max(wall, -puck.vx); puck.x = R_P; puck.vx = Math.abs(puck.vx) * E_WALL; }
   if (puck.x > W - R_P) { wall = Math.max(wall, puck.vx); puck.x = W - R_P; puck.vx = -Math.abs(puck.vx) * E_WALL; }
   const mouth = Math.abs(puck.x - W / 2) < goal / 2;
@@ -171,15 +211,36 @@ function bumpSound(ev) {
 
 /* ---------- CPU（2人の上側・プレイヤー1） ---------- */
 
+// パックから狙う所 (gx, gy) への向き（長さはそのまま）。じゃまブロックがその線の上にあれば、
+// ブロックの横（パックとすれ違うだけの余裕を足した所）を通る向きに変える（「少し横にずらして狙う」くらい。壁で跳ねて入ることもある）
+function aimPast(puck, gx, gy, block) {
+  const dx = gx - puck.x;
+  const dy = gy - puck.y;
+  if (!block) return [dx, dy];
+  const l = Math.hypot(dx, dy) || 1;
+  const ux = dx / l;
+  const uy = dy / l;
+  const cx = (block.ax + block.bx) / 2;
+  const cy = (block.ay + block.by) / 2;
+  const along = (cx - puck.x) * ux + (cy - puck.y) * uy; // ブロックの中心まで、打つ向きにどれだけ先か
+  if (along < 0.12 || along > l) return [dx, dy]; // ブロックが後ろ・すぐ前（くっついている）・ゴールより先
+  const side = (cx - puck.x) * -uy + (cy - puck.y) * ux; // ブロックの中心が打つ線のどちら側にどれだけ離れているか
+  const half = Math.abs(((block.bx - block.ax) / 2) * -uy + ((block.by - block.ay) / 2) * ux);
+  const room = half + block.r + R_P + 0.02;
+  if (Math.abs(side) >= room) return [dx, dy];
+  const k = side > 0 ? -1 : 1; // ブロックの中心と反対の側を通る
+  return [cx + k * -uy * room - puck.x, cy + k * ux * room - puck.y];
+}
+
 // 打ち返せそうなら相手のゴールへ向けて打ち込み、相手の陣地にあるときはゴールの前で構える。
-// 強さは、動く速さ・判断の間隔（反応の遅さ）・狙いのずれで変える。goal = ゴールの幅（狙う広さと、守る範囲に使う）
-export function cpuTarget(puck, m, lv, rnd, goal = GOAL) {
+// 強さは、動く速さ・判断の間隔（反応の遅さ）・狙いのずれで変える。goal = ゴールの幅（狙う広さと、守る範囲に使う）。
+// block = じゃまブロック（あれば、まっすぐ打つとブロックに当たるときだけ、ブロックの横を通るようにずらして打つ）
+export function cpuTarget(puck, m, lv, rnd, goal = GOAL, block = null) {
   const defY = 0.2;
   if (puck.y < H / 2 + R_P) {
     if (puck.y < m.y - 0.01) return { x: W / 2 + (puck.x - W / 2) * 0.5, y: R_M + 0.01 }; // パックが後ろにある → 下がって回り込む
     const gx = W / 2 + (rnd() - 0.5) * goal * (1 + lv.err * 6);
-    const ax = gx - puck.x;
-    const ay = H - puck.y;
+    const [ax, ay] = aimPast(puck, gx, H, block);
     const al = Math.hypot(ax, ay);
     return { x: puck.x + (ax / al) * 0.15 + (rnd() - 0.5) * lv.err, y: puck.y + (ay / al) * 0.15 };
   }
@@ -243,12 +304,13 @@ export function clampHex(p, x, y) {
   return q;
 }
 
-// パックを dt 秒進める。ゴールに入ったら、入れられた席（0〜2）を返す。goal = ゴールの幅
-export function stepHex(puck, mallets, dt, ev = null, goal = GOAL3) {
+// パックを dt 秒進める。ゴールに入ったら、入れられた席（0〜2）を返す。goal = ゴールの幅。block = じゃまブロック（なしなら null）
+export function stepHex(puck, mallets, dt, ev = null, goal = GOAL3, block = null) {
   friction(puck, dt);
   let hit = 0;
   let wall = 0;
   for (const m of mallets) hit = Math.max(hit, bounceCircle(puck, m.x, m.y, R_P + R_M, m.vx, m.vy));
+  if (block) wall = Math.max(wall, bounceBlock(puck, block));
   for (const e of EDGES) {
     const d = puck.x * e.u.x + puck.y * e.u.y; // 中心から外向きの距離
     if (e.goal >= 0 && Math.abs(-puck.x * e.u.y + puck.y * e.u.x) < goal / 2) { // ゴールの口の前
@@ -275,7 +337,7 @@ const rot = (o, deg) => {
   const s = Math.sin((deg * Math.PI) / 180);
   return { x: o.x * c - o.y * s, y: o.x * s + o.y * c };
 };
-export function cpuHex(p, puck, m, lv, rnd, mallets, goal = GOAL3) {
+export function cpuHex(p, puck, m, lv, rnd, mallets, goal = GOAL3, block = null) {
   const back = (o) => rot(o, 120 * p);
   const q = rot(puck, -120 * p);
   const v = rot({ x: puck.vx, y: puck.vy }, -120 * p);
@@ -293,8 +355,7 @@ export function cpuHex(p, puck, m, lv, rnd, mallets, goal = GOAL3) {
     const off = (rnd() - 0.5) * goal * (1 + lv.err * 6);
     const gx = u.x * HEX_A - u.y * off;
     const gy = u.y * HEX_A + u.x * off;
-    const ax = gx - puck.x;
-    const ay = gy - puck.y;
+    const [ax, ay] = aimPast(puck, gx, gy, block);
     const al = Math.hypot(ax, ay) || 1;
     const e = (rnd() - 0.5) * lv.err;
     return { x: puck.x + (ax / al) * 0.15 + e, y: puck.y + (ay / al) * 0.15 + e };
@@ -307,29 +368,36 @@ export function cpuHex(p, puck, m, lv, rnd, mallets, goal = GOAL3) {
 
 /* ---------- 台（盤の形ごとの関数の組） ---------- */
 
-// 台を作る。n = 人数（2: 長方形、3: 六角形）、goalKey = ゴールの広さ（GOAL_SIZES の鍵）。goal = この台のゴールの幅
-function table(n, goalKey = 'normal') {
+// 台を作る。n = 人数（2: 長方形、3: 六角形）、goalKey = ゴールの広さ（GOAL_SIZES の鍵）、block = じゃまブロックを置くか。
+// goal = この台のゴールの幅。block = じゃまブロック（なしなら null）。keep = マレットが動いた先をブロックの外へ押し出す（なしなら null）。
+// じゃまブロックなしの台は、前と全く同じ関数の組になる（自動確認で同じ動きになることを見ている）
+export function table(n, goalKey = 'normal', block = false) {
   const mul = GOAL_SIZES[goalKeyOf(goalKey)].mul;
+  const blk = block ? (n === 3 ? BLOCK3 : BLOCK2) : null;
+  // マレットの動ける範囲（ブロックがあれば、ブロックから R_M 離れた所までに押し出す）
+  const fence = (base) => (blk ? (p, x, y) => { const q = base(p, x, y); return pushOut(blk, q.x, q.y, R_M + blk.r); } : base);
   if (n === 3) {
     const goal = GOAL3 * mul;
+    const clamp = fence(clampHex);
     return {
-      n: 3, w: 2 * (HEX_R + PAD), h: 2 * (HEX_A + PAD), goal,
-      step: (puck, ms, dt, ev) => stepHex(puck, ms, dt, ev, goal),
-      clamp: clampHex, zone: zoneHex, serve: serveHex, home: homeHex,
-      cpu: (p, puck, m, lv, rnd, ms) => cpuHex(p, puck, m, lv, rnd, ms, goal),
+      n: 3, w: 2 * (HEX_R + PAD), h: 2 * (HEX_A + PAD), goal, block: blk, keep: blk ? clamp : null,
+      step: (puck, ms, dt, ev) => stepHex(puck, ms, dt, ev, goal, blk),
+      clamp, zone: zoneHex, serve: serveHex, home: homeHex,
+      cpu: (p, puck, m, lv, rnd, ms) => cpuHex(p, puck, m, lv, rnd, ms, goal, blk),
     };
   }
   const goal = GOAL * mul;
+  const clamp = fence(clampMallet);
   return {
-    n: 2, w: W, h: H, goal,
-    step(puck, ms, dt, ev) { const g = stepPuck(puck, ms, dt, ev, goal); return g === null ? null : 1 - g; },
-    clamp: clampMallet,
+    n: 2, w: W, h: H, goal, block: blk, keep: blk ? clamp : null,
+    step(puck, ms, dt, ev) { const g = stepPuck(puck, ms, dt, ev, goal, blk); return g === null ? null : 1 - g; },
+    clamp,
     zone: (q) => (q.y > H / 2 ? 0 : 1),
     serve: servePuck,
     home: homeMallet,
     cpu(p, puck, m, lv, rnd) {
-      if (p === 1) return cpuTarget(puck, m, lv, rnd, goal);
-      const t = cpuTarget(flipO(puck), flipO(m), lv, rnd, goal);
+      if (p === 1) return cpuTarget(puck, m, lv, rnd, goal, blk);
+      const t = cpuTarget(flipO(puck), flipO(m), lv, rnd, goal, blk); // ブロックは盤の真ん中にあるので、上下を入れ替えても同じ
       return { x: W - t.x, y: H - t.y };
     },
   };
@@ -381,6 +449,20 @@ function drawPieces(ctx, P, s, st) {
     ctx.arc(x, y, R_P * s, 0, Math.PI * 2);
     ctx.fill();
   }
+}
+
+// じゃまブロック（角の丸い横長の形か丸）。縁と同じ色で塗る
+function drawBlock(ctx, P, s, b) {
+  if (!b) return;
+  const [ax, ay] = P(b.ax, b.ay);
+  const [bx, by] = P(b.bx, b.by);
+  const a = Math.atan2(by - ay, bx - ax);
+  ctx.fillStyle = '#5b7f99';
+  ctx.beginPath();
+  ctx.arc(bx, by, b.r * s, a - Math.PI / 2, a + Math.PI / 2);
+  ctx.arc(ax, ay, b.r * s, a + Math.PI / 2, a + (Math.PI * 3) / 2);
+  ctx.closePath();
+  ctx.fill();
 }
 
 function drawBanner(ctx, text, s, cx, cy, rotate) {
@@ -435,13 +517,14 @@ function drawRect(ctx, view, st, P, opts) {
     ctx.fillText(String(st.score[p]), 0, 0);
     ctx.restore();
   }
+  drawBlock(ctx, P, s, opts.block);
   drawPieces(ctx, P, s, st);
   if (st.banner) {
     for (const [cy, rot] of opts.rotateTop ? [[h * 0.3, true], [h * 0.7, false]] : [[h / 2, false]]) drawBanner(ctx, st.banner, s, w / 2, cy, rot);
   }
 }
 
-function drawHex(ctx, view, st, P, goal) {
+function drawHex(ctx, view, st, P, goal, block) {
   const { s, w, h } = view;
   ctx.clearRect(0, 0, w, h);
   const corners = [0, 1, 2, 3, 4, 5].map((k) => { const v = dir(60 * k); return P(v.x * HEX_R, v.y * HEX_R); });
@@ -498,6 +581,7 @@ function drawHex(ctx, view, st, P, goal) {
     ctx.fillText(String(st.score[p]), x, y);
   }
   ctx.globalAlpha = 1;
+  drawBlock(ctx, P, s, block);
   drawPieces(ctx, P, s, st);
   if (st.banner) drawBanner(ctx, st.banner, s, w / 2, h / 2, false);
 }
@@ -548,7 +632,8 @@ function mount(root, opts) {
   root.append(panel, canvas); // 設定・もう一回は盤の上（盤の下だとスマホで見落とすため）
   let n = online && Number(opts.rules?.players) === 3 ? 3 : 2;
   let goalKey = online ? goalKeyOf(opts.rules?.goal) : 'normal'; // ゴールの広さ
-  let T = table(n, goalKey);
+  let blockOn = online && opts.rules?.block === 'on'; // じゃまブロック
+  let T = table(n, goalKey, blockOn);
   let pucks = online && Number(opts.rules?.pucks) === 2 ? 2 : 1; // パックの数
   const view = { s: 1, w: 1, h: 1 };
   // 盤の座標 ↔ 画面の座標。自分は常に画面の下側（2人: オンラインの青は上下逆さ。3人: 自分のゴールが下に来るように回す）
@@ -692,7 +777,7 @@ function mount(root, opts) {
     return PLAYERS[p];
   };
   const goalText = () => (n === 2 ? `${target}点先取` : `${target}点取られたら終わり`) + (pucks === 2 ? '・パック2つ' : '')
-    + (goalKey !== 'normal' ? `・ゴール${GOAL_SIZES[goalKey].name}` : '');
+    + (goalKey !== 'normal' ? `・ゴール${GOAL_SIZES[goalKey].name}` : '') + (blockOn ? '・じゃまブロック' : '');
   // 決着したときの盤の上の文（画面に描くので色の名前を使う）
   function overBanner() {
     const me = perspective();
@@ -746,7 +831,7 @@ function mount(root, opts) {
     const ev = { hit: 0, wall: 0 };
     for (let i = 0; i < steps; i++) {
       const h = dt / steps;
-      for (let p = 0; p < n; p++) moveMallet(st.mallets[p], p, targets[p], bots.includes(p) ? level.speed : MALLET_V, h, T.clamp);
+      for (let p = 0; p < n; p++) moveMallet(st.mallets[p], p, targets[p], bots.includes(p) ? level.speed : MALLET_V, h, T.clamp, T.keep);
       if (!playing || st.pause > 0) continue;
       bumpPucks(ev); // パックどうしを先に、壁を後に見る（押し離したパックが壁へめり込まないように）
       for (let k = 0; k < st.pucks.length && playing; k++) {
@@ -782,6 +867,10 @@ function mount(root, opts) {
     const rowG = el('label', 'hk-row');
     rowG.append(el('span', '', 'ゴールの広さ'), gk);
     box.append(rowG);
+    const bk = selectEl([['off', 'なし'], ['on', 'あり']], prefs.block === 'on' ? 'on' : 'off');
+    const rowB = el('label', 'hk-row');
+    rowB.append(el('span', '', 'じゃまブロック'), bk);
+    box.append(rowB);
     let lv;
     if (opts.mode === 'cpu') {
       lv = selectEl(Object.entries(CPU_LEVELS).map(([k, v]) => [k, v.name]), CPU_LEVELS[prefs.level] ? prefs.level : 'weak');
@@ -795,7 +884,8 @@ function mount(root, opts) {
     const showPlayers = () => {
       n = pl && Number(pl.value) === 3 ? 3 : 2;
       goalKey = goalKeyOf(gk.value);
-      T = table(n, goalKey);
+      blockOn = bk.value === 'on';
+      T = table(n, goalKey, blockOn);
       pucks = Number(pk.value) === 2 ? 2 : 1;
       resetState();
       ptsLabel.textContent = n === 3 ? '何点取られたら終わり' : '何点先取';
@@ -809,10 +899,11 @@ function mount(root, opts) {
     if (pl) pl.onchange = showPlayers;
     pk.onchange = showPlayers;
     gk.onchange = showPlayers; // ゴールの幅もその場で盤に描いて見せる
+    bk.onchange = showPlayers; // じゃまブロックも
     box.append(btn('始める', 'primary', () => {
       target = Number(pts.value);
       if (lv) level = CPU_LEVELS[lv.value];
-      savePrefs({ points: target, level: lv?.value ?? prefs.level, players: pl ? n : prefs.players, pucks, goal: goalKey });
+      savePrefs({ points: target, level: lv?.value ?? prefs.level, players: pl ? n : prefs.players, pucks, goal: goalKey, block: blockOn ? 'on' : 'off' });
       startLocal();
     }));
     panel.append(box);
@@ -985,7 +1076,7 @@ function mount(root, opts) {
     for (let s = 0; s < steps; s++) {
       const h = dt / steps;
       // ほかの端末のマレットは届いた位置へなめらかに
-      for (let p = 0; p < n; p++) moveMallet(st.mallets[p], p, targets[p], !dv.includes(p) ? MALLET_V * 2 : bots.includes(p) ? level.speed : MALLET_V, h, T.clamp);
+      for (let p = 0; p < n; p++) moveMallet(st.mallets[p], p, targets[p], !dv.includes(p) ? MALLET_V * 2 : bots.includes(p) ? level.speed : MALLET_V, h, T.clamp, T.keep);
       if (!net.started || st.over || st.pause > 0) continue;
       // パックどうしは、両方ともこの端末が動かしているときだけぶつける（片方がほかの端末のときは、すり抜ける）。壁より先に見る
       bumpPucks(ev, st.pucks.map((_, i) => i).filter((i) => dv.includes(net.owners[i])));
@@ -1043,8 +1134,8 @@ function mount(root, opts) {
   function frame(now) {
     if (!alive) return;
     tick(now);
-    if (n === 2) drawRect(ctx, view, st, toScreen, { rotateTop: opts.mode === 'two', flip, goal: T.goal });
-    else drawHex(ctx, view, st, toScreen, T.goal);
+    if (n === 2) drawRect(ctx, view, st, toScreen, { rotateTop: opts.mode === 'two', flip, goal: T.goal, block: T.block });
+    else drawHex(ctx, view, st, toScreen, T.goal, T.block);
     raf = requestAnimationFrame(frame);
   }
   // 画面が隠れて描き替えが止まっても（ほかのアプリへ切り替えたときなど）、オンラインでは位置のやり取りを続ける
@@ -1090,6 +1181,7 @@ export default {
     { key: 'players', label: '人数', desc: '3人は六角形の盤で、人が足りなければ CPU が入る', def: 2, choices: [[2, '2人'], [3, '3人']] },
     { key: 'points', label: '何点で終わり', desc: '2人は先にこの点を取った方の勝ち。3人は誰かがこの数だけ入れられたら終わりで、失点の少ない人の勝ち', def: 7, choices: POINTS.map((p) => [p, `${p}点`]) },
     { key: 'goal', label: 'ゴールの広さ', desc: 'ひろいほど点が入りやすく、1試合が短くなる（全員のゴールが同じ広さ）', def: 'normal', choices: Object.entries(GOAL_SIZES).map(([k, v]) => [k, v.name]) },
+    { key: 'block', label: 'じゃまブロック', desc: '盤の真ん中に、パックが跳ね返る動かないブロックを置く', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'pucks', label: 'パック', desc: '2つにすると、2つのパックで同時に打ち合う（パックどうしもぶつかる。ゴールしても止まらずに続く）', def: 1, choices: [[1, '1つ'], [2, '2つ']] },
     { key: 'level', label: 'CPU の強さ', desc: '3人で CPU が入るとき', def: 'weak', choices: Object.entries(CPU_LEVELS).map(([k, v]) => [k, v.name]) },
   ],

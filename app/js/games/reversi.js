@@ -9,6 +9,11 @@
 //   Claude の判断: 穴は 6×6 で2つ・8×8 で4つ・10×10 で6つ。盤の真ん中を中心に点対称に置く（先手と後手で不公平にならないように）。
 //   隅と、真ん中の 4×4 には置かない（始めの形と隅の取り合いは残す）。穴はいつも空きなので、はさむ線もそこで止まる（四隅封印と同じ）。
 //   人数・盤の大きさ・四隅封印と一緒に使える。
+// 詳細設定「角でもう1手」（2026-10-07 の16回目の案。最初はなし）: 四隅のどれかに置いたら、同じ人が続けてもう1回置く（また角ならさらにもう1回）。
+//   Claude の判断: 続けて置く番に置ける所が無ければ、ふつうに次の人へ（パスと同じ。2人で両方とも置けなければ終局）。
+//   3〜4人の「置ける所」はいつもと同じ（はさめなければ石のとなり）なので、盤が埋まっていなければ続けて置ける。
+//   手の一覧の形は今のまま。turn が同じ人を続けて返すだけ。人数・盤の大きさ・穴あき盤と一緒に使える（四隅封印では角に置けないので効かない）。
+//   CPU は今の点の付け方のまま（隅の点が高いので、自然に角を取りに行く）。
 
 import { CPU_SETTING, boardCpu, mulberry32 } from './util.js';
 
@@ -138,6 +143,9 @@ function score(s, p) {
   return v + (legalMoves(s.board, p, s.closed).length - legalMoves(s.board, 1 - p, s.closed).length) * 3;
 }
 
+// 角でもう1手（詳細設定）で、この手が続けてもう1回置ける手か（角に置いたか）。置ける所があるかは呼ぶ側で見る
+const cornerBonus = (s, m) => !!s.bonus && isCorner(sizeOf(s.board), m);
+
 function count(board, n = 2) {
   const c = Array(n).fill(0);
   for (const v of board) if (v !== null) c[v]++;
@@ -198,6 +206,7 @@ export default {
     },
     { key: 'corners', label: '四隅封印', desc: '四隅に石を置けない。「隅を取れば強い」が使えなくなる', def: false },
     { key: 'holes', label: '穴あき盤', desc: '石を置けないマス（穴）が数か所ある。置き場所は毎回変わる（先手と後手で同じ条件になるよう、点対称に置く）', def: false },
+    { key: 'corner', label: '角でもう1手', desc: '角に置いたら、続けてもう1回置ける（四隅封印と一緒では、角に置けないので効かない）', def: false },
     CPU_SETTING,
   ],
 
@@ -221,7 +230,7 @@ export default {
       board[(h - 1) * N + h] = 0; board[h * N + h - 1] = 0;
     }
     const holes = rules.holes ? makeHoles(N, seed) : [];
-    return { n, board, shut: !!rules.corners, holes, closed: closedOf(N, !!rules.corners, holes), turn: 0, last: null, flipped: [], passed: null, over: false };
+    return { n, board, shut: !!rules.corners, holes, closed: closedOf(N, !!rules.corners, holes), turn: 0, last: null, flipped: [], passed: null, over: false, bonus: !!rules.corner, again: false, missed: null };
   },
 
   turn(s) { return s.turn; },
@@ -234,7 +243,10 @@ export default {
       const board = s.board.slice();
       board[m] = s.turn;
       for (const i of flips) board[i] = s.turn;
-      return { ...s, board, turn: (s.turn + 1) % s.n, last: m, flipped: flips, over: board.every((v, i) => v !== null || s.closed?.has(i)) };
+      const over = board.every((v, i) => v !== null || s.closed?.has(i));
+      // 角でもう1手: 3〜4人は盤が埋まっていなければ必ず置ける所がある（はさめなければ石のとなり）
+      const again = !over && cornerBonus(s, m);
+      return { ...s, board, turn: again ? s.turn : (s.turn + 1) % s.n, last: m, flipped: flips, over, again, missed: null };
     }
     const flips = flipsFor(s.board, s.turn, m, s.closed);
     if (!flips.length) return null;
@@ -245,10 +257,15 @@ export default {
     let turn = next;
     let passed = null;
     let over = false;
-    if (!legalMoves(board, next, s.closed).length) {
+    let again = false;
+    let missed = null; // 角を取ったが、続けて置ける所が無かった人
+    if (cornerBonus(s, m)) {
+      if (legalMoves(board, s.turn, s.closed).length) { turn = s.turn; again = true; } else missed = s.turn;
+    }
+    if (!again && !legalMoves(board, next, s.closed).length) {
       if (legalMoves(board, s.turn, s.closed).length) { turn = s.turn; passed = next; } else over = true;
     }
-    return { ...s, board, turn, last: m, flipped: flips, passed, over };
+    return { ...s, board, turn, last: m, flipped: flips, passed, over, again, missed };
   },
 
   result(s) {
@@ -267,11 +284,14 @@ export default {
     if (s.n > 2) {
       const c = count(s.board, s.n);
       let html = '<span class="rv-score">' + c.map((v, p) => `<span class="rv-mini p${p}"></span>${this.players[p]} ${v}`).join('　') + '</span>';
+      if (s.again && !s.over) html += `<br>${this.players[s.turn]}は角を取ったので、もう1回！`;
       if (!s.over && !legalMoves(s.board, s.turn, s.closed).length) html += `<br>${this.players[s.turn]}ははさめる所がないので、石のとなりならどこにでも置けます`;
       return html;
     }
     const [b, w] = count(s.board);
     let html = `<span class="rv-score"><span class="rv-mini p0"></span>黒 ${b}　−　${w} 白<span class="rv-mini p1"></span></span>`;
+    if (s.again && !s.over) html += `<br>${this.players[s.turn]}は角を取ったので、もう1回！`;
+    if (s.missed != null && !s.over) html += `<br>${this.players[s.missed]}は角を取りましたが、続けて置ける場所がないので${this.players[s.turn]}の番です`;
     if (s.passed !== null && !s.over) html += `<br>${this.players[s.passed]}は置ける場所がないのでパスです`;
     return html;
   },
