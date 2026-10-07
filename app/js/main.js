@@ -64,7 +64,7 @@ function myName() {
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -306,7 +306,45 @@ function voteSelect() {
   return label;
 }
 // 待合室の下に出す、準備OK と投票の欄（ゲストはボタンと投票の一覧、ホストは数だけ）
+/* ---------- 部屋の名前（2026-10-07 本人の決定）: ホストが部屋に名前を付け、部屋の欄・招待の小窓に出す ---------- */
+// Claude の判断: 16文字まで。外から来た文字なので、出すときは textContent か esc() を通す。state の roomName で送る。空なら出さない。
+// 付けるのはホストの待合室だけ（ゲストには部屋の欄に出る）。
+const cleanRoomName = (t) => String(t ?? '').replace(/\s+/g, ' ').trim().slice(0, 16);
+function roomNamePanel() {
+  if (S.mode !== 'online' || !S.isHost) return null;
+  const label = document.createElement('label');
+  label.className = 'lobby-roomname';
+  const text = document.createElement('span');
+  text.textContent = '🏷 部屋の名前';
+  const input = document.createElement('input');
+  input.maxLength = 16;
+  input.placeholder = '例: 〇〇家の対戦部屋';
+  input.value = S.roomName ?? '';
+  input.onchange = () => {
+    S.roomName = cleanRoomName(input.value);
+    saveRoom();
+    sendState();
+    render();
+  };
+  label.append(text, input);
+  return label;
+}
+
+/* ---------- いまのルール（2026-10-07 本人の決定）: 「？遊び方」の下に、詳細設定で最初と変えたルールの一覧を出す ---------- */
+// Claude の判断: 対局中も見られるように「？遊び方」の欄の下に足す（上の段にボタンを増やすとスマホ幅で入りきらないため）。
+// 最初の設定と同じものは出さない。人数・CPU の強さ・盤の大きさなども、最初と違えば出す（何で遊んでいるか分かるように）。
+function changedRules(game) {
+  const cur = rulesOf(game.id, S?.rules);
+  return (game.settings ?? []).filter((x) => cur[x.key] !== x.def).map((x) => {
+    const v = cur[x.key];
+    const name = x.choices ? (x.choices.find(([c]) => c === v)?.[1] ?? String(v)) : v ? 'あり' : 'なし';
+    return `${x.label}: ${name}`;
+  });
+}
+
 function appendLobbyExtras(board) {
+  const nm = roomNamePanel();
+  if (nm) board.append(nm);
   const r = readyLine();
   if (r) board.append(r);
   const v = voteLine();
@@ -728,6 +766,8 @@ function renderRoomBar() {
   if (!S || S.mode !== 'online') { bar.hidden = true; return; }
   bar.hidden = false;
   el('room-code').textContent = S.code;
+  el('room-name').textContent = S.roomName ? '🏷 ' + S.roomName : '';
+  el('room-name').hidden = !S.roomName;
 
   const others = S.members.filter((id) => id !== S.myId);
   const lost = others.filter((id) => !alive(id)).length;
@@ -870,10 +910,20 @@ function renderHowto(game) {
   const box = el('howto');
   btn.hidden = !game?.howto;
   if (!game?.howto) { box.hidden = true; howtoFor = null; return; }
-  if (howtoFor !== game.id) {
-    howtoFor = game.id;
-    box.hidden = true;
-    box.replaceChildren(...game.howto.map((t) => { const p = document.createElement('p'); p.textContent = t; return p; }));
+  const changed = changedRules(game);
+  const key = game.id + '\n' + changed.join('\n');
+  if (howtoFor !== key) {
+    if (howtoFor?.split('\n')[0] !== game.id) box.hidden = true; // ゲームが変わったら閉じる（ルールが変わっただけなら開いたまま）
+    howtoFor = key;
+    const lines = game.howto.map((t) => { const p = document.createElement('p'); p.textContent = t; return p; });
+    const rules = document.createElement('div');
+    rules.className = 'howto-rules';
+    const head = document.createElement('b');
+    head.textContent = '📋 いまのルール';
+    const body = document.createElement('span');
+    body.textContent = changed.length ? `（最初と変えたもの）${changed.join('・')}` : '（詳細設定は最初のまま）';
+    rules.append(head, ' ', body);
+    box.replaceChildren(...lines, ...(game.settings?.length ? [rules] : [])); // 詳細設定の無いゲームには出さない
   }
   btn.setAttribute('aria-expanded', String(!box.hidden));
 }
@@ -1731,7 +1781,7 @@ function invite() {
   pop.setAttribute('aria-modal', 'true');
   pop.setAttribute('aria-label', '友だちを招待する');
   pop.innerHTML = `<div class="invite-box">
-    <div class="invite-title">友だちを招待する</div>
+    <div class="invite-title">友だちを招待する</div>${S.roomName ? `<div class="invite-room">🏷 ${esc(S.roomName)}</div>` : ''}
     <div class="invite-qr" aria-live="polite"><span class="invite-wait">QR コードを作っています…</span></div>
     <p class="invite-note">そばにいる友だちは、スマホのカメラでこの QR コードを読み取ると入れます。</p>
     <div class="invite-code">部屋コード <strong>${esc(S.code)}</strong></div>
@@ -1775,7 +1825,7 @@ function openNet() {
 function send(msg, qos) { S?.net?.send(msg, qos); }
 function sendState() {
   const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, undo, streak, beg } = S;
-  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {} });
+  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {}, roomName: S.roomName ?? '' });
 }
 function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves, u: S.undo ?? 0 }); }
 function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner, mark: myMark() }); }
@@ -1902,6 +1952,7 @@ function adoptState(msg) {
     : null;
   S.tally = msg.tally && Number.isInteger(msg.tally.games) && msg.tally.wins && typeof msg.tally.wins === 'object' ? msg.tally : null;
   S.stay = msg.stay === true;
+  S.roomName = cleanRoomName(msg.roomName);
   S.marks = msg.marks && typeof msg.marks === 'object' ? Object.fromEntries(Object.entries(msg.marks).filter(([id, m]) => typeof id === 'string' && MARKS.includes(m) && m)) : {};
   const tm = msg.timer;
   S.timer = tm && typeof tm.key === 'string' && Number.isFinite(tm.start) && (tm.end === null || Number.isFinite(tm.end)) ? { key: tm.key, start: tm.start, end: tm.end } : null;

@@ -1523,3 +1523,11 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .invite-code strong { letter-spacing: .12em; font-size: 1.2rem; }
 .invite-actions { display: flex; gap: 8px; margin-top: 14px; }
 .invite-actions .btn { flex: 1; }
+
+/* 部屋の名前・いまのルール */
+.room-name { flex-basis: 100%; font-weight: 700; overflow-wrap: anywhere; }
+.lobby-roomname { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 10px; font-size: .9rem; }
+.lobby-roomname input { flex: 1 1 180px; min-width: 0; font: inherit; padding: 6px 10px; border: 1.5px solid var(--line); border-radius: 8px; background: #fff; }
+.invite-room { font-weight: 700; margin: -4px 0 8px; overflow-wrap: anywhere; }
+.howto-rules { margin: 8px 0 2px; padding-top: 6px; border-top: 1px dashed var(--line); font-size: .85rem; }
+.howto-rules span { color: var(--muted); }
