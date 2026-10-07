@@ -2901,6 +2901,48 @@ for (let g = 0; g < 30; g++) {
   assert.ok(used >= 10, 'CPU もジョーカーを使う');
   console.log('sevens joker uses', used);
 }
+// パスは出せないときだけ（詳細設定）
+{
+  const { playable } = await import('../app/js/games/sevens.js');
+  const f = SV.init(4, 7, { rules: { forced: true } });
+  assert.ok(f.forced && !SV.init(4, 7, {}).forced, '最初は なし');
+  const p = f.turn;
+  assert.ok(playable(f, p).length > 0);
+  assert.equal(SV.apply(f, { p, t: 'pass' }), null, 'ありでは出せる札があるときのパスは反則');
+  assert.ok(SV.apply(SV.init(4, 7, {}), { p, t: 'pass' }), 'なしでは出せる札があってもパスできる');
+  // 出せる札が無い局面を作る（p の手札を場から離れた札だけにする）
+  const lone = { ...f, hands: f.hands.map((h, q) => (q === p ? h.filter((c) => !SV.canPlace(f, c)) : h)) };
+  assert.ok(lone.hands[p].length > 0 && !playable(lone, p).length);
+  let t = lone;
+  for (let k = 0; k < 3; k++) {
+    t = SV.apply(t, { p, t: 'pass' });
+    assert.ok(t && t.passes[p] === k + 1 && !t.outs.includes(p), '出せないときのパスは通って回数に数える');
+    t = { ...t, turn: p };
+  }
+  t = SV.apply(t, { p, t: 'pass' });
+  assert.ok(t.outs.includes(p), 'ありでも回数を超えたら失格');
+  // ジョーカーを置ける所があれば、ジョーカーだけでもパスできない
+  const jk = { ...lone, joker: true, hands: lone.hands.map((h, q) => (q === p ? [...h, 'JK'] : h)) };
+  assert.ok(playable(jk, p).includes('JK'));
+  assert.equal(SV.apply(jk, { p, t: 'pass' }), null, 'ジョーカーを置けるときもパスは反則');
+  // CPU どうしで最後まで（トンネル・ジョーカー・パスの回数と一緒に）。わざとのパスはしない
+  for (let g = 0; g < 40; g++) {
+    const n = 3 + (g % 4);
+    let st = SV.init(n, 900 + g, { rules: { forced: true, joker: g % 2 === 0, tunnel: g % 3 === 0, passes: g % 4 ? 3 : 5 } });
+    let guard = 0;
+    while (!SV.result(st)) {
+      const can = playable(st, st.turn).length;
+      const m = SV.cpu(st, st.turn);
+      if (can) assert.notEqual(m.t, 'pass', 'ありでは CPU は出せる札があればパスしない');
+      st = SV.apply(st, { p: st.turn, ...m });
+      assert.ok(st, '七並べ（パスは出せないときだけ）の CPU が反則を出した');
+      assert.ok(++guard < 600);
+    }
+    const onField = Object.values(st.field).filter((v) => v !== 'joker').length;
+    assert.equal(onField + st.hands.reduce((a, h) => a + h.filter((c) => c !== 'JK').length, 0), 52, '札の数が崩れない（パスは出せないときだけ）');
+    assert.equal(new Set(SV.result(st).ranking).size, n, '全員に順位（パスは出せないときだけ）');
+  }
+}
 console.log('sevens OK');
 
 // ---------- マンカラ ----------
@@ -3105,6 +3147,61 @@ assert.deepEqual(OE.result(oe).winners, [2]);
   const h0 = OE.init(3, 41, { rules: { time: 60, hint: 'on' } });
   const g = { p: 1, t: 'guess', n: 0, text: OE.topic(h0)[0] };
   assert.deepEqual(OE.apply(h0, g).scores, OE.apply(OE.init(3, 41, { rules: { time: 60 } }), g).scores, 'ヒントで点は変わらない');
+}
+// お題を選ぶ（2026-10-07 の12回目）
+{
+  const { mulberry32: mb, shuffle: sh } = await import('../app/js/games/util.js');
+  // なしでは今と同じ（お題の並び・局面の形）
+  for (let seed = 0; seed < 50; seed++) {
+    const a = OE.init(5, seed, { rules: { pick: 'off' } });
+    assert.deepEqual(a, OE.init(5, seed), 'なしは前と同じ局面');
+    assert.deepEqual(a.topics, sh(TOPICS.map((_, i) => i), mb(seed)).slice(0, 5), 'なしのお題の並びは前と同じ');
+    assert.equal(a.phase, 'draw');
+  }
+  // 2つのお題は重ならず、ほかの回とも重ならない。同じ種なら同じ
+  for (let seed = 0; seed < 50; seed++) {
+    const a = OE.init(10, seed, { rules: { pick: 'on' } });
+    assert.deepEqual(a, OE.init(10, seed, { rules: { pick: 'on' } }), '同じ種なら同じお題');
+    assert.equal(new Set(a.opts.flat()).size, 20, '2つのお題が重ならない・ほかの回とも重ならない');
+    assert.ok(a.opts.flat().every((i) => Number.isInteger(i) && TOPICS[i]));
+  }
+  const p0 = OE.init(3, 41, { rules: { pick: 'on', time: 60 } });
+  assert.equal(p0.phase, 'choose', 'ありでは選ぶところから');
+  assert.equal(OE.topic(p0), null, '選ぶまではお題が決まっていない');
+  assert.deepEqual([OE.canAct(p0, 0), OE.canAct(p0, 1), OE.canAct(p0, 2)], [true, false, false], '選ぶ間は描く人だけ');
+  const ch = { p: 0, t: 'choose', k: 0, i: 1 };
+  assert.equal(OE.apply(p0, { ...ch, p: 1 }), null, '描く人しか選べない');
+  assert.equal(OE.apply(p0, { ...ch, i: 2 }), null, '3つ目は無い');
+  assert.equal(OE.apply(p0, { p: 0, t: 'line', k: 0, g: 0, c: 0, w: 1, d: encode([[10, 10], [20, 20]]) }), null, '選ぶ前は線を描けない');
+  assert.equal(OE.apply(p0, { p: 0, t: 'giveup', k: 0 }), null, '選ぶ前はあきらめられない');
+  assert.equal(OE.apply(p0, { p: 1, t: 'guess', n: 0, text: TOPICS[p0.opts[0][0]][0] }), null, '選ぶ前は答えられない');
+  assert.equal(OE.apply(p0, { p: -1, t: 'end', turn: 0 }), null, '選ぶ間に描く時間の締め切りは来ない');
+  assert.deepEqual(OE.referee(p0), { key: 'choose:0', ms: 10000, move: { t: 'choose', turn: 0 } }, '選ぶ時間は10秒');
+  let q = OE.apply(p0, ch);
+  assert.deepEqual([q.phase, q.topics[0], OE.topic(q)], ['draw', p0.opts[0][1], TOPICS[p0.opts[0][1]]], '選んだお題で描き始める');
+  assert.equal(OE.referee(q).key, 'draw:0', '描く時間は選んだあとから');
+  assert.equal(OE.apply(q, ch), null, '2回目の選ぶ手は反則');
+  assert.equal(OE.apply(q, { ...ch, k: 1 }), null, '描いている間は選べない');
+  assert.equal(OE.apply(q, { p: -1, t: 'choose', turn: 0 }), null, '選んだあとの時間切れは弾く');
+  q = OE.apply(q, { p: 0, t: 'line', k: 1, g: 1, c: 0, w: 1, d: encode([[10, 10], [20, 20]]) });
+  assert.equal(q.strokes.length, 1, '選んだあとは描ける');
+  q = OE.apply(q, { p: 1, t: 'guess', n: 0, text: TOPICS[p0.opts[0][1]][0] });
+  assert.deepEqual([q.correct, q.scores], [[1], [3, 10, 0]], '選んだお題で答え合わせ・点は今と同じ');
+  // 時間切れは1つ目
+  const tq = OE.apply(p0, { p: -1, t: 'choose', turn: 0 });
+  assert.deepEqual([tq.phase, tq.topics[0]], ['draw', p0.opts[0][0]], '時間切れで1つ目に決まる');
+  assert.equal(OE.apply(p0, { p: -1, t: 'choose', turn: 1 }), null, 'ほかの回の時間切れは弾く');
+  assert.equal(OE.cpu(p0, 0), null, '部屋を出た描く人は選ばない（10秒で1つ目に決まる）');
+  // 次の人も選ぶところから。終わりまで進めて、選んだお題が記録に残る
+  q = OE.apply(OE.apply(tq, { p: 0, t: 'giveup', k: 0 }), { p: -1, t: 'next', turn: 0 });
+  assert.deepEqual([q.turn, q.phase], [1, 'choose'], '次の人も選ぶところから');
+  q = OE.apply(q, { p: 1, t: 'choose', k: 0, i: 0 });
+  q = OE.apply(OE.apply(q, { p: -1, t: 'end', turn: 1 }), { p: -1, t: 'next', turn: 1 });
+  q = OE.apply(OE.apply(q, { p: -1, t: 'choose', turn: 2 }), { p: -1, t: 'end', turn: 2 });
+  q = OE.apply(q, { p: -1, t: 'next', turn: 2 });
+  assert.ok(OE.result(q));
+  assert.deepEqual(q.history.map((h) => h.topic), [p0.opts[0][0], p0.opts[1][0], p0.opts[2][0]], '選んだお題が記録に残る');
+  assert.equal(new Set(q.history.map((h) => h.topic)).size, 3, '同じ対局で同じお題は出ない');
 }
 console.log('oekaki OK');
 
@@ -3389,6 +3486,73 @@ assert.ok(sonarUsed >= 40, 'CPU もソナーを使う: ' + sonarUsed);
       assert.ok(st, '8×8 で CPU が反則を出した');
       assert.ok(++guard < 140);
     }
+  }
+}
+// 船をくっつけない（詳細設定。2026-10-07 の12回目）
+{
+  const KM = await import('../app/js/games/kaisen.js');
+  const setting = KS.settings.find((x) => x.key === 'apart');
+  assert.deepEqual([setting.def, setting.choices.map((c) => c[0])], ['off', ['off', 'on']], '船をくっつけないは なし が最初');
+  assert.equal(KS.init().apart, false, '最初は船がとなり合ってもよい');
+  // となり合っているか（ななめも含める）を盤から数える
+  const touch = (g, n) => g.some((k, i) => k >= 0 && [-1, 0, 1].some((dr) => [-1, 0, 1].some((dc) => {
+    const r = Math.floor(i / n) + dr;
+    const c = (i % n) + dc;
+    return r >= 0 && r < n && c >= 0 && c < n && g[r * n + c] >= 0 && g[r * n + c] !== k;
+  })));
+  const side = [[0, 0, false], [1, 0, false], ...fleet.slice(2)]; // 5マスと4マスが上下にとなり
+  const diag = [[0, 0, false], [1, 5, false], ...fleet.slice(2)]; // 5マスの右はし (0,4) と4マスの左はし (1,5) がななめ
+  const end = [[0, 0, false], [0, 5, false], ...fleet.slice(2)]; // 5マスのすぐ右に4マス（よこにつながる）
+  const gap = [[0, 0, false], [1, 6, false], ...fleet.slice(2)]; // ななめに1マスあける
+  assert.ok(KM.layout(fleet, 10, true), 'くっつけない: 1段ずつあければ置ける');
+  for (const [f, what] of [[side, '上下のとなり'], [diag, 'ななめのとなり'], [end, 'よこのとなり']]) {
+    assert.ok(KM.layout(f), 'なしでは' + what + 'でも置ける');
+    assert.equal(KM.layout(f, 10, true), null, 'くっつけない: ' + what + 'は反則');
+  }
+  assert.ok(KM.layout(gap, 10, true), 'くっつけない: ななめでも1マスあければ置ける');
+  assert.ok(KM.layout([[0, 0, false], [0, 6, false], ...fleet.slice(2)], 10, true), 'くっつけない: よこに1マスあければ置ける');
+  let sa = KS.init({ rules: { apart: 'on' } });
+  assert.equal(sa.apart, true, 'ありにできる');
+  assert.equal(KS.apply(sa, { t: 'place', ships: diag }), null, 'くっつけない: ななめにとなる並べ方は反則');
+  assert.equal(KS.apply(KS.apply(sa, { t: 'place', ships: fleet }), { t: 'place', ships: side }), null, 'くっつけない: 後手の並べ方も確かめる');
+  sa = KS.apply(KS.apply(sa, { t: 'place', ships: fleet }), { t: 'place', ships: gap });
+  assert.deepEqual([sa.phase, sa.turn], ['fire', 0], 'くっつけない: 守った並べ方なら撃ち合いに進む');
+  assert.ok(KS.apply(KS.apply(KS.init(), { t: 'place', ships: side }), { t: 'place', ships: diag }), 'なしではとなり合う並べ方も通る（今と同じ）');
+  // 8×8 も
+  const fleet8 = [[0, 0, false], [2, 0, false], [4, 0, false], [6, 0, true]];
+  assert.ok(KM.layout(fleet8, 8, true), 'くっつけない 8×8: 1段ずつあければ置ける');
+  assert.equal(KM.layout([[0, 0, false], [1, 4, false], ...fleet8.slice(2)], 8, true), null, 'くっつけない 8×8: ななめのとなりは反則');
+  assert.equal(KS.apply(KS.init({ rules: { size: 8, apart: 'on' } }), { t: 'place', ships: [[0, 0, false], [1, 0, false], ...fleet8.slice(2)] }), null, 'くっつけない 8×8: 上下のとなりは反則');
+  // おまかせは必ず決まりを守る（2つの広さ）。なしのときは今と同じで、となり合う並べ方も出る
+  for (const n of [10, 8]) {
+    let touched = 0;
+    for (let k = 0; k < 200; k++) {
+      const r = KM.randomShips(n, true);
+      const g = KM.layout(r, n, true);
+      assert.ok(g && !touch(g, n), `くっつけない ${n}×${n}: おまかせは必ず決まりを守る`);
+      if (touch(KM.layout(KM.randomShips(n), n), n)) touched++;
+    }
+    assert.ok(touched > 0, `なし ${n}×${n}: おまかせはとなり合う並べ方も出す（今と同じ）`);
+  }
+  // CPU どうしで最後まで（2つの広さ・ソナー・当たったらもう一度も）。沈めた船のまわりは撃たない
+  for (let g = 0; g < 36; g++) {
+    const n = g % 2 ? 8 : 10;
+    let st = KS.init({ rules: { apart: 'on', size: n, sonar: g % 4 >= 2 ? 'on' : 'off', again: g % 8 >= 4 ? 'on' : 'off' } });
+    let guard = 0;
+    while (!KS.result(st)) {
+      const p = st.turn;
+      const m = KS.cpu(st, p, { cpu: ['weak', 'normal', 'strong'][g % 3] });
+      if (st.phase === 'fire' && Number.isInteger(m)) {
+        const opp = st.grid[1 - p];
+        const sunkCells = opp.map((k, i) => i).filter((i) => opp[i] >= 0 && opp.every((k2, j) => k2 !== opp[i] || st.shots[p][j]));
+        const near = sunkCells.some((i) => Math.abs(Math.floor(i / n) - Math.floor(m / n)) <= 1 && Math.abs((i % n) - (m % n)) <= 1);
+        assert.ok(!near, 'くっつけない: CPU は沈めた船のまわりを撃たない');
+      }
+      st = KS.apply(st, m);
+      assert.ok(st, 'くっつけないで CPU が反則を出した');
+      assert.ok(++guard < 220);
+    }
+    assert.ok(!touch(st.grid[0], n) && !touch(st.grid[1], n), 'くっつけない: CPU の並べ方も決まりを守る');
   }
 }
 console.log('kaisen OK');

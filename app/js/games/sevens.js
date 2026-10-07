@@ -1,5 +1,6 @@
 // 七並べ。3〜6人。トランプ52枚（ジョーカーなし）を全部配り、7の札は最初に全部場に並べる。♦7 を持っていた人から始める。
-// 自分の番に、場の札のとなり（同じマークで数字が1つ違う所）に1枚出すか、パスする。出せる札があってもパスしてよい。
+// 自分の番に、場の札のとなり（同じマークで数字が1つ違う所）に1枚出すか、パスする。出せる札があってもパスしてよい
+// （詳細設定「パスは出せないときだけ」があり（最初はなし）なら、出せる札があるときのパスは反則。下の forced）。
 // パスは詳細設定の回数まで（最初は3回）。それを超えてパスしたら失格で、その人の手札は全部場に並べる（2026-10-05 本人承認）。
 // 手札を早くなくした順に順位が付き、失格した人は最後（あとで失格した人ほど上）。
 // トンネル（詳細設定・最初はなし）: K と A をつながっているものとみなす（K が出ていれば A を、A が出ていれば K を出せる）。
@@ -8,6 +9,8 @@
 //   その本物の札を持っている人は、次の自分の番に必ずその札を出し（パスもほかの札も出せない）、ジョーカーを受け取る。
 //   作り（Claude の判断）: 自分が持っている札の場所には置けない。ジョーカーが最後の1枚なら置いて上がってよい。失格した人のジョーカーは場に並べず捨てる。
 //   置いたジョーカーは field[置いた所] = 'joker'、出さなければいけない人は jk = { at: 置いた所, owner }。
+// パスは出せないときだけ（詳細設定・最初はなし。2026-10-07 本人承認）: playable（出せる札。置ける所があるときのジョーカーも入る）が
+//   1枚でもあればパスできない。出せないときのパスは今までどおり回数に数え、超えたら失格。局面の forced。
 // 手: { p, t: 'play', c: 札 } / { p, t: 'play', c: 'JK', at: 置く所 } / { p, t: 'pass' }
 
 import { mulberry32, shuffle } from './util.js';
@@ -60,6 +63,7 @@ export default {
   settings: [
     { key: 'passes', label: 'パスできる回数', desc: 'これを超えてパスすると失格（手札は全部場に並べる）', def: 3, choices: [[3, '3回'], [5, '5回']] },
     { key: 'tunnel', label: 'トンネル', desc: 'K と A をつながっているとみなす（K が出ていれば A を、A が出ていれば K を出せる）', def: false },
+    { key: 'forced', label: 'パスは出せないときだけ', desc: '出せる札があるときはパスできない（止める作戦が使えなくなる）', def: false, choices: [[false, 'なし'], [true, 'あり']] },
     { key: 'joker', label: 'ジョーカー', desc: '1枚入れる。出せる所に本物の札の代わりに置ける。その札を持っている人は、次の番に必ずその札を出してジョーカーを受け取る', def: false },
   ],
 
@@ -76,7 +80,7 @@ export default {
       hands[p] = h.filter((x) => rankOf(x) !== 7).sort((a, b) => ORDER(a) - ORDER(b));
     });
     const s = {
-      n, maxPass: rules.passes === 5 ? 5 : 3, tunnel: rules.tunnel === true, joker, jk: null,
+      n, maxPass: rules.passes === 5 ? 5 : 3, tunnel: rules.tunnel === true, joker, jk: null, forced: rules.forced === true,
       hands, field, turn, passes: Array(n).fill(0), done: [], outs: [], last: null, step: 0,
     };
     // 7 しか持っていなかった人は配った時点で上がり
@@ -132,6 +136,7 @@ export default {
       s.last = { t: 'play', p, c: m.c };
       if (!s.hands[p].length) { s.done.push(p); s.last.up = true; }
     } else if (m.t === 'pass') {
+      if (s0.forced && playable(s0, p).length) return null;
       s.passes[p] += 1;
       if (s.passes[p] > s.maxPass) {
         for (const c of s.hands[p]) if (c !== JOKER) s.field[c] = 'out';
@@ -149,7 +154,7 @@ export default {
   },
 
   // CPU: 出せる札があればたいてい出す。自分が続きの札を持っているマークを優先し、持っていない所を開けるのは後回し。
-  // 手札が多くパスに余裕があるときは、相手を助けるだけの札しか無ければ ときどきパスする。2割は適当に出して弱めている
+  // 手札が多くパスに余裕があるときは、相手を助けるだけの札しか無ければ ときどきパスする（「パスは出せないときだけ」ではしない）。2割は適当に出して弱めている
   cpu(s, p) {
     const hand = s.hands[p];
     if (s.jk && s.jk.owner === p) return { t: 'play', c: s.jk.at };
@@ -177,7 +182,8 @@ export default {
     const scored = ok.map((c) => ({ c, v: follow(c) * 2 + (rankOf(c) === 1 || rankOf(c) === 13 ? 3 : 0) + Math.random() }));
     scored.sort((a, b) => b.v - a.v);
     const left = s.maxPass - s.passes[p];
-    if (scored[0].v < 1 && left >= 2 && hand.length > 4 && Math.random() < 0.35) return { t: 'pass' };
+    // 「パスは出せないときだけ」では、わざとのパスはしない（反則になるため）
+    if (!s.forced && scored[0].v < 1 && left >= 2 && hand.length > 4 && Math.random() < 0.35) return { t: 'pass' };
     return { t: 'play', c: scored[0].c };
   },
 
@@ -300,6 +306,13 @@ export default {
         b.type = 'button';
         b.className = 'btn secondary';
         b.textContent = left > 0 ? `パス（あと${left}回）` : 'パス（失格になります）';
+        // 「パスは出せないときだけ」で出せる札があるときは押せない
+        if (s.forced && can.length) {
+          b.disabled = true;
+          b.style.opacity = '.45';
+          b.style.cursor = 'default';
+          b.textContent = 'パス（出せる札があるのでできない）';
+        }
         b.onclick = () => { if (left > 0 || confirm('パスすると失格になり、手札を全部場に並べます。よろしいですか？')) o.onMove({ t: 'pass' }); };
         act.append(b);
         root.append(act);

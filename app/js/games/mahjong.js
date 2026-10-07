@@ -17,6 +17,8 @@
 //   チーは上家からだけ・ノーテン罰符3000点・136枚で王牌14枚。
 // 詳細設定（2026-10-06 本人の決定）: 「赤ドラ」なしでは赤い五も普通の五として描き、ドラに数えない。「喰いタン」なしでは鳴いた手（暗槓だけは鳴いていない扱い）の断幺九を付けない。
 //   どちらも最初は「あり」。喰いタンなしは mahjong-engine.js を変えずに、ここで候補からタンヤオを外して一番高い形を選び直す（noKuitanBest）。
+// 詳細設定「待ち牌の表示」（2026-10-07 本人の決定。最初は「なし」）: 聴牌している間、自分の手牌の上の段に待ちの牌（フリテンなら「フリテン」も）を出す。
+//   自分の番で切る前は、選んだ牌を切ったときの待ちを出す（Claude の判断）。見せるだけで、手の一覧・apply は変えない（waitView・waitsEl）。
 // Claude の判断: 暗槓への国士無双のロンは作らない（ごくまれなため）。抜いた北へのロンはできる（槍槓は付かない）。
 //   リーチ中で和了れない・カンできないときは1秒で自動でツモ切りする。局の結果は全員が「次へ」を押すか30秒で次の局へ。
 //
@@ -172,6 +174,25 @@ const furiten = (s, p) => {
   const h = s.h;
   return h.furitenTemp[p] || h.furitenRiichi[p] || h.rivers[p].some((x) => h.waits[p].includes(kindOf(x.id)));
 };
+
+// 詳細設定「待ち牌の表示」で自分の画面に出す中身（見せるだけ。局面は変えない）。
+// 13枚の形（打ったあと・ほかの人の番）は局面に入っている待ち（h.waits）。リーチ中も切る牌が決まっているので同じ。
+// 14枚の形（自分の番で切る前）は、選んだ牌 sel を切ったときの待ちを waitsOf で数え直す（選んでいなければ出さない）。
+// 戻り値は { kinds: 待ちの牌の種類（聴牌でなければ []）, furiten, after: 選んだ牌を切ったときの待ちか }
+function waitView(s, p, sel = null) {
+  const h = s.h;
+  if (h.hands[p].length % 3 === 1 || h.riichi[p]) {
+    const kinds = h.waits[p].slice();
+    return { kinds, furiten: kinds.length > 0 && furiten(s, p), after: false };
+  }
+  if (sel === null || !h.hands[p].includes(sel)) return { kinds: [], furiten: false, after: false };
+  const t = { ...s, h: { ...h, hands: h.hands.slice() } };
+  t.h.hands[p] = h.hands[p].filter((id) => id !== sel);
+  const kinds = waitsOf(t, p);
+  // 切った牌も河に入る。同巡フリテンは自分のツモ（か鳴き）で解けているので、河と切る牌だけを見る
+  const gone = [...h.rivers[p].map((x) => kindOf(x.id)), kindOf(sel)];
+  return { kinds, furiten: kinds.some((k) => gone.includes(k)), after: true };
+}
 
 /* ---------- できること ---------- */
 
@@ -732,6 +753,35 @@ function tableEl(s, o, me, watching) {
   return table;
 }
 
+// 待ち牌の表示（詳細設定）。手牌の上の段（ツモった牌を出す所。いつも空けてある）の左側に重ねて置くので、
+// 出たり消えたりしても盤の高さは変わらない（keepH を壊さない）。style.css は使わず、ここで見た目を付ける
+function waitsEl(v) {
+  const box = document.createElement('div');
+  box.className = 'mj-waits';
+  Object.assign(box.style, {
+    position: 'absolute', left: '0', right: 'calc(var(--hw) + 8px)', bottom: 'calc(100% + 12px)', width: 'auto', minWidth: '0',
+    display: 'flex', alignItems: 'center', gap: '2px', overflow: 'hidden', whiteSpace: 'nowrap', pointerEvents: 'none',
+    fontSize: 'clamp(11px, calc(var(--hw) * .4), 15px)', color: 'var(--muted)', transition: 'none',
+  });
+  const label = document.createElement('span');
+  label.textContent = v.after ? '切ると待ち:' : '待ち:';
+  label.style.cssText = 'flex: none; margin-right: 2px;';
+  box.append(label);
+  for (const k of v.kinds) {
+    const t = tileEl(k * 4 + 1); // 赤でない牌の番号で描く
+    t.style.cssText += 'width: min(calc(var(--hw) * .6), 28px); flex: 0 1 auto; min-width: 0;';
+    box.append(t);
+  }
+  if (v.furiten) {
+    const f = document.createElement('span');
+    f.textContent = 'フリテン';
+    f.title = '自分の捨て牌に待ちの牌がある・見送った などで、ロンでは和了れません（ツモはできます）';
+    f.style.cssText = 'flex: none; margin-left: 4px; padding: 0 4px; border: 1px solid #c62d1f; border-radius: 4px; color: #c62d1f; font-weight: 700;';
+    box.append(f);
+  }
+  return box;
+}
+
 function button(text, cls, fn) {
   const b = document.createElement('button');
   b.type = 'button';
@@ -872,6 +922,10 @@ function render(root, s, o) {
     }
     row.append(b);
   });
+  if (s.rules.waits && !watching) {
+    const v = waitView(s, me, myTurn ? ui.sel : null);
+    if (v.kinds.length) row.append(waitsEl(v));
+  }
   root.append(hand);
 
   const actions = document.createElement('div');
@@ -928,13 +982,14 @@ export default {
     { key: 'length', label: '長さ', desc: '東風戦は親が1周（4人なら4局ほど）、半荘戦は2周', def: 'east', choices: [['east', '東風戦'], ['south', '半荘戦']] },
     { key: 'red', label: '赤ドラ', desc: '赤い五（4人・5人は五萬・五筒・五索、3人は五筒・五索）を1枚ずつ入れ、持っているだけで1翻', def: true },
     { key: 'kuitan', label: '喰いタン', desc: '鳴いた手でも断幺九（2〜8だけの手）が役になる', def: true },
+    { key: 'waits', label: '待ち牌の表示', desc: '聴牌したら、何で和了れるか（待ちの牌）を自分の画面に出す。初めての人向け', def: false },
     { key: 'players', label: '人数', desc: '3人麻雀は二萬〜八萬を抜いた108枚・チーなし・北は抜きドラ。5人麻雀は5人目に自風がなく、ツモは4人から受け取る', def: 4, choices: [[4, '4人'], [3, '3人（三人麻雀）'], [5, '5人（五人麻雀）']] },
   ],
   seats(rules) { return rules.players === 3 ? 3 : rules.players === 5 ? 5 : 4; },
 
   init(n, seed, { rules = {} } = {}) {
     const s = {
-      n, seed, rules: { length: rules.length === 'south' ? 'south' : 'east', red: rules.red !== false, kuitan: rules.kuitan !== false }, scores: Array(n).fill(n === 3 ? 35000 : 25000),
+      n, seed, rules: { length: rules.length === 'south' ? 'south' : 'east', red: rules.red !== false, kuitan: rules.kuitan !== false, waits: rules.waits === true }, scores: Array(n).fill(n === 3 ? 35000 : 25000),
       kyoku: 0, honba: 0, kyotaku: 0, handNo: 0, seq: 0, over: false, ranking: null, h: null,
     };
     startHand(s);
@@ -991,4 +1046,4 @@ export default {
 };
 
 // テスト用
-export const _test = { turnOptions, claimOptions, winResult, waitsOf, liveLeft, kindOf, chiOptions, seatWind };
+export const _test = { turnOptions, claimOptions, winResult, waitsOf, waitView, liveLeft, kindOf, chiOptions, seatWind };

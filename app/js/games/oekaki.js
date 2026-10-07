@@ -7,12 +7,17 @@
 // お題は oekaki-data.js から対局の種で選ぶ（同じ対局で同じお題は出ない）。
 // 当てる人の画面には、前から答えの文字数（○○○）を出している。詳細設定「ヒント」をありにすると、残り時間が4分の1になったら
 // 最初の1文字も見せる（2026-10-06 の8回目。見せるだけで点は変わらない。時間は各端末で画面に出てからの時間で計り、手には入れない）。
+// 詳細設定「お題を選ぶ」をありにすると（2026-10-07 の12回目）、描く人の番の始めに、描く人にだけお題を2つ見せて選んでもらう（phase 'choose'）。
+// 2つのお題は、なしと同じ対局の種でまぜた並びの 2回目×2 番目と その次（ほかの回と重ならない。選ばなかったお題もその対局では出ない）。
+// 選ぶまでは描けず、答えも打てない。10秒たったら進行役が1つ目に決める（描く人が部屋を出ていても進む）。制限時間は選んだあとから数える。
+// なしのときは、お題の並びも局面の形も前と同じ。
 //
 // 描いた線は、ペンを動かしている間 0.5秒ごとに区切って「線」の手として送る（離れていても描いている途中が見えるように）。
 // 座標は 0〜999（絵の左上が 0）を2文字ずつに縮めて送る（ENC）。手の一覧を毎回まるごと送る作りなので、送る量を小さくしたい。
 // 手: { p, t: 'line', k, g: ひと筆の番号, c: 色, w: 太さ, d: 座標の文字列 } / { p, t: 'undo', k } / { p, t: 'clear', k } / { p, t: 'giveup', k }
 //     （k = 描く人のこの回の手の数。同じ手が2回届いても2回目は反則になる）
 //     { p, t: 'guess', n: その人のこの回の答えの数, text } / 進行役（p = -1）: { t: 'end', turn } / { t: 'next', turn }
+//     お題を選ぶ: { p, t: 'choose', k, i: 0 か 1 } / 進行役の時間切れ: { t: 'choose', turn }（1つ目に決める）
 
 import { mulberry32, shuffle, esc } from './util.js';
 import { kana, scoreChips, leaders, ranks, winnersText, timeBar, since } from './party.js';
@@ -27,6 +32,7 @@ const MAX_D = 2400; // 1つの線の手の座標の文字数の上限（0.5秒�
 const GUESS_PT = [10, 8, 6];
 const DRAWER_PT = 3;
 const HINT_AT = 0.75; // ヒントの最初の1文字を見せる時（制限時間のこの割合がたったら＝残り4分の1）
+const PICK_MS = 10000; // お題を選ぶ時間
 
 const ENC = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 export function encode(pts) {
@@ -63,13 +69,20 @@ export function hintText(reading, elapsed, limit, on) {
 const clone = (s) => ({ ...s, strokes: s.strokes.slice(), scores: s.scores.slice(), correct: s.correct.slice(), chat: s.chat.slice(), gn: s.gn.slice() });
 
 function newTurn(s) {
-  s.phase = 'draw';
+  s.phase = s.pick ? 'choose' : 'draw';
   s.strokes = [];
   s.dn = 0;
   s.ver += 1;
   s.correct = [];
   s.chat = [];
   s.gn = Array(s.n).fill(0);
+}
+
+// お題を選ぶ: この回の2つのうち i 番目に決めて、描き始める
+function choose(s, i) {
+  s.topics = s.topics.slice();
+  s.topics[s.turn] = s.opts[s.turn][i];
+  s.phase = 'draw';
 }
 
 function endTurn(s, why) {
@@ -92,6 +105,7 @@ export default {
   settings: [
     { key: 'time', label: '1回の制限時間', desc: '全員が当てたら、時間の前でも次へ進む', def: 80, choices: [[60, '60秒'], [80, '80秒'], [120, '120秒']] },
     { key: 'hint', label: 'ヒント', desc: '残り時間が4分の1になると、当てる人に答えの最初の1文字を見せる（文字数はいつも見える）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
+    { key: 'pick', label: 'お題を選ぶ', desc: '描く人が2つのお題から描きやすい方を選んでから描く（選ぶ時間は10秒）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -101,28 +115,39 @@ export default {
       hint: rules.hint === 'on',
       scores: Array(n).fill(0), history: [], ver: 0, why: null, step: 0,
     };
+    // お題を選ぶ: 回ごとに、まぜた並びから重ならない2つを持つ。お題は選んだときに決まる（なしでは何も足さない）
+    if (rules.pick === 'on') {
+      s.pick = true;
+      s.opts = Array.from({ length: n }, (_, t) => [order[2 * t], order[2 * t + 1]]);
+      s.topics = Array(n).fill(null);
+    }
     newTurn(s);
     return s;
   },
 
-  topic(s) { return TOPICS[s.topics[s.turn]]; },
+  topic(s) { return s.topics[s.turn] == null ? null : TOPICS[s.topics[s.turn]]; },
   ended(s) { return s.turn >= s.n; },
   turn() { return null; },
   canAct(s, p) {
-    if (this.ended(s) || s.phase !== 'draw' || p < 0 || p >= s.n) return false;
+    if (this.ended(s) || p < 0 || p >= s.n) return false;
+    if (s.phase === 'choose') return p === s.turn; // 選ぶ間は描く人だけ
+    if (s.phase !== 'draw') return false;
     return p === s.turn || !s.correct.includes(p);
   },
   referee(s) {
     if (this.ended(s)) return null;
+    if (s.phase === 'choose') return { key: `choose:${s.turn}`, ms: PICK_MS, move: { t: 'choose', turn: s.turn } };
     if (s.phase === 'draw') return { key: `draw:${s.turn}`, ms: s.limit * 1000, move: { t: 'end', turn: s.turn } };
     return { key: `show:${s.turn}`, ms: SHOW_MS, move: { t: 'next', turn: s.turn } };
   },
   cpuDelay() { return 1500; },
   // CPU は入らないので、ここに来るのは部屋を出た人の席だけ。描く人が出たら、その回を終える
+  // （お題を選ぶ間は何もしない。進行役が10秒で1つ目に決め、そのあと終える）
   cpu(s, p) { return p === s.turn && s.phase === 'draw' ? { t: 'giveup', k: s.dn } : null; },
   sound(a, b, m, me) {
     if (m.t === 'guess') return b.correct.length > a.correct.length ? 'correct' : m.p === me ? 'wrong' : null;
     if (m.t === 'next') return b.turn === me ? 'turn' : 'pop';
+    if (m.t === 'choose') return b.turn === me ? null : 'pop'; // 選び終わった（当てる人はここから）
     if (b.phase === 'show' && a.phase === 'draw') return 'question';
     return null;
   },
@@ -137,6 +162,10 @@ export default {
   phaseText(s, me, pn) {
     const who = s.turn === me ? 'あなた' : pn(s.turn);
     if (s.phase === 'show') return `答え合わせ（${s.turn + 1}/${s.n}回目）`;
+    if (s.phase === 'choose') {
+      if (s.turn === me) return `<b>あなた</b>が描く番です。お題を選んでください（${s.turn + 1}/${s.n}回目）`;
+      return `<b>${who}</b>がお題を選んでいます…（${s.turn + 1}/${s.n}回目）`;
+    }
     if (s.turn === me) return `<b>あなた</b>が描く番です（${s.turn + 1}/${s.n}回目）`;
     return `<b>${who}</b>が描いています。何の絵か当ててください（${s.turn + 1}/${s.n}回目）`;
   },
@@ -148,6 +177,7 @@ export default {
       const s = clone(s0);
       s.step += 1;
       if (m.t === 'end' && s.phase === 'draw') { endTurn(s, 'time'); return s; }
+      if (m.t === 'choose' && s.phase === 'choose') { choose(s, 0); return s; }
       if (m.t === 'next' && s.phase === 'show') {
         s.turn += 1;
         if (!this.ended(s)) newTurn(s);
@@ -161,7 +191,11 @@ export default {
     const drawer = m.p === s.turn;
     if (drawer) {
       if (m.k !== s.dn) return null;
-      if (m.t === 'line') {
+      if (s.phase === 'choose') {
+        // 選ぶ間は「選ぶ」だけ。選んだら draw になるので、同じ手が2回届いても2回目は反則
+        if (m.t !== 'choose' || (m.i !== 0 && m.i !== 1)) return null;
+        choose(s, m.i);
+      } else if (m.t === 'line') {
         if (!Number.isInteger(m.c) || m.c < 0 || m.c >= COLORS.length || !Number.isInteger(m.w) || m.w < 0 || m.w >= WIDTHS.length) return null;
         if (!Number.isInteger(m.g) || !validD(m.d)) return null;
         s.strokes.push({ g: m.g, c: m.c, w: m.w, d: m.d });
@@ -224,11 +258,20 @@ export default {
     ui.isDrawer = isDrawer;
     showTopic();
 
+    // お題を選ぶボタン（描く人の画面にだけ出す）
+    const choosing = !res && s.phase === 'choose' && me === s.turn && o.canMove;
+    ui.pick.hidden = !choosing;
+    if (choosing) {
+      ui.pick.querySelectorAll('button').forEach((b, i) => { b.textContent = TOPICS[s.opts[s.turn][i]][0]; });
+    }
+
     // 残り時間の帯（場面が替わったら作り直す）。ヒントの最初の1文字も、ここで決めた時刻に出す（render を待たない）
+    // 描く時間はこの鍵（…:draw）で計るので、お題を選んだあとから数え始める
     const barKey = res ? '' : `oe:${s.seed}:${s.turn}:${s.phase}`;
     if (ui.barKey !== barKey) {
       ui.barKey = barKey;
-      const bar = barKey ? timeBar(barKey, s.phase === 'draw' ? s.limit * 1000 : SHOW_MS) : document.createElement('div');
+      const ms = s.phase === 'draw' ? s.limit * 1000 : s.phase === 'choose' ? PICK_MS : SHOW_MS;
+      const bar = barKey ? timeBar(barKey, ms) : document.createElement('div');
       ui.bar.replaceWith(bar);
       ui.bar = bar;
       clearTimeout(ui.hintTimer);
@@ -276,10 +319,14 @@ function showTopic() {
   const { s, o, res, isDrawer } = ui;
   const me = o.me >= 0 ? o.me : null;
   const nameP = (p) => (p === me ? 'あなた' : o.names[p]);
-  const t = TOPICS[s.topics[s.turn]];
+  const t = res ? null : TOPICS[s.topics[s.turn]];
   let html;
   if (res) {
     html = '<div class="um-label">おしまい</div>' + s.history.map((h) => `${esc(nameP(h.drawer))}: <b>${esc(TOPICS[h.topic][0])}</b>（${h.correct.length}人が正解）`).join('<br>');
+  } else if (s.phase === 'choose') {
+    html = isChooser()
+      ? '<div class="um-label">描くお題を選んでください（ほかの人には見えません）</div><small>10秒たつと左のお題に決まります</small>'
+      : `<div class="um-label">${esc(nameP(s.turn))}がお題を選んでいます…</div><small>選び終わったら、絵が描かれ始めます</small>`;
   } else if (s.phase === 'show') {
     const why = s.why === 'all' ? '全員が当てました！' : s.why === 'giveup' ? '描く人があきらめました' : '時間切れ';
     html = `<div class="um-label">${why}</div><div class="oe-word">答えは「${esc(t[0])}」</div>`;
@@ -293,6 +340,7 @@ function showTopic() {
   }
   if (ui.topicHtml !== html) { ui.topic.innerHTML = html; ui.topicHtml = html; }
 }
+const isChooser = () => ui.o.me === ui.s.turn && ui.o.me >= 0;
 
 function build(root, s, key, res) {
   root.innerHTML = '';
@@ -312,6 +360,20 @@ function build(root, s, key, res) {
   ui.topic = document.createElement('div');
   ui.topic.className = 'oe-topic';
   ui.bar = document.createElement('div');
+
+  // お題を選ぶ2つのボタン（お題を選ぶ ありのときだけ使う。中身は render で入れる）
+  ui.pick = document.createElement('div');
+  ui.pick.className = 'oe-pick';
+  ui.pick.hidden = true;
+  ui.pick.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0';
+  for (const i of [0, 1]) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn primary';
+    b.style.cssText = 'font-size:1.15em;padding:14px 8px;white-space:normal';
+    b.onclick = () => send({ t: 'choose', i });
+    ui.pick.append(b);
+  }
 
   ui.wrap = document.createElement('div');
   ui.wrap.className = 'oe-wrap';
@@ -397,7 +459,7 @@ function build(root, s, key, res) {
   };
 
   if (res) root.append(ui.chips, ui.topic); // 終わったら点数とお題の一覧だけ
-  else root.append(ui.chips, ui.topic, ui.bar, ui.wrap, ui.tools, ui.form, ui.note, ui.chat);
+  else root.append(ui.chips, ui.topic, ui.pick, ui.bar, ui.wrap, ui.tools, ui.form, ui.note, ui.chat);
 }
 
 function syncTools() {

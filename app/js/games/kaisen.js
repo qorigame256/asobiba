@@ -4,10 +4,13 @@
 // 詳細設定「ソナー」（2026-10-06 本人の決定。最初はなし）: 撃つ代わりに1回だけ、相手の海の 3×3（盤の端では欠ける）を調べて、
 //   まだ撃っていないマスのうち船のマスがいくつあるかが分かる（Claude の判断: 数まで出す・使ったら相手の番・相手にも場所と数が見える）。
 // 船のマスを全部撃たれたら、その船は沈む。相手の船を先に全部沈めた方の勝ち。
-// 決まりごと（Claude の判断）: 船どうしは となり合ってもよい（重なるのはだめ）。どの船を沈めたかは相手にも知らせる。
+// 決まりごと（Claude の判断）: 船どうしは となり合ってもよい（重なるのはだめ。下の「船をくっつけない」で禁止にできる）。どの船を沈めたかは相手にも知らせる。
 // 相手の船は画面に出さないが、手札と同じ簡易の隠し方（全員の端末が全部の配置を知っている）。同じ画面の2人では隠せないので、オンラインだけ（noLocal）。
 // 詳細設定「海の広さ」（2026-10-06 の8回目）: 10×10（最初。船 5・4・3・3・2）か 8×8（船 4・3・3・2）。一辺は局面の size に持つ。
 //   ソナー（3×3）・当たったらもう一度・CPU の考え方は、どちらの広さでも同じ（Claude の判断）。
+// 詳細設定「船をくっつけない」（2026-10-07 の12回目。最初はなし）: 船どうしを上下左右・ななめのどれでもとなりに置けない（1マス以上あける）。
+//   局面の apart。並べる手がこれに反していたら反則。おまかせ・CPU の並べ方も守る。CPU は、沈めた船のまわりなど船がないと分かるマスを撃たない（Claude の判断）。
+//   なしのときは前と全く同じ（おまかせの乱数の使い方も同じ）。
 // マスの番号 = 段*一辺+列（段0が一番上。10×10 なら 段*10+列 で、前と同じ）。
 // 手: 並べる { t: 'place', ships: [[段, 列, たてか], …]（FLEETS のその広さの船の順） } / 撃つ = マスの番号 / ソナー { t: 'sonar', c: 真ん中のマスの番号 }
 
@@ -20,8 +23,19 @@ export const fleetOf = (n) => FLEETS[n] ?? SHIPS;
 const sizeOf = (s) => s.size ?? N;
 const shipName = (len) => `${len}マスの船`;
 
-// 並べ方 → 各マスの船の番号（-1 は海）。並べられなければ null。n は一辺
-export function layout(ships, n = N) {
+// まわり8マス（盤の外は除く）。n は一辺
+function around(i, n) {
+  const r0 = Math.floor(i / n);
+  const c0 = i % n;
+  const out = [];
+  for (let r = r0 - 1; r <= r0 + 1; r++) for (let c = c0 - 1; c <= c0 + 1; c++) if ((r !== r0 || c !== c0) && r >= 0 && r < n && c >= 0 && c < n) out.push(r * n + c);
+  return out;
+}
+// 別の船どうしが（ななめも含めて）となり合っているか。grid は各マスの船の番号（-1 は海）
+const touching = (grid, n) => grid.some((k, i) => k >= 0 && around(i, n).some((j) => grid[j] >= 0 && grid[j] !== k));
+
+// 並べ方 → 各マスの船の番号（-1 は海）。並べられなければ null。n は一辺。apart は「船をくっつけない」
+export function layout(ships, n = N, apart = false) {
   const SHIPS = fleetOf(n);
   const N = n;
   if (!Array.isArray(ships) || ships.length !== SHIPS.length) return null;
@@ -38,11 +52,13 @@ export function layout(ships, n = N) {
       grid[rr * N + cc] = k;
     }
   }
+  if (apart && touching(grid, N)) return null;
   return grid;
 }
 
 // おまかせの並べ方（CPU と「おまかせ」ボタン。ホストか自分の端末だけで動くので Math.random を使ってよい）
-export function randomShips(n = N) {
+// apart（船をくっつけない）のときは、まわり8マスにほかの船が無い所にだけ置く（なしのときは前と全く同じ）
+export function randomShips(n = N, apart = false) {
   const SHIPS = fleetOf(n);
   const N = n;
   for (;;) {
@@ -56,7 +72,7 @@ export function randomShips(n = N) {
         const r = Math.floor(Math.random() * (v ? N - SHIPS[k] + 1 : N));
         const c = Math.floor(Math.random() * (v ? N : N - SHIPS[k] + 1));
         const cells = Array.from({ length: SHIPS[k] }, (_, j) => (r + (v ? j : 0)) * N + c + (v ? 0 : j));
-        if (cells.every((i) => grid[i] === -1)) {
+        if (cells.every((i) => grid[i] === -1 && (!apart || around(i, N).every((j) => grid[j] === -1)))) {
           cells.forEach((i) => { grid[i] = k; });
           ships.push([r, c, v]);
           placed = true;
@@ -84,6 +100,24 @@ const hitsOf = (s, p) => s.shots[p].filter((x, i) => x && s.grid[1 - p][i] >= 0)
 
 /* ---------- CPU ---------- */
 
+// 船をくっつけないときに、船がないと分かるマスも true にした「撃ったマス」の写し（CPU が見てよい情報だけを使う）:
+// 沈めた船のまわり8マス・沈んでいない船の当たりのななめ・当たりが2つ並んでいたらその横（船はまっすぐなので）
+function noShipCells(shot, opp, sunk, N) {
+  const out = shot.slice();
+  const hit = (i) => shot[i] && opp[i] >= 0;
+  for (let i = 0; i < N * N; i++) {
+    if (!hit(i)) continue;
+    const r = Math.floor(i / N);
+    const c = i % N;
+    if (sunk.has(opp[i])) { for (const j of around(i, N)) if (!hit(j)) out[j] = true; continue; }
+    for (const j of around(i, N)) if (Math.floor(j / N) !== r && j % N !== c) out[j] = true; // ななめ
+    const side = (rr, cc) => rr >= 0 && rr < N && cc >= 0 && cc < N && hit(rr * N + cc);
+    if (side(r, c - 1) || side(r, c + 1)) { if (r > 0) out[i - N] = true; if (r < N - 1) out[i + N] = true; } // よこに並ぶ → 上下は海
+    if (side(r - 1, c) || side(r + 1, c)) { if (c > 0) out[i - 1] = true; if (c < N - 1) out[i + 1] = true; } // たてに並ぶ → 左右は海
+  }
+  return out;
+}
+
 // 撃ったマスの結果だけを見て選ぶ（相手の船の位置はのぞかない）。
 // よわい: 適当に撃ち、当たったあとは半分だけそのまわりを狙う。ふつう: 当たったらまわりを狙う。
 // つよい: それに加えて、残っている船が入れるマスの数で狙いを決める（市松模様に近い撃ち方になる）
@@ -91,12 +125,13 @@ function kaisenCpu(s, p, rules) {
   const level = rules?.cpu === 'strong' ? 'strong' : rules?.cpu === 'normal' ? 'normal' : 'weak';
   const N = sizeOf(s);
   const SHIPS = fleetOf(N);
-  const shot = s.shots[p];
   const opp = s.grid[1 - p];
   const sunk = new Set(sunkList(s, p));
+  // 船をくっつけない: 船がないと分かるマスは、撃ったマスと同じに扱う（撃たない）
+  const shot = s.apart ? noShipCells(s.shots[p], opp, sunk, N) : s.shots[p];
   // 沈んでいない船に当たったマス（CPU が知っている情報: 当たったか・どの船が沈んだか）
   const open = [];
-  for (let i = 0; i < N * N; i++) if (shot[i] && opp[i] >= 0 && !sunk.has(opp[i])) open.push(i);
+  for (let i = 0; i < N * N; i++) if (s.shots[p][i] && opp[i] >= 0 && !sunk.has(opp[i])) open.push(i);
   const free = (r, c) => r >= 0 && r < N && c >= 0 && c < N && !shot[r * N + c];
   let untried = Array.from({ length: N * N }, (_, i) => i).filter((i) => !shot[i]);
   const pick = (a) => a[Math.floor(Math.random() * a.length)];
@@ -142,7 +177,7 @@ function kaisenCpu(s, p, rules) {
   };
   // ソナー: 当たりを追っていないときに使う（6発撃ったあと。よわいは毎回3割の見込みで）。
   // 場所は よわい 適当・ふつう まだ撃っていないマスが多い所・つよい 船が入れる見込みが大きい所。どれも盤の端に寄らない
-  const shots = shot.filter(Boolean).length;
+  const shots = s.shots[p].filter(Boolean).length; // 実際に撃った数（船がないと分かるマスは数えない）
   if (s.sonarOn && !s.sonar[p] && shots >= 6 && (level !== 'weak' || Math.random() < 0.3)) {
     const centers = [];
     for (let r = 1; r < N - 1; r++) for (let c = 1; c < N - 1; c++) centers.push(r * N + c);
@@ -186,11 +221,12 @@ const game = {
     { key: 'sonar', label: 'ソナー', desc: '撃つ代わりに1回だけ、相手の海の 3×3 に船のマスがいくつあるか調べられる（使ったら相手の番）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'again', label: '当たったらもう一度', desc: '当たったら（沈めたときも）続けてもう1回撃てる。外れたら相手の番', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'size', label: '海の広さ', desc: '8×8 は船が4隻（4・3・3・2マス）で、早く終わる', def: 10, choices: [[10, '10×10（船5隻）'], [8, '8×8（船4隻）']] },
+    { key: 'apart', label: '船をくっつけない', desc: '船どうしを、ななめも含めてとなりに置けない（よくある決まり）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
   ],
 
   init({ rules = {} } = {}) {
     const n = Number(rules.size) === 8 ? 8 : N;
-    return { size: n, again: rules.again === 'on', sonarOn: rules.sonar === 'on', sonar: [null, null], phase: 'place', turn: 0, grid: [null, null], shots: [Array(n * n).fill(false), Array(n * n).fill(false)], last: null, won: null, count: 0 };
+    return { size: n, again: rules.again === 'on', apart: rules.apart === 'on', sonarOn: rules.sonar === 'on', sonar: [null, null], phase: 'place', turn: 0, grid: [null, null], shots: [Array(n * n).fill(false), Array(n * n).fill(false)], last: null, won: null, count: 0 };
   },
 
   turn(s) { return s.turn; },
@@ -200,7 +236,7 @@ const game = {
     const N = sizeOf(s);
     if (s.phase === 'place') {
       if (!m || m.t !== 'place') return null;
-      const grid = layout(m.ships, N);
+      const grid = layout(m.ships, N, !!s.apart);
       if (!grid) return null;
       const g = s.grid.slice();
       g[s.turn] = grid;
@@ -238,7 +274,7 @@ const game = {
   },
 
   cpu(s, p, rules) {
-    if (s.phase === 'place') return { t: 'place', ships: randomShips(sizeOf(s)) };
+    if (s.phase === 'place') return { t: 'place', ships: randomShips(sizeOf(s), !!s.apart) };
     return kaisenCpu(s, p, rules);
   },
 
@@ -376,7 +412,7 @@ function renderPlace(root, s, o) {
 
   const head = document.createElement('p');
   head.className = 'cc-log';
-  head.textContent = plc.sel === null ? '全部並べました。よければ「これで決める」' : `${shipName(SHIPS[plc.sel])}を置くマス（左上のはし）を選ぶ。置いた船を押すと持ち上げます`;
+  head.textContent = plc.sel === null ? '全部並べました。よければ「これで決める」' : `${shipName(SHIPS[plc.sel])}を置くマス（左上のはし）を選ぶ。置いた船を押すと持ち上げます${s.apart ? '（船どうしは、ななめも含めてとなりに置けません）' : ''}`;
   root.append(head);
 
   const list = document.createElement('div');
@@ -404,7 +440,7 @@ function renderPlace(root, s, o) {
       if (plc.sel === null) return;
       const trial = plc.ships.slice();
       trial[plc.sel] = [Math.floor(i / N), i % N, plc.vert];
-      // ほかの船と重ならず盤に収まるか（まだ置いていない船は確かめない）
+      // ほかの船と重ならず盤に収まるか（船をくっつけないときは、となり合わないかも。まだ置いていない船は確かめない）
       const g = Array(N * N).fill(-1);
       let ok = true;
       trial.forEach((x, k) => {
@@ -416,7 +452,7 @@ function renderPlace(root, s, o) {
           g[r * N + c] = k;
         }
       });
-      if (!ok) return;
+      if (!ok || (s.apart && touching(g, N))) return;
       plc.ships = trial;
       const next = plc.ships.findIndex((x) => !x);
       plc.sel = next < 0 ? null : next;
@@ -438,7 +474,7 @@ function renderPlace(root, s, o) {
     acts.append(b);
   };
   btn(plc.vert ? '向き: たて ↕' : '向き: よこ ↔', 'secondary', () => { plc.vert = !plc.vert; draw(); });
-  btn('おまかせ', 'secondary', () => { plc.ships = randomShips(N); plc.sel = null; draw(); });
+  btn('おまかせ', 'secondary', () => { plc.ships = randomShips(N, !!s.apart); plc.sel = null; draw(); });
   btn('やり直す', 'ghost', () => { plc.ships = SHIPS.map(() => null); plc.sel = 0; draw(); });
   btn('これで決める', 'primary', () => { if (all()) o.onMove({ t: 'place', ships: all() }); }, !all());
   root.append(acts);

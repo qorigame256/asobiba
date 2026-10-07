@@ -242,6 +242,41 @@ if (!TESTDATA || !fs.existsSync(TESTDATA)) {
     s.h.draw = s.h.L - 15;
     check('山が残っていればポンできる', T.claimOptions(s, 0, tile(s, 0, '1m'), 'discard')[3]?.includes('pon'));
   }
+  // 詳細設定「待ち牌の表示」（2026-10-07）。見せるだけの waitView
+  {
+    check('待ち牌の表示は最初は「なし」', mj.init(4, 1, { rules: {} }).rules.waits === false && mj.init(4, 1, { rules: { waits: true } }).rules.waits === true);
+    const nonTen = '1m258m258p258s1357z';
+    const s = table(['234m234p567p678s59s', tenpai25m, nonTen, '19m19p19s1234567z']);
+    const k = (str) => E.kindOf(str);
+    let v = T.waitView(s, 1);
+    check('13枚の聴牌なら待ちが出る（二萬・五萬）', v.kinds.join() === [k('2m'), k('5m')].join() && !v.furiten && !v.after, JSON.stringify(v));
+    check('聴牌でなければ待ちは空', T.waitView(s, 2).kinds.length === 0 && !T.waitView(s, 2).furiten);
+    check('国士無双の13面待ちも出る', T.waitView(s, 3).kinds.length === 13);
+    s.h.rivers[1] = [{ id: 4 * 4 + 3, riichi: false, taken: false }]; // 自分の河に五萬
+    check('待ちの牌が自分の河にあればフリテン', T.waitView(s, 1).furiten === true);
+    s.h.rivers[1] = [];
+    s.h.furitenTemp[1] = true;
+    check('見送ったあと（同巡フリテン）もフリテン', T.waitView(s, 1).furiten === true);
+    s.h.furitenTemp[1] = false;
+    s.h.furitenRiichi[1] = true;
+    check('リーチ後に見送ったあともフリテン', T.waitView(s, 1).furiten === true);
+    s.h.furitenRiichi[1] = false;
+    // 14枚（自分の番で切る前）: 選んでいなければ出さない。選んだ牌を切ったときの待ちを出す
+    check('14枚で牌を選ぶ前は出さない', T.waitView(s, 0).kinds.length === 0);
+    v = T.waitView(s, 0, tile(s, 0, '9s'));
+    check('九索を選ぶと五索の単騎待ち', v.kinds.join() === String(k('5s')) && v.after && !v.furiten, JSON.stringify(v));
+    check('二萬を選ぶと聴牌しないので空', T.waitView(s, 0, tile(s, 0, '2m')).kinds.length === 0);
+    s.h.rivers[0] = [{ id: tile(s, 0, '5s') ^ 1, riichi: false, taken: false }];
+    check('選んだ牌を切ったときの待ちが河にあればフリテン', T.waitView(s, 0, tile(s, 0, '9s')).furiten === true);
+    s.h.rivers[0] = [];
+    const t2 = table(['234m234p567p678s55s', '', '', '']); // 五索を切ると五索の単騎待ち（切る牌が待ち）
+    check('切る牌そのものが待ちならフリテン', T.waitView(t2, 0, tile(t2, 0, '5s')).furiten === true && T.waitView(t2, 0, tile(t2, 0, '5s')).kinds.join() === String(k('5s')));
+    // リーチ中は14枚でも今の待ち。局面は変えない
+    s.h.riichi[0] = 1;
+    s.h.waits[0] = [k('5s')];
+    check('リーチ中は切る前でも今の待ち', T.waitView(s, 0).kinds.join() === String(k('5s')) && !T.waitView(s, 0).after);
+    check('待ちを数えても手牌は変わらない', s.h.hands[0].length === 14);
+  }
 }
 
 console.log(failed ? `\n${failed} 件の失敗（${passed} 件は OK）` : `\nすべて OK（${passed} 件）`);
