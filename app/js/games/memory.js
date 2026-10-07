@@ -5,12 +5,19 @@
 //   すき間のない長方形に並べるため、並べやすい枚数にした（本人の決定・2026-10-03。前は 52枚・26枚）。並べ方は SIZES の cols 列。
 // 詳細設定「続けて取れる組」（2026-10-06 本人の決定）: 組を取って続けてめくれるのは決めた組の数まで。そこまで取ったら次の人へ。
 // 詳細設定「見た札のヒント」（2026-10-06 本人の決定。子ども向けに簡単にする）: 一度めくった札は、伏せたあとも真ん中に小さく数字が残る（マークは出さない）。
+// 詳細設定「色もそろえる」（2026-10-07 本人の決定。最初は なし）: 同じ数字でも、色（黒の♠♣・赤の♥♦）が同じ2枚でないと組にならない。
+//   どの数字も黒2枚・赤2枚なので、組の数は同じ（枚数の半分）。ありのときだけ局面に color: true を持つ（なしでは今までと全く同じ形）。
+//   見た札のヒントは、ありのとき数字を札の色で出す。CPU も同じ決まり（pairKey）で組を探す。
 // 手: { p, t: 'flip', i: 何枚目の札か }。めくった札がもう表なら反則なので、同じ手が2回来ても2回目は弾かれる。
 
 import { mulberry32, shuffle } from './util.js';
-import { makeDeck, rankOf, rankLabel, cardEl, backEl, cardLabel } from './cards.js';
+import { makeDeck, rankOf, suitOf, rankLabel, cardEl, backEl, cardLabel } from './cards.js';
 
 const SIZES = { 48: { top: 12, cols: 8 }, 36: { top: 9, cols: 6 }, 24: { top: 6, cols: 6 } };
+
+const isRed = (c) => suitOf(c) === 'h' || suitOf(c) === 'd';
+// 組になる2枚は同じ値になる（色もそろえるなら数字と色、なしなら数字だけ）
+const pairKey = (s, c) => (s.color ? rankOf(c) * 2 + (isRed(c) ? 1 : 0) : rankOf(c));
 
 const clone = (s) => ({ ...s, taken: s.taken.slice(), open: s.open.slice(), scores: s.scores.slice(), seen: s.seen.slice() });
 
@@ -28,6 +35,7 @@ export default {
   settings: [
     { key: 'size', label: '枚数', desc: 'すき間のない長方形に並べる', def: 48, choices: [[48, '48枚（A〜Q・8×6）'], [36, '36枚（A〜9・6×6）'], [24, '24枚（A〜6・6×4）']] },
     { key: 'hint', label: '見た札のヒント', desc: '一度めくった札は、伏せたあとも小さく数字が残る（覚えなくても取れるので、小さい子と遊ぶとき向け）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
+    { key: 'color', label: '色もそろえる', desc: '同じ数字でも、色（黒の♠♣・赤の♥♦）が同じ2枚でないと取れない。覚えることが増えてむずかしくなる', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'streak', label: '続けて取れる組', desc: '組を取ったあと続けてめくれるのは、この数の組まで。覚えるのが得意な人の独走を防ぐ', def: 0, choices: [[0, '何組でも'], [2, '2組まで'], [3, '3組まで']] },
   ],
 
@@ -35,10 +43,12 @@ export default {
     const { top } = SIZES[rules.size] ?? SIZES[48];
     const deck = makeDeck().filter((c) => rankOf(c) <= top);
     const cards = shuffle(deck, mulberry32(seed));
-    return {
+    const s = {
       n, cards, hint: rules.hint === 'on', limit: [2, 3].includes(rules.streak) ? rules.streak : 0, streak: 0, taken: Array(cards.length).fill(null), open: [], turn: 0, scores: Array(n).fill(0),
       seen: Array(cards.length).fill(false), done: false, step: 0, last: null,
     };
+    if (rules.color === 'on') s.color = true; // なしのときは局面に何も足さない（今までと同じ形）
+    return s;
   },
 
   turn(s) { return s.done ? null : s.turn; },
@@ -77,8 +87,9 @@ export default {
     s.last = { p: m.p, t: 'flip', i };
     if (s.open.length === 2) {
       const [a, b] = s.open;
-      const match = rankOf(s.cards[a]) === rankOf(s.cards[b]);
+      const match = pairKey(s, s.cards[a]) === pairKey(s, s.cards[b]);
       s.last = { p: m.p, t: 'pair', a, b, match };
+      if (!match && s.color && rankOf(s.cards[a]) === rankOf(s.cards[b])) s.last.hue = true; // 数字は同じで色が違う
       if (match) {
         s.taken[a] = m.p;
         s.taken[b] = m.p;
@@ -106,12 +117,12 @@ export default {
       return pool[Math.floor(Math.random() * pool.length)];
     };
     if (fresh.length === 1) {
-      const r = rankOf(s.cards[fresh[0]]);
-      const j = memory.find((i) => rankOf(s.cards[i]) === r);
+      const r = pairKey(s, s.cards[fresh[0]]);
+      const j = memory.find((i) => pairKey(s, s.cards[i]) === r);
       return { t: 'flip', i: j ?? pickAny() };
     }
     for (const i of memory) {
-      if (memory.some((j) => j !== i && rankOf(s.cards[j]) === rankOf(s.cards[i]))) return { t: 'flip', i };
+      if (memory.some((j) => j !== i && pairKey(s, s.cards[j]) === pairKey(s, s.cards[i]))) return { t: 'flip', i };
     }
     return { t: 'flip', i: pickAny() };
   },
@@ -181,7 +192,7 @@ export default {
       }
       if (s.hint && s.seen[i] && s.taken[i] === null && !s.open.includes(i)) {
         const h = document.createElement('span');
-        h.className = 'mm-hint';
+        h.className = 'mm-hint' + (s.color && isRed(card) ? ' red' : ''); // 色もそろえるなら色も分かるように
         h.textContent = rankLabel(rankOf(card));
         e.append(h);
       }
@@ -201,9 +212,9 @@ function tag(cls, text) {
 
 function logText(s, nameP) {
   const l = s.last;
-  if (!l) return '裏向きの札を2枚めくって、同じ数字ならもらえます';
+  if (!l) return s.color ? '裏向きの札を2枚めくって、同じ数字で同じ色（黒どうし・赤どうし）ならもらえます' : '裏向きの札を2枚めくって、同じ数字ならもらえます';
   if (l.t === 'flip') return `${nameP(l.p)}が ${cardLabel(s.cards[l.i])} をめくった。もう1枚…`;
   const pair = `${cardLabel(s.cards[l.a])} と ${cardLabel(s.cards[l.b])}`;
   if (l.match) return s.done ? `${nameP(l.p)}が ${pair} をそろえた！ これで全部です` : `${nameP(l.p)}が ${pair} をそろえた！ ${l.stop ? `${s.limit}組続けて取ったので次の人へ` : 'もう1回'}`;
-  return `${nameP(l.p)}は ${pair}… はずれ`;
+  return l.hue ? `${nameP(l.p)}は ${pair}… 数字は同じでも色が違うので、はずれ` : `${nameP(l.p)}は ${pair}… はずれ`;
 }

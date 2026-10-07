@@ -1530,6 +1530,36 @@ for (let k = 0; k < 200; k++) {
   mmGames++;
 }
 console.log('memory games', mmGames);
+// 色もそろえる: 同じ数字でも色（黒 ♠♣・赤 ♥♦）が違えばはずれ。なしのときは局面の形が今までと同じ
+assert.ok(!('color' in MM.init(2, 5, { rules: {} })) && !('color' in MM.init(2, 5, { rules: { color: 'off' } })), 'なしでは color を持たない');
+assert.equal(MM.init(2, 5, { rules: { color: 'on' } }).color, true, 'ありでは color: true');
+s = { ...MM.init(2, 0, { rules: { size: 24, color: 'on' } }), cards: ['s1', 'h1', 'c1', 'd1', 's2', 'c2'], taken: Array(6).fill(null), seen: Array(6).fill(false) };
+t = mmFlip(s, 0, 0, 1);
+assert.deepEqual([t.last.match, t.last.hue, t.turn], [false, true, 1], '♠1 と ♥1 は色が違うのではずれ');
+t = mmFlip(t, 1, 0, 2);
+assert.deepEqual([t.last.match, t.taken[0], t.taken[2], t.turn], [true, 1, 1, 1], '♠1 と ♣1 は黒どうしで組');
+t = mmFlip(t, 1, 1, 3);
+assert.deepEqual([t.last.match, t.scores[1]], [true, 2], '♥1 と ♦1 は赤どうしで組');
+t = mmFlip({ ...s, color: undefined }, 0, 0, 1);
+assert.equal(t.last.match, true, 'なしなら ♠1 と ♥1 で組');
+let mmColor = 0;
+for (let k = 0; k < 100; k++) {
+  const n = 2 + (k % 5);
+  let st = MM.init(n, k * 17 + 3, { rules: { size: [48, 36, 24][k % 3], color: 'on' } });
+  let steps = 0;
+  while (!MM.result(st)) {
+    st = MM.apply(st, { ...MM.cpu(st, st.turn), p: st.turn });
+    assert.ok(st, '神経衰弱（色もそろえる）の CPU が反則の手を出した');
+    if (st.last.t === 'pair' && st.last.match) {
+      const red = (c) => c[0] === 'h' || c[0] === 'd';
+      assert.ok(red(st.cards[st.last.a]) === red(st.cards[st.last.b]), '色もそろえるの組は同じ色');
+      mmColor++;
+    }
+    if (++steps > 8000) throw new Error('神経衰弱（色もそろえる）が終わらない');
+  }
+  assert.equal(st.scores.reduce((a, b) => a + b, 0), st.cards.length / 2, '色もそろえるでも組の数の合計は枚数の半分');
+}
+console.log('memory color pairs', mmColor);
 // ---------- 石取り ----------
 const NIM = GAMES.nim;
 const { goodMove } = await import('../app/js/games/nim.js');

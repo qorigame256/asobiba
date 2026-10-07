@@ -1076,6 +1076,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
   background: rgba(255, 255, 255, .92); color: #2f4f7a; border-radius: 4px; text-align: center; line-height: 1;
   font-family: Georgia, "Times New Roman", serif; font-size: 30cqw; pointer-events: none;
 }
+.mm-grid .mm-hint.red { color: #c62d1f; } /* 色もそろえる（詳細設定）では赤い札の数字を赤く */
 .board button.pcard.back.usable { background: repeating-linear-gradient(45deg, #2f6fb3 0 5px, #3d7fc4 5px 10px); border-color: #fff; cursor: pointer; }
 .board button.pcard.back.usable:hover { filter: brightness(1.12); }
 .board button.pcard.open.usable { cursor: pointer; }
