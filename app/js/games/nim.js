@@ -106,7 +106,7 @@ export default {
     // 鍵と値（last・lose・win）は前のまま（前の部屋の設定がそのまま使えるように）。count は 2026-10-07 に足した
     { key: 'last', label: '勝ち負け', desc: '最後の1個を取った人が負け・勝ち、または取った石の数で勝負', def: 'lose', choices: [['lose', '最後の1個で負け'], ['win', '最後の1個で勝ち'], ['count', '取った数で勝負']] },
     { key: 'hide', label: '残りを隠す', desc: '山に残っている石の数を見せない。取った数だけ分かる', def: false },
-    { key: 'heaps', label: '山の数', desc: '3つは3・5・7個の山（残りを隠すときは大きさがばらばら）。1つの山から好きなだけ取れる（「1回に取れる数」は取った数で勝負のときだけ使う）', def: 1, choices: [[1, '1つ'], [3, '3つ']] },
+    { key: 'heaps', label: '山の数', desc: '3つは3・5・7個の山。1つの山から好きなだけ取れる（取った数で勝負のときだけ「1回に取れる数」まで）', def: 1, choices: [[1, '1つ'], [3, '3つ']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -428,6 +428,7 @@ export default {
       cancel.textContent = 'やめる';
       cancel.onclick = () => { picked = null; draw(); };
       actions.append(cancel);
+      if (!picked.k) actions.classList.add('nim-nums'); // 数のボタン（最大9個）は折り返して並べる
       if (picked.k) {
         const take = document.createElement('button');
         take.type = 'button';

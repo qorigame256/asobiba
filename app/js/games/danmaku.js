@@ -563,7 +563,6 @@ export default {
     wrap.append(canvas);
     let slowBtn = null;
     if (slowOn(s)) {
-      note.textContent += ' ⏱ スローは1回だけ（パソコンはスペースキーでも）。';
       const bar = document.createElement('div');
       bar.className = 'dm-slow';
       slowBtn = document.createElement('button');
@@ -571,6 +570,7 @@ export default {
       slowBtn.className = 'btn small secondary dm-slow-btn';
       slowBtn.textContent = '⏱ スロー（1回だけ）';
       slowBtn.disabled = true;
+      slowBtn.title = 'パソコンはスペースキーでも押せます';
       slowBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); useSlow(); }); // 押した瞬間に効かせる
       slowBtn.addEventListener('click', useSlow); // キーボードで押したとき（2回目は canSlow が弾く）
       bar.append(slowBtn);

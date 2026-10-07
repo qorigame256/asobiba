@@ -1171,6 +1171,8 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .nim-three .nim-hpile .nim-label { margin-bottom: 0; }
 .nim-three .nim-hpile > .nim-stones { flex: none; flex-direction: row; flex-wrap: wrap; justify-content: center; }
 .nim-hpile.empty { opacity: .55; }
+.nim-actions.nim-nums { flex-wrap: wrap; gap: 8px; }
+.board .nim-nums button.btn { white-space: nowrap; padding: 10px 14px; min-width: 56px; }
 .nim-hidden-ball { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; font-size: 1.6rem; font-weight: 800; color: #fff; background: radial-gradient(circle at 35% 30%, #a7a29a, #6c665e 70%); }
 .nim-hidden-ball.empty { background: none; color: var(--muted); font-size: .9rem; box-shadow: inset 0 0 0 1.5px var(--line); }
 
@@ -1563,9 +1565,9 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .ac-note { text-align: center; font-size: .82rem; color: var(--muted); margin: 0; }
 /* 弾幕回避のスロー（詳細設定）。ボタンは盤の上の1行 */
 .dm-slow { display: flex; justify-content: center; }
-.dm-slow-btn { min-width: 13em; font-variant-numeric: tabular-nums; touch-action: manipulation; }
-.dm-slow-btn:disabled { opacity: .55; }
-.dm-slow-btn.dm-slowing { opacity: 1; background: #5b47b8; border-color: #5b47b8; color: #fff; }
+.board button.dm-slow-btn { min-width: 13em; padding: 6px 14px; font-size: .9rem; font-variant-numeric: tabular-nums; touch-action: manipulation; }
+.board button.dm-slow-btn:disabled { opacity: .5; cursor: default; }
+.board button.dm-slow-btn.dm-slowing { opacity: 1; background: #5b47b8; border-color: #5b47b8; color: #fff; }
 /* 遊んでいる間はページを動かさない（指でなぞるとページが動いてしまうため） */
 html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behavior: none; }
 #screen-play:has(.ac-live) { touch-action: none; }
