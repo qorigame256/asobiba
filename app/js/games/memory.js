@@ -7,7 +7,11 @@
 // 詳細設定「見た札のヒント」（2026-10-06 本人の決定。子ども向けに簡単にする）: 一度めくった札は、伏せたあとも真ん中に小さく数字が残る（マークは出さない）。
 // 詳細設定「色もそろえる」（2026-10-07 本人の決定。最初は なし）: 同じ数字でも、色（黒の♠♣・赤の♥♦）が同じ2枚でないと組にならない。
 //   どの数字も黒2枚・赤2枚なので、組の数は同じ（枚数の半分）。ありのときだけ局面に color: true を持つ（なしでは今までと全く同じ形）。
-//   見た札のヒントは、ありのとき数字を札の色で出す。CPU も同じ決まり（pairKey）で組を探す。
+//   見た札のヒントは、ありのとき数字を札の色で出す。CPU も同じ決まり（isPair）で組を探す。
+// 詳細設定「13ならべ」（2026-10-07 本人の決定。最初は なし）: 同じ数字でなく、足して13になる2枚（A=1・J=11・Q=12）が組になる。
+//   A〜Q のときだけ どの札にも相方があるので、ありのときは枚数の設定を見ず いつも48枚にする。数 r の札と 13−r の札は4枚ずつで、
+//   1組取るとどちらも1枚ずつ減るので、必ず全部取り切れる。色もそろえると一緒なら「足して13で、色も同じ」（黒2枚・赤2枚ずつなので、これも取り切れる）。
+//   ありのときだけ局面に thirteen: true を持つ（なしでは今までと全く同じ形）。画面には、めくった2枚の合計を「7＋6＝13 ⭕」のように出す。
 // 手: { p, t: 'flip', i: 何枚目の札か }。めくった札がもう表なら反則なので、同じ手が2回来ても2回目は弾かれる。
 
 import { mulberry32, shuffle } from './util.js';
@@ -16,8 +20,10 @@ import { makeDeck, rankOf, suitOf, rankLabel, cardEl, backEl, cardLabel } from '
 const SIZES = { 48: { top: 12, cols: 8 }, 36: { top: 9, cols: 6 }, 24: { top: 6, cols: 6 } };
 
 const isRed = (c) => suitOf(c) === 'h' || suitOf(c) === 'd';
-// 組になる2枚は同じ値になる（色もそろえるなら数字と色、なしなら数字だけ）
-const pairKey = (s, c) => (s.color ? rankOf(c) * 2 + (isRed(c) ? 1 : 0) : rankOf(c));
+// 数字が合っているか（13ならべなら足して13、なしなら同じ数字）
+const numOk = (s, a, b) => (s.thirteen ? rankOf(a) + rankOf(b) === 13 : rankOf(a) === rankOf(b));
+// 組になる2枚か（色もそろえるなら、数字に加えて色も同じ2枚だけ）
+const isPair = (s, a, b) => numOk(s, a, b) && (!s.color || isRed(a) === isRed(b));
 
 const clone = (s) => ({ ...s, taken: s.taken.slice(), open: s.open.slice(), scores: s.scores.slice(), seen: s.seen.slice() });
 
@@ -36,11 +42,13 @@ export default {
     { key: 'size', label: '枚数', desc: 'すき間のない長方形に並べる', def: 48, choices: [[48, '48枚（A〜Q・8×6）'], [36, '36枚（A〜9・6×6）'], [24, '24枚（A〜6・6×4）']] },
     { key: 'hint', label: '見た札のヒント', desc: '一度めくった札は、伏せたあとも小さく数字が残る（覚えなくても取れるので、小さい子と遊ぶとき向け）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'color', label: '色もそろえる', desc: '同じ数字でも、色（黒の♠♣・赤の♥♦）が同じ2枚でないと取れない。覚えることが増えてむずかしくなる', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
+    { key: 'thirteen', label: '13ならべ', desc: '同じ数字でなく、足して13になる2枚を取る（A=1・J=11・Q=12）。ありのときは枚数はいつも48枚（A〜Q）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'streak', label: '続けて取れる組', desc: '組を取ったあと続けてめくれるのは、この数の組まで。覚えるのが得意な人の独走を防ぐ', def: 0, choices: [[0, '何組でも'], [2, '2組まで'], [3, '3組まで']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const { top } = SIZES[rules.size] ?? SIZES[48];
+    const thirteen = rules.thirteen === 'on';
+    const { top } = SIZES[thirteen ? 48 : rules.size] ?? SIZES[48]; // 13ならべは A〜Q でないと相方の無い札が出るので48枚だけ
     const deck = makeDeck().filter((c) => rankOf(c) <= top);
     const cards = shuffle(deck, mulberry32(seed));
     const s = {
@@ -48,6 +56,7 @@ export default {
       seen: Array(cards.length).fill(false), done: false, step: 0, last: null,
     };
     if (rules.color === 'on') s.color = true; // なしのときは局面に何も足さない（今までと同じ形）
+    if (thirteen) s.thirteen = true; // 13ならべも同じ
     return s;
   },
 
@@ -87,9 +96,9 @@ export default {
     s.last = { p: m.p, t: 'flip', i };
     if (s.open.length === 2) {
       const [a, b] = s.open;
-      const match = pairKey(s, s.cards[a]) === pairKey(s, s.cards[b]);
+      const match = isPair(s, s.cards[a], s.cards[b]);
       s.last = { p: m.p, t: 'pair', a, b, match };
-      if (!match && s.color && rankOf(s.cards[a]) === rankOf(s.cards[b])) s.last.hue = true; // 数字は同じで色が違う
+      if (!match && s.color && numOk(s, s.cards[a], s.cards[b])) s.last.hue = true; // 数字は合っているが色が違う
       if (match) {
         s.taken[a] = m.p;
         s.taken[b] = m.p;
@@ -106,7 +115,7 @@ export default {
     return s;
   },
 
-  // CPU: 見た札を覚えているが、1枚ごとに4割の見込みで忘れる（弱めるため）
+  // CPU: 見た札を覚えているが、1枚ごとに4割の見込みで忘れる（弱めるため）。覚えている札の中から組になる2枚を探す（13ならべなら足して13）
   cpu(s, p) {
     const fresh = s.open.length === 2 ? [] : s.open; // この番にめくった札
     const left = s.cards.map((_, i) => i).filter((i) => s.taken[i] === null && !fresh.includes(i));
@@ -117,12 +126,12 @@ export default {
       return pool[Math.floor(Math.random() * pool.length)];
     };
     if (fresh.length === 1) {
-      const r = pairKey(s, s.cards[fresh[0]]);
-      const j = memory.find((i) => pairKey(s, s.cards[i]) === r);
+      const c = s.cards[fresh[0]];
+      const j = memory.find((i) => isPair(s, c, s.cards[i]));
       return { t: 'flip', i: j ?? pickAny() };
     }
     for (const i of memory) {
-      if (memory.some((j) => j !== i && pairKey(s, s.cards[j]) === pairKey(s, s.cards[i]))) return { t: 'flip', i };
+      if (memory.some((j) => j !== i && isPair(s, s.cards[i], s.cards[j]))) return { t: 'flip', i };
     }
     return { t: 'flip', i: pickAny() };
   },
@@ -159,6 +168,15 @@ export default {
     log.className = 'cc-log';
     log.textContent = logText(s, nameP);
     root.append(log);
+    if (s.thirteen) {
+      // 13ならべ: めくった2枚の合計を小さく出す（「7＋6＝13 ⭕」）
+      const sum = document.createElement('p');
+      sum.className = 'cc-log mm-sum';
+      sum.style.fontWeight = '800';
+      sum.style.margin = '-6px 0 0';
+      sum.textContent = sumText(s);
+      root.append(sum);
+    }
 
     const grid = document.createElement('div');
     const cols = SIZES[s.cards.length]?.cols ?? 8;
@@ -212,9 +230,27 @@ function tag(cls, text) {
 
 function logText(s, nameP) {
   const l = s.last;
-  if (!l) return s.color ? '裏向きの札を2枚めくって、同じ数字で同じ色（黒どうし・赤どうし）ならもらえます' : '裏向きの札を2枚めくって、同じ数字ならもらえます';
+  if (!l) {
+    const num = s.thirteen ? '足して13になる2枚（A=1・J=11・Q=12）' : '同じ数字';
+    return s.color ? `裏向きの札を2枚めくって、${num}で同じ色（黒どうし・赤どうし）ならもらえます` : `裏向きの札を2枚めくって、${num}ならもらえます`;
+  }
   if (l.t === 'flip') return `${nameP(l.p)}が ${cardLabel(s.cards[l.i])} をめくった。もう1枚…`;
   const pair = `${cardLabel(s.cards[l.a])} と ${cardLabel(s.cards[l.b])}`;
   if (l.match) return s.done ? `${nameP(l.p)}が ${pair} をそろえた！ これで全部です` : `${nameP(l.p)}が ${pair} をそろえた！ ${l.stop ? `${s.limit}組続けて取ったので次の人へ` : 'もう1回'}`;
-  return l.hue ? `${nameP(l.p)}は ${pair}… 数字は同じでも色が違うので、はずれ` : `${nameP(l.p)}は ${pair}… はずれ`;
+  if (l.hue) return `${nameP(l.p)}は ${pair}… ${s.thirteen ? '足すと13でも' : '数字は同じでも'}色が違うので、はずれ`;
+  return `${nameP(l.p)}は ${pair}… はずれ`;
+}
+
+// 13ならべの合計の一行。A・J・Q は数も添える（「Q(12)＋A(1)＝13 ⭕」）
+function sumText(s) {
+  const l = s.last;
+  if (!l) return '';
+  const num = (c) => {
+    const r = rankOf(c);
+    return r === 1 || r > 10 ? `${rankLabel(r)}(${r})` : String(r);
+  };
+  if (l.t === 'flip') return `${num(s.cards[l.i])}＋？＝13`;
+  const a = s.cards[l.a];
+  const b = s.cards[l.b];
+  return `${num(a)}＋${num(b)}＝${rankOf(a) + rankOf(b)} ${l.match ? '⭕' : '❌'}`;
 }
