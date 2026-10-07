@@ -277,6 +277,107 @@ if (!TESTDATA || !fs.existsSync(TESTDATA)) {
     check('リーチ中は切る前でも今の待ち', T.waitView(s, 0).kinds.join() === String(k('5s')) && !T.waitView(s, 0).after);
     check('待ちを数えても手牌は変わらない', s.h.hands[0].length === 14);
   }
+
+  // 3. 役の早見表（2026-10-07）。表の役の名前と翻数が、エンジンで実際に数えた翻数と食い違わないか
+  section('役の早見表');
+  {
+    const G = T.YAKU_GUIDE;
+    const names = G.flatMap((r) => r.names);
+    check('表の役はエンジンの役と同じ（多すぎも足りなさもない）', names.length === E.YAKU_NAMES.length && E.YAKU_NAMES.every((n) => names.filter((x) => x === n).length === 1),
+      `表だけ: ${names.filter((n) => !E.YAKU_NAMES.includes(n))} / 表に無い: ${E.YAKU_NAMES.filter((n) => !names.includes(n))}`);
+    const order = G.map((r) => (r.yakuman ? 100 : r.han));
+    check('翻数の少ない順で、役満は最後', order.every((x, i) => i === 0 || order[i - 1] <= x));
+    check('ひとこと説明は短い（20字まで）', G.every((r) => r.desc.length <= 20), G.filter((r) => r.desc.length > 20).map((r) => r.label).join());
+    // その役が付く例（鳴かない手と、鳴いた手）。[手牌（和了牌を含む）, 副露, 和了牌, 場の様子]。鳴いた例が無いのは、鳴きの関係しない役
+    const ex = {
+      立直: [['123m456p789s234m55p', [], '5p', { riichi: true }], ['456p789s234m55p', ['chi:1m'], '5p', { riichi: true }]],
+      ダブル立直: [['123m456p789s234m55p', [], '5p', { double_riichi: true }], ['456p789s234m55p', ['chi:1m'], '5p', { double_riichi: true }]],
+      一発: [['123m456p789s234m55p', [], '5p', { riichi: true, ippatsu: true }], ['456p789s234m55p', ['chi:1m'], '5p', { riichi: true, ippatsu: true }]],
+      門前清自摸和: [['123m456p789s234m55p', [], '5p', { tsumo: true }], ['456p789s234m55p', ['chi:1m'], '5p', { tsumo: true }]],
+      平和: [['123m456p789s234m55p', [], '4m'], ['456p789s234m55p', ['chi:1m'], '4m']],
+      断幺九: [['234m456p678s345m22p', [], '2p'], ['456p678s345m22p', ['chi:2m'], '2p']],
+      一盃口: [['112233m456p789s55p', [], '5p'], ['123m456p789s55p', ['chi:1m'], '5p']],
+      '役牌 白': [['555z123m456p789s11p', [], '1p'], ['123m456p789s11p', ['pon:5z'], '1p']],
+      '役牌 發': [['666z123m456p789s11p', [], '1p'], ['123m456p789s11p', ['pon:6z'], '1p']],
+      '役牌 中': [['777z123m456p789s11p', [], '1p'], ['123m456p789s11p', ['pon:7z'], '1p']],
+      '役牌 場風': [['111z123m456p789s11p', [], '1p'], ['123m456p789s11p', ['pon:1z'], '1p']],
+      '役牌 自風': [['222z123m456p789s11p', [], '1p'], ['123m456p789s11p', ['pon:2z'], '1p']],
+      '役牌 北': [['444z123m456p789s11p', [], '1p', { north_yakuhai: true }], ['123m456p789s11p', ['pon:4z'], '1p', { north_yakuhai: true }]],
+      嶺上開花: [['123m456p789s234m55p', [], '5p', { rinshan: true, tsumo: true }], ['456p789s234m55p', ['chi:1m'], '5p', { rinshan: true, tsumo: true }]],
+      槍槓: [['123m456p789s234m55p', [], '5p', { chankan: true }], ['456p789s234m55p', ['chi:1m'], '5p', { chankan: true }]],
+      海底摸月: [['123m456p789s234m55p', [], '5p', { haitei: true, tsumo: true }], ['456p789s234m55p', ['chi:1m'], '5p', { haitei: true, tsumo: true }]],
+      河底撈魚: [['123m456p789s234m55p', [], '5p', { houtei: true }], ['456p789s234m55p', ['chi:1m'], '5p', { houtei: true }]],
+      七対子: [['1122m3344p5566s77z', [], '7z'], ['1122m3344p55s', ['pon:7z'], '5s']],
+      対々和: [['111m444m222p333s55z', [], '1m'], ['333s444m55z', ['pon:1m', 'pon:2p'], '5z']],
+      三暗刻: [['111m222p333s456m77z', [], '7z'], ['111m222p333s77z', ['pon:9s'], '7z']],
+      三色同刻: [['111m111p111s456m77z', [], '7z'], ['111p111s456m77z', ['pon:1m'], '7z']],
+      三色同順: [['123m123p123s456m77z', [], '7z'], ['123p123s456m77z', ['chi:1m'], '7z']],
+      一気通貫: [['123456789m456p77z', [], '7z'], ['456789m456p77z', ['chi:1m'], '7z']],
+      混全帯幺九: [['123m789p111s999m77z', [], '7z'], ['789p111s999m77z', ['chi:1m'], '7z']],
+      三槓子: [['456m77z', ['ankan:1m', 'ankan:2p', 'ankan:3s'], '7z'], ['456m77z', ['kan:1m', 'kan:2p', 'kan:3s'], '7z']],
+      小三元: [['555z666z77z123m456p', [], '7z'], ['666z77z123m456p', ['pon:5z'], '7z']],
+      混老頭: [['111m999p111s999s11z', [], '1m'], ['999p111s999s11z', ['pon:1m'], '1z']],
+      二盃口: [['112233m445566p77z', [], '7z'], ['123m445566p77z', ['chi:1m'], '7z']],
+      純全帯幺九: [['123m789m123p789s11s', [], '1s'], ['789m123p789s11s', ['chi:1m'], '1s']],
+      混一色: [['123m456m789m111z22m', [], '2m'], ['456m789m111z22m', ['chi:1m'], '2m']],
+      清一色: [['123m345m456m789m22m', [], '2m'], ['345m456m789m22m', ['chi:1m'], '2m']],
+      国士無双: [['19m19p19s1234567z9m', [], '1m'], ['19m19p19s123456z', ['pon:7z'], '1m']],
+      四暗刻: [['111m222p333s444m55z', [], '1m', { tsumo: true }], ['222p333s444m55z', ['pon:1m'], '2p', { tsumo: true }]],
+      大三元: [['555z666z777z123m11p', [], '1p'], ['666z777z123m11p', ['pon:5z'], '1p']],
+      字一色: [['111z222z333z555z66z', [], '1z'], ['222z333z555z66z', ['pon:1z'], '6z']],
+      小四喜: [['111z222z333z44z123m', [], '1m'], ['222z333z44z123m', ['pon:1z'], '1m']],
+      大四喜: [['111z222z333z444z11m', [], '1z'], ['222z333z444z11m', ['pon:1z'], '1m']],
+      緑一色: [['234s234s666s888s66z', [], '6z'], ['234s666s888s66z', ['chi:2s'], '6z']],
+      清老頭: [['111m999m111p999p11s', [], '1m'], ['999m111p999p11s', ['pon:1m'], '1s']],
+      九蓮宝燈: [['11123455678999m', [], '2m'], ['11456789999m', ['chi:1m'], '1m']],
+      四槓子: [['77z', ['ankan:1m', 'ankan:2p', 'ankan:3s', 'ankan:4m'], '7z'], ['77z', ['kan:1m', 'kan:2p', 'kan:3s', 'kan:4m'], '7z']],
+      天和: [['123m456p789s234m55p', [], '5p', { tenho: true, tsumo: true }]],
+      地和: [['123m456p789s234m55p', [], '5p', { chiho: true, tsumo: true }]],
+      人和: [['123m456p789s234m55p', [], '5p', { renho: true }]],
+    };
+    // 2倍役満の例
+    const doubles = {
+      国士無双: ['19m19p19s1234567z1m', [], '1m'],
+      四暗刻: ['111m222p333s444m55z', [], '5z'],
+      九蓮宝燈: ['11123455678999m', [], '5m'],
+    };
+    // その手で、エンジンがその役に付ける一番大きい翻（付かなければ 0）
+    const hanOf = ([hand, open, win, ctx = {}], name) => {
+      let best = 0;
+      for (const c of E.candidates(E.parseCounts(hand), parseMelds(open), E.kindOf(win), toCtx(ctx))) {
+        for (const y of c.yaku) if (E.YAKU_NAMES[y.id] === name) best = Math.max(best, y.han);
+      }
+      return best;
+    };
+    for (const r of G) {
+      const want = r.yakuman ? E.YAKUMAN_HAN * r.yakuman : r.han;
+      const wantOpen = r.open ?? want;
+      for (const name of r.names) {
+        const [closed, opened] = ex[name] || [];
+        if (!closed) { check(`${name} の例がある`, false); continue; }
+        const got = hanOf(closed, name);
+        check(`${name}: 鳴かないとき ${guideText(r)}`, got === want, `エンジンは ${got}翻`);
+        if (opened) {
+          const g2 = hanOf(opened, name);
+          check(`${name}: 鳴いたとき ${r.open === 0 ? '付かない' : `${wantOpen}翻`}`, g2 === wantOpen, `エンジンは ${g2}翻`);
+        } else check(`${name}: 鳴くと変わると書くなら、鳴いた例で確かめる`, r.open === undefined);
+      }
+      if (r.double) {
+        const g = hanOf(doubles[r.names[0]] || ['', [], '1m'], r.names[0]);
+        check(`${r.names[0]}: ${r.double}`, g === E.YAKUMAN_HAN * 2, `エンジンは ${g}翻`);
+      }
+    }
+    const g4 = T.yakuGuide({ n: 4 });
+    const g3 = T.yakuGuide({ n: 3 });
+    check('役牌 北は3人麻雀の表だけに出る', !g4.some((r) => r.names.includes('役牌 北')) && g3.some((r) => r.names.includes('役牌 北')));
+    const tan = (g) => g.find((r) => r.names.includes('断幺九'));
+    check('喰いタンありなら断幺九は鳴いても1翻、なしなら「鳴くと付かない」', tan(g4).open === undefined && tan(T.yakuGuide({ kuitan: false })).open === 0);
+    check('表を作っても元の表は変わらない', tan(T.yakuGuide({ kuitan: true })).open === undefined);
+  }
+}
+
+function guideText(r) {
+  return r.yakuman ? (r.yakuman > 1 ? `${r.yakuman}倍役満` : '役満') : `${r.han}翻`;
 }
 
 console.log(failed ? `\n${failed} 件の失敗（${passed} 件は OK）` : `\nすべて OK（${passed} 件）`);

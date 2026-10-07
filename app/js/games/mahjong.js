@@ -19,6 +19,8 @@
 //   どちらも最初は「あり」。喰いタンなしは mahjong-engine.js を変えずに、ここで候補からタンヤオを外して一番高い形を選び直す（noKuitanBest）。
 // 詳細設定「待ち牌の表示」（2026-10-07 本人の決定。最初は「なし」）: 聴牌している間、自分の手牌の上の段に待ちの牌（フリテンなら「フリテン」も）を出す。
 //   自分の番で切る前は、選んだ牌を切ったときの待ちを出す（Claude の判断）。見せるだけで、手の一覧・apply は変えない（waitView・waitsEl）。
+// 役の早見表（2026-10-07 本人の決定。詳細設定ではなく、いつも出す）: 場の情報の段の「📖 役」で、和了れる役の一覧を盤の上に重ねて開く。
+//   観戦の人も見られる。見せるだけ（YAKU_GUIDE・yakuPanel）。表の役の名前と翻数は tools/test-mahjong.mjs がエンジンと突き合わせる。
 // Claude の判断: 暗槓への国士無双のロンは作らない（ごくまれなため）。抜いた北へのロンはできる（槍槓は付かない）。
 //   リーチ中で和了れない・カンできないときは1秒で自動でツモ切りする。局の結果は全員が「次へ」を押すか30秒で次の局へ。
 //
@@ -782,6 +784,143 @@ function waitsEl(v) {
   return box;
 }
 
+/* ---------- 役の早見表（2026-10-07） ---------- */
+
+// このゲームで和了れる役。翻数の少ない順で、役満は最後。names は mahjong-engine.js の YAKU_NAMES の名前
+// （エンジンは変えないので、表をエンジンに合わせる。tools/test-mahjong.mjs が、エンジンで実際に数えた翻数と食い違わないかを見る）。
+// han = 鳴かないときの翻、yakuman = 役満の何倍か、open = 鳴いたときの翻（0 は鳴くと付かない。無ければ鳴いても同じ）、
+// double = 2倍役満になるとき、sanma = 3人麻雀だけの役
+const YAKU_GUIDE = [
+  { names: ['立直'], label: '立直', yomi: 'リーチ', han: 1, open: 0, desc: '鳴かずに聴牌して宣言する' },
+  { names: ['一発'], label: '一発', yomi: 'イッパツ', han: 1, open: 0, desc: 'リーチから1巡のうちに和了る' },
+  { names: ['門前清自摸和'], label: '門前清自摸和', yomi: 'メンゼンツモ', han: 1, open: 0, desc: '鳴かずにツモで和了る' },
+  { names: ['平和'], label: '平和', yomi: 'ピンフ', han: 1, open: 0, desc: '順子だけ・役牌でない雀頭・両面待ち' },
+  { names: ['断幺九'], label: '断幺九', yomi: 'タンヤオ', han: 1, desc: '2〜8の牌だけで作る' },
+  { names: ['一盃口'], label: '一盃口', yomi: 'イーペーコー', han: 1, open: 0, desc: '同じ順子を2つ' },
+  { names: ['役牌 白', '役牌 發', '役牌 中'], label: '役牌 白・發・中', yomi: 'ヤクハイ', han: 1, desc: '白・發・中を3枚（1種類ごとに1翻）' },
+  { names: ['役牌 場風'], label: '役牌 場風', yomi: 'バカゼ', han: 1, desc: '場の風（東場なら東）を3枚' },
+  { names: ['役牌 自風'], label: '役牌 自風', yomi: 'ジカゼ', han: 1, desc: '自分の風の牌を3枚' },
+  { names: ['役牌 北'], label: '役牌 北', yomi: 'ペー', han: 1, sanma: true, desc: '北を3枚（3人麻雀だけ）' },
+  { names: ['嶺上開花'], label: '嶺上開花', yomi: 'リンシャンカイホウ', han: 1, desc: 'カンして引いた牌でツモ' },
+  { names: ['槍槓'], label: '槍槓', yomi: 'チャンカン', han: 1, desc: 'ほかの人の加槓の牌でロン' },
+  { names: ['海底摸月'], label: '海底摸月', yomi: 'ハイテイ', han: 1, desc: '山の最後の牌でツモ' },
+  { names: ['河底撈魚'], label: '河底撈魚', yomi: 'ホウテイ', han: 1, desc: '最後の捨て牌でロン' },
+  { names: ['ダブル立直'], label: 'ダブル立直', yomi: 'ダブルリーチ', han: 2, open: 0, desc: '最初の捨て牌でリーチ（鳴きの前）' },
+  { names: ['七対子'], label: '七対子', yomi: 'チートイツ', han: 2, open: 0, desc: '違う対子（同じ牌2枚）を7組' },
+  { names: ['対々和'], label: '対々和', yomi: 'トイトイ', han: 2, desc: '刻子（同じ牌3枚）を4つ' },
+  { names: ['三暗刻'], label: '三暗刻', yomi: 'サンアンコー', han: 2, desc: '鳴かずに作った刻子が3つ' },
+  { names: ['三色同刻'], label: '三色同刻', yomi: 'サンショクドウコー', han: 2, desc: '萬・筒・索で同じ数の刻子' },
+  { names: ['三色同順'], label: '三色同順', yomi: 'サンショク', han: 2, open: 1, desc: '萬・筒・索で同じ数の順子' },
+  { names: ['一気通貫'], label: '一気通貫', yomi: 'イッツー', han: 2, open: 1, desc: '同じ色で123・456・789' },
+  { names: ['混全帯幺九'], label: '混全帯幺九', yomi: 'チャンタ', han: 2, open: 1, desc: 'どの組と雀頭にも1・9か字牌' },
+  { names: ['三槓子'], label: '三槓子', yomi: 'サンカンツ', han: 2, desc: 'カンを3回する' },
+  { names: ['小三元'], label: '小三元', yomi: 'ショウサンゲン', han: 2, desc: '白發中の2つが刻子、1つが雀頭' },
+  { names: ['混老頭'], label: '混老頭', yomi: 'ホンロウトウ', han: 2, desc: '1・9と字牌だけで作る' },
+  { names: ['二盃口'], label: '二盃口', yomi: 'リャンペーコー', han: 3, open: 0, desc: '一盃口を2つ' },
+  { names: ['純全帯幺九'], label: '純全帯幺九', yomi: 'ジュンチャン', han: 3, open: 2, desc: 'どの組と雀頭にも1か9（字牌なし）' },
+  { names: ['混一色'], label: '混一色', yomi: 'ホンイツ', han: 3, open: 2, desc: '1つの色と字牌だけ' },
+  { names: ['清一色'], label: '清一色', yomi: 'チンイツ', han: 6, open: 5, desc: '1つの色だけ（字牌なし）' },
+  { names: ['国士無双'], label: '国士無双', yomi: 'コクシムソウ', yakuman: 1, open: 0, double: '13面待ちは2倍', desc: '1・9・字牌13種を1枚ずつ＋1枚' },
+  { names: ['四暗刻'], label: '四暗刻', yomi: 'スーアンコー', yakuman: 1, open: 0, double: '単騎待ちは2倍', desc: '鳴かずに作った刻子が4つ' },
+  { names: ['大三元'], label: '大三元', yomi: 'ダイサンゲン', yakuman: 1, desc: '白・發・中を全部刻子' },
+  { names: ['字一色'], label: '字一色', yomi: 'ツーイーソー', yakuman: 1, desc: '字牌だけで作る' },
+  { names: ['小四喜'], label: '小四喜', yomi: 'ショウスーシー', yakuman: 1, desc: '風の牌の3つが刻子、1つが雀頭' },
+  { names: ['大四喜'], label: '大四喜', yomi: 'ダイスーシー', yakuman: 2, desc: '風の牌4つとも刻子' },
+  { names: ['緑一色'], label: '緑一色', yomi: 'リューイーソー', yakuman: 1, desc: '2・3・4・6・8索と發だけ' },
+  { names: ['清老頭'], label: '清老頭', yomi: 'チンロウトウ', yakuman: 1, desc: '1と9の牌だけで作る' },
+  { names: ['九蓮宝燈'], label: '九蓮宝燈', yomi: 'チューレンポウトウ', yakuman: 1, open: 0, double: '9面待ちは2倍', desc: '1色で1112345678999＋1枚' },
+  { names: ['四槓子'], label: '四槓子', yomi: 'スーカンツ', yakuman: 1, desc: 'カンを4回する' },
+  { names: ['天和'], label: '天和', yomi: 'テンホー', yakuman: 1, desc: '親が配られた14枚で和了る' },
+  { names: ['地和'], label: '地和', yomi: 'チーホー', yakuman: 1, desc: '子が最初のツモで和了る（鳴きの前）' },
+  { names: ['人和'], label: '人和', yomi: 'レンホー', yakuman: 1, desc: '子が最初のツモの前にロン' },
+];
+
+// その対局の表（人数と喰いタンで少し変わる）。見せるだけ
+function yakuGuide({ n = 4, kuitan = true } = {}) {
+  return YAKU_GUIDE.filter((r) => !r.sanma || n === 3).map((r) => {
+    if (r.names[0] === '断幺九' && !kuitan) return { ...r, open: 0 };
+    if (r.names[0] === '役牌 自風' && n === 5) return { ...r, desc: r.desc + '（5人目には無い）' };
+    return r;
+  });
+}
+const guideHan = (r) => (r.yakuman ? (r.yakuman > 1 ? `${r.yakuman}倍役満` : '役満') : `${r.han}翻`);
+const guideOpen = (r) => (r.open === 0 ? '鳴くと付かない' : r.open ? `鳴くと${r.open}翻` : '');
+
+// 開いているかと、一覧のスクロールの位置（この端末だけで覚える。描き直しても開いたまま・同じ所を見たまま）
+const yakuView = { open: false, top: 0 };
+
+// 「📖 役」で開く一覧。場の情報の段（.mj-info）の下に、盤の上へ重ねて出す（中身の流れに入れないので盤の高さは変わらず、keepH を壊さない）。
+// style.css は使わず、ここで見た目を付ける
+function yakuPanel(s, close) {
+  const box = document.createElement('div');
+  box.className = 'mj-yaku-guide';
+  box.setAttribute('role', 'dialog');
+  box.setAttribute('aria-label', '役の早見表');
+  Object.assign(box.style, {
+    position: 'absolute', top: 'calc(100% + 4px)', left: '0', right: '0', zIndex: '30', maxHeight: 'min(70vh, 520px)', overflowY: 'auto',
+    overscrollBehavior: 'contain', background: 'var(--panel)', color: 'var(--ink)', border: '1.5px solid var(--line)', borderRadius: '12px',
+    boxShadow: '0 6px 20px rgba(0, 0, 0, .18)', padding: '8px 10px 10px', fontSize: '.85rem', lineHeight: '1.45', textAlign: 'left',
+  });
+  const head = document.createElement('div');
+  head.style.cssText = 'display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px;';
+  const title = document.createElement('b');
+  title.textContent = '役の早見表';
+  title.style.fontSize = '.95rem';
+  const shut = button('閉じる', 'ghost', close);
+  shut.style.cssText = 'padding: 4px 10px; font-size: .85rem;';
+  head.append(title, shut);
+  box.append(head);
+  const note = document.createElement('p');
+  note.style.cssText = 'margin: 0 0 6px; color: var(--muted); font-size: .78rem;';
+  note.textContent = `役が1つ以上ないと和了れません。ドラ・赤ドラ・裏ドラ${s.n === 3 ? '・抜いた北' : ''}は役ではなく、役があるときに1枚につき1翻増えます。`
+    + '「鳴く」はポン・チー・明槓（暗槓は入りません）。';
+  box.append(note);
+  const list = document.createElement('ul');
+  list.style.cssText = 'list-style: none; margin: 0; padding: 0;';
+  let lastYakuman = false;
+  for (const r of yakuGuide({ n: s.n, kuitan: s.rules.kuitan !== false })) {
+    if (!!r.yakuman !== lastYakuman) {
+      lastYakuman = true;
+      const sep = document.createElement('li');
+      sep.textContent = '役満（13翻。2倍役満は26翻）';
+      sep.style.cssText = 'margin-top: 8px; padding: 2px 4px; font-weight: 700; color: var(--accent); border-bottom: 1.5px solid var(--accent);';
+      list.append(sep);
+    }
+    const li = document.createElement('li');
+    li.style.cssText = 'display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; align-items: start; padding: 4px; border-bottom: 1px dashed var(--line);';
+    const left = document.createElement('div');
+    left.style.minWidth = '0';
+    const name = document.createElement('b');
+    name.textContent = r.label;
+    const yomi = document.createElement('span');
+    yomi.textContent = `（${r.yomi}）`;
+    yomi.style.cssText = 'color: var(--muted); font-size: .78rem;';
+    const desc = document.createElement('div');
+    desc.textContent = r.desc + (r.double ? `。${r.double}` : '');
+    desc.style.cssText = 'color: var(--muted); font-size: .78rem;';
+    left.append(name, yomi, desc);
+    const right = document.createElement('div');
+    right.style.cssText = 'text-align: right; white-space: nowrap;';
+    const han = document.createElement('b');
+    han.textContent = guideHan(r);
+    right.append(han);
+    const open = guideOpen(r);
+    if (open) {
+      const o = document.createElement('div');
+      o.textContent = open;
+      o.style.cssText = `font-size: .72rem; color: ${r.open === 0 ? '#c62d1f' : 'var(--muted)'};`;
+      right.append(o);
+    }
+    li.append(left, right);
+    list.append(li);
+  }
+  box.append(list);
+  box.addEventListener('scroll', () => { yakuView.top = box.scrollTop; }, { passive: true });
+  // 描き直しで作り直しても、見ていた所に戻す（作り終えてから。描き直しの途中で長さを読まないため）
+  queueMicrotask(() => { if (box.isConnected) box.scrollTop = yakuView.top; });
+  return box;
+}
+
 function button(text, cls, fn) {
   const b = document.createElement('button');
   b.type = 'button';
@@ -888,7 +1027,17 @@ function render(root, s, o) {
   dora.className = 'mj-dora';
   dora.append('ドラ表示 ');
   for (let i = 0; i < 1 + h.kans; i++) dora.append(tileEl(doraInd(h, i), { small: true }));
-  info.append(title, dora);
+  // 役の早見表（いつも出す。観戦の人も見られる）。一覧は場の情報の段の下に重ねて出す
+  const toggle = () => { yakuView.open = !yakuView.open; yakuView.top = 0; draw(); };
+  const yb = button('📖 役', 'secondary', toggle);
+  yb.style.cssText = 'padding: 2px 10px; font-size: .8rem; flex: none;';
+  yb.setAttribute('aria-expanded', String(yakuView.open));
+  const right = document.createElement('span');
+  right.style.cssText = 'display: inline-flex; align-items: center; gap: 8px; margin-left: auto;';
+  right.append(dora, yb);
+  info.style.position = 'relative';
+  info.append(title, right);
+  if (yakuView.open) info.append(yakuPanel(s, toggle));
   root.append(info);
 
   root.append(tableEl(s, o, me, watching));
@@ -1046,4 +1195,4 @@ export default {
 };
 
 // テスト用
-export const _test = { turnOptions, claimOptions, winResult, waitsOf, waitView, liveLeft, kindOf, chiOptions, seatWind };
+export const _test = { turnOptions, claimOptions, winResult, waitsOf, waitView, liveLeft, kindOf, chiOptions, seatWind, YAKU_GUIDE, yakuGuide };
