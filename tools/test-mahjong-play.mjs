@@ -33,7 +33,10 @@ function play(n, length, seed, style) {
   const rng = mulberry32(seed * 7 + 1);
   let s = mahjong.init(n, seed, { rules: { length, players: n } });
   const start = s.scores[0];
-  const stats = { moves: 0, hands: 0, ron: 0, tsumo: 0, draw: 0, calls: 0, riichi: 0, kans: 0, nuki: 0 };
+  const stats = { moves: 0, hands: 0, ron: 0, tsumo: 0, draw: 0, calls: 0, riichi: 0, kans: 0, nuki: 0, tg: 0 };
+  // ツモ切りの見分け（河の tsumogiri）: 最後に手牌へ入った牌（ツモ・嶺上・抜いたあとの補充）をそのまま捨てたらツモ切り。
+  // 鳴いたあとの打牌は手出し。局の始めの配牌は数えない（その人が1枚引くまでは確かめない）
+  let lastIn = [];
   for (let step = 0; step < 20000 && !mahjong.result(s); step++) {
     const actors = [...Array(n).keys()].filter((p) => mahjong.canAct(s, p));
     let m;
@@ -46,7 +49,24 @@ function play(n, length, seed, style) {
       if (!m) return { error: `だれも動けず進行役も無い（${s.h.phase}）` };
     }
     const prevPhase = s.h.phase;
+    const who = s.h.turn;
     const next = mahjong.apply(s, { ...m, p });
+    if (next && m.a === 'd' && lastIn[who] !== undefined) {
+      const want = lastIn[who] === m.t;
+      const got = next.h.rivers[who].at(-1);
+      if (got?.id !== m.t || got.tsumogiri !== want) return { error: `ツモ切りの見分けが違う ${JSON.stringify(got)}（${want} のはず）` };
+      if (want) stats.tg++;
+    }
+    if (next && next.h !== s.h && next.h.hands.length === s.h.hands.length && next.handNo === s.handNo && next.kyoku === s.kyoku && next.honba === s.honba) {
+      for (let q = 0; q < n; q++) {
+        const before = new Set(s.h.hands[q]);
+        const added = next.h.hands[q].filter((x) => !before.has(x));
+        if (added.length === 1) lastIn[q] = added[0];
+        else if (!added.length && q === p && ['pon', 'chi', 'kan'].includes(m.a)) lastIn[q] = null;
+      }
+    } else if (next) {
+      lastIn = [];
+    }
     if (!next) return { error: `手が反則になった ${JSON.stringify(m)} p=${p} phase=${s.h.phase}` };
     if (next.h.phase === 'claim' && prevPhase !== 'claim') {
       const c = next.h.claim;
@@ -100,7 +120,7 @@ function randomMove(s, p, rng) {
   return m;
 }
 
-const sum = { ron: 0, tsumo: 0, draw: 0, calls: 0, riichi: 0, kans: 0, nuki: 0, hands: 0 };
+const sum = { ron: 0, tsumo: 0, draw: 0, calls: 0, riichi: 0, kans: 0, nuki: 0, hands: 0, tg: 0 };
 let worstReplay = 0;
 let games = 0;
 for (const n of [4, 3, 5]) {
@@ -145,6 +165,6 @@ for (const n of [4, 3, 5]) {
   check('5人麻雀: 東風戦は東1〜東5局、持ち点25000点', s.scores.every((x) => x === 25000) && s.scores.length === 5);
 }
 check(`${games}局を最後まで進めて決まりごとが崩れない`, failed === 0, JSON.stringify(sum));
-check('ロン・ツモ・流局・鳴き・リーチ・カン・抜きがどれも起きた', Object.values(sum).every((v) => v > 0));
+check('ロン・ツモ・流局・鳴き・リーチ・カン・抜き・ツモ切りがどれも起きた', Object.values(sum).every((v) => v > 0));
 console.log(failed ? `\n${failed} 件の失敗` : '\nすべて OK');
 process.exit(failed ? 1 : 0);

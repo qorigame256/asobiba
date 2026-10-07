@@ -479,7 +479,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .sg .sg-cell.last { background: #f5b98e; }
 .sg .sg-cell.selected { background: #f3c74b; }
 .sg .sg-cell.checked { background: #f08a7a; }
-.sg .sg-cell.try::before { content: ""; position: absolute; inset: 10%; border: 2px dashed rgba(198, 45, 31, .4); border-radius: 4px; pointer-events: none; } /* トライのマス */
+.sg .sg-cell.try::before { content: ""; position: absolute; inset: 3%; border: 2px dashed rgba(198, 45, 31, .55); border-radius: 4px; pointer-events: none; } /* トライのマス */
 .sg button.sg-cell { cursor: pointer; }
 .sg .sg-cell.target::after { content: ""; position: absolute; width: 30%; height: 30%; border-radius: 50%; background: rgba(217, 100, 58, .7); pointer-events: none; }
 .sg .sg-cell.target:has(.sg-piece)::after { width: 88%; height: 88%; background: none; border: 3px solid rgba(217, 100, 58, .85); border-radius: 6px; }
@@ -601,6 +601,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .mj-tile.back { background-image: url(../img/mj/Back.svg); box-shadow: 0 2px 0 #8a1f1f; }
 .mj-tile.side { transform: rotate(-90deg); margin: 0 calc(var(--tw) * .18); }
 .mj-tile.taken { opacity: .3; }
+.mj-tile.tg { filter: brightness(.72); } /* ツモ切り（詳細設定「ツモ切りの表示」） */
 .mj-tile.latest { outline: 2px solid var(--accent); outline-offset: 1px; }
 .mj-tile.win { outline: 2px solid var(--win); outline-offset: 1px; margin-left: 6px; }
 
@@ -663,6 +664,12 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .lobby-list li small { color: var(--muted); font-weight: 400; }
 .lobby-list li.cpu { color: var(--muted); border-style: dashed; }
 .lobby-total { font-weight: 700; text-align: center; margin-top: 8px; }
+.lobby-ready, .lobby-vote { margin: 8px 0 0; font-size: .9rem; } /* 準備OK・次のゲームの投票 */
+.lobby-ready small { color: var(--muted); margin-left: 4px; }
+.lobby-ready.all { color: #2e7d32; font-weight: 700; }
+.btn.ready-go { animation: ready-go 1.2s ease-in-out infinite; } /* 全員の準備ができたら「始める」を目立たせる */
+@keyframes ready-go { 50% { box-shadow: 0 0 0 6px rgba(255, 170, 0, .45); } }
+@media (prefers-reduced-motion: reduce) { .btn.ready-go { animation: none; box-shadow: 0 0 0 3px rgba(255, 170, 0, .6); } }
 .lobby-pick { display: grid; gap: 8px; margin: 10px 0; }
 .lobby-pick label { display: flex; justify-content: space-between; align-items: center; gap: 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; }
 .lobby-pick select { font: inherit; padding: 4px 8px; border-radius: 8px; border: 1.5px solid var(--line); background: #fff; max-width: 60%; }

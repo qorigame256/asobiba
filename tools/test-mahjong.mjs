@@ -244,6 +244,7 @@ if (!TESTDATA || !fs.existsSync(TESTDATA)) {
   }
   // 詳細設定「待ち牌の表示」（2026-10-07）。見せるだけの waitView
   {
+    check('ツモ切りの表示は最初は「なし」', mj.init(4, 1, { rules: {} }).rules.tsumogiri === false && mj.init(4, 1, { rules: { tsumogiri: true } }).rules.tsumogiri === true);
     check('待ち牌の表示は最初は「なし」', mj.init(4, 1, { rules: {} }).rules.waits === false && mj.init(4, 1, { rules: { waits: true } }).rules.waits === true);
     const nonTen = '1m258m258p258s1357z';
     const s = table(['234m234p567p678s59s', tenpai25m, nonTen, '19m19p19s1234567z']);

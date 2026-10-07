@@ -19,6 +19,9 @@
 //   どちらも最初は「あり」。喰いタンなしは mahjong-engine.js を変えずに、ここで候補からタンヤオを外して一番高い形を選び直す（noKuitanBest）。
 // 詳細設定「待ち牌の表示」（2026-10-07 本人の決定。最初は「なし」）: 聴牌している間、自分の手牌の上の段に待ちの牌（フリテンなら「フリテン」も）を出す。
 //   自分の番で切る前は、選んだ牌を切ったときの待ちを出す（Claude の判断）。見せるだけで、手の一覧・apply は変えない（waitView・waitsEl）。
+// 詳細設定「ツモ切りの表示」（2026-10-07 本人の決定。最初は「なし」）: 河の牌のうち、引いた牌をそのまま捨てたもの（ツモ切り）を少し暗く描く。
+//   相手の手を読む手がかり。河にはもとから tsumogiri を覚えているので、描き方だけ変える（riverEl。手の一覧・apply は変えない）。
+//   鳴いたあとの打牌は引いていないので手出し。リーチ中の自動の打牌はツモ切り。
 // 役の早見表（2026-10-07 本人の決定。詳細設定ではなく、いつも出す）: 場の情報の段の「📖 役」で、和了れる役の一覧を盤の上に重ねて開く。
 //   観戦の人も見られる。見せるだけ（YAKU_GUIDE・yakuPanel）。表の役の名前と翻数は tools/test-mahjong.mjs がエンジンと突き合わせる。
 // Claude の判断: 暗槓への国士無双のロンは作らない（ごくまれなため）。抜いた北へのロンはできる（槍槓は付かない）。
@@ -680,7 +683,8 @@ function meldsEl(h, p, small) {
 }
 
 // 河。実際の卓と同じく6枚ごとに折り返し、自分の方へ段を重ねる
-function riverEl(h, p) {
+// tg（詳細設定「ツモ切りの表示」）なら、ツモ切りの牌を少し暗く描く
+function riverEl(h, p, tg) {
   const box = document.createElement('div');
   box.className = 'mj-river';
   let row = null;
@@ -688,6 +692,7 @@ function riverEl(h, p) {
     if (i % 6 === 0) { row = document.createElement('div'); row.className = 'mj-river-row'; box.append(row); }
     const t = tileEl(x.id, { side: x.riichi });
     if (x.taken) t.classList.add('taken');
+    if (tg && x.tsumogiri) { t.classList.add('tg'); t.title = 'ツモ切り'; }
     row.append(t);
   });
   if (h.claim && h.claim.from === p && h.claim.src === 'discard') row?.lastChild?.classList.add('latest');
@@ -715,7 +720,7 @@ function tableEl(s, o, me, watching) {
     const seat = document.createElement('div');
     seat.className = 'mj-zone' + (i === 0 ? ' mine' : '');
     seat.style.transform = `rotate(${turns[i]}deg)`;
-    seat.append(riverEl(h, p));
+    seat.append(riverEl(h, p, s.rules.tsumogiri));
     const edge = document.createElement('div');
     edge.className = 'mj-edge';
     const name = document.createElement('span');
@@ -1132,13 +1137,14 @@ export default {
     { key: 'red', label: '赤ドラ', desc: '赤い五（4人・5人は五萬・五筒・五索、3人は五筒・五索）を1枚ずつ入れ、持っているだけで1翻', def: true },
     { key: 'kuitan', label: '喰いタン', desc: '鳴いた手でも断幺九（2〜8だけの手）が役になる', def: true },
     { key: 'waits', label: '待ち牌の表示', desc: '聴牌したら、何で和了れるか（待ちの牌）を自分の画面に出す。初めての人向け', def: false },
+    { key: 'tsumogiri', label: 'ツモ切りの表示', desc: '引いた牌をそのまま捨てた牌（ツモ切り）を、河で少し暗く出す。相手の手を読む手がかりになる', def: false },
     { key: 'players', label: '人数', desc: '3人麻雀は二萬〜八萬を抜いた108枚・チーなし・北は抜きドラ。5人麻雀は5人目に自風がなく、ツモは4人から受け取る', def: 4, choices: [[4, '4人'], [3, '3人（三人麻雀）'], [5, '5人（五人麻雀）']] },
   ],
   seats(rules) { return rules.players === 3 ? 3 : rules.players === 5 ? 5 : 4; },
 
   init(n, seed, { rules = {} } = {}) {
     const s = {
-      n, seed, rules: { length: rules.length === 'south' ? 'south' : 'east', red: rules.red !== false, kuitan: rules.kuitan !== false, waits: rules.waits === true }, scores: Array(n).fill(n === 3 ? 35000 : 25000),
+      n, seed, rules: { length: rules.length === 'south' ? 'south' : 'east', red: rules.red !== false, kuitan: rules.kuitan !== false, waits: rules.waits === true, tsumogiri: rules.tsumogiri === true }, scores: Array(n).fill(n === 3 ? 35000 : 25000),
       kyoku: 0, honba: 0, kyotaku: 0, handNo: 0, seq: 0, over: false, ranking: null, h: null,
     };
     startHand(s);

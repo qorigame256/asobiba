@@ -336,7 +336,7 @@ export default {
     if (!ui.ink.hidden) {
       const left = Math.max(0, INK - s.ink);
       ui.ink.querySelector('i').style.width = `${(left / INK) * 100}%`;
-      ui.ink.querySelector('span').textContent = left ? `インク 残り ${Math.ceil((left / INK) * 100)}%` : 'インクがなくなりました（消しゴム・1つ戻すは使えます）';
+      ui.ink.querySelector('span').textContent = left ? `インク 残り ${Math.ceil((left / INK) * 100)}%` : isDrawer ? 'インクがなくなりました（消しゴム・1つ戻すは使えます）' : 'インクがなくなりました';
       ui.ink.classList.toggle('low', left < INK * 0.2);
     }
     ui.canvas.classList.toggle('drawing', isDrawer && o.canMove);
