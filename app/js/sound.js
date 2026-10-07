@@ -14,6 +14,7 @@
 // 勝ち・負け・正解・不正解・番が来た・ゴール・和了は、本人が試聴ページで聞いて選んだ（2026-10-03）。
 // 和了は音のファイルではなく、ブラウザの読み上げで「ロン！」「ツモ！」と言う（SAY。日本語の声で CC0 の素材が無かったため）。
 // リーチも読み上げで「リーチ！」と言う（2026-10-04 本人の決定。前は鐘の音 impact-sounds / impactBell_heavy_000）。
+// 将棋の王手も読み上げで「王手！」と言う（2026-10-07 詳細設定「王手の知らせ」。ありのときだけ）。
 //
 // 鳴らすのは Web Audio（ブラウザの音の仕組み）。スマホは画面に触れるまで音を出せないので、最初に触れたときに準備する。
 // iPhone はマナーモード（消音スイッチ）のときは鳴らない。オン・オフはこの端末に覚える（localStorage）。
@@ -21,7 +22,7 @@
 const NAMES = ['place', 'card', 'draw', 'shuffle', 'chip', 'pop', 'punch', 'stone', 'turn', 'correct', 'wrong', 'question', 'hit',
   'win', 'lose', 'draw_game', 'call', 'smack', 'wall', 'goal'];
 // 読み上げで出す音（名前 → 言う言葉）。声は端末ごとに違う
-const SAY = { ron: 'ロン！', tsumo: 'ツモ！', riichi: 'リーチ！' };
+const SAY = { ron: 'ロン！', tsumo: 'ツモ！', riichi: 'リーチ！', oute: '王手！' }; // oute は将棋の「王手の知らせ」
 export const isVoice = (name) => name in SAY;
 // 音ごとの大きさ（素材の最大音量はそろえてあるので、耳ざわりなものを下げる）
 const GAIN = { pop: 0.5, stone: 0.6, wall: 0.4, turn: 0.6, question: 0.6, hit: 0.6, wrong: 0.6, shuffle: 0.7 };

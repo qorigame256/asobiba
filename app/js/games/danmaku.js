@@ -8,9 +8,16 @@
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready →(3秒)→ go → play →(時間＋待ち)→ end
 // 詳細設定「残機」（2026-10-06 本人の決定。最初は 1機＝今までどおり当たったら脱落）: 2機・3機なら、その数だけ当たったら脱落。
 //   Claude の判断: 当たったあと2秒は当たらない（自機が点滅する）。その場で続ける。順位は脱落した時刻（最後の1機を失った時刻）で決める。
-// 手: { p: -1, t: 'go' | 'end' } / { p, t: 'hit', ms: もった時間, k: 何回目の当たりか（0から） } / { p, t: 'last', ms }
+// 手: { p: -1, t: 'go' | 'end' } / { p, t: 'hit', ms: もった時間, k: 何回目の当たりか（0から） } / { p, t: 'last', ms } / { p, t: 'slow', ms }（スロー ありだけ）
 //   k が局面の hits[p] と違う手は反則（同じ当たりが2回届いても1回だけ数える）。
 // CPU（と部屋を出た人の席）はホストの端末がよける動きを計算する（cpu の中の sim）。腕前はわざと鈍くしてある。
+// 詳細設定「スロー」（2026-10-07 の19回目。最初は なし＝前と全く同じ。局面に slow も持たない）: ありなら1人1回（対局ごと）、
+//   ⏱ スロー（パソコンはスペースキーでも）を押すと、3秒のあいだ自分の画面の弾が 0.4倍の速さになる（危ないときの切り札）。
+//   Claude の判断: 遅くなるのは使った人の画面の弾だけ。弾はもともと各自の端末の時計で動いていて、当たり判定も自分の端末だけでしているので、
+//   その人の「弾の時計」だけを遅らせる（slowClock。3秒のあと弾の時計は実の時計より 1.8秒遅れたまま進む。新しい弾が出るのもその分遅れる）。
+//   全員を遅くする形は、各自の時計がそろっていないので「いつから遅くするか」が端末ごとにずれ、押した人に有利な形にもなるので選ばなかった。
+//   残り時間・もった時間（手の ms）・脱落の順位は実の時計のまま。使ったことは手 { p, t: 'slow', ms: 押した時刻 } で送る
+//   （局面の slow[p] に覚えて2回目を弾く。ほかの人の画面に「○○ がスロー！」を出す）。CPU は弾がすぐそばに来たときに、ときどき使う。
 
 import { mulberry32 } from './util.js';
 import { since, scoreChips, esc } from './party.js';
@@ -24,6 +31,16 @@ const SHIP_R = 0.02;
 const SEND_MS = 100;
 const START = { x: 0.5, y: H - 0.12 };
 const SAFE_SEC = 2; // 残機があって当たったあと、当たらない秒数
+export const SLOW_SEC = 3; // スローの長さ（実の秒）
+export const SLOW_RATE = 0.4; // スローの間の弾の速さ（倍）
+const SLOW_NOTE_MS = 2500; // 「○○ がスロー！」を出す長さ
+
+// スローを at 秒（実の時計。null なら使っていない）に使ったときの、実の時刻 sec での「弾の時計」（戻らない）
+export function slowClock(sec, at) {
+  if (at === null || at === undefined || !(sec > at)) return sec;
+  return sec - (1 - SLOW_RATE) * Math.min(sec - at, SLOW_SEC);
+}
+const slowOn = (s) => Array.isArray(s.slow); // スロー ありの局面だけ slow を持つ
 
 /* ---------- 弾の作り方（全員同じ） ---------- */
 
@@ -105,6 +122,14 @@ export function hitAt(active, sec, x, y) {
   for (const b of active) {
     const [bx, by] = posOf(b, sec);
     if (Math.hypot(bx - x, by - y) < b.r + HIT_R) return true;
+  }
+  return false;
+}
+// 弾が sec 秒の少し先に、(x, y) のすぐそばにあるか（CPU がスローを使う目安）
+export function dangerAt(active, sec, x, y) {
+  for (const b of active) {
+    const [bx, by] = posOf(b, sec + 0.15);
+    if (Math.hypot(bx - x, by - y) < b.r + HIT_R + 0.025) return true;
   }
   return false;
 }

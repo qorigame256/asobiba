@@ -182,10 +182,19 @@ export function cpuMove(s, rules) {
 
 /* ---------- 進行 ---------- */
 
-export function init() {
+export function init(quiet = false) {
   const board = initialBoard();
   const hands = [Array(4).fill(0), Array(4).fill(0)];
-  return { zoo: true, board, hands, turn: 0, ply: 0, last: null, keys: [posKey(board, hands, 0)], result: null };
+  const s = { zoo: true, board, hands, turn: 0, ply: 0, last: null, keys: [posKey(board, hands, 0)], result: null };
+  if (quiet) s.quiet = true; // 王手の知らせ「なし」（ありのときは今までと同じ形）
+  return s;
+}
+
+// 王手の知らせ（shogi.js が使う）: 最後の手で、次に指す人のライオンに指した人の駒が利いているか。局面だけから決める
+export function gaveCheck(s) {
+  if (s.result || !s.last || s.last.resign) return false;
+  const k = lionSq(s.board, s.turn);
+  return k >= 0 && attacked(s.board, k, 1 - s.turn);
 }
 
 export function apply(s, m) {
@@ -204,6 +213,7 @@ export function apply(s, m) {
   const mark = s.turn === 0 ? '▲' : '△';
   const note = `${mark}${FILES[mv.t % W]}${RANKS[rowOf(mv.t)]}${NAME[piece]}${m.d ? '打' : ''}${promoted ? '成' : ''}`;
   const n = { zoo: true, board: b, hands: h, turn: next, ply, keys, result: null, last: { ...mv, side: s.turn, note } };
+  if (s.quiet) n.quiet = true;
   const j = judge(b, s.turn, captured);
   if (j) n.result = { ...j, cells: [] };
   else if (keys.filter((k) => k === key).length >= 4) n.result = { winner: null, cells: [], reason: '千日手' };
@@ -351,4 +361,4 @@ export function render(root, s, o, players) {
 }
 
 // テスト用
-export const _test34 = { moves, attacked, make, judge, initialBoard, evaluate };
+export const _test34 = { gaveCheck, moves, attacked, make, judge, initialBoard, evaluate };

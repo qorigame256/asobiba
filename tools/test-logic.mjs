@@ -417,6 +417,26 @@ for (const players of [2, 3]) {
     }
   }
 }
+// リバーシの石の数を隠す: なしの局面は前と同じ（hide を持たない）・対局の間は数が出ない・終わったら出る・ほかの設定と一緒でも最後まで打てる
+{
+  assert.ok(R.settings.some((x) => x.key === 'hide' && x.def === false), '石の数を隠すの設定（最初はなし）');
+  assert.ok(!('hide' in R.init({ rules: { hide: false } })) && !('hide' in R.init()), 'なしの局面に hide を足さない');
+  for (const rules of [{}, { players: 3 }, { players: 4 }, { size: 6 }, { size: 10, holes: true }, { corners: true, corner: true }, { players: 4, holes: true, corner: true }]) {
+    const all = { ...rules, hide: true, cpu: 'weak' };
+    let st = R.init({ rules: all, seed: 90 });
+    assert.equal(st.hide, true);
+    const showSt = R.init({ rules, seed: 90 });
+    assert.match(R.info(showSt), /黒 2|黒 1/, 'なしなら数が出る ' + JSON.stringify(rules));
+    while (!R.result(st)) {
+      assert.match(R.info(st), /石の数はひみつ/, '対局の間は隠す ' + JSON.stringify(rules));
+      assert.doesNotMatch(R.info(st), /rv-mini/, '対局の間は数を出さない');
+      st = R.apply(st, R.cpu(st, st.turn, all));
+      assert.ok(st, '石の数を隠すで CPU が反則を出した');
+    }
+    assert.doesNotMatch(R.info(st), /ひみつ/, '終わったら隠さない');
+    assert.match(R.info(st), /rv-mini p0"><\/span>黒 \d+/, '終わったら数が出る');
+  }
+}
 
 // ランダム対局で落ちないこと・必ず終わること
 function randomGame(g, legalOf) {

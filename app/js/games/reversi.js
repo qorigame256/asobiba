@@ -14,6 +14,10 @@
 //   3〜4人の「置ける所」はいつもと同じ（はさめなければ石のとなり）なので、盤が埋まっていなければ続けて置ける。
 //   手の一覧の形は今のまま。turn が同じ人を続けて返すだけ。人数・盤の大きさ・穴あき盤と一緒に使える（四隅封印では角に置けないので効かない）。
 //   CPU は今の点の付け方のまま（隅の点が高いので、自然に角を取りに行く）。
+// 詳細設定「石の数を隠す」（2026-10-07 の19回目の案。最初はなし）: 対局の間、状態の欄に石の数を出さない（盤を見て数えるのは自由）。
+//   Claude の判断: 終わったら（over）いつもどおり出す。局面には、ありのときだけ hide: true を足す（なしの局面は前と全く同じ）。
+//   隠している間は「石の数はひみつ（終わったら出ます）」と出す。ふりかえりの途中の局面は終わっていないので隠れたまま。CPU は変えない。
+//   人数・盤の大きさ・四隅封印・穴あき盤・角でもう1手と一緒に使える。
 
 import { CPU_SETTING, boardCpu, mulberry32 } from './util.js';
 
@@ -207,6 +211,7 @@ export default {
     { key: 'corners', label: '四隅封印', desc: '四隅に石を置けない。「隅を取れば強い」が使えなくなる', def: false },
     { key: 'holes', label: '穴あき盤', desc: '石を置けないマス（穴）が数か所ある。置き場所は毎回変わる（先手と後手で同じ条件になるよう、点対称に置く）', def: false },
     { key: 'corner', label: '角でもう1手', desc: '角に置いたら、続けてもう1回置ける（四隅封印と一緒では、角に置けないので効かない）', def: false },
+    { key: 'hide', label: '石の数を隠す', desc: '終わるまで、だれが何個持っているかの数が出ない。どっちが多いか、盤を見て考えよう', def: false },
     CPU_SETTING,
   ],
 
@@ -230,7 +235,7 @@ export default {
       board[(h - 1) * N + h] = 0; board[h * N + h - 1] = 0;
     }
     const holes = rules.holes ? makeHoles(N, seed) : [];
-    return { n, board, shut: !!rules.corners, holes, closed: closedOf(N, !!rules.corners, holes), turn: 0, last: null, flipped: [], passed: null, over: false, bonus: !!rules.corner, again: false, missed: null };
+    return { n, board, shut: !!rules.corners, holes, closed: closedOf(N, !!rules.corners, holes), turn: 0, last: null, flipped: [], passed: null, over: false, bonus: !!rules.corner, again: false, missed: null, ...(rules.hide ? { hide: true } : {}) };
   },
 
   turn(s) { return s.turn; },
@@ -281,15 +286,18 @@ export default {
   },
 
   info(s) {
+    // 石の数を隠す（詳細設定）: 終わるまで数を出さない
+    const hidden = s.hide && !s.over;
+    const secret = '<span class="rv-score">石の数はひみつ（終わったら出ます）</span>';
     if (s.n > 2) {
       const c = count(s.board, s.n);
-      let html = '<span class="rv-score">' + c.map((v, p) => `<span class="rv-mini p${p}"></span>${this.players[p]} ${v}`).join('　') + '</span>';
+      let html = hidden ? secret : '<span class="rv-score">' + c.map((v, p) => `<span class="rv-mini p${p}"></span>${this.players[p]} ${v}`).join('　') + '</span>';
       if (s.again && !s.over) html += `<br>${this.players[s.turn]}は角を取ったので、もう1回！`;
       if (!s.over && !legalMoves(s.board, s.turn, s.closed).length) html += `<br>${this.players[s.turn]}ははさめる所がないので、石のとなりならどこにでも置けます`;
       return html;
     }
     const [b, w] = count(s.board);
-    let html = `<span class="rv-score"><span class="rv-mini p0"></span>黒 ${b}　−　${w} 白<span class="rv-mini p1"></span></span>`;
+    let html = hidden ? secret : `<span class="rv-score"><span class="rv-mini p0"></span>黒 ${b}　−　${w} 白<span class="rv-mini p1"></span></span>`;
     if (s.again && !s.over) html += `<br>${this.players[s.turn]}は角を取ったので、もう1回！`;
     if (s.missed != null && !s.over) html += `<br>${this.players[s.missed]}は角を取りましたが、続けて置ける場所がないので${this.players[s.turn]}の番です`;
     if (s.passed !== null && !s.over) html += `<br>${this.players[s.passed]}は置ける場所がないのでパスです`;

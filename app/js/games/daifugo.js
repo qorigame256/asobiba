@@ -2,6 +2,7 @@
 // 強さ: 3 < 4 < … < K < A < 2。ジョーカーは1枚出しなら何にでも勝ち、組の中ではどの札の代わりにもなる。
 // 手: { p, t: 'play', cards: [札…] } / { p, t: 'pass' } / { p, t: 'give', cards }（カード交換で上位が渡す札）
 //     { p, t: 'seven', cards }（7渡しで次の人へ渡す札） / { p, t: 'ten', cards }（10捨てで捨てる札）
+//     { p, t: 'bomb', r: 数字 1(A)〜13(K) }（12ボンバーで全員に捨てさせる数字）
 //
 // ルールの細かい決めごと（どれも Claude の判断。変えるなら本人に確認）:
 //   - 1回パスした人は、場が流れるまで出せない。全員がパスしたら場が流れ、最後に出した人から（上がっていれば次の人から）。
@@ -19,6 +20,12 @@
 //     8切りなどで場が流れるときも、渡し終えてから流す。CPU は弱い札から渡す（捨てる）。
 //   - 9リバース（詳細設定。2026-10-06 本人の決定）: 9を出すたびに順番の向き（s.dir）が入れ替わり、場が流れてもそのまま。枚数に関係なく1回
 //     （階段に9があっても1回）。逆回りでは「次の人」（5飛び・7渡しの相手も）が反対どなりになる。8切りなどで流れるときも向きは変わる。
+//   - 12ボンバー（詳細設定。2026-10-07 本人の決定、細かい所は Claude の判断）: Q を出した人が数字を1つ（A〜K。ジョーカーは選べない）選び、
+//     上がっていない全員（選んだ人も）がその数字の札を全部捨てる。Q の枚数に関係なく1回（階段に Q が入っていても・ジョーカーが Q の代わりでも1回）。
+//     だれも持っていない数字も選べる。選ぶまで出した人の番のまま（s.pend の { t: 'bomb' }。7渡し・10捨てのあと、最後に選ぶ）。場の Q はそのまま。
+//     8切りなどで流れるときも、選び終えてから流す。出して上がったとき・7渡しや10捨てで上がったときは選ばない。
+//     捨てて手札がなくなった人は上がり（反則上がりにしない）。上がる順は、選んだ人から順番の向きに席の順。都落ちは最初に上がった人で見る（ふだんと同じ）。
+//     CPU は自分が一番多く持っている数字（同じなら、いまの強さ（革命を見る）で弱い方）。2割は持っている数字から適当に選ぶ。
 //   - カード交換: 大貧民の一番強い2枚 → 大富豪、大富豪が選んだ2枚 → 大貧民。4人以上なら貧民と富豪で1枚ずつも。
 //     前の対局と顔ぶれが違うときは交換しない。
 
@@ -238,6 +245,25 @@ function afterPlay(s, p, flow) {
   }
 }
 
+// 12ボンバー: 数字 r の札を、上がっていない全員の手札から捨てる（選んだ p から順番の向きに）。手札がなくなった人は上がり
+function bomb(s, p, r, last) {
+  const order = Array.from({ length: s.n }, (_, k) => seatAt(s, p, k)).filter((q) => isActive(s, q));
+  last.hits = [];
+  for (const q of order) {
+    const k = s.hands[q].filter((c) => rankOf(c) === r).length;
+    if (!k) continue;
+    s.hands[q] = s.hands[q].filter((c) => rankOf(c) !== r);
+    last.hits.push([q, k]);
+  }
+  for (const q of order) {
+    if (s.hands[q].length || !isActive(s, q)) continue; // 都落ちで先に最下位になった人は飛ばす
+    const x = {};
+    goOut(s, q, x);
+    (last.outs ??= []).push(q);
+    if (x.miyako !== undefined) last.miyako = x.miyako;
+  }
+}
+
 const clone = (s) => ({
   ...s, hands: s.hands.map((h) => h.slice()), passed: s.passed.slice(), out: s.out.slice(), fouls: s.fouls.slice(),
   gives: s.gives.slice(), swaps: s.swaps.slice(),
@@ -256,6 +282,7 @@ const RULE_LIST = [
   { key: 'five', label: '5飛び', desc: '5を出すと、出した5の枚数だけ次の人を飛ばす（飛ばされた人はパスと同じ）', def: false },
   { key: 'seven', label: '7渡し', desc: '7を出すと、出した7の枚数だけ好きな札を次の人に渡す（必ず）', def: false },
   { key: 'ten', label: '10捨て', desc: '10を出すと、出した10の枚数だけ好きな札を捨てる（必ず）', def: false },
+  { key: 'bomber', label: '12ボンバー', desc: 'Q を出した人が数字を1つ選び、全員がその数字の札を全部捨てる', def: false },
   { key: 'nine', label: '9リバース', desc: '9を出すと順番の向きが逆になる（次に9が出るまでそのまま）', def: false },
   { key: 'elevenBack', label: '11バック', desc: 'J を出すと、場が流れるまで強さの順番が逆になる', def: false },
   { key: 'spe3', label: 'スペ3返し', desc: 'ジョーカー1枚には ♠3 で勝てる', def: false },
@@ -273,6 +300,11 @@ function logText(s, nameP) {
   if (L.t === 'give' || L.t === 'seven') t = `${nameP(L.p)}が${nameP(L.to)}に${L.n}枚渡した${L.t === 'seven' ? '（7渡し）' : ''}`;
   else if (L.t === 'ten') t = `${nameP(L.p)}が${L.n}枚捨てた（10捨て）`;
   else if (L.t === 'pass') t = `${nameP(L.p)}はパス`;
+  else if (L.t === 'bomb') {
+    const hits = L.hits.map(([q, k]) => `${nameP(q)} ${k}枚`).join('・');
+    t = `${nameP(L.p)}が 12ボンバー：${rankLabel(L.r)} を指定（${hits || 'だれも持っていなかった'}）`;
+    if (L.outs) t += ` → ${L.outs.map(nameP).join('・')}が上がり！`;
+  }
   else t = `${nameP(L.p)}が ${L.cards.map(cardLabel).join(' ')} を出した`;
   if (L.effects?.length) t += `（${L.effects.join('・')}）`;
   if (L.foul) t += ' → 反則上がりで最下位';
@@ -329,7 +361,7 @@ export default {
   result(s) { return s.phase === 'done' ? { winner: s.ranking[0], ranking: s.ranking } : null; },
   startSound: 'shuffle',
   // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
-  sound(a, b, m) { return m.t === 'pass' ? 'pop' : m.t === 'play' && b.last?.effects?.length ? 'call' : 'card'; },
+  sound(a, b, m) { return m.t === 'bomb' ? 'call' : m.t === 'pass' ? 'pop' : m.t === 'play' && b.last?.effects?.length ? 'call' : 'card'; },
   carry(s, p) { return s.ranking.indexOf(p); },
 
   resultText(res, me, pn) {
@@ -367,20 +399,29 @@ export default {
     if (s.pend) {
       // 7渡し・10捨て: 出した人が札を選ぶまで次へ進まない
       const pd = s.pend[0];
-      const k = Math.min(pd.k, s.hands[p].length);
-      if (m.t !== pd.t || !validCards(m.cards, s.hands[p]) || m.cards.length !== k) return null;
-      s.hands[p] = removeCards(s.hands[p], m.cards);
-      const last = { p, t: pd.t, n: k };
-      if (pd.t === 'seven') {
-        last.to = nextActive(s, p);
-        s.hands[last.to] = sortHand([...s.hands[last.to], ...m.cards]);
-      }
-      s.last = last;
-      s.pend = s.pend.slice(1);
-      if (!s.hands[p].length) {
-        s.pend = [];
-        goOut(s, p, last);
+      if (pd.t === 'bomb') {
+        // 12ボンバー: 数字を選ぶ（いつも最後）
+        if (m.t !== 'bomb' || !Number.isInteger(m.r) || m.r < 1 || m.r > 13) return null;
+        s.last = { p, t: 'bomb', r: m.r };
+        bomb(s, p, m.r, s.last);
+        s.pend = s.pend.slice(1);
         if (finishIfOver(s)) return s;
+      } else {
+        const k = Math.min(pd.k, s.hands[p].length);
+        if (m.t !== pd.t || !validCards(m.cards, s.hands[p]) || m.cards.length !== k) return null;
+        s.hands[p] = removeCards(s.hands[p], m.cards);
+        const last = { p, t: pd.t, n: k };
+        if (pd.t === 'seven') {
+          last.to = nextActive(s, p);
+          s.hands[last.to] = sortHand([...s.hands[last.to], ...m.cards]);
+        }
+        s.last = last;
+        s.pend = s.pend.slice(1);
+        if (!s.hands[p].length) {
+          s.pend = [];
+          goOut(s, p, last);
+          if (finishIfOver(s)) return s;
+        }
       }
       if (s.pend.length) return s;
       const flow = s.after;
@@ -443,8 +484,9 @@ export default {
     const count = meld.kind === 'set' ? meld.n : 1;
     if (s.rules.seven && contains(meld, 7)) pend.push({ t: 'seven', k: count });
     if (s.rules.ten && contains(meld, 10)) pend.push({ t: 'ten', k: count });
+    if (s.rules.bomber && contains(meld, 12)) pend.push({ t: 'bomb' });
     if (pend.length && s.hands[p].length) {
-      for (const x of pend) effects.push(x.t === 'seven' ? '7渡し' : '10捨て');
+      for (const x of pend) effects.push(x.t === 'seven' ? '7渡し' : x.t === 'ten' ? '10捨て' : '12ボンバー');
       s.pend = pend;
       s.after = flow;
       return s;
@@ -458,6 +500,16 @@ export default {
   cpu(s, p) {
     const hand = s.hands[p];
     if (s.phase === 'exchange') return { t: 'give', cards: hand.slice(0, s.gives[0].k) };
+    if (s.pend?.[0].t === 'bomb') {
+      // 12ボンバー: 一番多く持っている数字（同じなら弱い方）。2割は持っている数字から適当に
+      const cnt = new Map();
+      for (const c of hand) if (c !== JOKER) cnt.set(rankOf(c), (cnt.get(rankOf(c)) ?? 0) + 1);
+      const ranks = [...cnt.keys()];
+      if (!ranks.length) return { t: 'bomb', r: 1 + Math.floor(Math.random() * 13) }; // ジョーカーだけ
+      if (Math.random() < 0.2) return { t: 'bomb', r: ranks[Math.floor(Math.random() * ranks.length)] };
+      const weak = (r) => (s.rev ? -1 : 1) * power('s' + r);
+      return { t: 'bomb', r: ranks.reduce((a, b) => (cnt.get(b) > cnt.get(a) || (cnt.get(b) === cnt.get(a) && weak(b) < weak(a)) ? b : a)) };
+    }
     if (s.pend) {
       // 弱い札から（革命中は強さが逆。ジョーカーは最後まで残す）
       const k = Math.min(s.pend[0].k, hand.length);
@@ -558,6 +610,12 @@ export default {
     log.className = 'cc-log';
     log.textContent = logText(s, nameP);
     root.append(log);
+    if (s.pend?.[0].t === 'bomb' && s.turn !== me) {
+      const w = document.createElement('p');
+      w.className = 'df-bomb-wait';
+      w.textContent = `💣 ${nameP(s.turn)}が 12ボンバーの数字を選んでいます…`;
+      root.append(w);
+    }
 
     if (s.ranking) {
       const list = document.createElement('ol');
@@ -573,7 +631,8 @@ export default {
     if (me !== null) {
       const myTurn = o.canMove;
       const giving = myTurn && s.phase === 'exchange';
-      const pd = myTurn && s.pend ? { ...s.pend[0], k: Math.min(s.pend[0].k, s.hands[me].length) } : null; // 7渡し・10捨て
+      const bombing = myTurn && s.pend?.[0].t === 'bomb'; // 12ボンバー
+      const pd = myTurn && s.pend && !bombing ? { ...s.pend[0], k: Math.min(s.pend[0].k, s.hands[me].length) } : null; // 7渡し・10捨て
       const legal = myTurn && s.phase === 'play' && !pd ? legalPlays(s, me) : [];
       const usable = new Set(legal.flatMap((m) => m.cards));
       const head = document.createElement('div');
@@ -590,6 +649,7 @@ export default {
         const hint = document.createElement('small');
         hint.textContent = giving
           ? `${nameP(s.gives[0].to)}に渡す札を${s.gives[0].k}枚選んで「渡す」`
+          : bombing ? '12ボンバー: 数字を1つ選ぶと、全員がその数字の札を全部捨てます（あなたも）'
           : pd ? (pd.t === 'seven' ? `7渡し: ${nameP(nextActive(s, me))}に渡す札を${pd.k}枚選んで「渡す」` : `10捨て: 捨てる札を${pd.k}枚選んで「捨てる」`)
           : legal.length ? '出す札を選んで「出す」。光っている札が使えます' : '出せる札がありません。「パス」を押してください';
         head.append(hint);
@@ -600,10 +660,11 @@ export default {
       hand.className = 'df-hand';
       for (const c of s.hands[me]) {
         const can = giving || !!pd || usable.has(c);
-        const e = cardEl(c, myTurn ? 'button' : 'div');
+        const pickable = myTurn && !bombing;
+        const e = cardEl(c, pickable ? 'button' : 'div');
         if (can) e.classList.add('usable');
         if (sel.cards.includes(c)) e.classList.add('selected');
-        if (myTurn) {
+        if (pickable) {
           e.onclick = () => {
             sel.cards = sel.cards.includes(c) ? sel.cards.filter((x) => x !== c) : [...sel.cards, c];
             draw();
@@ -625,7 +686,21 @@ export default {
           b.onclick = fn;
           actions.append(b);
         };
-        if (giving) {
+        if (bombing) {
+          // 数字のボタン（弱い順。自分が持っている枚数も出す）
+          actions.classList.add('df-bomb');
+          for (const r of [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 1, 2]) {
+            const k = s.hands[me].filter((c) => rankOf(c) === r).length;
+            btn(rankLabel(r), k ? 'primary' : 'secondary', true, () => o.onMove({ t: 'bomb', r }));
+            const b = actions.lastChild;
+            b.title = k ? `あなたは${k}枚` : 'あなたは持っていない';
+            if (k) {
+              const n = document.createElement('small');
+              n.textContent = `×${k}`;
+              b.append(n);
+            }
+          }
+        } else if (giving) {
           btn('渡す', 'primary', sel.cards.length === s.gives[0].k, () => o.onMove({ t: 'give', cards: sel.cards }));
         } else if (pd) {
           btn(pd.t === 'seven' ? '渡す' : '捨てる', 'primary', sel.cards.length === pd.k, () => o.onMove({ t: pd.t, cards: sel.cards }));

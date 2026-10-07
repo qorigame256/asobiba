@@ -279,12 +279,21 @@ export function cpuMove(s, rules) {
 
 /* ---------- 進行 ---------- */
 
-export function init(auto = false) {
+export function init(auto = false, quiet = false) {
   const board = initialBoard();
   const hands = [0, 1, 2].map(() => Array(8).fill(0));
   const s = { n: 3, board, hands, turn: 0, ply: 0, alive: [true, true, true], out: [], last: null, keys: [posKey(board, hands, 0)], result: null };
   if (auto) s.auto = true; // いつも成る（なしのときは何も足さない）
+  if (quiet) s.quiet = true; // 王手の知らせ「なし」（apply は局面を広げて写すので、そのまま続く）
   return s;
+}
+
+// 王手の知らせ（shogi.js が使う）: 最後の手で、指した人の駒がほかの（残っている）人の玉に利いているか。局面だけから決める
+export function gaveCheck(s) {
+  if (s.result || !s.last || s.last.resign) return false;
+  const me = s.last.side;
+  const mine = attackSet(s.board, me);
+  return [0, 1, 2].some((q) => q !== me && s.alive[q] && mine.has(kingSq(s.board, q)));
 }
 
 function finish(n) {
@@ -578,4 +587,4 @@ export function render(root, s, o) {
 }
 
 // テスト用
-export const _test3 = { legalMoves, reach, step, lineOf, initialBoard, attackSet, make, kingSq };
+export const _test3 = { gaveCheck, legalMoves, reach, step, lineOf, initialBoard, attackSet, make, kingSq };
