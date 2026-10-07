@@ -769,7 +769,7 @@ function waitsEl(v) {
   box.append(label);
   for (const k of v.kinds) {
     const t = tileEl(k * 4 + 1); // 赤でない牌の番号で描く
-    t.style.cssText += 'width: min(calc(var(--hw) * .6), 28px); flex: 0 1 auto; min-width: 0;';
+    t.style.cssText += 'width: min(calc(var(--hw) * .72), 30px); flex: 0 1 auto; min-width: 0;';
     box.append(t);
   }
   if (v.furiten) {

@@ -264,13 +264,13 @@ if (!TESTDATA || !fs.existsSync(TESTDATA)) {
     // 14枚（自分の番で切る前）: 選んでいなければ出さない。選んだ牌を切ったときの待ちを出す
     check('14枚で牌を選ぶ前は出さない', T.waitView(s, 0).kinds.length === 0);
     v = T.waitView(s, 0, tile(s, 0, '9s'));
-    check('九索を選ぶと五索の単騎待ち', v.kinds.join() === String(k('5s')) && v.after && !v.furiten, JSON.stringify(v));
+    check('九索を選ぶと五索・八索待ち', v.kinds.join() === [k('5s'), k('8s')].join() && v.after && !v.furiten, JSON.stringify(v));
     check('二萬を選ぶと聴牌しないので空', T.waitView(s, 0, tile(s, 0, '2m')).kinds.length === 0);
     s.h.rivers[0] = [{ id: tile(s, 0, '5s') ^ 1, riichi: false, taken: false }];
     check('選んだ牌を切ったときの待ちが河にあればフリテン', T.waitView(s, 0, tile(s, 0, '9s')).furiten === true);
     s.h.rivers[0] = [];
-    const t2 = table(['234m234p567p678s55s', '', '', '']); // 五索を切ると五索の単騎待ち（切る牌が待ち）
-    check('切る牌そのものが待ちならフリテン', T.waitView(t2, 0, tile(t2, 0, '5s')).furiten === true && T.waitView(t2, 0, tile(t2, 0, '5s')).kinds.join() === String(k('5s')));
+    const t2 = table(['234m234p567p678s55s', '', '', '']); // 五索を切ると五索・八索待ち（切る牌が待ち）
+    check('切る牌そのものが待ちならフリテン', T.waitView(t2, 0, tile(t2, 0, '5s')).furiten === true && T.waitView(t2, 0, tile(t2, 0, '5s')).kinds.join() === [k('5s'), k('8s')].join());
     // リーチ中は14枚でも今の待ち。局面は変えない
     s.h.riichi[0] = 1;
     s.h.waits[0] = [k('5s')];
