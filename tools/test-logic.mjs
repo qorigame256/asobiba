@@ -2270,7 +2270,8 @@ assert.notEqual(GM.cpu(s, 0, { cpu: 'strong' }), 3, 'ぴったり五目の CPU �
     let guard = 0;
     while (!HT.result(st)) {
       const p = st.phase === 'end' ? (g % n) % n : st.toAct;
-      const q = HT.canAct(st, p) ? p : HT.turn(st) ?? st.cards.findIndex((c) => c);
+      // 動ける人の CPU だけに打たせる（main.js と同じ）。前は持ち点0で抜けた人を選ぶことがあり、まれに落ちていた
+      const q = HT.canAct(st, p) ? p : [...Array(n).keys()].find((i) => HT.canAct(st, i));
       st = HT.apply(st, { ...HT.cpu(st, q), p: q });
       assert.ok(st, 'ひたいカードの CPU が反則');
       assert.equal(st.chips.reduce((a, b) => a + b, 0) + (st.phase === 'end' ? st.carry : st.pot), n * 20, '持ち点と場の点の合計は変わらない');
