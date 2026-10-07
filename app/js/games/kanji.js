@@ -10,9 +10,12 @@
 //   答えられるのは1問に1回だけ（何度も試せると当てずっぽうで取れるため）。全員が答えたら、正解がいなくても1.5秒待って締め切る。
 // 詳細設定「問題の数」（2026-10-07 本人の決定。最初は10問）: 10・15・20問。まぜた問題の並びの先頭から取るだけなので、10問のときは前と全く同じ。
 //   同じ問題は出さない。難しさの問題が足りなければ、出せる数まで（今はどの難しさも20語以上あるので足りなくならない）。問題の数は qs の長さで見る。
+// 「ふりかえり」（2026-10-07 本人の決定。詳細設定にせず、いつも出す）: 対局が終わった画面に、出た漢字と正しい読みを出た順に並べる
+//   （自分が正解した問題に ⭕、まちがえた・答えなかった問題に ❌。観戦の人には印を付けない。いちばん速く正解した人の名前も小さく添える）。
+//   見せるだけで手・点は変えない。そのために締め切り（close）のとき、その問題でだれが何秒で正解したかを局面の log に足していく（reviewOf）。
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'try', q: 問題番号, text: 答え, ms, n: その問題で何回目の答えか }
 
-import { mulberry32, shuffle } from './util.js';
+import { mulberry32, shuffle, esc } from './util.js';
 import { since, kana, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
 import { KANJI } from './kanji-data.js';
 
@@ -51,6 +54,29 @@ export function choicesOf(seed, q, [word, yomis]) {
 }
 
 const clone = (s) => ({ ...s, scores: s.scores.slice(), tries: s.tries.slice(), solved: s.solved.slice(), said: s.said.slice() });
+
+// 「ふりかえり」の中身（画面に依存しない）。出た順に { n: 何問目, word, yomi: 読み（2つ以上は「／」で）, mark: ⭕・❌・''（観戦）, fast: いちばん速く正解した人の番号の一覧, ms }。
+// log は締め切りのたびに足した { solved: 各自の正解の時間（ms か null）, winners }。締め切っていない問題は出さない
+export function reviewOf(s, me = null) {
+  return (s.log ?? []).map((x, q) => {
+    const [word, yomis] = s.qs[q];
+    const mine = me === null || me < 0 || me >= s.n ? '' : x.solved[me] !== null ? '⭕' : '❌';
+    return { n: q + 1, word, yomi: yomis.join('／'), mark: mine, fast: x.winners.slice(), ms: x.winners.length ? x.solved[x.winners[0]] : null };
+  });
+}
+
+// ふりかえりの見た目（style.css には入れず、使うときに足す）。1問1行。読みが長いときはその欄の中で折り返す
+const REVIEW_CSS = `
+.kj-review { background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 8px 12px; }
+.kj-review summary { cursor: pointer; font-weight: 700; }
+.kj-review ol { list-style: none; margin: 6px 0 0; padding: 0; }
+.kj-review li { display: grid; grid-template-columns: 1.7em 1.5em auto minmax(0, 1fr) auto; gap: 6px; align-items: baseline; padding: 5px 0; border-top: 1px solid var(--line); }
+.kj-rv-n { font-size: .78rem; color: var(--muted); text-align: right; }
+.kj-rv-word { font-weight: 800; font-size: 1.15rem; white-space: nowrap; font-family: "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", serif; }
+.kj-rv-yomi { color: #2f8a4a; font-weight: 700; overflow-wrap: anywhere; }
+.kj-rv-who { font-size: .75rem; color: var(--muted); max-width: 6.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kj-review.watch li { grid-template-columns: 1.7em auto minmax(0, 1fr) auto; }
+`;
 
 /* ---------- 画面 ---------- */
 
@@ -136,6 +162,7 @@ export default {
         const winners = best === null ? [] : s.solved.map((v, p) => (v === best ? p : -1)).filter((p) => p >= 0);
         for (const p of winners) s.scores[p] += 1;
         s.last = { winners, best };
+        s.log = [...(s0.log ?? []), { solved: s.solved.slice(), winners }]; // ふりかえり用（点には使わない）
         return s;
       }
       return null;
@@ -207,6 +234,11 @@ export default {
     wrap.className = 'kj-wrap';
     ui = { mount, wrap, chips, n: 0 };
     wrap.append(chips);
+    if (s.phase === 'end') { // 対局が終わった画面は、最後の問題の札の代わりにふりかえり
+      wrap.append(this.review(s, me, o));
+      root.append(wrap);
+      return;
+    }
 
     const card = document.createElement('div');
     card.className = 'kj-card';
@@ -278,6 +310,36 @@ export default {
     this.note(s, me);
     // スマホは勝手にキーボードを出さない。「ゲームを変える」の一覧を開いているときも取り上げない（一覧が閉じる）
     if (ui.input && !matchMedia('(pointer: coarse)').matches && document.activeElement?.tagName !== 'SELECT') ui.input.focus();
+  },
+
+  // ふりかえり（開け閉めできる欄。最初は開いておく。同じ場面のうちは作り直さないので、閉じたら閉じたまま）
+  review(s, me, o) {
+    if (!document.getElementById('kj-review-css')) {
+      const st = document.createElement('style');
+      st.id = 'kj-review-css';
+      st.textContent = REVIEW_CSS;
+      document.head.append(st);
+    }
+    const rows = reviewOf(s, me);
+    const box = document.createElement('details');
+    box.className = 'kj-review' + (me === null ? ' watch' : '');
+    box.open = true;
+    const right = rows.filter((r) => r.mark === '⭕').length;
+    const sum = document.createElement('summary');
+    sum.textContent = `📝 ふりかえり（全${rows.length}問${me !== null ? `・あなたの正解 ${right}問` : ''}）`;
+    const list = document.createElement('ol');
+    for (const r of rows) {
+      const li = document.createElement('li');
+      const who = r.fast.map((p) => (p === me ? 'あなた' : o.names?.[p] ?? `プレイヤー${p + 1}`)); // 名前は外から来た文字なので esc を通す
+      const title = who.length ? `いちばん速く正解: ${who.join('・')}（${secText(r.ms)}）` : '正解した人はいませんでした';
+      li.innerHTML = `<span class="kj-rv-n">${r.n}</span>`
+        + (me !== null ? `<span class="kj-rv-mark" aria-label="${r.mark === '⭕' ? '正解' : 'まちがい'}">${r.mark}</span>` : '')
+        + `<span class="kj-rv-word">${esc(r.word)}</span><span class="kj-rv-yomi">${esc(r.yomi)}</span>`
+        + `<span class="kj-rv-who" title="${esc(title)}">${who.length ? '⚡' + esc(who.join('・')) : '―'}</span>`;
+      list.append(li);
+    }
+    box.append(sum, list);
+    return box;
   },
 
   // 答え方「4つから選ぶ」の4つのボタン（2×2）。答えたあと・答えを見せる場面では押せない形にして、○×を付ける

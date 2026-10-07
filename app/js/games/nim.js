@@ -6,6 +6,10 @@
 // 詳細設定「勝ち負け」の「取った数で勝負」（rules.last = 'count'。2026-10-07 本人の決定）: 山がなくなったとき、取った石の合計がいちばん多い人の勝ち
 // （同じ数なら同着。最後の1個は関係ない）。取った数は局面の got（プレイヤー番号 → 個数）。got は取った数で勝負のときだけ持つ
 // （負け・勝ちのときの局面は前と全く同じ）。
+// 詳細設定「残りを隠す」（rules.hide。2026-10-07 本人の決定。最初はなし）: 山の石の絵と残りの数を見せず「？」の山にする。直前に取られた数・これまでに取られた数は見せる。
+//   取る数は 1〜最大数のボタンで選ぶ。残りより多い数を選んだら、残りを全部取る（反則にすると、弾かれたことで残りの数が分かってしまうため。Claude の判断）。
+//   そのときの局面の last には押した数（want）も残す。決着したら、山の石を全部見せる。CPU は今のまま（数を知っている。手札と同じ簡易の隠し方）。
+//   なしのときは、手も局面も前と全く同じ。
 // 手: { p, t: 'take', pile: 0, k: 取る数 }（pile は山の番号。山は1つなので常に 0）
 
 import { mulberry32 } from './util.js';
@@ -26,6 +30,17 @@ export function goodMove(s) {
 }
 
 const counting = (s) => s.rules.last === 'count';
+const hidden = (s) => s.rules.hide === true;
+
+// 残りを隠すとき、画面に出してよい中身（画面に依存しない）。決着するまで残りの数は入れない
+export function hiddenView(s, me = null) {
+  const taken = s.start[0] - s.piles[0];
+  return {
+    taken, // これまでに取られた数（最初の数は見せないので、残りは分からない）
+    last: s.last ? { p: s.last.p, k: s.last.k, ...(s.last.want ? { want: s.last.want } : {}), you: s.last.p === me } : null,
+    buttons: Array.from({ length: s.max }, (_, i) => i + 1), // 押せる数（残りに関係なく、いつも 1〜最大数）
+  };
+}
 const clone = (s) => ({ ...s, piles: s.piles.slice(), ...(s.got ? { got: s.got.slice() } : {}) });
 
 let picked = null; // { step, pile, k } 取る石を選んでいるところ
@@ -43,6 +58,7 @@ export default {
     { key: 'max', label: '1回に取れる数', desc: 'おまかせは対局ごとに3〜5個のどれか', def: 0, choices: [[0, 'おまかせ'], [3, '3個まで'], [4, '4個まで'], [5, '5個まで']] },
     // 鍵と値（last・lose・win）は前のまま（前の部屋の設定がそのまま使えるように）。count は 2026-10-07 に足した
     { key: 'last', label: '勝ち負け', desc: '最後の1個を取った人が負け・勝ち、または取った石の数で勝負', def: 'lose', choices: [['lose', '最後の1個で負け'], ['win', '最後の1個で勝ち'], ['count', '取った数で勝負']] },
+    { key: 'hide', label: '残りを隠す', desc: '山に残っている石の数を見せない。取った数だけ分かる', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -92,17 +108,20 @@ export default {
 
   info(s) {
     const base = `この対局は1回に1〜${s.max}個まで取れます`;
-    return counting(s) ? `${base}。山がなくなったとき、取った石がいちばん多い人の勝ち` : base;
+    const hide = hidden(s) ? '。残りの数は隠れています（残りより多く選ぶと、残りを全部取ります）' : '';
+    return (counting(s) ? `${base}。山がなくなったとき、取った石がいちばん多い人の勝ち` : base) + hide;
   },
 
   apply(s0, m) {
     if (!m || m.t !== 'take' || !this.canAct(s0, m.p)) return null;
-    if (m.pile !== 0 || !Number.isInteger(m.k) || m.k < 1 || m.k > maxOf(s0)) return null;
+    // 残りを隠すときは、最大数までならいつでも選べて、残りより多ければ残りを全部取る
+    if (m.pile !== 0 || !Number.isInteger(m.k) || m.k < 1 || m.k > (hidden(s0) ? s0.max : maxOf(s0))) return null;
+    const k = Math.min(m.k, s0.piles[m.pile]);
     const s = clone(s0);
-    s.piles[m.pile] -= m.k;
+    s.piles[m.pile] -= k;
     s.step += 1;
-    s.last = { p: m.p, pile: m.pile, k: m.k };
-    if (counting(s)) s.got[m.p] += m.k;
+    s.last = { p: m.p, pile: m.pile, k, ...(k < m.k ? { want: m.k } : {}) };
+    if (counting(s)) s.got[m.p] += k;
     if (s.piles.every((v) => v === 0)) s.ender = m.p;
     else s.turn = (s.turn + 1) % s.n;
     return s;
@@ -160,6 +179,7 @@ export default {
       chips.append(chip);
     }
     root.append(chips);
+    if (hidden(s) && s.ender === null) { this.renderHidden(root, s, o, nameP, draw); return; }
 
     const total = s.piles.reduce((a, v) => a + v, 0);
     const field = document.createElement('div');
@@ -196,7 +216,8 @@ export default {
     const msg = document.createElement('p');
     msg.className = 'cc-log';
     if (picked) msg.textContent = `${s.piles.length > 1 ? `山${picked.pile + 1}から` : ''}${picked.k}個取ります`;
-    else if (s.last) msg.textContent = `${nameP(s.last.p)}が${s.piles.length > 1 ? `山${s.last.pile + 1}から` : ''}${s.last.k}個取った（残り${total}個）`;
+    else if (s.last?.want) msg.textContent = `${nameP(s.last.p)}が${s.last.want}個取ろうとして、残りの${s.last.k}個を全部取った（山は最初${s.start[0]}個でした）`;
+    else if (s.last) msg.textContent = `${nameP(s.last.p)}が${s.piles.length > 1 ? `山${s.last.pile + 1}から` : ''}${s.last.k}個取った（残り${total}個）${hidden(s) && s.ender !== null ? `（山は最初${s.start[0]}個でした）` : ''}`;
     else if (can) msg.textContent = '取りたい石をタップ（その石から右の石を全部取ります）';
     else msg.textContent = `全部で${total}個`;
     root.append(msg);
@@ -217,5 +238,69 @@ export default {
       actions.append(cancel, take);
       root.append(actions);
     }
+  },
+  // 残りを隠すときの画面（決着するまで）: 「？」の山と、直前に取られた石だけを色付きで出す。取る数は 1〜最大数のボタンで選ぶ
+  renderHidden(root, s, o, nameP, draw) {
+    const v = hiddenView(s, o.me >= 0 ? o.me : null);
+    const can = o.canMove;
+    const row = document.createElement('div');
+    row.className = 'nim-pile' + (picked ? ' picking' : '');
+    const label = document.createElement('div');
+    label.className = 'nim-label';
+    label.textContent = `残り ？個（これまでに取られた石 ${v.taken}個）`;
+    const body = document.createElement('div');
+    body.style.cssText = 'display: flex; align-items: center; gap: 12px; flex-wrap: wrap;';
+    const pile = document.createElement('div');
+    pile.setAttribute('aria-label', '残りの数は隠れています');
+    pile.textContent = '？';
+    pile.style.cssText = 'width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; font-size: 2rem; font-weight: 800; color: #fff;'
+      + ' background: radial-gradient(circle at 35% 30%, #a7a29a, #6c665e 70%); flex: none;';
+    body.append(pile);
+    if (v.last) { // 直前に取られた石（次の人が取るまで色付きで残す）
+      const stones = document.createElement('div');
+      stones.className = 'nim-stones';
+      for (let j = 0; j < v.last.k; j++) {
+        const st = document.createElement('span');
+        st.className = 'nim-stone gone taken' + (o.fresh ? ' pop' : '');
+        stones.append(st);
+      }
+      body.append(stones);
+    }
+    row.append(label, body);
+    root.append(row);
+
+    const msg = document.createElement('p');
+    msg.className = 'cc-log';
+    if (picked) msg.textContent = `${picked.k}個取ります（残りが足りなければ、残りを全部取ります）`;
+    else if (v.last) msg.textContent = `${nameP(v.last.p)}が${v.last.k}個取った`;
+    else if (can) msg.textContent = '取る数を選んでください（残りの数は見えません）';
+    else msg.textContent = '残りの数は見えません';
+    root.append(msg);
+
+    const actions = document.createElement('div');
+    actions.className = 'cc-actions nim-actions';
+    if (picked) {
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'btn secondary';
+      cancel.textContent = 'やめる';
+      cancel.onclick = () => { picked = null; draw(); };
+      const take = document.createElement('button');
+      take.type = 'button';
+      take.className = 'btn primary';
+      take.textContent = `${picked.k}個取る`;
+      take.onclick = () => { const { pile: p0, k } = picked; picked = null; o.onMove({ t: 'take', pile: p0, k }); };
+      actions.append(cancel, take);
+    } else if (can) {
+      for (const k of v.buttons) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn secondary';
+        b.textContent = `${k}個`;
+        b.onclick = () => { picked = { step: s.step, pile: 0, k }; draw(); };
+        actions.append(b);
+      }
+    }
+    if (actions.childElementCount) root.append(actions);
   },
 };
