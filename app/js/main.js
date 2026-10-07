@@ -490,10 +490,11 @@ function rulesOf(gameId, rules) {
 // 人数・CPU の強さと速さ・盤の大きさ。時間・回数・長さ・難しさ・読み上げ・駒落ち・ヒント（神経衰弱・難読漢字・お絵描き当て）・
 // エアホッケーのゴールの広さ（goal。盤の大きさと同じ）・難読漢字の答え方（choice。難しさと同じ）・マンカラの穴の数（pits。盤の大きさと同じ）・
 // いろあわせの最初の手札（deal。長さと同じ）・麻雀の待ち牌の表示（waits。ヒントと同じ）・
-// 将棋のいつも成る（autopromo。初めての人向けの手助けなのでヒントと同じ）・麻雀のツモ切りの表示（tsumogiri。待ち牌の表示と同じ）も好みなので抽選しない（Claude の判断）。
+// 将棋のいつも成る（autopromo。初めての人向けの手助けなのでヒントと同じ）・麻雀のツモ切りの表示（tsumogiri。待ち牌の表示と同じ）・
+// ヒット＆ブローの桁数（digits。難しさと同じ。5桁を足したときに入れた）も好みなので抽選しない（Claude の判断）。
 // 将棋のトライ（try）・神経衰弱の色もそろえる（color）・お絵描き当てのインクの量（ink）は遊び方なので抽選する。
 // マルバツ・将棋の size は盤の大きさでなく遊び方（スーパー・消える・5五将棋）なので抽選する。
-const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'autopromo', 'tsumogiri']);
+const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'autopromo', 'tsumogiri', 'digits']);
 const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
 
 // 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、エアホッケーは 2〜3。ほかは2）

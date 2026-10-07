@@ -1,4 +1,4 @@
-// 難読漢字の読み当て。全員に同じ漢字が出て、ひらがなで読みを打ち込む。いちばん速く正解した人に1点。10問。
+// 難読漢字の読み当て。全員に同じ漢字が出て、ひらがなで読みを打ち込む。いちばん速く正解した人に1点。10問（詳細設定「問題の数」で15問・20問も）。
 // 何度でも答え直せる。誰かが正解したら、少し待って締め切る（ほかの人の正解が通信で遅れて届く分を待つ）。
 // 速さは各自の端末で「画面に出てから正解を送るまで」を測る（party.js の since）。
 //
@@ -8,13 +8,15 @@
 // 詳細設定「答え方」（2026-10-06 本人の決定。最初は 打ち込む）: 4つから選ぶ では、読みを打たずに4つのボタンから1つ選ぶ。
 //   正しい読み（最初の読み）のほかの3つは、同じ難しさのほかの問題の読みから文字数の近いものを選ぶ（choicesOf。種と何問目かから作るので全員同じ）。
 //   答えられるのは1問に1回だけ（何度も試せると当てずっぽうで取れるため）。全員が答えたら、正解がいなくても1.5秒待って締め切る。
+// 詳細設定「問題の数」（2026-10-07 本人の決定。最初は10問）: 10・15・20問。まぜた問題の並びの先頭から取るだけなので、10問のときは前と全く同じ。
+//   同じ問題は出さない。難しさの問題が足りなければ、出せる数まで（今はどの難しさも20語以上あるので足りなくならない）。問題の数は qs の長さで見る。
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'try', q: 問題番号, text: 答え, ms, n: その問題で何回目の答えか }
 
 import { mulberry32, shuffle } from './util.js';
 import { since, kana, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
 import { KANJI } from './kanji-data.js';
 
-const TOTAL = 10;
+const ROUNDS = [[10, '10問'], [15, '15問'], [20, '20問']]; // 問題の数（詳細設定）
 const READY_MS = 3000;
 const SHOWN_MS = 3500;
 const GRACE_MS = 1500;
@@ -24,6 +26,7 @@ const CPU_RATE = { easy: 0.55, hard: 0.4, expert: 0.3, mix: 0.4 };
 const CHOICES = 4; // 答え方「4つから選ぶ」のボタンの数
 
 const limitOf = (s) => Number(s.rules.time) * 1000;
+const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 10);
 const qKey = (s, q = s.q) => `kanji:${s.seed}:${q}`;
 const poolOf = (level) => (level === 'mix' ? [...KANJI.easy, ...KANJI.hard, ...KANJI.expert] : KANJI[level] ?? KANJI.easy);
 export const isRight = (yomis, text) => yomis.includes(kana(text));
@@ -68,13 +71,14 @@ export default {
   settings: [
     { key: 'level', label: '難しさ', desc: '出る漢字の難しさ', def: 'easy', choices: Object.entries(LEVELS) },
     { key: 'time', label: '制限時間', desc: '1問あたりの時間', def: '25', choices: [['15', '15秒'], ['25', '25秒'], ['40', '40秒']] },
+    { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 10, choices: ROUNDS },
     { key: 'hint', label: 'ヒント', desc: '制限時間の4割（25秒なら10秒）がたつと、読みの1文字目を見せる', def: false },
     { key: 'choice', label: '答え方', desc: '読みを打ち込むか、4つの読みから選ぶか（選ぶときは1問に1回だけ）', def: false, choices: [[false, '打ち込む'], [true, '4つから選ぶ']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const r = { level: 'easy', time: '25', hint: false, choice: false, ...rules };
-    const qs = shuffle(poolOf(r.level), mulberry32(seed)).slice(0, TOTAL);
+    const qs = shuffle(poolOf(r.level), mulberry32(seed)).slice(0, roundsOf(r)); // 足りなければ出せる数まで（同じ問題は出さない）
     return {
       n, seed, rules: r, qs, q: -1, phase: 'ready',
       tries: Array(n).fill(0), solved: Array(n).fill(null), said: Array(n).fill(''), scores: Array(n).fill(0), last: null, step: 0,
@@ -94,7 +98,7 @@ export default {
   resultText(res, me, pn) { return winnersText(res.winners, me, pn); },
   phaseText(s) {
     if (s.phase === 'ready') return 'まもなく始まります…';
-    if (s.phase === 'open') return `第${s.q + 1}問 / ${TOTAL}`;
+    if (s.phase === 'open') return `第${s.q + 1}問 / ${s.qs.length}`;
     return `第${s.q + 1}問の答え`;
   },
 
@@ -115,7 +119,7 @@ export default {
       if (m.t === 'next' && (s0.phase === 'ready' || s0.phase === 'shown')) {
         const s = clone(s0);
         s.step += 1;
-        if (s.q + 1 >= TOTAL) { s.phase = 'end'; return s; }
+        if (s.q + 1 >= s.qs.length) { s.phase = 'end'; return s; }
         s.q += 1;
         s.phase = 'open';
         s.tries = Array(s.n).fill(0);
@@ -207,7 +211,8 @@ export default {
     const card = document.createElement('div');
     card.className = 'kj-card';
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">難しさ: ${LEVELS[s.rules.level] ?? ''}・1問 ${s.rules.time}秒</div>`;
+      const short = s.qs.length < roundsOf(s.rules) ? `（この難しさは問題が${s.qs.length}問しかありません）` : ''; // 今はどの難しさも足りている
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">難しさ: ${LEVELS[s.rules.level] ?? ''}・全${s.qs.length}問・1問 ${s.rules.time}秒${short}</div>`;
       wrap.append(card);
       root.append(wrap);
       return;
@@ -215,7 +220,7 @@ export default {
     const [word, yomis] = s.qs[s.q];
     const key = qKey(s);
     const limit = limitOf(s);
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${TOTAL}</div><div class="kj-word"></div>`;
+    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div><div class="kj-word"></div>`;
     card.querySelector('.kj-word').textContent = word;
     if (s.phase === 'open') {
       since(key); // 画面に出た時刻を覚える

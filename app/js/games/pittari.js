@@ -1,14 +1,17 @@
-// ぴったりストップ。決められた秒数（5〜15秒）ちょうどで「ストップ」を押し、近い人ほど高い点。5回。
+// ぴったりストップ。決められた秒数（5〜15秒）ちょうどで「ストップ」を押し、近い人ほど高い点。5回（詳細設定「回数」で10回も）。
 // 時計は最初の3秒だけ見えて、あとは消える（詳細設定「時計の見える時間」で 0秒・5秒にもできる。2026-10-06 本人の決定）。毎回、近い順に 3・2・1点（同じずれは同じ点。押さなかった人は0点）。
 // 時間は各自の端末で「画面に出てから押すまで」を測る（party.js の since）ので、通信の遅れで不利にならない。
 //
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open →（全員押した / 秒数＋5秒）→ close → shown → next …
+// 詳細設定「回数」（2026-10-07 本人の決定。最初は5回）: 5・10回。秒数は同じ乱数から続けて作るだけなので、5回のときは前と全く同じ
+//   （10回の最初の5回も5回のときと同じ秒数）。回数は targets の長さで見る。
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'stop', q: 何回目, ms }（1回に1人1度だけ。2回目は反則）
 
 import { mulberry32 } from './util.js';
 import { since, leaders, winnersText, scoreChips } from './party.js';
 
-const TOTAL = 5;
+const ROUNDS = [[5, '5回'], [10, '10回']]; // 回数（詳細設定）
+const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 5);
 const READY_MS = 3000;
 const SHOWN_MS = 4500;
 const GRACE_MS = 1500;
@@ -44,13 +47,14 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'fixed', label: 'いつも10秒', desc: '止める秒数を毎回10秒にする（いいえ なら5〜15秒で毎回変わる）', def: false },
+    { key: 'rounds', label: '回数', desc: '1回の対局で止める回数', def: 5, choices: ROUNDS },
     { key: 'peek', label: '時計の見える時間', desc: '始めに時計が見えている時間。「見えない」は最初から自分の感覚だけで数える', def: 3, choices: PEEK_CHOICES },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const r = { fixed: false, ...rules };
     const rnd = mulberry32(seed);
-    const targets = Array.from({ length: TOTAL }, () => (r.fixed ? 10 : 5 + Math.floor(rnd() * 11)));
+    const targets = Array.from({ length: roundsOf(r) }, () => (r.fixed ? 10 : 5 + Math.floor(rnd() * 11)));
     return { n, seed, rules: r, targets, q: -1, phase: 'ready', stops: Array(n).fill(null), scores: Array(n).fill(0), last: null, step: 0 };
   },
 
@@ -64,7 +68,7 @@ export default {
   resultText(res, me, pn) { return winnersText(res.winners, me, pn); },
   phaseText(s) {
     if (s.phase === 'ready') return 'まもなく始まります…';
-    if (s.phase === 'open') return `${s.q + 1}回目 / ${TOTAL}`;
+    if (s.phase === 'open') return `${s.q + 1}回目 / ${s.targets.length}`;
     return `${s.q + 1}回目の結果`;
   },
 
@@ -84,7 +88,7 @@ export default {
       if (m.t === 'next' && (s0.phase === 'ready' || s0.phase === 'shown')) {
         const s = clone(s0);
         s.step += 1;
-        if (s.q + 1 >= TOTAL) { s.phase = 'end'; return s; }
+        if (s.q + 1 >= s.targets.length) { s.phase = 'end'; return s; }
         s.q += 1;
         s.phase = 'open';
         s.stops = Array(s.n).fill(null);
@@ -158,12 +162,12 @@ export default {
 
     if (s.phase === 'ready') {
       const peek = peekMs(s);
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">${peek ? `時計は最初の${peek / 1000}秒だけ見えます` : '時計は見えません'}</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">全${s.targets.length}回・${peek ? `時計は最初の${peek / 1000}秒だけ見えます` : '時計は見えません'}</div>`;
       return;
     }
     const q = s.q;
     const target = s.targets[q];
-    card.innerHTML = `<div class="kj-num">${q + 1}回目 / ${TOTAL}</div><div class="pz-target"><b>${target}</b>秒で止めて！</div><div class="pz-clock"></div>`;
+    card.innerHTML = `<div class="kj-num">${q + 1}回目 / ${s.targets.length}</div><div class="pz-target"><b>${target}</b>秒で止めて！</div><div class="pz-clock"></div>`;
     const clock = card.querySelector('.pz-clock');
     const note = document.createElement('p');
     note.className = 'cc-log';

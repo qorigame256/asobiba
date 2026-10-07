@@ -1,5 +1,6 @@
 // ヒット＆ブロー（数当て）。かくれた「答えの数」を当て合う。2〜10人。
-// 答えは 0〜9 の数字を重ならないように並べたもの（桁数は詳細設定で 3 / 4）。
+// 答えは 0〜9 の数字を重ならないように並べたもの（桁数は詳細設定で 3 / 4 / 5。最初は4）。
+//   5桁は 2026-10-07 本人の決定で足した。答えの作り方は桁数が違うだけで同じなので、3桁・4桁の答えは前と全く同じ。
 //   ヒット = 数字も場所も合っている / ブロー = 数字は合っているが場所が違う
 // 詳細設定「同じ数字」を「使ってよい」にすると、答えにも予想にも同じ数字が何回も出てよい（2026-10-06 本人の決定）。
 //   ブローは、その数字が答えにある個数までしか数えない（マスターマインドと同じ数え方。答え 1123・予想 1111 なら 2ヒット 0ブロー）。
@@ -21,16 +22,22 @@ import { mulberry32, shuffle } from './util.js';
 const ALL_DIGITS = '0123456789'.split('');
 
 // 同じ数字があるときも数えられるよう、ブローは「数字ごとに 予想と答えの少ないほうの個数」の合計からヒットを引く
+// （CPU は5桁・同じ数字ありで10万通りの答えを何度も比べるので、数える箱は作り直さずに使い回す）
+const cg = new Int8Array(10);
+const ca = new Int8Array(10);
 export function score(g, ans) {
   let hit = 0;
-  const cg = Array(10).fill(0);
-  const ca = Array(10).fill(0);
+  cg.fill(0);
+  ca.fill(0);
   for (let i = 0; i < g.length; i++) {
-    if (g[i] === ans[i]) hit++;
-    cg[g[i]]++;
-    ca[ans[i]]++;
+    const x = g.charCodeAt(i) - 48;
+    const y = ans.charCodeAt(i) - 48;
+    if (x === y) hit++;
+    cg[x]++;
+    ca[y]++;
   }
-  const common = cg.reduce((a, v, d) => a + Math.min(v, ca[d]), 0);
+  let common = 0;
+  for (let d = 0; d < 10; d++) common += Math.min(cg[d], ca[d]);
   return { hit, blow: common - hit };
 }
 
@@ -76,13 +83,13 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'mode', label: '遊び方', desc: '順番に: 1人ずつ予想し、全員の予想が見える／同時に: 全員が一斉に予想する早当て', def: 'turn', choices: [['turn', '順番に当てる'], ['race', '同時に早当て']] },
-    { key: 'digits', label: '桁数', desc: '当てる数字の長さ。4桁のほうが難しい', def: 4, choices: [[3, '3桁'], [4, '4桁']] },
+    { key: 'digits', label: '桁数', desc: '当てる数字の長さ。長いほど難しい', def: 4, choices: [[3, '3桁'], [4, '4桁'], [5, '5桁']] },
     { key: 'dup', label: '同じ数字', desc: '使ってよい: 答えにも予想にも同じ数字が何回も出てくる（例 1123）。難しくなる', def: 'off', choices: [['off', '使わない'], ['on', '使ってよい']] },
     { key: 'secret', label: '答え', desc: '自分で決める: 始めに各自が答えの数を決め、次の席の人の数を当てる（2人なら当て合い）', def: 'same', choices: [['same', 'みんな同じ'], ['own', '自分で決める']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const digits = rules.digits === 3 ? 3 : 4;
+    const digits = rules.digits === 3 || rules.digits === 5 ? rules.digits : 4;
     const mode = rules.mode === 'race' ? 'race' : 'turn';
     const dup = rules.dup === 'on';
     const rng = mulberry32(seed);
@@ -440,6 +447,8 @@ function table(s, p, title, small = false) {
     const tr = document.createElement('tr');
     if (h.hit === s.digits) tr.className = 'hit-all';
     tr.innerHTML = `<td>${i + 1}</td><td class="hb-g">${h.g}</td><td>${h.hit}</td><td>${h.blow}</td>`;
+    // 5桁の小さい表は、字の間を詰めて「ヒット」「ブロー」の見出しが2行に割れないようにする（スマホ幅で2列に並ぶため）
+    if (small && s.digits >= 5) tr.querySelector('.hb-g').style.letterSpacing = '.04em';
     body.append(tr); // 1回目から下へ並べる
   });
   t.append(body);
