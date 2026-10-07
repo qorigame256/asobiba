@@ -90,6 +90,11 @@ p { margin: 0; }
   background: #fff;
 }
 .name-box + .join-form { margin-top: 10px; }
+.mark-label { margin-top: 10px; font-size: .9rem; color: var(--muted); }
+.mark-pick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.mark-btn { min-width: 40px; height: 40px; padding: 0 6px; font-size: 1.25rem; border: 1.5px solid var(--line); border-radius: 10px; background: #fff; cursor: pointer; }
+.mark-btn:first-child { font-size: .85rem; }
+.mark-btn.on { border-color: var(--accent, #d9643a); box-shadow: 0 0 0 2px var(--accent, #d9643a) inset; }
 
 .game-list {
   display: grid;

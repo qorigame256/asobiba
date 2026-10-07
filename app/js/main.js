@@ -64,7 +64,7 @@ function myName() {
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -104,7 +104,24 @@ function cpuName(id) {
 function nameOf(id) {
   if (!id) return '（空席）';
   if (isCpu(id)) return cpuName(id);
-  return (S.names?.[id] || 'ゲスト') + (S.beg?.includes(id) ? ' 🔰' : '');
+  const mark = S.marks?.[id];
+  return (MARKS.includes(mark) && mark ? mark + ' ' : '') + (S.names?.[id] || 'ゲスト') + (S.beg?.includes(id) ? ' 🔰' : '');
+}
+
+/* ---------- 自分のマーク（2026-10-07 本人の決定）: ホーム画面で名前の前に付ける絵文字を選び、部屋のみんなにも見せる ---------- */
+// Claude の判断: 選べるのは下の一覧だけ（外から来た値はこの一覧にあるときだけ使うので、そのまま HTML に入れてよい）。
+// CPU の 🤖 と初心者マークの 🔰 は見分けがつかなくなるので入れない。付けたかどうかは localStorage の bg-mark。
+// ゲストは hello の mark で知らせ、ホストが S.marks（人の id → マーク）に集めて state で送る（初心者マークと同じ形）。
+const MARK_KEY = 'bg-mark';
+const MARKS = ['', '🐱', '🐶', '🐰', '🐻', '🐼', '🦊', '🐸', '🐧', '🦁', '🐯', '🐨', '🐙', '🦄', '🐢', '🚀', '⭐', '🌸', '🍙', '⚽'];
+function myMark() {
+  try { const m = localStorage.getItem(MARK_KEY) ?? ''; return MARKS.includes(m) ? m : ''; } catch { return ''; }
+}
+// ホストが、だれがどのマークを付けているかを覚える
+function setMark(id, mark) {
+  const now = Object.fromEntries(Object.entries(S.marks ?? {}).filter(([x]) => x !== id && S.members.includes(x)));
+  if (MARKS.includes(mark) && mark) now[id] = mark;
+  S.marks = now;
 }
 
 /* ---------- 初心者マーク（2026-10-06 本人の決定）: 付けた人の画面では、いま選べる所（置ける所・出せる札）を強く光らせる ---------- */
@@ -121,7 +138,7 @@ function setBeginner(on) {
   document.body.classList.toggle('beginner', on);
   showBeginnerBtn();
   if (S?.mode === 'online') {
-    if (S.isHost) { setBeg(S.myId, on); sendState(); } else send({ type: 'hello', isHost: false, name: myName(), beg: on });
+    if (S.isHost) { setBeg(S.myId, on); sendState(); } else send({ type: 'hello', isHost: false, name: myName(), beg: on, mark: myMark() });
   }
   if (S) render();
 }
@@ -173,6 +190,26 @@ function tallyLine() {
     p.append(' ', b);
   }
   return p;
+}
+
+/* ---------- 対局の時間（2026-10-07 本人の決定）: 結果の画面に「この対局は ◯分◯秒」と出す ---------- */
+// Claude の判断: ホストの端末（同じ画面の対局ではその端末）が、対局の画面を最初に描いたときから決着を見たときまでを測り、
+// state の timer で全員へ送る（端末ごとの時計のずれが出ないように、始めと終わりを同じ端末で測る）。
+// 途中から測り始めた（再読み込みで覚えていなかったなど）ときは出さない。エアホッケーは結果が main.js を通らないので出ない。
+const timerKey = () => `${S.gameId}:${S.round}:${S.seed}`;
+function trackTime(res) {
+  if (S.mode === 'online' && !S.isHost) return;
+  if (S.timer?.key !== timerKey()) S.timer = { key: timerKey(), start: S.moves.length ? null : Date.now(), end: null };
+  if (res && S.timer.start && !S.timer.end) {
+    S.timer.end = Date.now();
+    saveRoom();
+  }
+}
+function timeHtml() {
+  const t = S.timer;
+  if (t?.key !== timerKey() || !t.start || !t.end || t.end < t.start) return '';
+  const sec = Math.round((t.end - t.start) / 1000);
+  return `⏱ この対局は ${sec >= 60 ? `${Math.floor(sec / 60)}分` : ''}${sec % 60}秒`;
 }
 
 /* ---------- 勝ち残り（2026-10-06 本人の決定）: 盤のゲームのもう一回で、負けた人が観戦の人と交代する ---------- */
@@ -615,6 +652,8 @@ function statusHtml(game, st, res) {
   if (preds) html += `<div class="status-sub pred">${preds}</div>`;
   const tally = res ? tallyHtml() : '';
   if (tally) html += `<div class="status-sub tally">${tally}</div>`;
+  const took = res ? timeHtml() : '';
+  if (took) html += `<div class="status-sub">${took}</div>`;
   const stay = res ? stayHtml(res) : '';
   if (stay) html += `<div class="status-sub stay">${stay}</div>`;
   return html;
@@ -747,6 +786,7 @@ function renderPage() {
   const res = game.result(st);
   S.myTurnNow = myTurnNow(game, st, res);
   if (!game.multi) tickClock(game, st, res);
+  trackTime(res);
   if (res) countResult(res);
   status.innerHTML = statusHtml(game, st, res);
   if (res && !game.multi && renderReview(game, st)) return; // ふりかえりで途中の局面を見ている
@@ -1404,7 +1444,7 @@ function createRoom(gameId) {
   S = {
     mode: 'online', code: randomString(CODE_LEN, CODE_CHARS), myId, isHost: true,
     gameId, round: 1, first: crypto.getRandomValues(new Uint8Array(1))[0] & 1, seed: 0, order: null, cpus: 0, moves: [],
-    members: [myId], names: { [myId]: myName() || 'プレイヤー1' }, rules: {}, prev: null, carry: null, pick: null, banned: [],
+    members: [myId], names: { [myId]: myName() || 'プレイヤー1' }, marks: myMark() ? { [myId]: myMark() } : {}, rules: {}, prev: null, carry: null, pick: null, banned: [],
   };
   saveRoom();
   setUrlRoom(S.code);
@@ -1491,16 +1531,16 @@ function openNet() {
 function send(msg, qos) { S?.net?.send(msg, qos); }
 function sendState() {
   const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, undo, streak, beg } = S;
-  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [] });
+  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null });
 }
 function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves, u: S.undo ?? 0 }); }
-function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner }); }
+function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner, mark: myMark() }); }
 
 function onConn(status) {
   S.conn = status;
   if (status === 'ready') {
-    send({ type: 'hello', isHost: S.isHost, name: myName(), beg: beginner });
-    if (S.isHost) { setBeg(S.myId, beginner); sendState(); }
+    send({ type: 'hello', isHost: S.isHost, name: myName(), beg: beginner, mark: myMark() });
+    if (S.isHost) { setBeg(S.myId, beginner); setMark(S.myId, myMark()); sendState(); }
   }
   render();
 }
@@ -1585,6 +1625,7 @@ function acceptMember(msg) {
     return;
   }
   setBeg(msg.from, msg.beg === true);
+  setMark(msg.from, msg.mark);
   saveRoom();
   sendState();
 }
@@ -1602,6 +1643,9 @@ function adoptState(msg) {
   S.streak = msg.streak && typeof msg.streak === 'object' && msg.streak.wins && typeof msg.streak.wins === 'object' ? msg.streak : null;
   S.tally = msg.tally && Number.isInteger(msg.tally.games) && msg.tally.wins && typeof msg.tally.wins === 'object' ? msg.tally : null;
   S.stay = msg.stay === true;
+  S.marks = msg.marks && typeof msg.marks === 'object' ? Object.fromEntries(Object.entries(msg.marks).filter(([id, m]) => typeof id === 'string' && MARKS.includes(m) && m)) : {};
+  const tm = msg.timer;
+  S.timer = tm && typeof tm.key === 'string' && Number.isFinite(tm.start) && (tm.end === null || Number.isFinite(tm.end)) ? { key: tm.key, start: tm.start, end: tm.end } : null;
   S.line = Array.isArray(msg.line) ? msg.line.filter((id) => typeof id === 'string') : [];
   for (const id of S.members) S.seen[id] ??= Date.now();
   const sameRound = S.gameId === msg.gameId && S.round === msg.round;
@@ -1813,6 +1857,26 @@ nameInput.value = myName();
 nameInput.addEventListener('input', () => {
   try { localStorage.setItem(NAME_KEY, cleanName(nameInput.value)); } catch { /* 無視 */ }
 });
+// 自分のマークを選ぶボタン（ホーム画面）
+function renderMarkPick() {
+  const box = el('mark-pick');
+  box.innerHTML = '';
+  const cur = myMark();
+  for (const m of MARKS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'mark-btn' + (m === cur ? ' on' : '');
+    b.textContent = m || 'なし';
+    b.setAttribute('role', 'radio');
+    b.setAttribute('aria-checked', String(m === cur));
+    b.onclick = () => {
+      try { localStorage.setItem(MARK_KEY, m); } catch { /* 無視 */ }
+      renderMarkPick();
+    };
+    box.append(b);
+  }
+}
+renderMarkPick();
 el('join-form').addEventListener('submit', (e) => {
   e.preventDefault();
   joinRoom(el('join-code').value);
