@@ -64,7 +64,7 @@ function myName() {
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -178,8 +178,9 @@ function tallyLine() {
   p.innerHTML = html;
   if (S.isHost) {
     const b = makeButton('成績を0に戻す', () => {
-      if (!confirm('この部屋の成績表と連勝を0に戻しますか？')) return;
+      if (!confirm('この部屋の成績表・連勝・対局の履歴を0に戻しますか？')) return;
       S.tally = null;
+      S.history = null;
       S.streak = null;
       saveRoom();
       sendState();
@@ -190,6 +191,22 @@ function tallyLine() {
     p.append(' ', b);
   }
   return p;
+}
+
+/* ---------- 対局の履歴（2026-10-07 本人の決定）: この部屋で遊んだゲームとだれが勝ったかを、待合室に新しい順で出す ---------- */
+// Claude の判断: ホストが成績表と同じ所（countResult）で覚え、state の history で送る。新しい順に20回まで。開け閉めできる欄にして、待合室が長くならないようにする。
+// 名前は外から来た文字なので、出すときは esc() を通す。「成績を0に戻す」で一緒に消える。
+const HISTORY_MAX = 20;
+function historyLine() {
+  const list = S.history ?? [];
+  if (S.mode !== 'online' || !list.length) return null;
+  const row = (h) => `<li>${GAMES[h.g].icon} ${esc(GAMES[h.g].name)} — ${h.w.length ? h.w.map((n) => `<b>${esc(n)}</b>`).join('・') + ' の勝ち' : '引き分け'}</li>`;
+  const box = document.createElement('details');
+  box.className = 'lobby-history';
+  box.open = !!S.historyOpen;
+  box.ontoggle = () => { S.historyOpen = box.open; };
+  box.innerHTML = `<summary>📜 この部屋の対局（新しい順・${list.length}回${list.length >= HISTORY_MAX ? 'まで' : ''}）</summary><ol>${list.map(row).join('')}</ol>`;
+  return box;
 }
 
 /* ---------- 対局の時間（2026-10-07 本人の決定）: 結果の画面に「この対局は ◯分◯秒」と出す ---------- */
@@ -279,6 +296,9 @@ function countResult(res) {
   const wonP = winnersOf(res);
   for (const id of Object.keys(by)) if (!isCpu(id) && wonP.includes(by[id])) preds[id] = (preds[id] ?? 0) + 1;
   S.tally = { games: t.games + 1, wins, preds };
+  // 対局の履歴: 新しいものから HISTORY_MAX 個。勝った人はそのときの表示名で覚える（CPU の名前は対局ごとに変わるため）
+  const names = [...won].map((id) => nameOf(id));
+  S.history = [{ g: S.gameId, w: names }, ...(S.history ?? [])].slice(0, HISTORY_MAX);
   saveRoom();
   sendState();
 }
@@ -311,9 +331,9 @@ function rulesOf(gameId, rules) {
 // 「おまかせ」（待合室でホストが押すと詳細設定を抽選する。2026-10-06 本人の決定）で抽選しない項目。本人が決めたのは
 // 人数・CPU の強さと速さ・盤の大きさ。時間・回数・長さ・難しさ・読み上げ・駒落ち・ヒント（神経衰弱・難読漢字・お絵描き当て）・
 // エアホッケーのゴールの広さ（goal。盤の大きさと同じ）・難読漢字の答え方（choice。難しさと同じ）・マンカラの穴の数（pits。盤の大きさと同じ）・
-// いろあわせの最初の手札（deal。長さと同じ）も好みなので抽選しない（Claude の判断）。
+// いろあわせの最初の手札（deal。長さと同じ）・麻雀の待ち牌の表示（waits。ヒントと同じ）も好みなので抽選しない（Claude の判断）。
 // マルバツ・将棋の size は盤の大きさでなく遊び方（スーパー・消える・5五将棋）なので抽選する。
-const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal']);
+const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits']);
 const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
 
 // 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、エアホッケーは 2〜3。ほかは2）
@@ -472,6 +492,26 @@ function appendReactions() {
 
 const playersText = (g) => (g.minPlayers === g.maxPlayers ? `${g.minPlayers}人` : `${g.minPlayers}〜${g.maxPlayers}人`);
 
+/* ---------- お気に入り（2026-10-07 本人の決定）: ホーム画面のゲームに ★ を付けると、一覧の先頭に並ぶ ---------- */
+// Claude の判断: 端末ごとに覚える（localStorage の bg-favs）。「ゲームを変える」の一覧でも先頭に並べる。付けた順でなく、いつもの並びのまま先頭へ寄せる。
+const FAV_KEY = 'bg-favs';
+function favorites() {
+  try {
+    const a = JSON.parse(localStorage.getItem(FAV_KEY) ?? '[]');
+    return Array.isArray(a) ? a.filter((id) => GAMES[id]?.ready) : [];
+  } catch { return []; }
+}
+function toggleFavorite(id) {
+  const now = favorites();
+  const next = now.includes(id) ? now.filter((x) => x !== id) : [...now, id];
+  try { localStorage.setItem(FAV_KEY, JSON.stringify(next)); } catch { /* 覚えられなくても、この画面では使える */ }
+}
+// お気に入りを先頭に寄せたゲームの並び
+function gameOrder() {
+  const favs = favorites();
+  return [...GAME_ORDER.filter((id) => favs.includes(id)), ...GAME_ORDER.filter((id) => !favs.includes(id))];
+}
+
 function renderHome() {
   const owner = isOwner();
   el('home-lead').textContent = owner
@@ -482,11 +522,22 @@ function renderHome() {
   const list = el('game-list');
   list.innerHTML = '';
   if (!owner) return;
-  for (const id of GAME_ORDER) {
+  const favs = favorites();
+  for (const id of gameOrder()) {
     const g = GAMES[id];
     const card = document.createElement('article');
-    card.className = 'game-card' + (g.ready ? '' : ' not-ready');
+    card.className = 'game-card' + (g.ready ? '' : ' not-ready') + (favs.includes(id) ? ' fav' : '');
     card.innerHTML = `<div class="game-icon" aria-hidden="true">${g.icon}</div><h3>${g.name}</h3><p>${g.desc}</p>`;
+    if (g.ready) {
+      const star = document.createElement('button');
+      star.type = 'button';
+      star.className = 'fav-btn';
+      star.textContent = favs.includes(id) ? '★' : '☆';
+      star.setAttribute('aria-pressed', String(favs.includes(id)));
+      star.setAttribute('aria-label', `${g.name}を お気に入り${favs.includes(id) ? 'から外す' : 'にする'}`);
+      star.onclick = () => { toggleFavorite(id); renderHome(); };
+      card.append(star);
+    }
     if (g.ready) {
       if (g.multi) {
         const tag = document.createElement('span');
@@ -1010,6 +1061,8 @@ function renderLobby(game) {
   board.innerHTML = html;
   const tally = tallyLine();
   if (tally) board.append(tally);
+  const hist = historyLine();
+  if (hist) board.append(hist);
   if (game.settings) board.append(rulesPanel(game));
 
   if (!S.isHost) return;
@@ -1083,6 +1136,8 @@ function renderBoardLobby(game) {
   }
   const tally = tallyLine();
   if (tally) board.append(tally);
+  const hist = historyLine();
+  if (hist) board.append(hist);
   if (!game.live) board.append(stayPanel());
   if (game.settings) board.append(rulesPanel(game));
   if (!S.isHost) return;
@@ -1229,11 +1284,12 @@ function gameSelect() {
   label.className = 'game-select';
   label.textContent = 'ゲームを変える ';
   const sel = document.createElement('select');
-  for (const id of GAME_ORDER) {
+  const favs = favorites();
+  for (const id of gameOrder()) {
     if (!GAMES[id].ready) continue;
     const opt = document.createElement('option');
     opt.value = id;
-    opt.textContent = GAMES[id].name;
+    opt.textContent = (favs.includes(id) ? '★ ' : '') + GAMES[id].name;
     opt.selected = id === S.gameId;
     sel.append(opt);
   }
@@ -1532,7 +1588,7 @@ function openNet() {
 function send(msg, qos) { S?.net?.send(msg, qos); }
 function sendState() {
   const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, undo, streak, beg } = S;
-  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null });
+  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [] });
 }
 function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves, u: S.undo ?? 0 }); }
 function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner, mark: myMark() }); }
@@ -1642,6 +1698,9 @@ function adoptState(msg) {
   S.rules = msg.rules && typeof msg.rules === 'object' ? msg.rules : {};
   S.beg = Array.isArray(msg.beg) ? msg.beg.filter((id) => typeof id === 'string') : [];
   S.streak = msg.streak && typeof msg.streak === 'object' && msg.streak.wins && typeof msg.streak.wins === 'object' ? msg.streak : null;
+  S.history = Array.isArray(msg.history)
+    ? msg.history.filter((h) => GAMES[h?.g] && Array.isArray(h.w)).slice(0, HISTORY_MAX).map((h) => ({ g: h.g, w: h.w.filter((x) => typeof x === 'string').map((x) => x.slice(0, 30)) }))
+    : null;
   S.tally = msg.tally && Number.isInteger(msg.tally.games) && msg.tally.wins && typeof msg.tally.wins === 'object' ? msg.tally : null;
   S.stay = msg.stay === true;
   S.marks = msg.marks && typeof msg.marks === 'object' ? Object.fromEntries(Object.entries(msg.marks).filter(([id, m]) => typeof id === 'string' && MARKS.includes(m) && m)) : {};
