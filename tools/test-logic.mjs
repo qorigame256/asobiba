@@ -2012,7 +2012,8 @@ for (let k = 0; k < 100; k++) {
   performance.now = () => clock;
   try {
     const got = { 1: [0, 0], 2: [0, 0], 3: [0, 0] };
-    for (let k = 0; k < 6; k++) {
+    // CPU は Math.random を使うので、対局を多めにして運で落ちにくくする（6局では 35/39・27/30・28/31 のように差が出ず落ちたことがある）
+    for (let k = 0; k < 40; k++) {
       let st = TG.init(3, 700 + k, { rules: { time: '20', bombs: true, move: k % 2 === 1, sizes: true } });
       st = ref(TG, st, 'go');
       const start = clock;
