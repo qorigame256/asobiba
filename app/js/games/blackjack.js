@@ -13,7 +13,13 @@
 // 決まりごと（Claude の判断）: 毎回52枚の新しい山を、対局の種と何回目かから作る。親の最初の2枚がブラックジャックなら、すぐに開いてその回は終わり
 // （プレイヤーもブラックジャックなら引き分け）。プレイヤーは全員同時に動く。全員が終えたら親が引き、結果を4.5秒見せて次の回へ。
 // 持ち点はマイナスになってもよい（最後まで遊べるように）。A は 1 か 11、J・Q・K は 10。
+// 賭ける額を選ぶ（詳細設定。最初はなし＝毎回10。2026-10-07 本人承認）: 毎回、札を配る前に全員が同時に 5・10・20 から選び（phase 'bet'。額は wager[p]）、
+//   そろったら配る。勝ち負けの点は選んだ額をもとにする（1.5倍・半分・ダブルの倍・スプリットのもう一つの手も選んだ額で）。
+//   Claude の判断: 持ち点より大きい額は選べない。持ち点が5より少ない（マイナスも）ときは5だけ選べる（持ち点はマイナスもありの決まりのまま）。
+//   端数は切り上げ（5のブラックジャックは +8、5のサレンダーは -3）。選び終わるまでほかの人の額は見せない。山は配る時に作るので、札は「なし」と同じ。
+//   CPU は持ち点が120以上なら20・80以下なら5・その間は10（2割は選べる額から適当）。
 // 手: { p, t: 'hit', r: 何回目か, k: 引く前の手札の枚数, h } / { p, t: 'stand', r, h } / { p, t: 'double', r, h } / { p, t: 'split', r } / { p, t: 'surrender', r }
+//   / { p, t: 'bet', r, v: 額 }（賭ける額を選ぶ。同じ回に2回は反則）
 //   （h はスプリットした2つ目の手なら 1。無ければ 0）/ 進行役（p = -1）: { t: 'next', r }
 
 import { mulberry32, shuffle, esc } from './util.js';
@@ -21,6 +27,7 @@ import { makeDeck, rankOf, cardEl, backEl } from './cards.js';
 import { scoreChips, leaders, ranks, winnersText, timeBar } from './party.js';
 
 const BET = 10;
+const BETS = [5, 10, 20]; // 賭ける額を選ぶ（詳細設定）で選べる額
 const START = 100;
 const SHOW_MS = 4500;
 
@@ -38,6 +45,13 @@ const isBJ = (cards) => cards.length === 2 && total(cards).v === 21;
 // スプリットした手の21はブラックジャックにしない
 const bjOf = (s, p, cards) => !s.sp?.[p] && isBJ(cards);
 const handNo = (s, p) => (s.fin?.[p] ? 1 : 0);
+// その人の1つの手の賭け（賭ける額を選ぶ がなしなら いつも10）
+const baseOf = (s, p) => s.wager?.[p] ?? BET;
+// 選べる額: 持ち点以下の額。1つも無い（持ち点が5より少ない）ときは一番小さい5だけ
+export const betChoices = (s, p) => {
+  const ok = BETS.filter((v) => v <= s.points[p]);
+  return ok.length ? ok : [BETS[0]];
+};
 // ファイブカード（詳細設定）: 5枚で21以下
 export const isFive = (s, cards) => !!s.fiveOn && cards.length >= 5 && total(cards).v <= 21;
 export const canSurrender = (s, p) => !!s.surOn && !s.sp[p] && s.hands[p].length === 2 && !s.done[p];
@@ -45,7 +59,7 @@ export const canSplit = (s, p) => !!s.splitOn && !s.sp[p] && s.hands[p].length =
 
 const clone = (s) => ({
   ...s, hands: s.hands.map((h) => h.slice()), dealer: s.dealer.slice(), bets: s.bets.slice(), done: s.done.slice(), points: s.points.slice(), deck: s.deck,
-  sur: s.sur.slice(), sp: s.sp.slice(), wait: s.wait.slice(), fin: s.fin.slice(),
+  sur: s.sur.slice(), sp: s.sp.slice(), wait: s.wait.slice(), fin: s.fin.slice(), ...(s.wager ? { wager: s.wager.slice() } : {}),
 });
 
 // いまの手が終わった。スプリットの2つ目が待っていれば、そちらに2枚目を配って続ける
@@ -55,7 +69,7 @@ function handDone(s, p) {
   s.fin[p] = { c: s.hands[p], bet: s.bets[p] };
   s.hands[p] = [...s.wait[p], s.deck[s.pos++]];
   s.wait[p] = null;
-  s.bets[p] = BET;
+  s.bets[p] = baseOf(s, p);
   s.done[p] = s.sp[p] === 'A' || total(s.hands[p]).v >= 21;
 }
 
@@ -64,7 +78,7 @@ const stops = (s, cards) => total(cards).v >= 21 || isFive(s, cards);
 
 // 1つの手の勝ち負け（増えた点。負けはマイナス）
 function gainOf(s, p, cards, bet) {
-  if (s.sur[p]) return -bet / 2;
+  if (s.sur[p]) return -Math.ceil(bet / 2);
   const v = total(cards).v;
   const d = total(s.dealer).v;
   const dBJ = isBJ(s.dealer);
@@ -77,7 +91,24 @@ function gainOf(s, p, cards, bet) {
   return -bet;
 }
 
+// 回の始め。賭ける額を選ぶ（詳細設定）なら、札を配る前に全員が額を選ぶ
 function deal(s) {
+  if (!s.betOn) { dealCards(s); return; }
+  s.wager = Array(s.n).fill(null);
+  s.hands = Array.from({ length: s.n }, () => []);
+  s.dealer = [];
+  s.bets = Array(s.n).fill(0);
+  s.sp = Array(s.n).fill(false);
+  s.sur = Array(s.n).fill(false);
+  s.wait = Array(s.n).fill(null);
+  s.fin = Array(s.n).fill(null);
+  s.done = Array(s.n).fill(false);
+  s.phase = 'bet';
+  s.out = null;
+  s.outFin = null;
+}
+
+function dealCards(s) {
   s.deck = shuffle(makeDeck(0), mulberry32((s.seed + s.round * 7919) >>> 0));
   s.pos = 0;
   const draw = () => s.deck[s.pos++];
@@ -87,7 +118,7 @@ function deal(s) {
     for (let p = 0; p < s.n; p++) s.hands[p].push(draw());
     s.dealer.push(draw());
   }
-  s.bets = Array(s.n).fill(BET);
+  s.bets = Array.from({ length: s.n }, (_, p) => baseOf(s, p));
   s.sp = Array(s.n).fill(false);
   s.sur = Array(s.n).fill(false);
   s.wait = Array(s.n).fill(null);
@@ -124,18 +155,23 @@ export default {
     { key: 'rounds', label: '回数', desc: 'この回数を遊んで、持ち点が多い人の勝ち', def: 5, choices: [[3, '3回'], [5, '5回'], [10, '10回']] },
     { key: 'surrender', label: 'サレンダー', desc: '最初の2枚を見て降りると、賭けの半分（5）だけ失ってその回を終われる', def: false },
     { key: 'five', label: 'ファイブカード', desc: '5枚引いて合計が21以下なら、親の札に関係なく勝ち（+10）', def: false },
+    { key: 'bets', label: '賭ける額を選ぶ', desc: '毎回、札を配る前に賭ける額を 5・10・20 から選ぶ（持ち点より多くは賭けられない）。なしなら毎回10', def: false, choices: [[false, 'なし'], [true, 'あり']] },
     { key: 'split', label: 'スプリット', desc: '最初の2枚が同じ数字なら、2つの手に分けて別々に勝負できる（賭けもそれぞれ10。分けるのは1回だけ。A を分けたら1枚ずつで終わり）', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const s = { n, seed, rounds: [3, 5, 10].includes(rules.rounds) ? rules.rounds : 5, splitOn: rules.split === true, fiveOn: rules.five === true, surOn: rules.surrender === true, round: 0, points: Array(n).fill(START), step: 0 };
+    const s = { n, seed, rounds: [3, 5, 10].includes(rules.rounds) ? rules.rounds : 5, splitOn: rules.split === true, fiveOn: rules.five === true, surOn: rules.surrender === true, betOn: rules.bets === true, round: 0, points: Array(n).fill(START), step: 0 };
     deal(s);
     return s;
   },
 
   ended(s) { return s.round >= s.rounds; },
   turn() { return null; },
-  canAct(s, p) { return !this.ended(s) && s.phase === 'play' && p >= 0 && p < s.n && !s.done[p]; },
+  canAct(s, p) {
+    if (this.ended(s) || !(p >= 0 && p < s.n)) return false;
+    if (s.phase === 'bet') return s.wager[p] === null;
+    return s.phase === 'play' && !s.done[p];
+  },
   referee(s) {
     if (this.ended(s) || s.phase !== 'result') return null;
     return { key: `res:${s.round}`, ms: SHOW_MS, move: { t: 'next', r: s.round } };
@@ -144,6 +180,7 @@ export default {
   startSound: 'shuffle',
   sound(a, b, m, me) {
     if (m.t === 'next') return 'shuffle';
+    if (m.t === 'bet') return b.phase === 'result' ? 'chip' : b.phase === 'play' ? 'card' : m.p === me ? 'chip' : null; // そろったら配る音
     if (b.phase === 'result' && a.phase === 'play') return 'chip';
     return m.p === me ? 'card' : null;
   },
@@ -157,6 +194,10 @@ export default {
   resultText(res, me, pn) { return winnersText(res.winners, me, pn); },
   phaseText(s, me) {
     if (s.phase === 'result') return `${s.round + 1}回目の結果`;
+    if (s.phase === 'bet') {
+      if (me >= 0 && s.wager[me] === null) return `<b>賭ける額を選んでください</b>（${s.round + 1}/${s.rounds}回目）`;
+      return `ほかの人が額を選ぶのを待っています…（${s.round + 1}/${s.rounds}回目）`;
+    }
     if (me >= 0 && !s.done[me]) return `<b>あなたの番</b>です（${s.round + 1}/${s.rounds}回目）`;
     return `ほかの人を待っています…（${s.round + 1}/${s.rounds}回目）`;
   },
@@ -176,6 +217,13 @@ export default {
     const s = clone(s0);
     s.step += 1;
     const hand = s.hands[p];
+    if (s0.phase === 'bet') {
+      // 賭ける額を選ぶ: 全員がそろったら配る
+      if (m.t !== 'bet' || !betChoices(s0, p).includes(m.v)) return null;
+      s.wager[p] = m.v;
+      if (s.wager.every((v) => v !== null)) dealCards(s);
+      return s;
+    }
     if (m.t === 'surrender') {
       if (!canSurrender(s0, p)) return null;
       s.sur[p] = true;
@@ -196,7 +244,7 @@ export default {
       handDone(s, p);
     } else if (m.t === 'double') {
       if (hand.length !== 2) return null;
-      s.bets[p] = BET * 2;
+      s.bets[p] = baseOf(s, p) * 2;
       hand.push(s.deck[s.pos++]);
       handDone(s, p);
     } else {
@@ -208,6 +256,14 @@ export default {
 
   // CPU: よくある「基本の戦い方」を短くしたもの。15%は気まぐれに逆を選んで弱めている
   cpu(s, p) {
+    if (s.phase === 'bet') {
+      // 持ち点が多ければ大きめ・少なければ小さめ。2割は選べる額から適当に
+      const ok = betChoices(s, p);
+      const pt = s.points[p];
+      const want = pt >= 120 ? 20 : pt <= 80 ? 5 : 10;
+      const v = Math.random() < 0.2 ? ok[Math.floor(Math.random() * ok.length)] : Math.max(...ok.filter((x) => x <= want), ok[0]);
+      return { t: 'bet', r: s.round, v };
+    }
     const hand = s.hands[p];
     const { v, soft } = total(hand);
     const r0 = rankOf(s.dealer[0]); // 親の見えている札
@@ -237,6 +293,7 @@ export default {
 
     root.append(scoreChips({ ...o, me }, s.points, { won: res ? res.winners : [] }));
     if (res) return;
+    if (s.phase === 'bet') { renderBet(root, s, o, me, nameP); return; }
 
     const showDealer = s.phase === 'result';
     const table = document.createElement('div');
@@ -301,7 +358,7 @@ export default {
           part('2つ目', h, s.bets[p], stText(h, s.done[p], s.phase === 'result' ? s.out[p] - (s.outFin[p] ?? 0) : 0), true);
         } else {
           part('1つ目', h, s.bets[p], stText(h, s.done[p], 0), true);
-          part('2つ目', s.wait[p], BET, '待ち', false);
+          part('2つ目', s.wait[p], baseOf(s, p), '待ち', false);
         }
       }
       table.append(box);
@@ -339,6 +396,54 @@ export default {
     }
   },
 };
+
+// 賭ける額を選ぶ場面（詳細設定）。ほかの人の額は、全員が選び終わるまで「選んだ」とだけ出す
+function renderBet(root, s, o, me, nameP) {
+  const table = document.createElement('div');
+  table.className = 'bj-table';
+  const dealer = document.createElement('div');
+  dealer.className = 'bj-dealer';
+  dealer.innerHTML = '<div class="bj-head">親（CPU）</div><div class="bj-head"><small>全員が賭ける額を選んだら札を配ります</small></div>';
+  table.append(dealer);
+  const seats = Array.from({ length: s.n }, (_, p) => p).filter((p) => p !== me);
+  if (me !== null) seats.push(me);
+  for (const p of seats) {
+    const box = document.createElement('div');
+    box.className = 'bj-player' + (p === me ? ' mine' : '');
+    const v = s.wager[p];
+    const st = v === null ? '選んでいます…' : p === me ? `賭け<b>${v}</b>` : '選んだ ✓';
+    box.innerHTML = `<div class="bj-head"><span class="bj-name">${esc(nameP(p))}</span> ${st}</div>`;
+    table.append(box);
+  }
+  root.append(table);
+  if (me === null || !o.canMove) return;
+  const acts = document.createElement('div');
+  acts.className = 'cc-actions bj-acts';
+  const note = document.createElement('div');
+  note.className = 'bj-note';
+  note.textContent = '賭ける額を選んでください';
+  acts.append(note);
+  const ok = betChoices(s, me);
+  for (const v of BETS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn ' + (v === BET ? 'primary' : 'secondary');
+    b.textContent = `${v}点`;
+    // スマホでも押しやすいよう、3つを同じ幅で大きめに並べる
+    b.style.cssText = 'flex: 1 1 0; min-width: 0; max-width: 8em; min-height: 52px; font-size: 1.15rem;';
+    if (!ok.includes(v)) { b.disabled = true; b.style.opacity = '.4'; b.title = '持ち点が足りません'; }
+    else b.onclick = () => o.onMove({ t: 'bet', r: s.round, v });
+    acts.append(b);
+  }
+  if (ok.length < BETS.length) {
+    const small = document.createElement('div');
+    small.className = 'bj-note';
+    small.style.fontWeight = '400';
+    small.textContent = s.points[me] < BETS[0] ? '持ち点が少ないので、5点だけ選べます' : '持ち点より多い額は選べません';
+    acts.append(small);
+  }
+  root.append(acts);
+}
 
 function handText(cards) {
   const { v, soft } = total(cards);

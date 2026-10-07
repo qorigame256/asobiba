@@ -4,18 +4,25 @@
 // 同じ数字がそろえば2枚捨てる。手札がなくなった人から上がり。最後まで札を持っていた1人の負け。
 // 引いた札は手札の中の決まらない位置に入る（ほかの人がどこにジョーカーが入ったか追えないように。位置は種から作るので全員同じ）。
 // 手: { p, t: 'draw', i: 引く相手の手札の何枚目か }。番の決まったゲームなので、位置で表してよい。
+// 詳細設定「同じ色でそろえる」（あり）: 同じ数字で同じ色（赤の♥♦どうし・黒の♠♣どうし）の2枚だけがそろう（最初に捨てる組も、引いたときも）。
+//   どの数字も赤2枚・黒2枚なので、どの札にも相方がちょうど1枚ある。ジジ抜きでは抜いた札の相方（同じ数字・同じ色）が最後の1枚になる。
+//   ありのときだけ局面に color: true を持つ（なしでは今までと全く同じ形）。
 
 import { mulberry32, shuffle } from './util.js';
-import { makeDeck, rankOf, cardEl, backEl, cardLabel, JOKER } from './cards.js';
+import { makeDeck, rankOf, suitOf, cardEl, backEl, cardLabel, JOKER } from './cards.js';
 
 const clone = (s) => ({ ...s, hands: s.hands.map((h) => h.slice()), out: s.out.slice() });
 
-// 手札から同じ数字の2枚を全部抜く。抜いた札の一覧を返す
-function dropPairs(hand) {
+const isRed = (c) => suitOf(c) === 'h' || suitOf(c) === 'd';
+// a と b がそろうか（ジョーカーはそろわない。color なら色も同じでないとそろわない）
+const pairs = (a, b, color) => a !== JOKER && b !== JOKER && rankOf(a) === rankOf(b) && (!color || isRed(a) === isRed(b));
+
+// 手札からそろう2枚を全部抜く。抜いた札の一覧を返す
+function dropPairs(hand, color) {
   const gone = [];
   const keep = [];
   for (const c of hand) {
-    const j = c === JOKER ? -1 : keep.findIndex((x) => x !== JOKER && rankOf(x) === rankOf(c));
+    const j = keep.findIndex((x) => pairs(x, c, color));
     if (j >= 0) gone.push(keep.splice(j, 1)[0], c);
     else keep.push(c);
   }
@@ -42,17 +49,20 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'mode', label: '遊び方', desc: 'ジジ抜きは、ジョーカーの代わりに誰も知らない1枚を抜いておく（どれが負けの札か最後まで分からない）', def: 'baba', choices: [['baba', 'ババ抜き'], ['jiji', 'ジジ抜き']] },
+    { key: 'color', label: '同じ色でそろえる', desc: '同じ数字でも、赤どうし（♥♦）・黒どうし（♠♣）でないと捨てられない', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const jiji = rules.mode === 'jiji';
+    const color = rules.color === 'on';
     let deck = shuffle(makeDeck(jiji ? 0 : 1), mulberry32(seed));
     let hidden = null;
     if (jiji) { hidden = deck[0]; deck = deck.slice(1); }
     const hands = Array.from({ length: n }, () => []);
     deck.forEach((c, k) => hands[k % n].push(c));
-    const first = hands.map((h) => dropPairs(h));
+    const first = hands.map((h) => dropPairs(h, color));
     const s = { n, seed, jiji, hidden, hands: first.map((x) => x.keep), out: [], turn: 0, step: 0, last: null, start: first.map((x) => x.gone.length / 2) };
+    if (color) s.color = true; // なしのときは局面に何も足さない（今までと同じ形）
     for (let p = 0; p < n; p++) if (!s.hands[p].length) s.out.push(p); // 配った時点で上がった人
     if (!s.hands[0].length) s.turn = nextActive(s, 0);
     return s;
@@ -85,7 +95,7 @@ export default {
     s.step += 1;
     const card = s.hands[from].splice(m.i, 1)[0];
     const mine = s.hands[m.p];
-    const j = card === JOKER ? -1 : mine.findIndex((x) => x !== JOKER && rankOf(x) === rankOf(card));
+    const j = mine.findIndex((x) => pairs(x, card, s.color));
     let pair = null;
     if (j >= 0) {
       pair = [mine.splice(j, 1)[0], card];
@@ -175,10 +185,12 @@ export default {
     if (me !== null) {
       const head = document.createElement('div');
       head.className = 'cc-hand-head';
-      head.innerHTML = `あなたの手札 <small>${s.hands[me].length ? s.hands[me].length + '枚' : '上がり！'}</small>`;
+      head.innerHTML = `あなたの手札 <small>${s.hands[me].length ? s.hands[me].length + '枚' : '上がり！'}</small>`
+        + (s.color ? ' <small>同じ数字・同じ色でそろいます</small>' : '');
       const hand = document.createElement('div');
       hand.className = 'bb-hand';
-      const order = (c) => (c === JOKER ? 99 : rankOf(c));
+      // 同じ色でそろえるときは、同じ数字の中で黒・赤の順に並べる
+      const order = (c) => (c === JOKER ? 99 : s.color ? rankOf(c) + (isRed(c) ? 0.5 : 0) : rankOf(c));
       for (const c of s.hands[me].slice().sort((a, b) => order(a) - order(b))) {
         const e = cardEl(c);
         if (o.fresh && s.last?.p === me && !s.last.pair && s.last.card === c) e.classList.add('pop');

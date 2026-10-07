@@ -3,6 +3,9 @@
 // （どちらも seed から作るので全員同じ。本人の決定・2026-10-03。前は「山いくつか」も選べたが、山1つだけにした）。
 // 詳細設定「1回に取れる数」（2026-10-06 本人の決定）: おまかせ（最初。上のとおり3〜5個のどれか）／3個まで／4個まで／5個まで。
 // 最後の1個を取った人の負け（詳細設定で「勝ち」にもできる）。3人以上のときも負けは1人だけ。
+// 詳細設定「勝ち負け」の「取った数で勝負」（rules.last = 'count'。2026-10-07 本人の決定）: 山がなくなったとき、取った石の合計がいちばん多い人の勝ち
+// （同じ数なら同着。最後の1個は関係ない）。取った数は局面の got（プレイヤー番号 → 個数）。got は取った数で勝負のときだけ持つ
+// （負け・勝ちのときの局面は前と全く同じ）。
 // 手: { p, t: 'take', pile: 0, k: 取る数 }（pile は山の番号。山は1つなので常に 0）
 
 import { mulberry32 } from './util.js';
@@ -22,7 +25,8 @@ export function goodMove(s) {
   return k >= 1 && k <= maxOf(s) ? { pile: 0, k } : null;
 }
 
-const clone = (s) => ({ ...s, piles: s.piles.slice() });
+const counting = (s) => s.rules.last === 'count';
+const clone = (s) => ({ ...s, piles: s.piles.slice(), ...(s.got ? { got: s.got.slice() } : {}) });
 
 let picked = null; // { step, pile, k } 取る石を選んでいるところ
 
@@ -37,7 +41,8 @@ export default {
   maxPlayers: 6,
   settings: [
     { key: 'max', label: '1回に取れる数', desc: 'おまかせは対局ごとに3〜5個のどれか', def: 0, choices: [[0, 'おまかせ'], [3, '3個まで'], [4, '4個まで'], [5, '5個まで']] },
-    { key: 'last', label: '最後の1個', desc: '最後の1個を取った人が', def: 'lose', choices: [['lose', '負け'], ['win', '勝ち']] },
+    // 鍵と値（last・lose・win）は前のまま（前の部屋の設定がそのまま使えるように）。count は 2026-10-07 に足した
+    { key: 'last', label: '勝ち負け', desc: '最後の1個を取った人が負け・勝ち、または取った石の数で勝負', def: 'lose', choices: [['lose', '最後の1個で負け'], ['win', '最後の1個で勝ち'], ['count', '取った数で勝負']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -45,7 +50,9 @@ export default {
     const r = { last: 'lose', ...rules };
     const piles = [int(rng, 15, 30)];
     const max = [3, 4, 5].includes(rules.max) ? rules.max : int(rng, 3, 5);
-    return { n, rules: r, piles, start: piles.slice(), max, turn: 0, ender: null, step: 0, last: null };
+    const s = { n, rules: r, piles, start: piles.slice(), max, turn: 0, ender: null, step: 0, last: null };
+    if (counting(s)) s.got = Array(n).fill(0);
+    return s;
   },
 
   turn(s) { return s.ender === null ? s.turn : null; },
@@ -55,6 +62,13 @@ export default {
   sound() { return 'stone'; },
   result(s) {
     if (s.ender === null) return null;
+    if (counting(s)) {
+      // 取った数で勝負: いちばん多い人の勝ち（同じ数なら全員）
+      const best = Math.max(...s.got);
+      const winners = s.got.map((v, p) => (v === best ? p : -1)).filter((p) => p >= 0);
+      const ranking = Array.from({ length: s.n }, (_, p) => p).sort((a, b) => s.got[b] - s.got[a]);
+      return { winner: winners[0], winners, ranking, got: s.got.slice(), ender: s.ender };
+    }
     const lose = s.rules.last === 'lose';
     // 最後を取った人が負けのとき、2人なら相手の勝ち。3人以上は「負けが1人」として表す
     const winner = lose ? (s.n === 2 ? 1 - s.ender : null) : s.ender;
@@ -62,6 +76,14 @@ export default {
   },
 
   resultText(res, me, pn) {
+    if (res.winners) {
+      const best = res.got[res.winners[0]];
+      if (res.winners.includes(me)) {
+        const others = res.winners.filter((p) => p !== me);
+        return `${best}個取って、あなたの勝ち！🎉${others.length ? `（${others.map(pn).join('・')}と同点）` : ''}`;
+      }
+      return `${res.winners.map(pn).join('・')}が${best}個取って勝ち！`;
+    }
     if (res.loser === null) return res.winner === me ? '最後の1個を取って、あなたの勝ち！🎉' : `${pn(res.winner)}が最後の1個を取って勝ち！`;
     if (res.loser === me) return '最後の1個を取ってしまった…あなたの負け';
     if (res.winner === me) return '相手が最後の1個を取った！あなたの勝ち！🎉';
@@ -69,7 +91,8 @@ export default {
   },
 
   info(s) {
-    return `この対局は1回に1〜${s.max}個まで取れます`;
+    const base = `この対局は1回に1〜${s.max}個まで取れます`;
+    return counting(s) ? `${base}。山がなくなったとき、取った石がいちばん多い人の勝ち` : base;
   },
 
   apply(s0, m) {
@@ -79,14 +102,17 @@ export default {
     s.piles[m.pile] -= m.k;
     s.step += 1;
     s.last = { p: m.p, pile: m.pile, k: m.k };
+    if (counting(s)) s.got[m.p] += m.k;
     if (s.piles.every((v) => v === 0)) s.ender = m.p;
     else s.turn = (s.turn + 1) % s.n;
     return s;
   },
 
-  // CPU: 3割は取れる手から適当に、残りは筋の良い手（無ければ1個だけ取って様子を見る）
+  // CPU: 3割は取れる手から適当に、残りは筋の良い手（無ければ1個だけ取って様子を見る）。
+  // 取った数で勝負のときは、残りの7割は取れるだけ取る
   cpu(s) {
     const list = legalMoves(s);
+    if (counting(s) && Math.random() > 0.3) return { t: 'take', pile: 0, k: maxOf(s) };
     const good = goodMove(s);
     if (good && Math.random() > 0.3) return { t: 'take', ...good };
     if (!good && Math.random() > 0.3) {
@@ -113,11 +139,18 @@ export default {
     chips.className = 'cc-opps';
     for (let p = 0; p < s.n; p++) {
       const chip = document.createElement('div');
-      chip.className = 'cc-opp' + (s.ender === null && s.turn === p ? ' turn' : '') + (res && (res.winner === p || (res.loser !== null && res.loser !== p)) ? ' won' : '');
+      const won = res && (res.winners ? res.winners.includes(p) : res.winner === p || (res.loser !== null && res.loser !== p));
+      chip.className = 'cc-opp' + (s.ender === null && s.turn === p ? ' turn' : '') + (won ? ' won' : '');
       const name = document.createElement('div');
       name.className = 'cc-opp-name';
       name.textContent = nameP(p);
       chip.append(name);
+      if (counting(s)) { // 取った数で勝負: 取った石の数
+        const got = document.createElement('div');
+        got.className = 'mm-score nim-got';
+        got.textContent = `${s.got[p]}個`;
+        chip.append(got);
+      }
       if (o.away[p] || (o.sub?.[p])) {
         const t = document.createElement('span');
         t.className = 'cc-tag away';
