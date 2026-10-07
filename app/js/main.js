@@ -494,7 +494,7 @@ function rulesOf(gameId, rules) {
 // ヒット＆ブローの桁数（digits。難しさと同じ。5桁を足したときに入れた）も好みなので抽選しない（Claude の判断）。
 // 将棋のトライ（try）・神経衰弱の色もそろえる（color）・お絵描き当てのインクの量（ink）は遊び方なので抽選する。
 // マルバツ・将棋の size は盤の大きさでなく遊び方（スーパー・消える・5五将棋）なので抽選する。
-const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'autopromo', 'tsumogiri', 'digits']);
+const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match']);
 const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
 
 // 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、エアホッケーは 2〜3。ほかは2）
@@ -585,7 +585,36 @@ function lineup(game) {
 function showScreen(name) {
   for (const s of document.querySelectorAll('.screen')) s.hidden = s.id !== 'screen-' + name;
   window.scrollTo(0, 0);
+  keepAwake(name === 'play');
+  if (name !== 'play') renderNetBanner();
 }
+
+/* ---------- 画面を暗くしない（2026-10-07 の18回目の案）: 対局の画面（待合室も）にいる間は、スマホの画面が勝手に消えないようにする ---------- */
+// ブラウザの Screen Wake Lock を使う（iPhone は iOS 16.4 から。使えない端末では何もしない）。
+// ほかのタブ・アプリへ移ると自動で外れるので、戻ってきたらかけ直す。
+let wakeLock = null;
+let wantWake = false;
+let wakeAsking = false;
+async function keepAwake(on) {
+  wantWake = on;
+  if (!on) {
+    const w = wakeLock;
+    wakeLock = null;
+    try { await w?.release(); } catch { /* 無視 */ }
+    return;
+  }
+  if (wakeLock || wakeAsking || document.visibilityState !== 'visible' || !navigator.wakeLock) return;
+  wakeAsking = true;
+  try {
+    const w = await navigator.wakeLock.request('screen');
+    if (!wantWake) { w.release().catch(() => {}); return; }
+    wakeLock = w;
+    w.addEventListener('release', () => { if (wakeLock === w) wakeLock = null; });
+  } catch { /* 電池の節約中などで断られたら、何もしない */ } finally {
+    wakeAsking = false;
+  }
+}
+document.addEventListener('visibilitychange', () => { if (wantWake && document.visibilityState === 'visible') keepAwake(true); });
 
 function makeButton(text, onClick, variant = 'primary') {
   const b = document.createElement('button');
@@ -801,9 +830,50 @@ function renderRoomBar() {
   } else {
     cls = 'on'; text = others.length === 1 ? '相手と接続中' : `あなたを入れて${others.length + 1}人が接続中`;
   }
+  // 通信の具合（2026-10-07 の18回目の案）: 自分の合図が中継サーバーから戻るまでの時間（遅れ）を添える。遅いときは黄色
+  if (S.conn === 'ready' && S.rtt != null) {
+    const stuck = netStuck();
+    if ((stuck || S.rtt > SLOW_MS) && cls === 'on') { cls = 'wait'; text = '通信が遅れています'; }
+    text += stuck ? '（合図が戻ってきません）' : `（遅れ ${(S.rtt / 1000).toFixed(1)}秒）`;
+  }
   el('presence-dot').className = 'dot ' + cls;
   el('presence-text').textContent = text;
+  renderNetBanner();
 }
+
+/* ---------- 通信の具合（2026-10-07 の18回目の案） ---------- */
+// 生存確認の合図（ping）に送った時刻を入れ、自分に戻ってきたときの差を遅れ（S.rtt）にする。
+// S.pingAt = まだ戻っていない合図のうち一番古いものを送った時刻（戻ったら null）。
+// 一度つながったあとで切れたら、画面の一番上に帯を出す（下へスクロールしていても見えるように）。
+const SLOW_MS = 1500; // 遅れがこれより長いと「遅れています」
+const STUCK_MS = 12000; // 合図がこれより長く戻らないと「遅れています」（切れたと分かる前）
+const netStuck = () => S.pingAt != null && Date.now() - S.pingAt > STUCK_MS;
+
+function onSelf(msg) {
+  if (msg.type !== 'ping' || !Number.isFinite(msg.t)) return;
+  S.rtt = Math.max(0, Date.now() - msg.t);
+  S.pingAt = null;
+  renderRoomBar();
+}
+
+function renderNetBanner() {
+  let bar = document.getElementById('net-banner');
+  const show = S?.mode === 'online' && S.everReady && S.conn !== 'ready' && !el('screen-play').hidden;
+  if (!show) { if (bar) bar.hidden = true; return; }
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'net-banner';
+    bar.className = 'net-banner';
+    bar.setAttribute('role', 'status');
+    el('screen-play').prepend(bar); // 対局の画面の一番上（上の段を隠さず、下へスクロールしても上に貼り付く）
+  }
+  bar.hidden = false;
+  bar.textContent = navigator.onLine === false
+    ? '⚠ ネットにつながっていません。つながったら自動でつなぎ直します'
+    : '⚠ 通信が切れました。つなぎ直しています…';
+}
+window.addEventListener('online', () => { if (S) renderRoomBar(); });
+window.addEventListener('offline', () => { if (S) renderRoomBar(); });
 
 function statusHtml(game, st, res) {
   const me = myPlayer();
@@ -1896,6 +1966,7 @@ function openNet() {
       S.code, S.myId,
       (msg) => { if (S === session) onMessage(msg); },
       (status) => { if (S === session) onConn(status); },
+      (msg) => { if (S === session) onSelf(msg); },
     );
   } catch {
     S.conn = 'error';
@@ -1912,8 +1983,12 @@ function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, mo
 function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner, mark: myMark() }); }
 
 function onConn(status) {
+  const back = status === 'ready' && S.everReady && S.conn !== 'ready';
   S.conn = status;
   if (status === 'ready') {
+    if (back) toast('通信がもどりました');
+    S.everReady = true;
+    S.pingAt = null;
     send({ type: 'hello', isHost: S.isHost, name: myName(), beg: beginner, mark: myMark() });
     if (S.isHost) { setBeg(S.myId, beginner); setMark(S.myId, myMark()); sendState(); }
   }
@@ -2239,7 +2314,7 @@ function rebase(msg) {
 setInterval(() => {
   if (S?.mode !== 'online' || S.conn !== 'ready') return;
   if (!S.isHost && !S.members.includes(S.myId) && !S.full) askState();
-  else send({ type: 'ping' });
+  else { send({ type: 'ping', t: Date.now() }); S.pingAt ??= Date.now(); } // t: 戻ってきたら通信の遅れを測る
   const lostKey = S.members.filter((id) => !alive(id)).join();
   if (lostKey !== S.lostKey) { S.lostKey = lostKey; render(); } else renderRoomBar();
 }, HEARTBEAT_MS);

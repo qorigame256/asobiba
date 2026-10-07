@@ -551,5 +551,47 @@ function perft(board, hands, side, d) {
   }
 }
 
+// 駒の並び「ばらばら」（2026-10-07 の18回目の案）
+{
+  console.log('--- 駒の並び（ばらばら）');
+  check('駒の並びは最初は「ふつう」', shogi.settings.some((x) => x.key === 'mix' && x.def === 'off'));
+  const std = shogi.init({ rules: {} });
+  check('ふつうは局面に何も足さない', !('mixed' in std) && JSON.stringify(shogi.init({ rules: { mix: 'off' }, seed: 5 })) === JSON.stringify(std));
+  const boards = new Set();
+  let ok = true;
+  for (let seed = 1; seed <= 60; seed++) {
+    const s = shogi.init({ rules: { mix: 'on' }, seed });
+    const b = s.board;
+    const sorted = (a) => a.slice().sort((x, y) => x - y).join();
+    const bottom = b.slice(72, 81);
+    if (!s.mixed || b[sq(8, 4)] !== 8 || b[sq(0, 4)] !== -8) ok = false; // 玉は真ん中
+    if (sorted(bottom) !== sorted([2, 3, 4, 5, 8, 5, 4, 3, 2])) ok = false; // 下の段の駒の種類と数はふつうと同じ
+    if (sorted([b[sq(7, 1)], b[sq(7, 7)]]) !== '6,7') ok = false; // 角と飛
+    if (!b.every((v, i) => v === -b[80 - i])) ok = false; // 後手は点対称の同じ並び
+    if (JSON.stringify(b) === JSON.stringify(std.board)) ok = false; // ふつうと同じ並びにはならない
+    if (JSON.stringify(shogi.init({ rules: { mix: 'on' }, seed }).board) !== JSON.stringify(b)) ok = false; // 同じ種なら同じ並び
+    if (legalMoves(b, s.hands, 0).length < 20) ok = false;
+    boards.add(b.join());
+  }
+  check('ばらばら: 玉は真ん中・駒の数は同じ・点対称・ふつうと違う・同じ種なら同じ', ok);
+  check('ばらばら: 種ごとに並びが変わる', boards.size >= 55, `${boards.size}通り`);
+  check('ばらばら: 駒落ち・5五将棋・3人では使わない', !shogi.init({ rules: { mix: 'on', handicap: 'bishop' }, seed: 3 }).mixed
+    && !shogi.init({ rules: { mix: 'on', size: 'mini' }, seed: 3 }).mixed && !shogi.init({ rules: { mix: 'on', players: 3 }, seed: 3 }).mixed);
+  for (const seed of [11, 12]) {
+    let x = shogi.init({ rules: { mix: 'on', try: 'on' }, seed });
+    const moves = [];
+    let bad = 0;
+    while (!x.result) {
+      const mv = JSON.parse(JSON.stringify(shogi.cpu(x, x.turn, { cpu: 'weak' })));
+      const n = shogi.apply(x, mv);
+      if (!n) { bad++; break; }
+      moves.push(mv);
+      x = n;
+    }
+    const again = moves.reduce((y, m) => (y ? shogi.apply(y, m) : null), shogi.init({ rules: { mix: 'on', try: 'on' }, seed }));
+    check(`ばらばら: CPU どうしで最後まで指せ、当て直すと同じ局面（種 ${seed}）`, !bad && x.mixed && again?.keys.at(-1) === x.keys.at(-1), `${x.ply}手・${x.result?.reason}`);
+  }
+}
+
 console.log(failed ? `\n${failed} 件の失敗` : '\nすべて OK');
 process.exit(failed ? 1 : 0);

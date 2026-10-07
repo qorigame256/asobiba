@@ -789,6 +789,35 @@ function waitsEl(v) {
   return box;
 }
 
+// テンパイまであと何枚（詳細設定。2026-10-07 の18回目の案）。向聴数を言い換えて出す（見せるだけ。局面は変えない）。
+// 13枚の形はいまの手、14枚の形（自分の番で切る前）は、選んだ牌があればそれを切ったとき、無ければ一番良く切ったとき
+// （14枚のまま向聴数を数えると、一番良い牌を切ったときの数になる）。戻り値は { n: 向聴数（-1 = 和了りの形）, after: 選んだ牌を切ったときか }
+function shantenView(s, p, sel = null) {
+  const h = s.h;
+  const fixed = h.melds[p].length;
+  if (h.hands[p].length % 3 === 2 && sel !== null && h.hands[p].includes(sel)) {
+    return { n: E.shanten(countsOf(h.hands[p].filter((id) => id !== sel)), fixed), after: true };
+  }
+  return { n: E.shanten(countsOf(h.hands[p]), fixed), after: false };
+}
+
+// 待ち牌の表示と同じ所（手牌の上の段の左側）に出す。待ち牌の表示があって聴牌しているときは、そちらを出す
+function shantenEl(v) {
+  const box = document.createElement('div');
+  box.className = 'mj-shanten';
+  Object.assign(box.style, {
+    position: 'absolute', left: '0', right: 'calc(var(--hw) + 8px)', bottom: 'calc(100% + 12px)', width: 'auto', minWidth: '0',
+    overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', pointerEvents: 'none',
+    fontSize: 'clamp(11px, calc(var(--hw) * .4), 15px)', color: 'var(--muted)', transition: 'none',
+  });
+  const head = v.after ? '切ると ' : '';
+  if (v.n < 0) box.textContent = '和了りの形';
+  else if (v.n === 0) box.textContent = head + 'テンパイ';
+  else box.textContent = `${head}テンパイまで あと${v.n}枚`;
+  if (v.n <= 0) Object.assign(box.style, { color: '#1f7a3a', fontWeight: '700' });
+  return box;
+}
+
 /* ---------- 役の早見表（2026-10-07） ---------- */
 
 // このゲームで和了れる役。翻数の少ない順で、役満は最後。names は mahjong-engine.js の YAKU_NAMES の名前
@@ -1076,10 +1105,12 @@ function render(root, s, o) {
     }
     row.append(b);
   });
+  let waitShown = false;
   if (s.rules.waits && !watching) {
     const v = waitView(s, me, myTurn ? ui.sel : null);
-    if (v.kinds.length) row.append(waitsEl(v));
+    if (v.kinds.length) { row.append(waitsEl(v)); waitShown = true; }
   }
+  if (s.rules.shanten && !watching && !waitShown && h.hands[me]?.length) row.append(shantenEl(shantenView(s, me, myTurn ? ui.sel : null)));
   root.append(hand);
 
   const actions = document.createElement('div');
@@ -1137,6 +1168,7 @@ export default {
     { key: 'red', label: '赤ドラ', desc: '赤い五（4人・5人は五萬・五筒・五索、3人は五筒・五索）を1枚ずつ入れ、持っているだけで1翻', def: true },
     { key: 'kuitan', label: '喰いタン', desc: '鳴いた手でも断幺九（2〜8だけの手）が役になる', def: true },
     { key: 'waits', label: '待ち牌の表示', desc: '聴牌したら、何で和了れるか（待ちの牌）を自分の画面に出す。初めての人向け', def: false },
+    { key: 'shanten', label: 'テンパイまであと何枚', desc: '自分の手が、あと何枚でテンパイになるか（向聴数）を自分の画面に出す。切る牌を選ぶと、それを切ったときの枚数になる。初めての人向け', def: false },
     { key: 'tsumogiri', label: 'ツモ切りの表示', desc: '引いた牌をそのまま捨てた牌（ツモ切り）を、河で少し暗く出す。相手の手を読む手がかりになる', def: false },
     { key: 'players', label: '人数', desc: '3人麻雀は二萬〜八萬を抜いた108枚・チーなし・北は抜きドラ。5人麻雀は5人目に自風がなく、ツモは4人から受け取る', def: 4, choices: [[4, '4人'], [3, '3人（三人麻雀）'], [5, '5人（五人麻雀）']] },
   ],
@@ -1144,7 +1176,7 @@ export default {
 
   init(n, seed, { rules = {} } = {}) {
     const s = {
-      n, seed, rules: { length: rules.length === 'south' ? 'south' : 'east', red: rules.red !== false, kuitan: rules.kuitan !== false, waits: rules.waits === true, tsumogiri: rules.tsumogiri === true }, scores: Array(n).fill(n === 3 ? 35000 : 25000),
+      n, seed, rules: { length: rules.length === 'south' ? 'south' : 'east', red: rules.red !== false, kuitan: rules.kuitan !== false, waits: rules.waits === true, tsumogiri: rules.tsumogiri === true, shanten: rules.shanten === true }, scores: Array(n).fill(n === 3 ? 35000 : 25000),
       kyoku: 0, honba: 0, kyotaku: 0, handNo: 0, seq: 0, over: false, ranking: null, h: null,
     };
     startHand(s);
@@ -1201,4 +1233,4 @@ export default {
 };
 
 // テスト用
-export const _test = { turnOptions, claimOptions, winResult, waitsOf, waitView, liveLeft, kindOf, chiOptions, seatWind, YAKU_GUIDE, yakuGuide };
+export const _test = { turnOptions, claimOptions, winResult, waitsOf, waitView, shantenView, liveLeft, kindOf, chiOptions, seatWind, YAKU_GUIDE, yakuGuide };

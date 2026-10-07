@@ -242,6 +242,23 @@ if (!TESTDATA || !fs.existsSync(TESTDATA)) {
     s.h.draw = s.h.L - 15;
     check('山が残っていればポンできる', T.claimOptions(s, 0, tile(s, 0, '1m'), 'discard')[3]?.includes('pon'));
   }
+  // 詳細設定「テンパイまであと何枚」（2026-10-07 の18回目の案）。見せるだけの shantenView
+  {
+    check('テンパイまであと何枚は最初は「なし」', mj.init(4, 1, { rules: {} }).rules.shanten === false && mj.init(4, 1, { rules: { shanten: true } }).rules.shanten === true);
+    const s = table(['234m234p567p678s59s', tenpai25m, '1m258m258p258s135z', '19m19p19s1234567z']);
+    let v = T.shantenView(s, 1);
+    check('13枚の聴牌は0', v.n === 0 && !v.after, JSON.stringify(v));
+    check('国士無双の13面待ちも0', T.shantenView(s, 3).n === 0);
+    check('ばらばらの手は大きい数', T.shantenView(s, 2).n >= 4, JSON.stringify(T.shantenView(s, 2)));
+    v = T.shantenView(s, 0);
+    check('14枚で選ぶ前は一番良く切ったとき（九索を切れば聴牌）', v.n === 0 && !v.after, JSON.stringify(v));
+    v = T.shantenView(s, 0, tile(s, 0, '2m'));
+    check('二萬を選ぶと切ったあとは1枚', v.n === 1 && v.after, JSON.stringify(v));
+    check('手にない牌を選んでいても選ぶ前と同じ', T.shantenView(s, 0, tile(s, 1, '2m')).after === false);
+    const t2 = table(['234m234p567p678s55s', '', '', '']);
+    s.h.hands[0] = t2.h.hands[0];
+    check('和了りの形は -1', T.shantenView(t2, 0).n === -1, JSON.stringify(T.shantenView(t2, 0)));
+  }
   // 詳細設定「待ち牌の表示」（2026-10-07）。見せるだけの waitView
   {
     check('ツモ切りの表示は最初は「なし」', mj.init(4, 1, { rules: {} }).rules.tsumogiri === false && mj.init(4, 1, { rules: { tsumogiri: true } }).rules.tsumogiri === true);

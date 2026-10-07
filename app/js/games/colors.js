@@ -49,6 +49,15 @@
 //     山に数字でない札（32枚）より多く残っていないと終わらなくなるため。減らしたときは最初の説明に「手札は○枚ずつ」と出す。
 //   - 「手札の上限」は、最初の手札＋15枚と25枚の大きい方（capOf）。今選べる枚数（10枚まで）ではいつも25枚のまま。
 //     上限が最初の手札に近すぎる（少なすぎる）ことが無いように、の守りとして書いておく。
+// 詳細設定「点数で勝負」（2026-10-07 の18回目の案。なし（最初。1回勝負）・3回戦・5回戦）: 決めた回数だけ続けて遊ぶ。上がった人が、
+//   ほかの人の残りの札の点（数字はその数・スキップ／リバース／ドロー2は20点・ワイルド／ワイルドドロー4は50点。本家と同じ）をもらい、
+//   全部の回の合計点がいちばん多い人の勝ち（同じ点なら全員の勝ち）。Claude の判断:
+//   - 1回が終わると、残りの札と点を見せる（局面の match.gap）。だれか（対局している人）が「次の回へ」（手 { p, t: 'next' }）を押すと配り直す。
+//     CPU は3秒待ってから押す（ポーカーの「次の勝負へ」と同じ形）。最後の回は「次の回へ」なしで、そのまま結果。
+//   - 配り直しの種は対局の種と回の数から作る（hseed）。最初に出す人は回ごとに1つずつ回す（2回目は2番目の人から）。
+//   - 手札の上限で脱落した人の札は、脱落したときの点を覚えておき（lost）、その回に上がった人がもらう。
+//   - なしのときは局面に何も足さない（今までと全く同じ形）。
+
 
 import { mulberry32, shuffle } from './util.js';
 
@@ -67,6 +76,13 @@ const dealOf = (n, rules) => Math.min(DEALS.includes(rules?.deal) ? rules.deal :
 // 手札の上限。最初の手札＋15枚より少なくしない（今選べる枚数ではいつも25枚）
 const capOf = (s) => Math.max(CAP, dealOf(s.n, s.rules) + 15);
 
+// 点数で勝負（詳細設定）: 札の点と、手札の点の合計
+const MATCHES = [3, 5];
+const cardPts = (c) => (c[0] === 'W' ? 50 : isNumber(c) ? Number(c[1]) : 20);
+const handPts = (h) => h.reduce((a, c) => a + cardPts(c), 0);
+// n 回目の配りの種（1回目は対局の種そのまま＝今までと同じ配り）
+const handSeed = (seed, no) => (no === 1 ? seed : (seed ^ Math.imul(no, 0x9e3779b1)) >>> 0);
+
 const isOut = (s, q) => !!s.out?.[q];
 const aliveCount = (s) => s.hands.filter((_, q) => !isOut(s, q)).length;
 // from から dir の向きに、脱落していない人を k 人進んだ席
@@ -80,6 +96,7 @@ function checkCap(s, q) {
   if (!s.rules?.cap || isOut(s, q) || s.hands[q].length <= capOf(s)) return;
   s.out = (s.out ?? Array(s.n).fill(false)).slice();
   s.out[q] = true;
+  if (s.match) { s.lost = (s.lost ?? Array(s.n).fill(0)).slice(); s.lost[q] = handPts(s.hands[q]); } // 点数で勝負: 脱落したときの点
   s.deck = [...s.hands[q], ...s.deck];
   s.hands[q] = [];
   if (s.last) s.last.out = [...(s.last.out ?? []), q];
@@ -136,7 +153,7 @@ function drawInto(s, p, k) {
       if (s.discard.length < 2) break; // 山も捨て札も無い
       const top = s.discard.pop();
       s.shuffles += 1;
-      s.deck = shuffle(s.discard, mulberry32(s.seed + s.shuffles * 0x9e3779b9));
+      s.deck = shuffle(s.discard, mulberry32((s.hseed ?? s.seed) + s.shuffles * 0x9e3779b9));
       s.discard = [top];
     }
     const c = s.deck.pop();
@@ -197,7 +214,8 @@ function logText(s, nameP) {
     // 最初の手札（詳細設定）を人数に合わせて減らしたときは、その枚数も出す
     const k = dealOf(s.n, s.rules);
     const less = DEALS.includes(s.rules?.deal) && k < s.rules.deal ? `（人数が多いので、手札は${k}枚ずつ）` : '';
-    return `最初の札は「${cardName(s.discard[0])}」${less}`;
+    const no = s.match && s.match.no > 1 ? `第${s.match.no}回を配りました。` : '';
+    return `${no}最初の札は「${cardName(s.discard[0])}」${less}`;
   }
   if (L.t === 'draw') return (L.got ? `${nameP(L.p)}が山から${L.got}枚引いた${L.got > 1 && L.drew ? '（出せる札が来た）' : ''}` : '山札が無いので引けなかった') + outText(s, L, nameP);
   if (L.t === 'pass') return `${nameP(L.p)}は引いた札を出さずに次へ`;
@@ -223,6 +241,96 @@ function logText(s, nameP) {
   return t + outText(s, L, nameP);
 }
 
+// 札を配って最初の札をめくる（init と、点数で勝負の配り直し）
+function deal(n, seed, rules) {
+  const deck = shuffle(makeDeck(), mulberry32(seed));
+  const k = dealOf(n, rules); // 最初の手札（詳細設定）。7枚なら今までと同じ配り方
+  const hands = Array.from({ length: n }, () => sortHand(deck.splice(-k)));
+  let top = deck.pop();
+  while (!isNumber(top)) { deck.unshift(top); top = deck.pop(); }
+  return { deck, discard: [top], hands, color: top[0] };
+}
+
+// 点数で勝負: だれかが上がった（s.winner）局面に、点を足して回の結果（gap）を書く。最後の回なら合計点で勝った人を s.winner に入れる
+function settle(s) {
+  const w = s.winner;
+  const left = s.hands.map((h) => h.slice());
+  const lost = s.lost ?? Array(s.n).fill(0);
+  const gain = left.reduce((a, h, q) => a + (q === w ? 0 : handPts(h) + lost[q]), 0);
+  const pts = s.match.pts.slice();
+  pts[w] += gain;
+  s.match = { ...s.match, pts, gap: { w, gain, left, lost } };
+  if (s.match.no < s.match.of) { s.winner = null; return; }
+  s.match.final = true;
+  s.winner = pts.indexOf(Math.max(...pts));
+}
+
+// 点数で勝負: 次の回を配る（最初に出す人は回ごとに1つずつ回す）
+function nextHand(s0, p) {
+  const no = s0.match.no + 1;
+  const hseed = handSeed(s0.seed, no);
+  const s = { ...s0, ...deal(s0.n, hseed, s0.rules), hseed, pend: null, shuffles: 0, turn: (no - 1) % s0.n, dir: 1, drawn: null, step: s0.step + 1, last: null };
+  delete s.out;
+  delete s.lost;
+  s.match = { ...s0.match, no, gap: null };
+  return s;
+}
+
+// 点数で勝負: 回の結果（上がった人・ほかの人の残りの札と点・合計点・「次の回へ」）
+function gapEl(s, o, nameP) {
+  const M = s.match;
+  const g = M.gap;
+  const box = document.createElement('div');
+  box.className = 'cc-gap';
+  const title = document.createElement('p');
+  title.className = 'cc-gap-title';
+  title.textContent = `第${M.no}回は ${nameP(g.w)} の上がり！ +${g.gain}点`;
+  box.append(title);
+  const list = document.createElement('div');
+  list.className = 'cc-gap-list';
+  for (let k = 1; k < s.n; k++) {
+    const q = (g.w + k) % s.n;
+    const row = document.createElement('div');
+    row.className = 'cc-gap-row';
+    const nm = document.createElement('span');
+    nm.className = 'cc-gap-name';
+    nm.textContent = nameP(q);
+    const cards = document.createElement('span');
+    cards.className = 'cc-gap-cards';
+    for (const c of g.left[q]) cards.append(cardEl(c));
+    if (g.lost[q]) cards.append(`脱落（${g.lost[q]}点）`);
+    const pt = document.createElement('b');
+    pt.textContent = `${handPts(g.left[q]) + g.lost[q]}点`;
+    row.append(nm, cards, pt);
+    list.append(row);
+  }
+  box.append(list);
+  const total = document.createElement('p');
+  total.className = 'cc-gap-total';
+  const order = M.pts.map((_, p) => p).sort((a, b) => M.pts[b] - M.pts[a] || a - b);
+  total.append('合計: ');
+  for (const p of order) {
+    const one = document.createElement('span'); // 名前と点の途中で折り返さない
+    one.textContent = `${nameP(p)} ${M.pts[p]}点`;
+    total.append(one);
+  }
+  box.append(total);
+  if (!M.final && o.canMove) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn primary';
+    b.textContent = `次の回へ（第${M.no + 1}回）`;
+    b.onclick = () => o.onMove({ t: 'next' });
+    box.append(b);
+  } else if (!M.final) {
+    const w = document.createElement('p');
+    w.className = 'cc-log';
+    w.textContent = '「次の回へ」が押されるのを待っています';
+    box.append(w);
+  }
+  return box;
+}
+
 export default {
   id: 'colors',
   name: 'いろあわせ',
@@ -241,24 +349,52 @@ export default {
     { key: 'cap', label: '手札の上限', desc: '手札が25枚を超えたら脱落（その人を飛ばして続け、最後に残った1人も勝ち）', def: false },
     { key: 'call', label: '最後の1枚の宣言', desc: '手札が1枚になる札を出すときは、先に「いろあわせ！」を押す。忘れたら2枚引く', def: false },
     { key: 'challenge', label: 'チャレンジ', desc: 'ワイルドドロー4をいつでも出せる。出された人は「チャレンジ」できる。出した人が場の色の札を持っていたら出した人が4枚、持っていなかったらチャレンジした人が6枚引く', def: false },
+    { key: 'match', label: '点数で勝負', desc: '決めた回数だけ続けて遊ぶ。上がった人が、ほかの人の残りの札の点（数字はその数・記号は20点・ワイルドは50点）をもらい、合計点がいちばん多い人の勝ち', def: 0, choices: [[0, 'なし（1回勝負）'], [3, '3回戦'], [5, '5回戦']] },
     { key: 'sevenZero', label: '7で交換・0で回す', desc: '7を出したら、選んだ1人と手札を交換する。0を出したら、全員が手札を次の人へ渡す（回っている向き）', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const deck = shuffle(makeDeck(), mulberry32(seed));
-    const k = dealOf(n, rules); // 最初の手札（詳細設定）。7枚なら今までと同じ配り方
-    const hands = Array.from({ length: n }, () => sortHand(deck.splice(-k)));
-    let top = deck.pop();
-    while (!isNumber(top)) { deck.unshift(top); top = deck.pop(); }
-    return { n, seed, rules: { stack: false, sevenZero: false, ...rules }, pend: null, shuffles: 0, deck, discard: [top], hands, turn: 0, dir: 1, color: top[0], drawn: null, winner: null, step: 0, last: null };
+    const s = { n, seed, rules: { stack: false, sevenZero: false, ...rules }, pend: null, shuffles: 0, ...deal(n, seed, rules), turn: 0, dir: 1, drawn: null, winner: null, step: 0, last: null };
+    // 点数で勝負（詳細設定）。なしのときは局面に何も足さない
+    if (MATCHES.includes(rules.match)) s.match = { of: rules.match, no: 1, pts: Array(n).fill(0), gap: null };
+    return s;
   },
 
-  turn(s) { return s.winner === null ? s.turn : null; },
-  canAct(s, p) { return s.winner === null && s.turn === p; },
-  result(s) { return s.winner === null ? null : { winner: s.winner }; },
+  turn(s) { return s.winner === null && !s.match?.gap ? s.turn : null; },
+  // 点数で勝負の回の間は、対局しているだれでも「次の回へ」を押せる
+  canAct(s, p) { return s.winner === null && (s.match?.gap ? Number.isInteger(p) && p >= 0 && p < s.n : s.turn === p); },
+  result(s) {
+    if (s.winner === null) return null;
+    if (!s.match) return { winner: s.winner };
+    // 点数で勝負: 合計点の多い順（同じ点なら席の順）。いちばん多い人が2人以上なら全員の勝ち
+    const pts = s.match.pts;
+    const ranking = pts.map((_, p) => p).sort((a, b) => pts[b] - pts[a] || a - b);
+    const top = ranking.filter((p) => pts[p] === pts[ranking[0]]);
+    return top.length > 1 ? { winner: ranking[0], winners: top, ranking, pts } : { winner: ranking[0], ranking, pts };
+  },
+  resultText(res, me, pn) {
+    if (!res.pts) return res.winner === me ? 'あなたの勝ち！🎉' : `${pn(res.winner)}の勝ち！`;
+    const pt = (p) => `${res.pts[p]}点`;
+    if (res.winners) {
+      const names = res.winners.map(pn).join('・');
+      return `${names}が同じ点で優勝！（${pt(res.winners[0])}）${res.winners.includes(me) ? '🎉' : ''}`;
+    }
+    if (me >= 0) {
+      const i = res.ranking.filter((q) => res.pts[q] > res.pts[me]).length; // 同じ点なら同じ順位
+      return i === 0 ? `あなたの優勝！🎉（${pt(me)}）` : `あなたは${i + 1}位（${pt(me)}）。優勝は${pn(res.winner)}（${pt(res.winner)}）`;
+    }
+    return `${pn(res.winner)}の優勝！（${pt(res.winner)}）`;
+  },
+  phaseText(s, me, pn) {
+    const g = s.match?.gap;
+    if (!g) return '';
+    return `第${s.match.no}回は${pn(g.w)}の上がり（+${g.gain}点）。「次の回へ」で配ります`;
+  },
+  cpuDelay(s) { return s.match?.gap ? 3000 : undefined; }, // 回の結果は少し長めに見せる
   startSound: 'shuffle',
   // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
   sound(a, b, m) {
+    if (m.t === 'next') return 'shuffle';
     if (b.last?.call) return 'call';
     if (b.last?.forgot) return 'wrong';
     if (m.t === 'challenge') return b.last?.bluff ? 'correct' : 'wrong';
@@ -266,7 +402,19 @@ export default {
   },
 
   apply(s0, m) {
-    if (!m || s0.winner !== null || m.p !== s0.turn) return null;
+    if (!m) return null;
+    if (s0.match?.gap) { // 点数で勝負: 回の間は「次の回へ」だけ
+      if (m.t !== 'next' || s0.winner !== null || !this.canAct(s0, m.p)) return null;
+      return nextHand(s0, m.p);
+    }
+    if (m.t === 'next') return null;
+    const s = this.applyHand(s0, m);
+    if (s && s.winner !== null && s.match) settle(s);
+    return s;
+  },
+
+  applyHand(s0, m) {
+    if (s0.winner !== null || m.p !== s0.turn) return null;
     const s = clone(s0);
     const p = m.p;
     const next = (k) => stepAlive(s, p, k); // 脱落した人（手札の上限）は飛ばす
@@ -397,6 +545,7 @@ export default {
   // CPU: 出せる札の中から「数字の大きい札を先に・ワイルドは取っておく・次の人が残り少ないなら妨害札」で選ぶ。
   // 強くなりすぎないよう、3回に1回くらいは出せる札から適当に選ぶ。
   cpu(s, p) {
+    if (s.match?.gap) return { t: 'next' };
     const m = this.cpuMove(s, p);
     // 最後の1枚の宣言（詳細設定）: 出したら1枚になりそうなら宣言する（1割5分は忘れる）
     if (m.t === 'play' && s.rules?.call && s.hands[p].length - 1 - (m.more?.length ?? 0) === 1 && Math.random() >= 0.15) m.call = true;
@@ -470,6 +619,13 @@ export default {
 
     root.innerHTML = '';
     root.className = 'board cc';
+    const M = s.match; // 点数で勝負（詳細設定）
+    if (M) {
+      const head = document.createElement('p');
+      head.className = 'cc-match';
+      head.textContent = `点数で勝負　第${M.no}回／全${M.of}回`;
+      root.append(head);
+    }
 
     // ほかの人（自分の次の席から順に）
     const opps = document.createElement('div');
@@ -485,6 +641,12 @@ export default {
       count.className = 'cc-opp-count';
       count.innerHTML = `<span class="ccard mini back"></span>×${s.hands[p].length}`;
       chip.append(name, count);
+      if (M) {
+        const pt = document.createElement('div');
+        pt.className = 'cc-opp-pts';
+        pt.textContent = `${M.pts[p]}点`;
+        chip.append(pt);
+      }
       const tags = [];
       if (isOut(s, p)) tags.push(['away', '脱落']);
       else if (s.hands[p].length === 1) tags.push(['last', 'ラスト1枚']);
@@ -499,6 +661,8 @@ export default {
       opps.append(chip);
     }
     root.append(opps);
+
+    if (M?.gap) { root.append(gapEl(s, o, nameP)); return; } // 点数で勝負: 回の結果
 
     // 場（山札・捨て札・いまの色と回る向き）
     const table = document.createElement('div');
@@ -533,6 +697,7 @@ export default {
     const head = document.createElement('div');
     head.className = 'cc-hand-head';
     head.textContent = isOut(s, me) ? `あなたは手札が${capOf(s)}枚を超えたので脱落しました` : `あなたの手札（${s.hands[me].length}枚）${s.rules?.cap ? `／上限 ${capOf(s)}枚` : ''}`;
+    if (M) head.textContent += `／あなたの点 ${M.pts[me]}点`;
     if (myTurn) {
       const hint = document.createElement('small');
       hint.textContent = s.drawn !== null

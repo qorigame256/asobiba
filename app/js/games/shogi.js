@@ -23,8 +23,12 @@
 //   入ったら勝ち。玉は利きのあるマスへ動けないので、入れた時点で「そこで取られない」は満たしている。入玉で長引いて 300手の引き分けになるのを防ぐ。
 //   本将棋と5五将棋の2人だけ（3×4 はもとからトライがある・3人は使わない）。駒落ち・持ち駒なし・いつも成ると一緒に使える。
 //   局面に trial: true を持つ（なしのときは今までと全く同じ形）。CPU の読みもトライを勝ちとして数える。
+// 詳細設定「駒の並び」（2026-10-07 の18回目の案。最初は ふつう）: 「ばらばら」にすると、一番下の段の玉以外の8枚（香・桂・銀・金 2枚ずつ）の並びと、
+//   角と飛の左右を、対局の種（seed）から毎回おまかせで決める（決まった序盤が使えない）。後手は先手と点対称の同じ並び。歩の段は今までどおり。
+//   Claude の判断: 本将棋の2人・平手だけ（駒落ちを選んだときは駒落ちを優先して、ふつうの並び）。ふつうと全く同じ並びになったら引き直す。
+//   局面に mixed: true を持つ（ふつうのときは今までと全く同じ形）。CPU の読みと点の付け方は駒の場所に頼らないので、そのまま。
 
-import { CPU_SETTING } from './util.js';
+import { CPU_SETTING, mulberry32 } from './util.js';
 import * as three from './shogi3.js';
 import * as zoo from './shogi34.js';
 
@@ -71,12 +75,25 @@ function mustPromote(t, side, r, N) {
   return ((t === PAWN || t === LANCE) && far === 0) || (t === KNIGHT && far <= 1);
 }
 
-function initialBoard(handicap) {
+// 駒の並び「ばらばら」: 一番下の段（玉は真ん中のまま）と、角・飛の左右を rng で決める
+function mixedBack(rng) {
+  const STD = [2, 3, 4, 5, 5, 4, 3, 2];
+  for (;;) {
+    const rest = STD.slice();
+    for (let i = rest.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
+    const swap = rng() < 0.5;
+    if (!swap && rest.join() === STD.join()) continue; // ふつうと同じ並びは引き直す
+    return { back: [...rest.slice(0, 4), KING, ...rest.slice(4)], swap };
+  }
+}
+
+function initialBoard(handicap, rng = null) {
   const b = Array(81).fill(0);
-  const back = [2, 3, 4, 5, 8, 5, 4, 3, 2];
+  const mix = rng ? mixedBack(rng) : null;
+  const back = mix ? mix.back : [2, 3, 4, 5, 8, 5, 4, 3, 2];
   for (let c = 0; c < 9; c++) {
     b[8 * 9 + c] = back[c];
-    b[c] = -back[c];
+    b[8 - c] = -back[c]; // 後手は点対称（ふつうの並びは左右対称なので今までと同じ）
     b[6 * 9 + c] = PAWN;
     b[2 * 9 + c] = -PAWN;
   }
@@ -84,6 +101,7 @@ function initialBoard(handicap) {
   b[7 * 9 + 7] = 7; // 先手の飛 2八
   b[9 + 1] = -7; // 後手の飛 8二
   b[9 + 7] = -6; // 後手の角 2二
+  if (mix?.swap) { b[7 * 9 + 1] = 7; b[7 * 9 + 7] = 6; b[9 + 1] = -6; b[9 + 7] = -7; } // ばらばら: 角と飛を入れ替える
   // 駒落ち: 先手（上手）の駒を落とす
   if (handicap === 'lance') b[8 * 9 + 8] = 0;
   if (handicap === 'bishop' || handicap === 'two') b[7 * 9 + 1] = 0;
@@ -351,22 +369,25 @@ export default {
     { key: 'drops', label: '持ち駒', desc: '「使わない」にすると、取った駒は消えるだけで打てない（チェスのよう）。本将棋と5五将棋の2人だけ', def: 'on', choices: [['on', '使う'], ['off', '使わない']] },
     { key: 'try', label: 'トライ', desc: '自分の玉が相手の玉の最初のマスに入ったら勝ち（入玉で長引かない）。本将棋と5五将棋の2人だけ', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'autopromo', label: 'いつも成る', desc: '成れるときは聞かずに自動で成る（わざと成らない手は指せない）。初めての人向け', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
+    { key: 'mix', label: '駒の並び', desc: '「ばらばら」にすると、一番下の段の駒（玉は真ん中のまま）と角・飛の左右を毎回おまかせで並べる（先手と後手は同じ並び）。決まった序盤が使えない。本将棋の2人・平手だけ', def: 'off', choices: [['off', 'ふつう'], ['on', 'ばらばら']] },
     { key: 'handicap', label: '駒落ち', desc: '先手（上手）が駒を落として先に指す。腕の差があるときに', def: 'none', choices: Object.entries(HANDICAPS) },
     CPU_SETTING,
   ],
 
-  init({ rules = {} } = {}) {
+  init({ rules = {}, seed = 1 } = {}) {
     const auto = rules.autopromo === 'on';
     if (rules.players === 3) return three.init(auto);
     if (rules.size === 'zoo') return zoo.init();
     const mini = rules.size === 'mini';
     const handicap = !mini && HANDICAPS[rules.handicap] ? rules.handicap : 'none';
-    const board = mini ? miniBoard() : initialBoard(handicap);
+    const mixed = !mini && handicap === 'none' && rules.mix === 'on'; // 駒の並び「ばらばら」
+    const board = mini ? miniBoard() : initialBoard(handicap, mixed ? mulberry32(seed >>> 0) : null);
     const hands = [Array(8).fill(0), Array(8).fill(0)];
     if (rules.drops === 'off') { hands[0][0] = NO_HAND; hands[1][0] = NO_HAND; }
     const s = { board, hands, turn: 0, ply: 0, handicap, last: null, keys: [posKey(board, hands, 0)], checks: [false], result: null };
     if (auto) s.auto = true; // なしのときは局面に何も足さない（今までと同じ形）
     if (rules.try === 'on') s.trial = true; // トライも同じ
+    if (mixed) s.mixed = true; // 駒の並びも同じ
     return s;
   },
 
@@ -396,6 +417,7 @@ export default {
     };
     if (s.auto) n.auto = true;
     if (s.trial) n.trial = true;
+    if (s.mixed) n.mixed = true;
     if (s.trial && isTry(s.board, s.turn, mv)) {
       n.result = { winner: s.turn, cells: [mv.t], reason: 'トライ（玉が相手の玉の最初のマスに入った）' };
     } else if (!legalMoves(b, h, next, true, !!s.auto).length) {
@@ -423,6 +445,7 @@ export default {
     const parts = [];
     if (s.board.length === 25) parts.push('5五将棋');
     if (s.handicap !== 'none') parts.push(`${HANDICAPS[s.handicap]}（☗先手が上手）`);
+    if (s.mixed) parts.push('ばらばらの並び');
     if (s.hands[0][0] === NO_HAND) parts.push('持ち駒なし');
     if (s.auto) parts.push('いつも成る');
     if (s.trial) parts.push('トライあり');

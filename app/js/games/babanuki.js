@@ -7,11 +7,20 @@
 // 詳細設定「同じ色でそろえる」（あり）: 同じ数字で同じ色（赤の♥♦どうし・黒の♠♣どうし）の2枚だけがそろう（最初に捨てる組も、引いたときも）。
 //   どの数字も赤2枚・黒2枚なので、どの札にも相方がちょうど1枚ある。ジジ抜きでは抜いた札の相方（同じ数字・同じ色）が最後の1枚になる。
 //   ありのときだけ局面に color: true を持つ（なしでは今までと全く同じ形）。
+// 詳細設定「引く札を見せる」（あり。2026-10-07 の18回目の案）: 引く人は札を1回押して選び（つまむ）、もう一度押して引く。
+//   つまんだ札は全員の画面で少し持ち上がり、引かれる人の画面では自分の手札のどの札か（表）が分かる（通話しながら駆け引きする）。
+//   つまんだ位置は手の一覧に入れず、送りっぱなし（o.stream → onStream）。勝ち負けに関わらないので、届かなくても困らない。
+//   CPU はつままずにすぐ引く。ありのときだけ局面に peek: true を持つ。
 
 import { mulberry32, shuffle } from './util.js';
 import { makeDeck, rankOf, suitOf, cardEl, backEl, cardLabel, JOKER } from './cards.js';
 
 const clone = (s) => ({ ...s, hands: s.hands.map((h) => h.slice()), out: s.out.slice() });
+
+// 引く札を見せる: いまつまんでいる札（{ key: 対局の種と何手目か, i: 引く相手の手札の何枚目か }）と、描き直し用の最後の画面
+let peek = null;
+let view = null;
+const peekKey = (s) => `${s.seed}:${s.step}`;
 
 const isRed = (c) => suitOf(c) === 'h' || suitOf(c) === 'd';
 // a と b がそろうか（ジョーカーはそろわない。color なら色も同じでないとそろわない）
@@ -50,6 +59,7 @@ export default {
   settings: [
     { key: 'mode', label: '遊び方', desc: 'ジジ抜きは、ジョーカーの代わりに誰も知らない1枚を抜いておく（どれが負けの札か最後まで分からない）', def: 'baba', choices: [['baba', 'ババ抜き'], ['jiji', 'ジジ抜き']] },
     { key: 'color', label: '同じ色でそろえる', desc: '同じ数字でも、赤どうし（♥♦）・黒どうし（♠♣）でないと捨てられない', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
+    { key: 'peek', label: '引く札を見せる', desc: '引く人は札を1回押してつまみ、もう一度押して引く。つまんだ札はみんなに見え、引かれる人には自分のどの札かが分かる（通話しながら駆け引き）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -63,6 +73,7 @@ export default {
     const first = hands.map((h) => dropPairs(h, color));
     const s = { n, seed, jiji, hidden, hands: first.map((x) => x.keep), out: [], turn: 0, step: 0, last: null, start: first.map((x) => x.gone.length / 2) };
     if (color) s.color = true; // なしのときは局面に何も足さない（今までと同じ形）
+    if (rules.peek === 'on') s.peek = true;
     for (let p = 0; p < n; p++) if (!s.hands[p].length) s.out.push(p); // 配った時点で上がった人
     if (!s.hands[0].length) s.turn = nextActive(s, 0);
     return s;
@@ -112,8 +123,21 @@ export default {
 
   cpu(s) { return { t: 'draw', i: Math.floor(Math.random() * s.hands[this.victim(s)].length) }; },
 
+  // 引く札を見せる: 引く人がつまんだ位置が届いたら、ゲームの画面だけ描き直す
+  onStream(d, from) {
+    const s = view?.s;
+    if (!s?.peek || this.done(s) || from !== s.turn || d?.k !== s.step) return;
+    const n = s.hands[this.victim(s)]?.length ?? 0;
+    const i = d.i === null ? null : Number(d.i);
+    if (i !== null && !(Number.isInteger(i) && i >= 0 && i < n)) return;
+    peek = i === null ? null : { key: peekKey(s), i };
+    if (view.root.isConnected) this.render(view.root, s, { ...view.o, fresh: false });
+  },
+
   render(root, s, o) {
+    view = { root, s, o };
     const me = o.me >= 0 ? o.me : null;
+    const held = s.peek && peek?.key === peekKey(s) ? peek.i : null; // つままれている札の位置
     const nameP = (p) => (p === me ? 'あなた' : o.names[p]);
     const res = this.result(s);
     const from = res ? -1 : this.victim(s);
@@ -154,7 +178,9 @@ export default {
       box.className = 'bb-field';
       const head = document.createElement('div');
       head.className = 'bb-head';
-      head.textContent = o.canMove ? `${nameP(from)}の札から1枚えらんで引く` : `${nameP(s.turn)}が ${nameP(from)}の札から引きます`;
+      head.textContent = o.canMove
+        ? (s.peek ? `${nameP(from)}の札を押してつまみ、もう一度押して引く（つまんだ札はみんなに見えます）` : `${nameP(from)}の札から1枚えらんで引く`)
+        : `${nameP(s.turn)}が ${nameP(from)}の札から引きます`;
       const row = document.createElement('div');
       row.className = 'bb-backs';
       s.hands[from].forEach((_, i) => {
@@ -163,14 +189,26 @@ export default {
           e = document.createElement('button');
           e.type = 'button';
           e.className = 'pcard back usable';
-          e.setAttribute('aria-label', `${i + 1}枚目を引く`);
-          e.onclick = () => o.onMove({ t: 'draw', i });
+          e.setAttribute('aria-label', s.peek && held !== i ? `${i + 1}枚目をつまむ` : `${i + 1}枚目を引く`);
+          e.onclick = () => {
+            if (!s.peek || held === i) { peek = null; o.onMove({ t: 'draw', i }); return; }
+            peek = { key: peekKey(s), i };
+            o.stream?.({ k: s.step, i });
+            this.render(root, s, { ...o, fresh: false });
+          };
         } else {
           e = backEl();
         }
+        if (held === i) e.classList.add('bb-held');
         row.append(e);
       });
       box.append(head, row);
+      if (held !== null && me === from && s.hands[from][held] !== undefined) {
+        const note = document.createElement('div');
+        note.className = 'bb-head bb-held-note';
+        note.textContent = `${nameP(s.turn)}がつまんでいるのは あなたの ${cardLabel(s.hands[from][held])}`;
+        box.append(note);
+      }
       root.append(box);
     }
 
@@ -194,6 +232,7 @@ export default {
       for (const c of s.hands[me].slice().sort((a, b) => order(a) - order(b))) {
         const e = cardEl(c);
         if (o.fresh && s.last?.p === me && !s.last.pair && s.last.card === c) e.classList.add('pop');
+        if (held !== null && me === from && s.hands[me][held] === c) e.classList.add('bb-held');
         hand.append(e);
       }
       root.append(head, hand);

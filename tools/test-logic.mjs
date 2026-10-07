@@ -886,6 +886,61 @@ console.log('colors stack OK');
   console.log('colors deal: average moves 5/10', avg(steps[5]), avg(steps[10]));
 }
 
+// いろあわせの点数で勝負（2026-10-07 の18回目の案）: 決めた回数だけ配り直し、上がった人がほかの人の残りの札の点をもらう
+{
+  const U = GAMES.colors;
+  assert.ok(U.settings.some((x) => x.key === 'match' && x.def === 0), '点数で勝負の設定（最初はなし）');
+  assert.equal(U.init(3, 5, { rules: {} }).match, undefined, 'なしでは局面に何も足さない');
+  assert.deepEqual({ ...U.init(3, 5, { rules: { match: 3 } }), match: undefined, rules: undefined }, { ...U.init(3, 5, { rules: {} }), match: undefined, rules: undefined }, '1回目の配りは今までと同じ');
+  // 上がったら点を足し、回の結果（gap）。回の間は札を出せず、だれでも「次の回へ」を押せる
+  const b = { ...U.init(3, 1, { rules: { match: 3 } }), discard: ['r5'], color: 'r', turn: 0, hands: [['r1'], ['y5', 'gS', 'W'], ['b9', 'W4']] };
+  let c = U.apply(b, { p: 0, t: 'play', i: 0 });
+  assert.deepEqual([c.winner, c.match.pts, c.match.gap.w, c.match.gap.gain], [null, [5 + 20 + 50 + 9 + 50, 0, 0], 0, 134], '上がった人がほかの人の残りの札の点をもらう');
+  assert.equal(U.result(c), null, '途中の回では決着しない');
+  assert.equal(U.turn(c), null, '回の間はだれの番でもない');
+  assert.equal(U.apply(c, { p: 1, t: 'draw' }), null, '回の間は引けない');
+  assert.equal(U.apply(b, { p: 0, t: 'next' }), null, '回の途中で「次の回へ」は押せない');
+  const n2 = U.apply(c, { p: 2, t: 'next' });
+  assert.ok(n2 && n2.match.no === 2 && n2.match.gap === null && n2.turn === 1, '次の回は2番目の人から');
+  assert.equal(total(n2), 108, '配り直したら108枚');
+  assert.deepEqual(n2, U.apply(c, { p: 1, t: 'next' }), 'だれが押しても同じ配り');
+  assert.notDeepEqual(n2.hands, b.hands, '配りは回ごとに変わる');
+  assert.deepEqual(n2.match.pts, c.match.pts, '点は持ち越す');
+  // 最後の回で、合計点がいちばん多い人の勝ち。同じ点なら全員
+  const last = { ...b, match: { of: 3, no: 3, pts: [0, 200, 100], gap: null } };
+  c = U.apply(last, { p: 0, t: 'play', i: 0 });
+  assert.deepEqual([c.winner, U.result(c).ranking, U.result(c).winners], [1, [1, 0, 2], undefined], '合計点で順位');
+  c = U.apply({ ...last, match: { ...last.match, pts: [66, 200, 100] } }, { p: 0, t: 'play', i: 0 });
+  assert.deepEqual(U.result(c).winners, [0, 1], '同じ点なら全員の勝ち');
+  assert.equal(U.apply(c, { p: 0, t: 'next' }), null, '最後の回のあとは次の回が無い');
+  // 手札の上限で脱落した人の点は、その回に上がった人がもらう
+  const capb = { ...U.init(3, 1, { rules: { match: 3, cap: true } }), deck: ['b1', 'b2'], discard: ['r5'], color: 'r', turn: 0, hands: [['rD', 'r1'], Array(24).fill('y1'), ['g9']] };
+  c = U.apply(capb, { p: 0, t: 'play', i: 0 });
+  assert.deepEqual(c.lost, [0, 24 + 1 + 2, 0], '脱落したときの点を覚える（黄1が24枚と、引いた青1・青2）');
+  // CPU どうしで最後まで: 反則なし・回の数・点の合計
+  for (let k = 0; k < 60; k++) {
+    const of = k % 2 ? 3 : 5;
+    let st = U.init(2 + (k % 5), k * 131 + 7, { rules: { match: of, stack: k % 3 === 0, cap: k % 4 === 1, sevenZero: k % 5 === 2 } });
+    let steps = 0;
+    let gains = 0;
+    let hands = 1;
+    while (!U.result(st)) {
+      const p = st.match.gap ? (k % st.n) : U.turn(st);
+      const next = U.apply(st, { ...U.cpu(st, p), p });
+      assert.ok(next, '点数で勝負で CPU が反則');
+      assert.equal(total(next), 108, '点数で勝負で札の枚数が変わった');
+      if (next.match.gap && !st.match.gap) gains += next.match.gap.gain;
+      if (next.match.no > st.match.no) hands++;
+      st = next;
+      if (++steps > 40000) throw new Error('点数で勝負が終わらない');
+    }
+    assert.equal(hands, of, '決めた回数だけ遊ぶ');
+    assert.equal(st.match.pts.reduce((a, x) => a + x, 0), gains, '点の合計は、もらった点の合計');
+    assert.ok(st.match.final);
+  }
+  console.log('colors match OK');
+}
+
 // ---------- 大富豪 ----------
 const D = GAMES.daifugo;
 const ALL = Object.fromEntries(D.settings.map((x) => [x.key, true]));
@@ -3261,6 +3316,17 @@ for (const n of [2, 3, 5, 10]) {
 s = BB.init(3, 5, {});
 assert.equal(BB.apply(s, { p: 1, t: 'draw', i: 0 }), null, '番でない人は引けない');
 assert.equal(BB.apply(s, { p: 0, t: 'draw', i: 99 }), null, '無い位置は引けない');
+// 引く札を見せる（2026-10-07 の18回目の案）: 局面に peek を持つだけで、配りと引き方は変わらない
+{
+  assert.ok(BB.settings.some((x) => x.key === 'peek' && x.def === 'off'), '引く札を見せるの設定（最初はなし）');
+  const a = BB.init(4, 9, { rules: {} });
+  const b = BB.init(4, 9, { rules: { peek: 'on' } });
+  assert.equal(a.peek, undefined, 'なしでは局面に何も足さない');
+  assert.equal(b.peek, true, 'ありでは peek');
+  assert.deepEqual(b.hands, a.hands, '配りは同じ');
+  const m = { p: 0, t: 'draw', i: 1 };
+  assert.deepEqual(BB.apply(b, m).hands, BB.apply(a, m).hands, '引き方も同じ');
+}
 // 同じ色でそろえる
 {
   const red = (c) => c[0] === 'h' || c[0] === 'd';

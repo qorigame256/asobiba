@@ -6,7 +6,8 @@
 const BROKER_URL = 'wss://broker.emqx.io:8084/mqtt';
 const TOPIC_PREFIX = 'asobiba-q7m/v1/room/';
 
-export function connectRoom(code, myId, onMessage, onStatus) {
+// onSelf（任意）: 自分が送ったものが中継サーバーから戻ってきたとき（通信の遅れを測るのに使う）
+export function connectRoom(code, myId, onMessage, onStatus, onSelf) {
   if (typeof mqtt === 'undefined') throw new Error('mqtt.js が読み込めていません');
   const topic = TOPIC_PREFIX + code;
   const client = mqtt.connect(BROKER_URL, {
@@ -27,7 +28,8 @@ export function connectRoom(code, myId, onMessage, onStatus) {
     if (t !== topic) return;
     let msg;
     try { msg = JSON.parse(payload.toString()); } catch { return; }
-    if (!msg || msg.from === myId) return; // 自分が送ったものも届くので捨てる
+    if (!msg) return;
+    if (msg.from === myId) { onSelf?.(msg); return; } // 自分が送ったものも届くので、ふつうの受け取りには回さない
     onMessage(msg);
   });
 

@@ -819,6 +819,22 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .board .cc-pick.c-g { background: #3a9d55; }
 .board .cc-pick.c-b { background: #2f6fb3; }
 .ccard.pop { animation: pop .22s ease-out; }
+/* 点数で勝負（いろあわせの詳細設定）: 回の数・点・回の結果 */
+.cc-match { text-align: center; font-size: .85rem; font-weight: 700; color: var(--muted); margin: 0; }
+.cc-opp-pts { font-weight: 800; color: var(--accent); }
+.cc-gap { background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 12px; text-align: center; display: grid; gap: 10px; justify-items: center; }
+.cc-gap-title { font-weight: 800; font-size: 1.05rem; margin: 0; }
+.cc-gap-list { display: grid; gap: 6px; width: 100%; }
+.cc-gap-row { display: flex; align-items: center; gap: 8px; text-align: left; }
+.cc-gap-name { flex: none; width: 6.5em; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cc-gap-cards { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 3px; align-items: center; font-size: .8rem; color: var(--muted); }
+.cc-gap-row b { flex: none; }
+.cc-gap .ccard { width: 26px; border-width: 2px; border-radius: 4px; box-shadow: none; }
+.cc-gap .ccard-face { font-size: .9rem; }
+.cc-gap .ccard-face .ccard-sym { width: 18px; height: 18px; }
+.cc-gap .ccard-corner { display: none; }
+.cc-gap-total { margin: 0; font-size: .9rem; }
+.cc-gap-total span { display: inline-block; white-space: nowrap; margin: 0 6px; }
 
 /* ---------- 詳細設定 ---------- */
 .lobby-rules { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
@@ -978,6 +994,9 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
   transition: opacity .2s, transform .2s;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+/* 通信が切れたときの帯（対局の画面の一番上。スクロールしていても上に貼り付く） */
+.net-banner { position: sticky; top: 0; z-index: 60; margin: 0 0 8px; border-radius: 0 0 10px 10px; background: #c62d1f; color: #fff; font-weight: 700; font-size: .9rem; text-align: center; padding: 8px 12px; box-shadow: 0 2px 8px rgba(0, 0, 0, .25); }
+.net-banner[hidden] { display: none; }
 
 /* ---------- リアクション・おまかせ ---------- */
 .reactions { position: fixed; top: calc(12px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; z-index: 50; width: max-content; max-width: calc(100vw - 32px); }
@@ -1275,6 +1294,10 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .bb-hand, .db-hand { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; }
 .bb-hand .pcard { width: 48px; }
 .bb-hand .pcard.pop { animation: pop .3s ease-out; box-shadow: 0 0 0 3px var(--accent); }
+/* 引く札を見せる（ババ抜きの詳細設定）: つままれている札を持ち上げて黄色の枠 */
+.board .bb-backs .pcard.bb-held, .bb-hand .pcard.bb-held { transform: translateY(-10px); box-shadow: 0 0 0 3px #f5c518; }
+.board .bb-backs button.pcard.back.usable.bb-held:hover { transform: translateY(-10px); }
+.bb-held-note { color: #ffe27a; margin: 10px 0 0; }
 .db-field { background: #2e6b47; color: #fff; border-radius: var(--radius); padding: 12px; text-align: center; min-height: 96px; display: flex; flex-direction: column; justify-content: center; gap: 8px; }
 .db-info small { color: #d7eadc; }
 .db-num { display: inline-block; min-width: 1.6em; font-size: 1.6rem; font-weight: 800; color: #ffe28a; }
