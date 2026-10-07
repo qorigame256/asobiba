@@ -20,7 +20,7 @@
 // 部屋を作る・同じ画面で遊ぶのは持ち主の端末だけ（owner.js）。ほかの人は招待された部屋に入るだけ。
 // banned = ホストが退出させた人の id。あいさつが来ても入れず、もう一度「退出」を送る。
 // streak = 連勝（2026-10-06 本人の決定）。{ key: ゲームと顔ぶれ, counted: 数え終えた対局, wins: 人の id → 連勝の数 }。ホストだけが数えて全員へ送る。
-// tally = 部屋の成績表（2026-10-06 本人の決定）。{ games: 決着した対局の数, wins: 人の id → 勝った回数 }。ゲームをまたいで数える。ホストが数えて全員へ送る。
+// tally = 部屋の成績表（2026-10-06 本人の決定）。{ games: 決着した対局の数, wins: 人の id → 勝った回数, preds: 人の id → 勝敗予想が当たった回数（10回目に足した。無いこともある） }。ゲームをまたいで数える。ホストが数えて全員へ送る。
 // preds = 勝敗予想（2026-10-06 本人の決定）。{ key: どの対局か, by: 人の id → 勝つと予想したプレイヤー番号 }。各自が全員へ送りっぱなしにし、受け取った端末がそれぞれ覚える。
 // beg = 初心者マークを付けている人の id の一覧（各自が自分の端末で付け外しし、ホストが集めて全員へ送る）。
 // undo = この対局で「待った」をした回数（盤のゲームのオンライン）。待ったをすると手の一覧が短くなり、ふつうの同期（長い方が正）では
@@ -144,7 +144,12 @@ function tallyHtml() {
   const ids = [...new Set([...S.members, ...Object.keys(t.wins)])].filter((id) => !isCpu(id) && (S.members.includes(id) || w(id)));
   ids.sort((a, b) => w(b) - w(a));
   const list = ids.map((id) => `<b>${esc(id === S.myId ? 'あなた' : nameOf(id))}</b> ${w(id)}勝`).join('・');
-  return `🏆 この部屋の成績（${t.games}回）: ${list}`;
+  // 勝敗予想の当たり（2026-10-07。10回目の案）: 1回でも当たった人だけ、当たった回数の多い順に出す（観戦だけの人も入る）
+  const pr = t.preds && typeof t.preds === 'object' ? t.preds : {};
+  const hits = (id) => (Number.isInteger(pr[id]) && pr[id] > 0 ? pr[id] : 0);
+  const seers = Object.keys(pr).filter((id) => !isCpu(id) && hits(id) && (S.members.includes(id) || S.names[id])).sort((a, b) => hits(b) - hits(a));
+  const seerList = seers.map((id) => `<b>${esc(id === S.myId ? 'あなた' : nameOf(id))}</b> ${hits(id)}回`).join('・');
+  return `🏆 この部屋の成績（${t.games}回）: ${list}` + (seers.length ? `<br>🔮 予想の当たり: ${seerList}` : '');
 }
 
 // 待合室に出す成績表の行。ホストには「成績を0に戻す」も付ける（2026-10-06 本人の決定。日をまたいで同じ部屋を使うときのため）
@@ -231,7 +236,12 @@ function countResult(res) {
   const t = S.tally ?? { games: 0, wins: {} };
   const wins = { ...t.wins };
   for (const id of won) if (!isCpu(id)) wins[id] = (wins[id] ?? 0) + 1;
-  S.tally = { games: t.games + 1, wins };
+  // 勝敗予想の当たり: ホストの端末に届いている予想で数える（予想は1巡するまでに締め切るので、決着のときには全部届いている）
+  const preds = { ...(t.preds ?? {}) };
+  const by = predsNow();
+  const wonP = winnersOf(res);
+  for (const id of Object.keys(by)) if (!isCpu(id) && wonP.includes(by[id])) preds[id] = (preds[id] ?? 0) + 1;
+  S.tally = { games: t.games + 1, wins, preds };
   saveRoom();
   sendState();
 }
@@ -263,9 +273,9 @@ function rulesOf(gameId, rules) {
 
 // 「おまかせ」（待合室でホストが押すと詳細設定を抽選する。2026-10-06 本人の決定）で抽選しない項目。本人が決めたのは
 // 人数・CPU の強さと速さ・盤の大きさ。時間・回数・長さ・難しさ・読み上げ・駒落ち・ヒント（神経衰弱・難読漢字・お絵描き当て）・
-// エアホッケーのゴールの広さ（goal。盤の大きさと同じ）・難読漢字の答え方（choice。難しさと同じ）も好みなので抽選しない（Claude の判断）。
+// エアホッケーのゴールの広さ（goal。盤の大きさと同じ）・難読漢字の答え方（choice。難しさと同じ）・マンカラの穴の数（pits。盤の大きさと同じ）も好みなので抽選しない（Claude の判断）。
 // マルバツ・将棋の size は盤の大きさでなく遊び方（スーパー・消える・5五将棋）なので抽選する。
-const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice']);
+const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits']);
 const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
 
 // 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、エアホッケーは 2〜3。ほかは2）
@@ -682,8 +692,20 @@ function render() {
   if (!S) return;
   const body = document.body;
   body.style.minHeight = document.documentElement.scrollHeight + 'px';
-  try { renderPage(); } finally { body.style.minHeight = ''; }
+  S.myTurnNow = false;
+  try { renderPage(); } finally { body.style.minHeight = ''; setTurnTitle(S?.myTurnNow); }
 }
+
+/* ---------- 番が来たらタブの名前で知らせる（2026-10-07。10回目の案。Claude の案から本人が推奨どおり選んだ） ---------- */
+// オンラインで自分の番のあいだ、タブの名前の頭に「● あなたの番」を付ける（ほかのタブを見ていても気づけるように）。
+// Claude の判断: 番が決まるゲームだけ（全員が同時に動く realtime のゲームと、番の決まらない場面（turn が null）では付けない。「番が来た」音と同じ考え方）。
+const BASE_TITLE = typeof document !== 'undefined' ? document.title : '';
+const TURN_TITLE = '● あなたの番 - ';
+function setTurnTitle(on) {
+  const want = on ? TURN_TITLE + BASE_TITLE : BASE_TITLE;
+  if (document.title !== want) document.title = want;
+}
+const myTurnNow = (game, st, res) => S.mode === 'online' && !game.realtime && canMove(game, st, res) && (!game.multi || game.turn(st) === myPlayer());
 
 function renderPage() {
   const focused = document.activeElement;
@@ -723,6 +745,7 @@ function renderPage() {
   }
 
   const res = game.result(st);
+  S.myTurnNow = myTurnNow(game, st, res);
   if (!game.multi) tickClock(game, st, res);
   if (res) countResult(res);
   status.innerHTML = statusHtml(game, st, res);
@@ -1154,6 +1177,7 @@ function onKicked() {
   const net = S.net;
   setTimeout(() => net?.close(), 300);
   S = null;
+  setTurnTitle(false);
   setUrlRoom(null);
   showScreen('home');
   alert('部屋を作った人によって、部屋から退出させられました。');
@@ -1427,6 +1451,7 @@ function leave() {
     setTimeout(() => net?.close(), 500);
   }
   S = null;
+  setTurnTitle(false);
   setUrlRoom(null);
   showScreen('home');
 }

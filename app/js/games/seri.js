@@ -5,6 +5,8 @@
 // 15回で終わり、取った点数の合計が多い人の勝ち。
 // 決まりごと（Claude の判断）: 持ち越した札がたまったときは、いちばん新しく表にした札の向き（プラスかマイナスか）で決め、
 // たまった札は全部まとめて取る。最後の回で持ち越しになった札は誰も取らない。
+// 詳細設定「次の札」（2026-10-07。10回目の案）: 見せるにすると、次の回に表になる点数の札を、いまの札の横に小さく見せる（山の順番は前から決まっているので、見せるだけ）。
+//   CPU は次の札を見ない（今までどおりの腕前のまま）。
 // 手: { p, t: 'bid', r: 何回目か（0から）, v: 出す数 }。r と「この回はもう出したか」で、同じ手が2回来ても2回目は反則になる。
 
 import { mulberry32, shuffle, esc } from './util.js';
@@ -27,11 +29,14 @@ export default {
   realtime: true,
   minPlayers: 2,
   maxPlayers: 6,
+  settings: [
+    { key: 'peek', label: '次の札', desc: '次の回に表になる点数の札を、先に見せる（いまの札を見送って次を狙う駆け引きができる）', def: false, choices: [[false, '見せない'], [true, '見せる']] },
+  ],
 
-  init(n, seed) {
+  init(n, seed, { rules = {} } = {}) {
     const deck = shuffle(POINTS, mulberry32(seed));
     return {
-      n, deck, round: 0, pot: [deck[0]], bids: Array(n).fill(null),
+      n, deck, rules: { peek: false, ...rules }, round: 0, pot: [deck[0]], bids: Array(n).fill(null),
       hands: Array.from({ length: n }, () => Array.from({ length: BIDS }, (_, i) => i + 1)),
       scores: Array(n).fill(0), taken: Array.from({ length: n }, () => []), last: null, step: 0,
     };
@@ -149,8 +154,11 @@ export default {
     const now = document.createElement('div');
     now.className = 'sr-now';
     const card = s.pot[s.pot.length - 1];
+    const next = s.rules?.peek ? s.deck[s.round + 1] : undefined;
+    const nextHtml = next === undefined ? (s.rules?.peek ? '<span class="sr-next">次の札<br>なし（最後）</span>' : '')
+      : `<span class="sr-next">次の札<span class="sr-point small${next < 0 ? ' minus' : ''}">${potText(next)}</span></span>`;
     now.innerHTML = `<div class="um-label">${s.round + 1}回目 / ${POINTS.length}</div>`
-      + `<div class="sr-pots">${s.pot.map((v) => `<span class="sr-point${v < 0 ? ' minus' : ''}">${potText(v)}</span>`).join('')}</div>`
+      + `<div class="sr-pots">${s.pot.map((v) => `<span class="sr-point${v < 0 ? ' minus' : ''}">${potText(v)}</span>`).join('')}${nextHtml}</div>`
       + `<small>${s.pot.length > 1 ? `持ち越し込みで合計 ${potText(sum(s.pot))}。` : ''}${card > 0 ? '一番<b>大きい</b>数を出した人が取る' : '一番<b>小さい</b>数を出した人が取る（取りたくない札）'}</small>`;
     root.append(now);
 

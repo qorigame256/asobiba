@@ -1118,6 +1118,17 @@ t = SP.apply(s, { p: 0, t: 'flip' });
 assert.equal(SP.result(t).winner, 0, '山が無ければ手元の札を出し、出し切ったら勝ち');
 s = spBase({ decks: [[], []], fields: [['h3', null, null, null], ['s9', null, null, null]], piles: [['d6'], ['c13']] });
 assert.equal(SP.result(SP.apply(s, { p: 0, t: 'flip' })).draw, true, '同時に出し切ったら引き分け');
+// 同じ数字（詳細設定）: ありなら台札と同じ数字も出せる
+s = spBase({ fields: [['h6', null, null, null], ['s13', null, null, null]] });
+assert.equal(SP.apply(s, { p: 0, t: 'play', card: 'h6', pile: 0 }), null, 'なしでは同じ数字は出せない');
+t = SP.apply(s, { p: 0, t: 'flip' });
+assert.ok(t, 'なしでは同じ数字しか無ければスピード！');
+s = spBase({ rules: { cpu: 'slow', same: true }, fields: [['h6', null, null, null], ['s13', null, null, null]] });
+assert.ok(SP.apply(s, { p: 0, t: 'play', card: 'h6', pile: 0 }), 'ありなら 6 の上に 6');
+assert.ok(SP.apply(s, { p: 1, t: 'play', card: 's13', pile: 1 }), 'ありなら K の上に K');
+assert.equal(SP.apply(s, { p: 0, t: 'flip' }), null, 'ありでは同じ数字を出せるうちはスピード！できない');
+assert.equal(SP.apply(s, { p: 0, t: 'play', card: 'h6', pile: 1 }), null, 'ありでも K の上に 6 は出せない');
+assert.equal(SP.init(2, 42, { rules: {} }).rules.same, false, '最初はなし');
 // 3人: 17枚ずつ・余り1枚・台札3つ
 s = SP.init(3, 42, { rules: {} });
 assert.equal(s.piles.length, 3);
@@ -1151,7 +1162,7 @@ assert.equal(SP.result(sp3({ fields: [[null], ['h2'], [null]], piles: [['d1'], [
 let spGames = 0;
 for (let k = 0; k < 600; k++) {
   const np = k % 2 ? 3 : 2;
-  let st = SP.init(np, k * 7 + 3, { rules: {} });
+  let st = SP.init(np, k * 7 + 3, { rules: { same: k % 4 >= 2 } }); // 半分は「同じ数字も出せる」
   let steps = 0;
   while (!SP.result(st)) {
     const p = Math.floor(Math.random() * np);
@@ -2236,6 +2247,36 @@ while (!DT.result(s)) s = DT.apply(s, s.lines.indexOf(null));
 assert.equal(dotScores(s).reduce((a, b) => a + b), 9, '四角は全部だれかのもの');
 const top = Math.max(...dotScores(s));
 assert.equal(DT.result(s).winner, dotScores(s).filter((v) => v === top).length === 1 ? dotScores(s).indexOf(top) : null);
+// 金の四角（詳細設定）: 一辺 - 2 個、種から決まり、取ると2点
+{
+  assert.equal(DT.init({ seed: 5 }).gold, undefined, 'なしでは金の四角が無い');
+  for (const k of [3, 4, 5, 6]) {
+    const g = DT.init({ rules: { gold: true, size: k }, seed: 5 }).gold;
+    assert.equal(g.length, k - 2, `${k}×${k} の金の四角は ${k - 2} 個`);
+    assert.equal(new Set(g).size, g.length, '金の四角が重ならない');
+    assert.ok(g.every((b) => b >= 0 && b < k * k));
+  }
+  assert.deepEqual(DT.init({ rules: { gold: true }, seed: 9 }).gold, DT.init({ rules: { gold: true }, seed: 9 }).gold, '同じ種なら同じ場所');
+  const seen = new Set();
+  for (let sd = 0; sd < 20; sd++) seen.add(DT.init({ rules: { gold: true }, seed: sd }).gold.join());
+  assert.ok(seen.size > 5, '種が違えば場所も変わる');
+  let st = { ...DT.init({ rules: { gold: true, size: 3 }, seed: 1 }), gold: [0] };
+  for (const m of [0, 3, 12, 13]) st = DT.apply(st, m); // 左上の四角（金）を青が取る
+  assert.deepEqual([st.boxes[0], dotScores(st)], [1, [0, 2]], '金の四角は2点');
+  // 全部引いたら点の合計は 四角の数 + 金の数。勝ち負けも点で決まる。CPU も最後まで打てる
+  for (let g = 0; g < 30; g++) {
+    let x = DT.init({ rules: { gold: true, players: 2 + (g % 3), swap: g % 4 === 0 }, seed: g });
+    while (!DT.result(x)) { x = DT.apply(x, DT.cpu(x, x.turn, { cpu: ['weak', 'normal', 'strong'][g % 3] })); assert.ok(x, '金の四角の CPU が打てる'); }
+    const sc = dotScores(x);
+    assert.equal(sc.reduce((a, b) => a + b), x.w * x.h + x.gold.length, '金の四角: 点の合計');
+    const best = Math.max(...sc);
+    assert.equal(DT.result(x).winner, sc.filter((v) => v === best).length === 1 ? sc.indexOf(best) : null, '金の四角: 点の多い人の勝ち');
+  }
+  // ふつう以上の CPU は、金の四角とふつうの四角が両方取れるなら金を取る
+  let y = { ...DT.init({ rules: { gold: true, size: 3 }, seed: 1 }), gold: [8] };
+  for (const m of [0, 3, 12, 8, 11, 22]) y = DT.apply(y, m); // 四角0（残りは右13）と金の四角8（残りは右23）が3辺
+  for (const lv of ['normal', 'strong']) for (let k = 0; k < 10; k++) assert.equal(DT.cpu(y, y.turn, { cpu: lv }), 23, `${lv} の CPU は金の四角を先に取る`);
+}
 {
   const RJ = { rules: { renju: true } };
   const pos = (blacks, whites, turn = 0) => {
@@ -2726,6 +2767,28 @@ for (let g = 0; g < 20; g++) {
   }
   assert.equal(st.pits[6] + st.pits[13], total, '石の数が崩れない');
 }
+// 穴の数（詳細設定。2人だけ）
+s = MC.init({ rules: { pits: 4 } });
+assert.deepEqual(s.pits, [4, 4, 4, 4, 0, 4, 4, 4, 4, 0], '穴4つ: 1人ぶんは穴4つ＋ゴール');
+assert.equal(MC.apply(s, 4), null, '穴4つ: 手は 0〜3 だけ');
+t = MC.apply(s, 0);
+assert.deepEqual([t.pits, t.turn], [[0, 5, 5, 5, 1, 4, 4, 4, 4, 0], 0], '穴4つ: ゴールで止まったらもう1回');
+assert.equal(MC.apply({ ...mc, holes: 5, pits: [1, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0] }, 0).last.capture.got, 8, '穴5つ: 向かい（2*5 - 1 = 9）の石を取る');
+assert.deepEqual(MC.apply({ ...mc, holes: 4, pits: [0, 0, 0, 6, 0, 1, 0, 0, 0, 0] }, 3).last.sown, [4, 5, 6, 7, 8, 0], '穴4つ: 相手のゴールは飛ばす');
+assert.equal(MC.init({ rules: { pits: 4, players: 3 } }).holes, 6, '3人はいつも穴6つ');
+assert.equal(MC.init({ rules: { pits: 7 } }).holes, 6, '選べない数なら6つ');
+for (let g = 0; g < 24; g++) {
+  const holes = [4, 5][g % 2];
+  let st = MC.init({ rules: { pits: holes, stones: 3 + (g % 4), nocap: g % 5 === 0 } });
+  const total = st.pits.reduce((a, b) => a + b, 0);
+  let guard = 0;
+  while (!MC.result(st)) {
+    st = MC.apply(st, MC.cpu(st, st.turn, { cpu: ['weak', 'normal', 'strong'][g % 3] }));
+    assert.ok(st && st.holes === holes, '穴の数: CPU が反則を出した・穴の数が続かない');
+    assert.ok(++guard < 400);
+  }
+  assert.equal(st.pits[holes] + st.pits[2 * holes + 1], total, '穴の数: 石の数が崩れない');
+}
 // 3人
 s = MC.init({ rules: { players: 3 } });
 assert.equal(MC.seatCount({ players: 3 }), 3);
@@ -2793,6 +2856,15 @@ for (let g = 0; g < 20; g++) {
   assert.ok(st.hands.every((h) => h.length === 0), '15回で全部の札を使い切る');
   const lost = st.last.lost ?? [];
   assert.equal(st.scores.reduce((a, b) => a + b, 0) + lost.reduce((a, b) => a + b, 0), 40, '点数の合計（+55 −15）が崩れない');
+}
+{
+  // 次の札: 見せるだけで、進み方は見せないときと同じ
+  const a = SR.init(3, 77), b = SR.init(3, 77, { rules: { peek: true } });
+  assert.deepEqual(a.deck, b.deck, '次の札を見せても山の順番は同じ');
+  assert.equal(b.rules.peek, true);
+  assert.equal(a.rules.peek, false);
+  const ta = bidAll(a, [3, 7, 9]), tb = bidAll(b, [3, 7, 9]);
+  assert.deepEqual([ta.scores, ta.pot], [tb.scores, tb.pot], '次の札を見せても結果は同じ');
 }
 console.log('seri OK');
 

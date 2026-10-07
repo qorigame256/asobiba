@@ -3,6 +3,7 @@
 // 3人: 52枚をまぜて17枚ずつ配り、余った1枚は使わない（2026-10-05 本人の決定）。
 // 手元に4枚を表向きに並べ、残りは自分の山。真ん中の台札は1人1か所（2人なら2か所、3人なら3か所）。
 // どの台札の一番上とも、数字が1つ違う札（K と A もつながる）なら出せる。
+// 詳細設定「同じ数字」（2026-10-07。10回目の案）: ありにすると、台札と同じ数字の札も出せる（なしなら今までどおり前後の数字だけ）。
 // 手元が空いたら自分の山から自動で補充。まだ上がっていない全員が出せなくなったら「スピード！」で、それぞれ自分の山の一番上を
 // 自分の台札に出し直す（山が無ければ手元の札から出す）。札を全部出し切った順に順位が付く。
 // 2人なら先に出し切った方の勝ち。3人なら2人が出し切るまで続ける（本人の決定）。同時に出し切ったら同じ順位。
@@ -21,9 +22,10 @@ function makeHalf(suits) {
   return d;
 }
 
-const fits = (card, top) => {
+// s は局面（詳細設定「同じ数字」を見る）
+const fits = (s, card, top) => {
   const d = Math.abs(rankOf(card) - rankOf(top));
-  return d === 1 || d === 12; // K と A もつながる
+  return d === 1 || d === 12 || (d === 0 && !!s.rules?.same); // K と A もつながる
 };
 const tops = (s) => s.piles.map((pl) => pl[pl.length - 1]);
 const seats = (s) => s.piles.map((_, i) => i);
@@ -34,7 +36,7 @@ function movesOf(s, p) {
   const t = tops(s);
   for (const card of s.fields[p]) {
     if (!card) continue;
-    for (const pile of seats(s)) if (fits(card, t[pile])) list.push({ t: 'play', card, pile });
+    for (const pile of seats(s)) if (fits(s, card, t[pile])) list.push({ t: 'play', card, pile });
   }
   return list;
 }
@@ -73,6 +75,7 @@ export default {
   maxPlayers: 3,
   settings: [
     { key: 'cpu', label: 'CPU の速さ', desc: 'CPU が1枚出すまでの間。速いほど強い', def: 'slow', choices: [['slow', 'ゆっくり'], ['normal', 'ふつう'], ['fast', 'はやい']] },
+    { key: 'same', label: '同じ数字', desc: '台札と同じ数字の札も出せる（なしなら前後の数字だけ）。札がどんどん出て早く終わる', def: false, choices: [[false, 'なし'], [true, '出せる']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -88,7 +91,7 @@ export default {
     }
     const fields = decks.map((d) => d.splice(-SLOTS));
     const piles = decks.map((d) => [d.pop()]);
-    return { n, rules: { cpu: 'slow', ...rules }, decks, fields, piles, aside, place: decks.map(() => null), step: 0, last: null, flips: 0 };
+    return { n, rules: { cpu: 'slow', same: false, ...rules }, decks, fields, piles, aside, place: decks.map(() => null), step: 0, last: null, flips: 0 };
   },
 
   turn() { return null; },
@@ -131,7 +134,7 @@ export default {
     s.step += 1;
     if (m.t === 'play') {
       const slot = s.fields[p].indexOf(m.card);
-      if (slot < 0 || !Number.isInteger(m.pile) || !s.piles[m.pile] || !fits(m.card, tops(s)[m.pile])) return null;
+      if (slot < 0 || !Number.isInteger(m.pile) || !s.piles[m.pile] || !fits(s, m.card, tops(s)[m.pile])) return null;
       s.piles[m.pile].push(m.card);
       s.fields[p][slot] = s.decks[p].length ? s.decks[p].pop() : null;
       s.last = { p, t: 'play', card: m.card, pile: m.pile };
@@ -197,7 +200,7 @@ export default {
           row.append(empty);
           continue;
         }
-        const piles = seats(s).filter((i) => fits(card, t[i]));
+        const piles = seats(s).filter((i) => fits(s, card, t[i]));
         const ok = mine && can && piles.length > 0;
         const e = cardEl(card, ok ? 'button' : 'div');
         if (ok) {
@@ -219,7 +222,7 @@ export default {
     const center = document.createElement('div');
     center.className = 'sp-center';
     seats(s).forEach((i) => {
-      const target = chosen && fits(chosen.card, t[i]);
+      const target = chosen && fits(s, chosen.card, t[i]);
       const e = cardEl(t[i], target ? 'button' : 'div');
       e.classList.add('sp-pile');
       if (target) {
