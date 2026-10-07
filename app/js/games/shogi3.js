@@ -8,6 +8,7 @@
 // 盤の値: 0 = 空、それ以外 = 持ち主 * 16 + 駒の番号（shogi.js と同じ。1歩 2香 3桂 4銀 5金 6角 7飛 8玉、成ると +8）。
 // 持ち駒 hands[p][駒の番号] = 枚数。手は shogi.js と同じ形（{ f, t, pr } / { d, t } / { resign: true }）。
 // 王を取られた人・投了した人・指せる手が無くなった人は脱落し、その人の駒（持ち駒も）は消える。
+// 詳細設定「いつも成る」があり（局面に auto: true）なら、成れる手の成らない方を作らない（shogi.js と同じ）。
 
 const PAWN = 1;
 const LANCE = 2;
@@ -132,8 +133,8 @@ function pawnOnLine(board, side, line) {
   return false;
 }
 
-// 指せる手（王手の放置も、王を取る手も含む。3人将棋では王手を放っておいてよい）
-function legalMoves(board, hands, side) {
+// 指せる手（王手の放置も、王を取る手も含む。3人将棋では王手を放っておいてよい）。auto は「いつも成る」
+function legalMoves(board, hands, side, auto = false) {
   const out = [];
   for (let i = 0; i < CELLS; i++) {
     const v = board[i];
@@ -142,7 +143,7 @@ function legalMoves(board, hands, side) {
     for (const j of reach(board, i)) {
       if (canPromote(t) && (inZone(side, i) || inZone(side, j))) {
         out.push({ f: i, t: j, pr: true });
-        if (!mustPromote(t, side, j)) out.push({ f: i, t: j, pr: false });
+        if (!auto && !mustPromote(t, side, j)) out.push({ f: i, t: j, pr: false });
       } else {
         out.push({ f: i, t: j, pr: false });
       }
@@ -257,7 +258,7 @@ function threat(b, alive, me) {
 export function cpuMove(s, rules) {
   const level = { weak: 1, normal: 1, strong: 1 }[rules?.cpu] ? rules.cpu : 'weak';
   const me = s.turn;
-  const moves = legalMoves(s.board, s.hands, me);
+  const moves = legalMoves(s.board, s.hands, me, !!s.auto);
   const kill = moves.find((m) => !m.d && s.board[m.t] && typeOf(s.board[m.t]) === KING);
   if (kill) return kill;
   if (Math.random() < { weak: 0.3, normal: 0.08, strong: 0 }[level]) return moves[Math.floor(Math.random() * moves.length)];
@@ -278,10 +279,12 @@ export function cpuMove(s, rules) {
 
 /* ---------- 進行 ---------- */
 
-export function init() {
+export function init(auto = false) {
   const board = initialBoard();
   const hands = [0, 1, 2].map(() => Array(8).fill(0));
-  return { n: 3, board, hands, turn: 0, ply: 0, alive: [true, true, true], out: [], last: null, keys: [posKey(board, hands, 0)], result: null };
+  const s = { n: 3, board, hands, turn: 0, ply: 0, alive: [true, true, true], out: [], last: null, keys: [posKey(board, hands, 0)], result: null };
+  if (auto) s.auto = true; // いつも成る（なしのときは何も足さない）
+  return s;
 }
 
 function finish(n) {
@@ -307,7 +310,7 @@ export function apply(s, m) {
     out.push(s.turn);
     last = { resign: true, side: s.turn, note: `${NAMES[s.turn]}が投了して脱落` };
   } else {
-    const legal = legalMoves(s.board, s.hands, s.turn);
+    const legal = legalMoves(s.board, s.hands, s.turn, !!s.auto);
     if (!legal.some((x) => sameMove(x, m))) return null;
     const mv = m.d ? { d: m.d, t: m.t } : { f: m.f, t: m.t, pr: !!m.pr };
     const r = make(s.board, s.hands, s.turn, mv);
@@ -318,7 +321,7 @@ export function apply(s, m) {
   }
   let next = nextAlive(s.turn, alive);
   // 指せる手が無い人も脱落（ほぼ起きない）
-  while (alive.filter(Boolean).length > 1 && !legalMoves(b, h, next).length) {
+  while (alive.filter(Boolean).length > 1 && !legalMoves(b, h, next, !!s.auto).length) {
     removeSide(b, h, next);
     alive[next] = false;
     out.push(next);
@@ -348,6 +351,7 @@ function notation(s, m, r) {
 
 export function info(s) {
   const parts = [];
+  if (s.auto) parts.push('いつも成る');
   if (s.out.length) parts.push(`脱落: ${s.out.map((q) => `<b class="pl p${q}">${NAMES[q]}</b>`).join('、')}`);
   if (s.last?.note) parts.push(`${s.ply}手目 ${s.last.note}`);
   if (s.result) parts.push(s.result.reason);
@@ -421,7 +425,7 @@ export function render(root, s, o) {
   const key = `${s.ply}:${o.me}`;
   if (ui.key !== key) ui = { key, from: null, drop: null, promo: null };
   const can = o.canMove && !s.result;
-  const legal = can ? legalMoves(s.board, s.hands, s.turn) : [];
+  const legal = can ? legalMoves(s.board, s.hands, s.turn, !!s.auto) : []; // いつも成るなら成る手だけなので、確認は出ない
   const targets = new Set();
   if (ui.from !== null) for (const m of legal) if (m.f === ui.from) targets.add(m.t);
   if (ui.drop !== null) for (const m of legal) if (m.d === ui.drop) targets.add(m.t);

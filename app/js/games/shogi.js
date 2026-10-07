@@ -16,6 +16,9 @@
 //   Claude の判断: 2人の本将棋と5五将棋だけ（3人・3×4 は今までどおり）。駒落ちとは一緒に使える。打ち歩詰めなどの決まりは打たないので関係なくなる。
 //   作り: 持ち駒の hands[p][0]（駒の番号0は使っていない）を NO_HAND にしておき、make() が取った駒を持ち駒に足さない（CPU の読みも同じ make を通る）。
 // 詳細設定「盤」の 3×4（動物の駒）は shogi34.js に任せる（2026-10-06 本人の決定。局面に zoo: true を持つ）。2人だけ・駒落ちとは組み合わせない。
+// 詳細設定「いつも成る」（2026-10-07 本人の決定。最初は なし）: ありにすると、成れる手はいつも成る（成らない手 pr: false は反則）。
+//   局面に auto: true を持ち、pseudoMoves / legalMoves が成らない手を作らない（CPU の読みも同じ）。画面は「成りますか？」を出さずに成る。
+//   本将棋・5五将棋・3人将棋（shogi3.js）で効く。3×4 はもともとヒヨコが必ず成るので関係ない。なしのときの局面は今までと全く同じ。
 
 import { CPU_SETTING } from './util.js';
 import * as three from './shogi3.js';
@@ -136,14 +139,15 @@ function pawnOnFile(board, side, c, N) {
 }
 
 // 王を取る手も含めた、駒の動ける手（王手の放置は調べない）
-function pseudoMoves(board, hands, side) {
+// auto（詳細設定「いつも成る」）なら、成れる手の成らない方を作らない
+function pseudoMoves(board, hands, side, auto = false) {
   const N = sizeOf(board);
   const out = [];
   const sgn = sgnOf(side);
   const add = (f, t, piece, rTo, rFrom) => {
     if (canPromote(piece) && (inZone(side, rFrom, N) || inZone(side, rTo, N))) {
       out.push({ f, t, pr: true });
-      if (!mustPromote(piece, side, rTo, N)) out.push({ f, t, pr: false });
+      if (!auto && !mustPromote(piece, side, rTo, N)) out.push({ f, t, pr: false });
     } else {
       out.push({ f, t, pr: false });
     }
@@ -206,9 +210,9 @@ function make(board, hands, side, m) {
   return { b, h, captured };
 }
 
-function legalMoves(board, hands, side, checkDropMate = true) {
+function legalMoves(board, hands, side, checkDropMate = true, auto = false) {
   const list = [];
-  for (const m of pseudoMoves(board, hands, side)) {
+  for (const m of pseudoMoves(board, hands, side, auto)) {
     const { b, h } = make(board, hands, side, m);
     if (attacked(b, kingSq(b, side), 1 - side)) continue; // 王手を放置する手
     // 打ち歩詰め: 歩を打って王手し、相手に逃げ道が無いなら反則
@@ -251,14 +255,14 @@ function evaluate(board, hands, side) {
 }
 
 // 決まった時間で打ち切る先読み。時間切れなら null
-function searchRoot(board, hands, side, moves, depth, deadline) {
+function searchRoot(board, hands, side, moves, depth, deadline, auto) {
   let nodes = 0;
   let aborted = false;
   const nega = (b, h, s, d, alpha, beta) => {
     if ((++nodes & 1023) === 0 && Date.now() > deadline) aborted = true;
     if (aborted) return 0;
     if (d === 0) return evaluate(b, h, s);
-    const ms = pseudoMoves(b, h, s);
+    const ms = pseudoMoves(b, h, s, auto);
     if (!ms.length) return -MATE;
     // 駒を取る手から先に読む（打ち切りが効きやすい）
     const scored = ms.map((m) => [m, m.d ? 0 : Math.abs(b[m.t]) === KING ? MATE : VALUE[Math.abs(b[m.t])] ?? 0]);
@@ -286,14 +290,14 @@ function searchRoot(board, hands, side, moves, depth, deadline) {
 
 function cpuMove(s, rules) {
   const level = { weak: 1, normal: 1, strong: 1 }[rules?.cpu] ? rules.cpu : 'weak';
-  const moves = legalMoves(s.board, s.hands, s.turn);
+  const moves = legalMoves(s.board, s.hands, s.turn, true, !!s.auto);
   const mistake = { weak: 0.3, normal: 0.08, strong: 0 }[level];
   if (Math.random() < mistake) return moves[Math.floor(Math.random() * moves.length)];
   const maxDepth = (sizeOf(s.board) === 5 ? { weak: 1, normal: 2, strong: 4 } : { weak: 1, normal: 2, strong: 3 })[level];
   const deadline = Date.now() + 1500;
   let scores = null;
   for (let d = 1; d <= maxDepth; d++) { // 浅い読みから順に。時間切れならひとつ前の結果を使う
-    const r = searchRoot(s.board, s.hands, s.turn, moves, d, deadline);
+    const r = searchRoot(s.board, s.hands, s.turn, moves, d, deadline, !!s.auto);
     if (!r) break;
     scores = r;
   }
@@ -335,19 +339,23 @@ export default {
     { key: 'players', label: '人数', desc: '3人では六角形の盤で3人が向き合う。王を取られた人は脱落（駒落ちは使わない）', def: 2, choices: [[2, '2人'], [3, '3人']] },
     { key: 'size', label: '盤', desc: '5五将棋は 5×5 の盤に 王・金・銀・角・飛・歩 が1枚ずつ。成れるのは一番奥の1段だけ。3×4 は動物の駒（ライオン・キリン・ゾウ・ヒヨコ）で、ライオンを取るか、ライオンが相手の奥の段に入って取られなければ勝ち（どちらも2人のときだけ。駒落ちは使わない）', def: 'full', choices: [['full', '本将棋（9×9）'], ['mini', '5五将棋（5×5）'], ['zoo', '3×4（動物の駒）']] },
     { key: 'drops', label: '持ち駒', desc: '「使わない」にすると、取った駒は消えるだけで打てない（チェスのよう）。本将棋と5五将棋の2人だけ', def: 'on', choices: [['on', '使う'], ['off', '使わない']] },
+    { key: 'autopromo', label: 'いつも成る', desc: '成れるときは聞かずに自動で成る（わざと成らない手は指せない）。初めての人向け', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'handicap', label: '駒落ち', desc: '先手（上手）が駒を落として先に指す。腕の差があるときに', def: 'none', choices: Object.entries(HANDICAPS) },
     CPU_SETTING,
   ],
 
   init({ rules = {} } = {}) {
-    if (rules.players === 3) return three.init();
+    const auto = rules.autopromo === 'on';
+    if (rules.players === 3) return three.init(auto);
     if (rules.size === 'zoo') return zoo.init();
     const mini = rules.size === 'mini';
     const handicap = !mini && HANDICAPS[rules.handicap] ? rules.handicap : 'none';
     const board = mini ? miniBoard() : initialBoard(handicap);
     const hands = [Array(8).fill(0), Array(8).fill(0)];
     if (rules.drops === 'off') { hands[0][0] = NO_HAND; hands[1][0] = NO_HAND; }
-    return { board, hands, turn: 0, ply: 0, handicap, last: null, keys: [posKey(board, hands, 0)], checks: [false], result: null };
+    const s = { board, hands, turn: 0, ply: 0, handicap, last: null, keys: [posKey(board, hands, 0)], checks: [false], result: null };
+    if (auto) s.auto = true; // なしのときは局面に何も足さない（今までと同じ形）
+    return s;
   },
 
   turn(s) { return s.turn; },
@@ -360,7 +368,7 @@ export default {
     if (m.resign === true) {
       return { ...s, result: { winner: 1 - s.turn, cells: [], reason: `${s.turn === 0 ? '先手' : '後手'}の投了` }, last: { resign: true, side: s.turn } };
     }
-    const legal = legalMoves(s.board, s.hands, s.turn);
+    const legal = legalMoves(s.board, s.hands, s.turn, true, !!s.auto);
     if (!legal.some((x) => sameMove(x, m))) return null;
     const mv = m.d ? { d: m.d, t: m.t } : { f: m.f, t: m.t, pr: !!m.pr };
     const { b, h } = make(s.board, s.hands, s.turn, mv);
@@ -374,7 +382,8 @@ export default {
       board: b, hands: h, turn: next, ply, handicap: s.handicap, keys, checks, result: null,
       last: { ...mv, side: s.turn, note: notation(s, mv, s.last?.t), check },
     };
-    if (!legalMoves(b, h, next).length) {
+    if (s.auto) n.auto = true;
+    if (!legalMoves(b, h, next, true, !!s.auto).length) {
       n.result = { winner: s.turn, cells: [], reason: '詰み' };
     } else if (keys.filter((k) => k === key).length >= 4) {
       // 千日手。くり返しの間ずっと王手をかけていた側の負け
@@ -400,6 +409,7 @@ export default {
     if (s.board.length === 25) parts.push('5五将棋');
     if (s.handicap !== 'none') parts.push(`${HANDICAPS[s.handicap]}（☗先手が上手）`);
     if (s.hands[0][0] === NO_HAND) parts.push('持ち駒なし');
+    if (s.auto) parts.push('いつも成る');
     if (s.last?.note) parts.push(`${s.ply}手目 ${s.last.note}`);
     if (s.result) parts.push(s.result.reason);
     else if (s.last?.check) parts.push('<b class="sg-check-text">王手！</b>');
@@ -417,7 +427,7 @@ export default {
     const key = `${s.ply}:${o.me}`;
     if (ui.key !== key) ui = { key, from: null, drop: null, promo: null };
     const can = o.canMove && !s.result;
-    const legal = can ? legalMoves(s.board, s.hands, s.turn) : [];
+    const legal = can ? legalMoves(s.board, s.hands, s.turn, true, !!s.auto) : []; // いつも成るなら成る手だけなので、確認は出ない
     const targets = new Set();
     if (ui.from !== null) for (const m of legal) if (m.f === ui.from) targets.add(m.t);
     if (ui.drop !== null) for (const m of legal) if (m.d === ui.drop) targets.add(m.t);

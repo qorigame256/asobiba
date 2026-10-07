@@ -13,6 +13,12 @@
 // 詳細設定「黄色い旗」（yellow。2026-10-06）: ありにすると黄色の旗が増え、お題にも黄色が入る。3本の旗の形で正解を決める。
 //   3本ぶん操作が増えるので、制限時間に YELLOW_EXTRA（0.5秒）足す。点・段階・読み上げは同じ。
 //   なしのときは乱数の使い方を前と全く同じにしている（旗を選ぶ所で、2本なら余分に乱数を引かない）ので、お題も結果も前と同じ。
+//
+// 詳細設定「あまのじゃく」（contrary。2026-10-07）: お題と逆の形を正解にする。いつも（all）は全部のお題、ときどき（mix）は
+//   「👿 あまのじゃく！」の印の付いたお題（15問のうち MIX_COUNT 問）だけ。逆にするのは「〜て」の命令だけで（赤上げて → 赤を下げる）、
+//   「〜ないで・〜ない」はいつもどおり動かさない（readPose）。逆にするお題は cmds に rev: true を付け、pose を逆にした正しい形に作り直す
+//   （次の問題もその形から始まる）。お題の文は同じ乱数で作り、印は別の乱数で seed から選ぶので、なしのときはお題も cmds の形も前と同じ。
+//   ときどきの印のお題は、印を読む分 MARK_EXTRA（0.7秒）時間を足し、読み上げでは「あまのじゃく」と先に読む。
 
 import { mulberry32 } from './util.js';
 import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
@@ -25,6 +31,8 @@ const STAGES = [ // 何問目から・制限時間の倍率・点の倍率・長
 ];
 const LONG_EXTRA = 800;
 const YELLOW_EXTRA = 500; // 黄色い旗がありのときに足す時間
+const MARK_EXTRA = 700; // あまのじゃく（ときどき）の印が付いたお題に足す時間
+const MIX_COUNT = 5; // あまのじゃく（ときどき）で印が付くお題の数（15問のうち。3問に1問）
 const READY_MS = 3000;
 const SHOWN_MS = 2600;
 const GRACE_MS = 1200; // ゲストの答えが届くのを待つ分
@@ -39,6 +47,15 @@ const YELLOW_CSS = `
 .fl-flags.fl3 .fl-flag { transform: scale(.75); transform-origin: 0 0; margin: 0 -25px -42px 0; }
 .fl-flags.fl3 .fl-label { font-size: .95rem; white-space: nowrap; }
 `; // 黄色い旗の見た目（3本並べるときは旗を4分の3に縮める。style.css には入れず、使うときに足す）
+const CONTRARY_CSS = `
+.fl-card.ama { border-color: #6b3fa0; box-shadow: 0 0 0 3px rgba(107, 63, 160, .3); }
+.fl-ama { display: inline-block; margin: 4px 0 2px; padding: 3px 14px; border-radius: 999px; background: #6b3fa0; color: #fff; font-weight: 800; font-size: 1.1rem; animation: flAma .45s ease-out; }
+.fl-stage.ama { background: #6b3fa0; }
+.fl-plain { font-size: .8rem; }
+@keyframes flAma { from { transform: scale(1.5); } }
+@media (prefers-reduced-motion: reduce) { .fl-ama { animation: none; } }
+`; // あまのじゃくの印の見た目（使うときに足す）
+const FLAG_KEY = { 赤: 'r', 白: 'w', 黄色: 'y' };
 
 // 使う旗（なしなら赤・白、ありなら赤・白・黄色）
 const flagsOf = (yellow) => (yellow ? ['r', 'w', 'y'] : ['r', 'w']);
@@ -89,12 +106,36 @@ function makeCommand(rng, pose, stage, keys) {
   return { text, pose: next };
 }
 
+// お題の文を読み直して、start から作る正しい形を返す。rev（あまのじゃく）なら「〜て」の命令を逆にする（上げて → 下げる）。
+// 「〜ないで・〜ない」は、逆でも逆でなくても動かさない
+function readPose(text, start, rev) {
+  const next = { ...start };
+  for (const part of text.split('、')) {
+    const m = part.match(/^(赤|白|黄色)(上げ|下げ)(て|ないで|ない)$/);
+    if (m && m[3] === 'て') next[FLAG_KEY[m[1]]] = (m[2] === '上げ') !== rev ? 1 : 0;
+  }
+  return next;
+}
+
+// あまのじゃく（ときどき）で印を付けるお題の番号。お題を作る乱数とは別の乱数で seed から選ぶ（全員の端末で同じ）
+function markedOf(seed) {
+  const rng = mulberry32(seed ^ 0xa3a70);
+  const idx = Array.from({ length: TOTAL }, (_, i) => i);
+  for (let i = idx.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [idx[i], idx[j]] = [idx[j], idx[i]];
+  }
+  return new Set(idx.slice(0, MIX_COUNT));
+}
+
 // 黄色が無い形（なしのとき）は y を 0 とみなす
 const samePose = (a, b) => a.r === b.r && a.w === b.w && (a.y ?? 0) === (b.y ?? 0);
 const hasYellow = (s) => s.rules.yellow === 'on';
 const firstPose = (yellow) => (yellow ? { r: 0, w: 0, y: 0 } : { r: 0, w: 0 });
 const stageOf = (q) => STAGES.findLast((x) => q >= x.from);
-const limitOf = (s, q = s.q) => Math.round((LIMITS[s.rules.speed] ?? LIMITS.normal) * stageOf(q).time) + (s.cmds[q]?.long ? LONG_EXTRA : 0) + (hasYellow(s) ? YELLOW_EXTRA : 0);
+const contraryOf = (s) => (['all', 'mix'].includes(s.rules.contrary) ? s.rules.contrary : 'off');
+const isMarked = (s, q = s.q) => contraryOf(s) === 'mix' && !!s.cmds[q]?.rev; // 「👿 あまのじゃく！」の印が付いたお題
+const limitOf = (s, q = s.q) => Math.round((LIMITS[s.rules.speed] ?? LIMITS.normal) * stageOf(q).time) + (s.cmds[q]?.long ? LONG_EXTRA : 0) + (hasYellow(s) ? YELLOW_EXTRA : 0) + (isMarked(s, q) ? MARK_EXTRA : 0);
 const qKey = (s, q = s.q) => `flags:${s.seed}:${q}`;
 const startPose = (s, q = s.q) => (q > 0 ? s.cmds[q - 1].pose : firstPose(hasYellow(s)));
 // 形を言葉にする（「赤↑上・白↓下」）
@@ -139,6 +180,7 @@ export default {
     { key: 'speed', label: '制限時間', desc: '1問あたりの時間', def: 'normal', choices: [['slow', 'ゆっくり（4秒）'], ['normal', 'ふつう（3秒）'], ['fast', 'はやい（2秒）']] },
     { key: 'voice', label: 'お題を読み上げる', desc: '各自の端末から声が出ます（iPhone は一度画面に触れてから）', def: false },
     { key: 'yellow', label: '黄色い旗', desc: '赤・白に黄色の旗が増え、お題にも「黄色上げて」などが入る（時間は0.5秒長め）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
+    { key: 'contrary', label: 'あまのじゃく', desc: 'お題と逆の形にする（「赤上げて」なら赤を下げる）。ときどきは 👿 の付いたお題だけ', def: 'off', choices: [['off', 'なし'], ['all', 'いつも'], ['mix', 'ときどき']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -152,8 +194,18 @@ export default {
       cmds.push(c);
       pose = c.pose;
     }
+    // あまのじゃく: 逆にするお題に rev を付け、正しい形を最初から作り直す（お題の文と乱数はそのまま）
+    if (rules.contrary === 'all' || rules.contrary === 'mix') {
+      const marked = rules.contrary === 'mix' ? markedOf(seed) : null;
+      pose = firstPose(yellow);
+      cmds.forEach((c, i) => {
+        if (!marked || marked.has(i)) c.rev = true;
+        c.pose = readPose(c.text, pose, !!c.rev);
+        pose = c.pose;
+      });
+    }
     return {
-      n, seed, rules: { speed: 'normal', voice: false, yellow: 'off', ...rules }, cmds, q: -1, phase: 'ready',
+      n, seed, rules: { speed: 'normal', voice: false, yellow: 'off', contrary: 'off', ...rules }, cmds, q: -1, phase: 'ready',
       ans: Array(n).fill(null), scores: Array(n).fill(0), last: null, step: 0,
     };
   },
@@ -230,6 +282,7 @@ export default {
   },
 
   // CPU: 8割は正しい形、2割は間違った形（黄色い旗がありなら3本の形から選ぶ）。速さは 0.8〜2.2 秒（制限時間に収まる分だけ）
+  // あまのじゃくで逆にするお題は7割だけ正しい形にし、間違えるときは半分ほど「お題どおりの形」にひっかかる
   cpuDelay(s) { return s.phase === 'open' ? 150 : 400; },
   cpu(s, p) {
     if (s.phase !== 'open') return null;
@@ -241,9 +294,13 @@ export default {
       const all = [{ r: 0, w: 0 }, { r: 1, w: 0 }, { r: 0, w: 1 }, { r: 1, w: 1 }];
       const poses = hasYellow(s) ? [...all.map((x) => ({ ...x, y: 0 })), ...all.map((x) => ({ ...x, y: 1 }))] : all;
       const wrong = poses.filter((x) => !samePose(x, want));
+      const rev = !!s.cmds[s.q].rev;
+      const plain = rev ? readPose(s.cmds[s.q].text, startPose(s), false) : null; // お題どおりの形（ひっかかったとき）
+      let pick = wrong[Math.floor(Math.random() * wrong.length)];
+      if (plain && !samePose(plain, want) && Math.random() < 0.5) pick = plain;
       plan = {
         at: Math.min(limit * 0.9, 800 + Math.random() * 1400),
-        pose: Math.random() < 0.8 ? want : wrong[Math.floor(Math.random() * wrong.length)],
+        pose: Math.random() < (rev ? 0.7 : 0.8) ? want : pick,
         done: false,
       };
       cpuPlan.set(key, plan);
@@ -269,6 +326,13 @@ export default {
       st.textContent = YELLOW_CSS;
       document.head.append(st);
     }
+    const contrary = contraryOf(s);
+    if (contrary !== 'off' && !document.getElementById('fl-contrary-css')) {
+      const st = document.createElement('style');
+      st.id = 'fl-contrary-css';
+      st.textContent = CONTRARY_CSS;
+      document.head.append(st);
+    }
 
     const shown = s.phase === 'shown' || s.phase === 'end';
     const extra = (p) => {
@@ -282,7 +346,9 @@ export default {
     const card = document.createElement('div');
     card.className = 'fl-card';
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="fl-q">よーい…</div><div class="fl-sub">${yellow ? '赤・白・黄色' : '赤と白'}の旗をお題どおりに動かしてください</div>`;
+      card.innerHTML = `<div class="fl-q">よーい…</div><div class="fl-sub">${yellow ? '赤・白・黄色' : '赤と白'}の旗をお題どおりに動かしてください</div>`
+        + (contrary === 'all' ? '<div class="fl-sub">👿 あまのじゃく: どのお題も逆に動かします（「赤上げて」なら赤を下げる。「〜ないで」は動かさない）</div>'
+          : contrary === 'mix' ? '<div class="fl-sub">👿 の印が付いたお題だけ逆に動かします（「赤上げて」なら赤を下げる。「〜ないで」は動かさない）</div>' : '');
       root.append(card);
       return;
     }
@@ -293,18 +359,30 @@ export default {
     const open = s.phase === 'open' && o.canMove && me !== null && elapsed < limit;
 
     if (local?.key !== key) local = { key, pose: { ...startPose(s) }, ms: 0, n: 0 };
-    if (s.phase === 'open' && s.rules.voice && spoken !== key) { spoken = key; speak(cmd.text); }
+    const marked = isMarked(s);
+    if (s.phase === 'open' && s.rules.voice && spoken !== key) { spoken = key; speak(marked ? `あまのじゃく！ ${cmd.text}` : cmd.text); }
 
     const mul = stageOf(s.q).mul;
-    card.innerHTML = `<div class="fl-num">第${s.q + 1}問 / ${TOTAL}${mul > 1 ? `<span class="fl-stage">点数×${mul}</span>` : ''}</div><div class="fl-q"></div>`;
+    card.innerHTML = `<div class="fl-num">第${s.q + 1}問 / ${TOTAL}${mul > 1 ? `<span class="fl-stage">点数×${mul}</span>` : ''}`
+      + `${contrary === 'all' ? '<span class="fl-stage ama">👿 逆に</span>' : ''}</div>`
+      + `${marked ? '<div class="fl-ama">👿 あまのじゃく！</div>' : ''}<div class="fl-q"></div>`;
+    if (marked) card.classList.add('ama');
     if (cmd.long) card.querySelector('.fl-q').classList.add('long');
     card.querySelector('.fl-q').textContent = cmd.text;
     if (s.phase === 'open') card.append(timeBar(key, limit));
     else {
       const ans = document.createElement('div');
       ans.className = 'fl-sub';
-      ans.textContent = `正解: ${poseText(keys, cmd.pose)}`;
+      ans.textContent = `${cmd.rev ? '正解（逆）' : '正解'}: ${poseText(keys, cmd.pose)}`;
       card.append(ans);
+      // 逆にしたお題は、お題どおりならどうなるかも小さく添える（形が同じときは出さない）
+      const plain = cmd.rev ? readPose(cmd.text, startPose(s), false) : null;
+      if (plain && !samePose(plain, cmd.pose)) {
+        const p = document.createElement('div');
+        p.className = 'fl-sub fl-plain';
+        p.textContent = `（お題どおりなら ${poseText(keys, plain)}）`;
+        card.append(p);
+      }
     }
     root.append(card);
 

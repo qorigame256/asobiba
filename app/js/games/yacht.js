@@ -7,6 +7,9 @@
 //   1〜6 の合計が 63点以上なら、ボーナス 35点。
 // 詳細設定「2回目のヨット」（2026-10-06 本人の決定。最初はなし）: ヨットの役に50点を書いたあとで、もう一度5個そろえて
 //   ほかの役に書いたら、そのたびに +100点（よくあるヤッツィーのボーナスと同じ。好きな役に書ける特別な決まり（ジョーカー）は入れない。Claude の判断）。
+// 点数の表の「ボーナス」の欄に、あと何点でボーナスか・獲得・無理を出す（2026-10-07 本人の承認。見せるだけで、手も点の付け方も変えない）。
+//   無理は、まだ空いている 1〜6 の役を全部いちばん高い点（5個そろい）で埋めても 63点に届かないとき（bonusInfo）。
+//   自分が振ったあとは、1〜6 の役のボタンに、そこに書いたあとの見込み（あと◯・獲得・無理）を小さく出す（まだ届くかどうかの途中のときだけ）。
 // サイコロの目は、対局の種・人・回・何回目の振りから作る（apply が乱数を使わず全員の端末で同じになるように）。
 // 手: { p, t: 'roll', r: 何回目, k: 何振り目(1〜3), keep: [残す5つの真偽] } / { p, t: 'score', r: 何回目, cat: 役の番号 }。
 // r と k を入れているので、同じ手が2回届いても2回目は弾かれる（realtime）。
@@ -42,6 +45,28 @@ export function totalOf(sheet, extra = 0) {
   const rest = sheet.slice(6).reduce((a, b) => a + (b ?? 0), 0);
   const bonus = upper >= BONUS_AT ? BONUS : 0;
   return { upper, bonus, total: upper + bonus + rest + extra };
+}
+// ボーナスの見込み（点数の表の「ボーナス」の欄に出す）。見るのは 1〜6 の役だけ（2回目のヨットの設定とは関係ない）。
+//   state: 'got' … 63点以上で獲得 / 'no' … 空いている 1〜6 の役 k を全部 5k 点で埋めても届かない / 'need' … あと need 点
+export function bonusInfo(sheet) {
+  let upper = 0;
+  let most = 0; // 空いている 1〜6 の役で、まだ取れるいちばん多い点の合計
+  for (let cat = 0; cat < 6; cat++) {
+    if (sheet[cat] === null || sheet[cat] === undefined) most += 5 * (cat + 1);
+    else upper += sheet[cat];
+  }
+  if (upper >= BONUS_AT) return { state: 'got', upper, need: 0 };
+  return { state: upper + most >= BONUS_AT ? 'need' : 'no', upper, need: BONUS_AT - upper };
+}
+// 見込みの短い書き方（表のせまい欄に入るように）
+const bonusShort = (b) => (b.state === 'got' ? '獲得' : b.state === 'no' ? '無理' : `あと${b.need}`);
+const bonusLong = (b) => (b.state === 'got' ? `ボーナス獲得 +${BONUS}` : b.state === 'no' ? 'ボーナスは無理' : `ボーナス（${BONUS_AT}点以上で+${BONUS}点）まであと${b.need}点`);
+// 欄の中の2行目（小さい字）
+function subLine(text, color) {
+  const sm = document.createElement('span');
+  sm.style.cssText = `display:block;font-size:.58rem;letter-spacing:-.03em;line-height:1.15;font-weight:400;${color ? `color:${color};` : ''}`;
+  sm.textContent = text;
+  return sm;
 }
 const totalOfPl = (x) => totalOf(x.sheet, x.extra ?? 0);
 // この出目を役 cat に書くと 2回目からのヨットのボーナスが付くか
@@ -273,20 +298,32 @@ export default {
           const plus = yachtBonus(s, s.pl[me], cat) ? YACHT_BONUS : 0;
           b.textContent = plus ? `${sc}+${plus}` : sc;
           if (!sc && !plus) b.classList.add('zero');
-          b.setAttribute('aria-label', `${label}に ${sc}点を書く${plus ? `（ヨットのボーナス +${plus}点）` : ''}`);
+          // 1〜6 の役: ここに書いたあとのボーナスの見込みを小さく出す（まだ届くかどうかの途中のときだけ）
+          let ahead = '';
+          if (cat < 6 && bonusInfo(s.pl[me].sheet).state === 'need') {
+            const after = bonusInfo(s.pl[me].sheet.map((v, c) => (c === cat ? sc : v)));
+            ahead = bonusLong(after);
+            b.style.padding = '1px 2px';
+            b.append(subLine(bonusShort(after), after.state === 'no' ? '#b54a3c' : after.state === 'got' ? 'var(--p2)' : 'var(--muted)'));
+          }
+          b.setAttribute('aria-label', `${label}に ${sc}点を書く${plus ? `（ヨットのボーナス +${plus}点）` : ''}${ahead ? `。書くと ${ahead}` : ''}`);
+          if (ahead) b.title = `書くと ${ahead}`;
           b.onclick = () => { if (sc || confirm(`${label}に 0点を書きますか？`)) o.onMove({ t: 'score', r: s.round, cat }); };
           td.append(b);
         }
         return td;
       }, cat === 5 ? 'sep' : '');
       if (cat === 5) {
-        addRow(`ボーナス`, (p) => { // 1〜6 の合計が63点以上で +35。足りないうちは「いま/63」
+        addRow(`ボーナス`, (p) => { // 1〜6 の合計が63点以上で +35。足りないうちは「いま/63」と、あと何点か（届かなくなったら「無理」）
           const td = document.createElement('td');
-          const t = totalOf(s.pl[p].sheet);
+          const b = bonusInfo(s.pl[p].sheet);
           td.className = 'yt-sub' + (p === me ? ' mine' : '');
-          td.textContent = t.bonus ? `+${t.bonus}` : `${t.upper}/${BONUS_AT}`;
+          td.textContent = b.state === 'got' ? `+${BONUS}` : `${b.upper}/${BONUS_AT}`;
+          td.append(subLine(bonusShort(b), b.state === 'got' ? 'var(--p2)' : b.state === 'no' ? '#b54a3c' : ''));
+          td.title = bonusLong(b);
           return td;
         }, 'bonus');
+        table.lastChild.firstChild.append(subLine(`${BONUS_AT}点で+${BONUS}`));
       }
     });
     if (s.bonusYacht) {

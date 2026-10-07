@@ -423,5 +423,81 @@ function perft(board, hands, side, d) {
   check('持ち駒なしで CPU どうしが最後まで指せる（打つ手なし）', games === 3, `${games}/3`);
 }
 
+// いつも成る（詳細設定）: 成れる手は必ず成る。成らない手は反則。行き所のない駒は今どおり。なしでは今と同じ
+{
+  const AUTO = { autopromo: 'on' };
+  const a0 = shogi.init({ rules: AUTO });
+  check('いつも成る: 局面に auto が付き、なしでは付かない', a0.auto === true && !('auto' in shogi.init()) && !('auto' in shogi.init({ rules: { autopromo: 'off' } })));
+  check('いつも成る: 最初の局面は同じ並び', a0.board.join() === shogi.init().board.join() && a0.keys[0] === shogi.init().keys[0]);
+  // 4. の成りの局面を、いつも成るで
+  const base4 = position([[8, 8, 8], [0, 8, -8], [1, 4, 1], [3, 0, 3], [3, 6, 6], [6, 2, 5]]);
+  const s = { ...base4, auto: true };
+  const ms = legalMoves(s.board, s.hands, 0, true, true);
+  check('いつも成る: 角が敵陣へは成る手だけ', has(ms, (m) => m.f === sq(3, 6) && m.t === sq(2, 7) && m.pr) && !has(ms, (m) => m.f === sq(3, 6) && m.t === sq(2, 7) && !m.pr));
+  check('いつも成る: 成らない手は反則（null）', shogi.apply(s, { f: sq(3, 6), t: sq(2, 7), pr: false }) === null);
+  const promoted = shogi.apply(s, { f: sq(3, 6), t: sq(2, 7), pr: true });
+  check('いつも成る: 成る手は通り、次の局面にも auto が残る', promoted && promoted.board[sq(2, 7)] === 14 && promoted.auto === true && promoted.last.note === '▲２三角成', promoted?.last?.note);
+  check('いつも成る: 敵陣に関係ない手・成れない駒は今どおり', !!shogi.apply(s, { f: sq(6, 2), t: sq(5, 2), pr: false }) && !!shogi.apply(s, { f: sq(3, 6), t: sq(4, 5), pr: false }));
+  const forcedOf = (list) => JSON.stringify(list.filter((m) => m.f === sq(1, 4) || m.f === sq(3, 0)));
+  const forced = legalMoves(s.board, s.hands, 0, true, true).filter((m) => m.f === sq(1, 4) || m.f === sq(3, 0));
+  check('いつも成る: 行き所のない駒は今どおり必ず成る', forced.length === 2 && forced.every((m) => m.pr)
+    && forcedOf(forced) === forcedOf(legalMoves(base4.board, base4.hands, 0)));
+  // なしでは今と同じ（成らない手も指せる・手の数が同じ）
+  check('いつも成る: なしでは成らない手も指せる', !!shogi.apply(base4, { f: sq(3, 6), t: sq(2, 7), pr: false }));
+  const plain = legalMoves(base4.board, base4.hands, 0);
+  const auto = legalMoves(s.board, s.hands, 0, true, true);
+  check('いつも成る: 減るのは成れる手の「成らない」方だけ', plain.length - auto.length === plain.filter((m) => !m.pr && plain.some((x) => x.f === m.f && x.t === m.t && x.pr)).length);
+  // 5五将棋・駒落ち・持ち駒なしと一緒に使える
+  const mini = shogi.init({ rules: { ...AUTO, size: 'mini' } });
+  const two = shogi.init({ rules: { ...AUTO, handicap: 'two', drops: 'off' } });
+  check('いつも成る: 5五将棋・駒落ち・持ち駒なしと一緒に使える', mini.auto && mini.board.length === 25 && two.auto && two.handicap === 'two' && two.hands[0][0] === -1);
+  // 3人将棋: 奥の段でない敵陣へ入る香は成る手だけ。成らない手は反則
+  {
+    const T = _test3;
+    const q = (P, y, x) => P * 40 + y * 8 + x;
+    const v = (owner, t) => owner * 16 + t;
+    const s3 = shogi.init({ rules: { ...AUTO, players: 3 } });
+    const b = Array(120).fill(0);
+    b[q(0, 0, 4)] = v(0, 8); b[q(1, 0, 4)] = v(1, 8); b[q(2, 0, 4)] = v(2, 8);
+    b[q(0, 2, 1)] = v(0, 2);
+    const hands = [0, 1, 2].map(() => Array(8).fill(0));
+    const st = { ...s3, board: b, hands, keys: [] };
+    const off = T.legalMoves(b, hands, 0).filter((m) => m.f === q(0, 2, 1) && m.t === q(2, 1, 6));
+    const on = T.legalMoves(b, hands, 0, true).filter((m) => m.f === q(0, 2, 1) && m.t === q(2, 1, 6));
+    check('3人: いつも成るなら選べる所は成る手だけ', s3.auto === true && off.length === 2 && on.length === 1 && on[0].pr === true);
+    check('3人: いつも成るなら成らない手は反則・成る手は通る', shogi.apply(st, { f: q(0, 2, 1), t: q(2, 1, 6), pr: false }) === null
+      && shogi.apply(st, { f: q(0, 2, 1), t: q(2, 1, 6), pr: true })?.auto === true);
+    check('3人: なしでは成らない手も指せる', !!shogi.apply({ ...st, auto: undefined }, { f: q(0, 2, 1), t: q(2, 1, 6), pr: false }));
+  }
+  // 3×4 はもともとヒヨコが必ず成る（いつも成るを付けても局面は同じ）
+  check('3×4: いつも成るでも局面は同じ', JSON.stringify(shogi.init({ rules: { ...AUTO, size: 'zoo' } })) === JSON.stringify(shogi.init({ rules: { size: 'zoo' } })));
+  // CPU どうしで最後まで。CPU が成らない手（成れたのに）を選ばないか・手の一覧を当て直すと同じ局面か
+  const chooses = (x, m) => !m.d && !m.pr && !m.resign
+    && (x.n === 3 ? _test3.legalMoves(x.board, x.hands, x.turn) : legalMoves(x.board, x.hands, x.turn)).some((y) => y.f === m.f && y.t === m.t && y.pr);
+  for (const [label, rules, level] of [['本将棋', {}, 'weak'], ['本将棋・二枚落ち・持ち駒なし', { handicap: 'two', drops: 'off' }, 'normal'], ['5五将棋', { size: 'mini' }, 'normal'], ['3人', { players: 3 }, 'weak']]) {
+    let x = shogi.init({ rules: { ...rules, ...AUTO } });
+    const moves = [];
+    let bad = 0;
+    let noPromo = 0;
+    let promos = 0;
+    let worst = 0;
+    while (!x.result) {
+      const t0 = Date.now();
+      const mv = JSON.parse(JSON.stringify(shogi.cpu(x, x.turn, { cpu: level })));
+      worst = Math.max(worst, Date.now() - t0);
+      if (chooses(x, mv)) noPromo++;
+      if (mv.pr) promos++;
+      const n = shogi.apply(x, mv);
+      if (!n) { bad++; break; }
+      moves.push(mv);
+      x = n;
+    }
+    const again = moves.reduce((y, m) => (y ? shogi.apply(y, m) : null), shogi.init({ rules: { ...rules, ...AUTO } }));
+    check(`いつも成る: ${label}の CPU（${level}）どうしで最後まで指せ、成らない手を選ばない・当て直すと同じ局面`,
+      !bad && !noPromo && worst < 2000 && again?.keys.at(-1) === x.keys.at(-1) && again.result?.reason === x.result.reason,
+      `${x.ply}手・成った手 ${promos}・${x.result?.reason}・最長 ${(worst / 1000).toFixed(2)}秒`);
+  }
+}
+
 console.log(failed ? `\n${failed} 件の失敗` : '\nすべて OK');
 process.exit(failed ? 1 : 0);

@@ -3,6 +3,9 @@
 // Claude の判断: 時間内に押し終えなかったら間違いと同じ。残っていた全員が同じ回で脱落したら、その人たちが同点で1位。
 //   順番は seed から決めた30個（最長30個まで。そこまで残った人は全員1位）。点は「覚えられた一番長い数」。
 //   押した順番そのものを手として送り、正しいかは全員の端末で同じように確かめる。間違えたらその時点で送る。
+// 詳細設定「逆から押す」（2026-10-07 の13回目）: なし（最初。今と同じ）・いつも・1回おき（2回目・4回目…だけ）。
+//   逆の回は、光った順番の逆（最後に光ったものから）が正解。光り方は同じで、正解の並べ方だけ変える（`want`）。
+//   逆の回は押す時間を2秒足す（REV_EXTRA_MS）。画面に「🔁 逆から！」を出す。CPU は逆の回で少し間違えやすい。
 //
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → go → show（光る）→ open → input →（全員押した / 時間切れ）→ close → shown → go …
 // 手: { p: -1, t: 'go' | 'open' | 'close' } / { p, t: 'in', r: 何回目, keys: [押したボタン 0〜3 …] }（1回に1人1度だけ）
@@ -19,11 +22,19 @@ const STEP_MS = 700; // 1つ光る間隔（光っているのは ON_MS）
 const ON_MS = 450;
 const SHOWN_MS = 2600;
 const GRACE_MS = 1500;
+const REV_EXTRA_MS = 2000; // 逆の回に足す押す時間（頭の中で並べ替える分）
 const COLORS = ['赤', '青', '黄', '緑'];
 
 const lenOf = (s) => FIRST + s.round;
 const showMs = (len) => LEAD_MS + len * STEP_MS;
-const inputMs = (len) => 4000 + len * 800;
+const inputMs = (len, rev = false) => 4000 + len * 800 + (rev ? REV_EXTRA_MS : 0);
+// 今の回が逆から押す回か（いつも: 毎回。1回おき: 2回目・4回目…＝ round が奇数）
+const revOf = (s) => s.rules.reverse === 'all' || (s.rules.reverse === 'mix' && s.round % 2 === 1);
+// 今の回の正解の押し順
+const want = (s) => {
+  const keys = s.seq.slice(0, lenOf(s));
+  return revOf(s) ? keys.reverse() : keys;
+};
 const keyOf = (s, part) => `kioku:${s.seed}:${s.round}:${part}`;
 const clone = (s) => ({ ...s, lives: s.lives.slice(), done: s.done.slice(), best: s.best.slice(), outAt: s.outAt.slice() });
 const aliveOf = (s) => s.lives.map((v, p) => (v > 0 ? p : -1)).filter((p) => p >= 0);
@@ -32,7 +43,8 @@ const aliveOf = (s) => s.lives.map((v, p) => (v > 0 ? p : -1)).filter((p) => p >
 function judge(s, keys) {
   const len = lenOf(s);
   if (!Array.isArray(keys) || !keys.length || keys.length > len || !keys.every((k) => Number.isInteger(k) && k >= 0 && k < 4)) return null;
-  const miss = keys.findIndex((k, i) => k !== s.seq[i]);
+  const goal = want(s);
+  const miss = keys.findIndex((k, i) => k !== goal[i]);
   if (miss >= 0) return miss === keys.length - 1 ? false : null; // 間違えたらそこで送る決まり
   return keys.length === len ? true : undefined;
 }
@@ -59,14 +71,18 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'lives', label: '間違えられる回数', desc: '何回間違えたら脱落か', def: 1, choices: [[1, '1回で脱落'], [3, '3回まで']] },
+    { key: 'reverse', label: '逆から押す', desc: '光った順番を、最後から逆に押す', def: 'off', choices: [['off', 'なし'], ['all', 'いつも'], ['mix', '1回おき']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const lives = rules.lives === 3 ? 3 : 1;
     const rnd = mulberry32(seed);
     const seq = Array.from({ length: MAX }, () => Math.floor(rnd() * 4));
+    // なしのときは局面の形も前と同じにする（reverse を持たない）
+    const r = { lives };
+    if (rules.reverse === 'all' || rules.reverse === 'mix') r.reverse = rules.reverse;
     return {
-      n, seed, rules: { lives }, seq, round: -1, phase: 'ready', lives: Array(n).fill(lives), done: Array(n).fill(null),
+      n, seed, rules: r, seq, round: -1, phase: 'ready', lives: Array(n).fill(lives), done: Array(n).fill(null),
       best: Array(n).fill(0), outAt: Array(n).fill(-1), last: null, step: 0,
     };
   },
@@ -89,8 +105,8 @@ export default {
   },
   phaseText(s) {
     if (s.phase === 'ready') return 'まもなく始まります…';
-    if (s.phase === 'show') return `${s.round + 1}回目（${lenOf(s)}個）: 光る順番を覚えて！`;
-    if (s.phase === 'input') return `${s.round + 1}回目（${lenOf(s)}個）: 同じ順番で押して！`;
+    if (s.phase === 'show') return `${s.round + 1}回目（${lenOf(s)}個）: 光る順番を覚えて！${revOf(s) ? '（🔁 逆から押す回）' : ''}`;
+    if (s.phase === 'input') return `${s.round + 1}回目（${lenOf(s)}個）: ${revOf(s) ? '🔁 逆の順番で押して！' : '同じ順番で押して！'}`;
     return `${s.round + 1}回目の結果`;
   },
 
@@ -99,7 +115,7 @@ export default {
     if (s.phase === 'show') return { key: 'show' + s.round, ms: showMs(lenOf(s)), move: { t: 'open' } };
     if (s.phase === 'input') {
       if (aliveOf(s).every((p) => s.done[p] !== null)) return { key: 'all' + s.round, ms: 500, move: { t: 'close' } };
-      return { key: 'in' + s.round, ms: inputMs(lenOf(s)) + GRACE_MS, move: { t: 'close' } };
+      return { key: 'in' + s.round, ms: inputMs(lenOf(s), revOf(s)) + GRACE_MS, move: { t: 'close' } };
     }
     if (s.phase === 'shown') return { key: 'shown' + s.round, ms: SHOWN_MS, move: { t: 'go' } };
     return null;
@@ -141,21 +157,23 @@ export default {
   },
 
   // CPU: 長くなるほど間違えやすい（3個で3%、5個で16%、7個で32%、9個で48%）。押し終えるまでの時間は 1個 0.45秒＋1秒
+  // 逆の回は1つ長いのと同じだけ間違えやすく（3個で10%、5個で24%、7個で40%）、押し始めも0.8秒遅い
   cpuDelay(s) { return s.phase === 'input' ? 150 : 500; },
   cpu(s, p) {
     if (!this.canAct(s, p)) return null;
     const len = lenOf(s);
+    const rev = revOf(s);
     const key = keyOf(s, 'in') + ':' + p;
     let plan = cpuPlan.get(key);
     if (!plan) {
-      const miss = Math.random() < Math.min(0.9, Math.max(0.03, (len - 3) * 0.08));
-      const keys = s.seq.slice(0, len);
+      const miss = Math.random() < Math.min(0.9, Math.max(rev ? 0.1 : 0.03, (len - (rev ? 2 : 3)) * 0.08));
+      const keys = want(s);
       if (miss) {
         const at = Math.floor(Math.random() * len);
         keys.length = at + 1;
         keys[at] = (keys[at] + 1 + Math.floor(Math.random() * 3)) % 4;
       }
-      plan = { at: 1000 + keys.length * 450, keys };
+      plan = { at: 1000 + keys.length * 450 + (rev ? 800 : 0), keys };
       cpuPlan.set(key, plan);
       if (cpuPlan.size > 300) cpuPlan.delete(cpuPlan.keys().next().value);
     }
@@ -198,13 +216,22 @@ export default {
     root.append(wrap);
 
     if (s.phase === 'ready') {
-      card.innerHTML = '<div class="kj-word small">よーい…</div><div class="kj-sub">光る順番を覚えてください</div>';
+      const how = s.rules.reverse === 'all' ? '光る順番を覚えて、逆から押してください' : s.rules.reverse === 'mix' ? '光る順番を覚えてください（2回目・4回目…は逆から押します）' : '光る順番を覚えてください';
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">${how}</div>`;
       return;
     }
     const len = lenOf(s);
     const head = document.createElement('div');
     head.className = 'kj-num';
     head.textContent = `${s.round + 1}回目（${len}個）`;
+    const rev = revOf(s);
+    // 逆から押す回の印（見せている間も押す間もはっきり出す。見た目は style.css に入れず、ここで付ける）
+    const revTag = document.createElement('div');
+    if (rev && s.phase !== 'shown' && !ended) {
+      revTag.className = 'km-rev';
+      revTag.textContent = '🔁 逆から！';
+      revTag.style.cssText = 'display:inline-block;margin-top:6px;padding:4px 14px;border-radius:999px;background:var(--accent);color:var(--accent-ink);font-weight:700;font-size:1.1rem;';
+    }
     const msg = document.createElement('div');
     msg.className = 'kj-sub km-msg';
     const pad = document.createElement('div');
@@ -218,7 +245,9 @@ export default {
       pad.append(b);
       return b;
     });
-    card.append(head, pad, msg);
+    card.append(head);
+    if (revTag.className) card.append(revTag);
+    card.append(pad, msg);
     const flash = (k, ms = 220) => { btns[k].classList.add('lit'); setTimeout(() => btns[k].classList.remove('lit'), ms); };
 
     // 光る順番を見せる（自分の画面に出てからの時間で。入力の番になっていても、見せ終わるまでは押せない）
@@ -238,7 +267,7 @@ export default {
     }
 
     if (s.phase === 'show') {
-      msg.textContent = '光る順番を覚えて！';
+      msg.textContent = rev ? '光る順番を覚えて！押すときは最後に光ったものから' : '光る順番を覚えて！';
     } else if (s.phase === 'input') {
       if (me === null) msg.textContent = '観戦中';
       else if (s.lives[me] <= 0) msg.textContent = '脱落しました。ほかの人を見守りましょう';
@@ -250,12 +279,12 @@ export default {
         prog.className = 'km-prog';
         const update = () => { prog.textContent = `${keys.length} / ${len}`; };
         update();
-        msg.textContent = '同じ順番で押して！';
+        msg.textContent = rev ? '最後に光ったものから、逆の順番で押して！' : '同じ順番で押して！';
         card.append(prog);
         const enable = () => {
           if (!pad.isConnected) return;
           since(inKey); // 押せるようになった時刻を覚える（CPU の速さもこの時計）
-          card.append(timeBar(inKey, inputMs(len)));
+          card.append(timeBar(inKey, inputMs(len, rev)));
           btns.forEach((b, k) => {
             b.disabled = false;
             b.onpointerdown = (e) => {
@@ -276,14 +305,17 @@ export default {
             if (!pad.isConnected || btns[0].disabled) return;
             btns.forEach((x) => { x.disabled = true; });
             msg.textContent = '時間切れ！';
-          }, inputMs(len));
+          }, inputMs(len, rev));
         };
         if (wait) setTimeout(enable, wait); else enable();
       }
     } else {
       const r = me !== null ? s.last?.res[me] : null;
-      msg.textContent = ended ? '' : r === 'ok' ? 'せいかい！次は1つ長くなります' : r ? `${r === 'late' ? '時間切れ' : 'まちがい'}…（正しい順番: ${s.seq.slice(0, len).map((k) => COLORS[k]).join('→')}）` : '次は1つ長くなります';
-      if (ended) msg.textContent = `正しい順番: ${s.seq.slice(0, len).map((k) => COLORS[k]).join('→')}`;
+      const right = `${rev ? '正しい押し順（逆から）' : '正しい順番'}: ${want(s).map((k) => COLORS[k]).join('→')}`;
+      // 1回おきでは、次の回が逆かどうかも先に知らせる
+      const next = s.rules.reverse === 'mix' ? (rev ? '（次は前から）' : '（次は🔁 逆から！）') : '';
+      msg.textContent = ended ? '' : r === 'ok' ? `せいかい！次は1つ長くなります${next}` : r ? `${r === 'late' ? '時間切れ' : 'まちがい'}…（${right}）` : `次は1つ長くなります${next}`;
+      if (ended) msg.textContent = right;
     }
   },
 };

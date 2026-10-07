@@ -1730,6 +1730,119 @@ assert.ok(FL.result(s), '15問で終わる');
     Object.defineProperty(performance, 'now', { value: realNow, configurable: true, writable: true });
   }
 }
+// あまのじゃく（詳細設定 contrary）
+{
+  const print = (rules) => {
+    let all = '';
+    for (let k = 0; k < 100; k++) all += (k ? '|' : '') + JSON.stringify(FL.init(3, k, { rules }).cmds);
+    let h = 0;
+    for (const ch of all) h = (Math.imul(h, 31) + ch.codePointAt(0)) | 0;
+    return h;
+  };
+  // なしのときは、お題も正しい形も前と全く同じ（黄色ありの値も前の作りで取ったもの）
+  assert.equal(print({ contrary: 'off' }), -980746463, 'あまのじゃくなしのお題が前と変わった');
+  assert.equal(print({ yellow: 'on', contrary: 'off' }), 297925439, '黄色ありであまのじゃくなしのお題が前と変わった');
+  // 文を読み直して形を作る（rev なら「〜て」を逆にする。「〜ないで・〜ない」は動かさない）
+  const readC = (text, pose, rev) => {
+    const next = { ...pose };
+    for (const part of text.split('、')) {
+      const m = part.match(/^(赤|白|黄色)(上げ|下げ)(て|ないで|ない)$/);
+      assert.ok(m, 'お題の形 ' + text);
+      if (m[3] === 'て') next[{ 赤: 'r', 白: 'w', 黄色: 'y' }[m[1]]] = (m[2] === '上げ') !== rev ? 1 : 0;
+    }
+    return next;
+  };
+  const patterns = new Set();
+  for (const yellow of ['off', 'on']) {
+    for (let k = 0; k < 300; k++) {
+      const base = FL.init(3, k, { rules: { yellow } });
+      for (const contrary of ['all', 'mix']) {
+        const st = FL.init(3, k, { rules: { yellow, contrary } });
+        assert.deepEqual(st.cmds.map((c) => [c.text, !!c.long]), base.cmds.map((c) => [c.text, !!c.long]), 'あまのじゃくでもお題の文は同じ');
+        assert.deepEqual(FL.init(3, k, { rules: { yellow, contrary } }).cmds, st.cmds, '同じ種なら同じお題と印');
+        let pose = yellow === 'on' ? { r: 0, w: 0, y: 0 } : { r: 0, w: 0 };
+        for (const c of st.cmds) {
+          assert.deepEqual(c.pose, readC(c.text, pose, !!c.rev), `あまのじゃくの正しい形が食い違う（${contrary}）: ${c.text}`);
+          pose = c.pose;
+        }
+        const revs = st.cmds.map((c, q) => (c.rev ? q : -1)).filter((q) => q >= 0);
+        if (contrary === 'all') assert.equal(revs.length, 15, 'いつもは全部のお題が逆');
+        else {
+          assert.equal(revs.length, 5, 'ときどきは15問のうち5問が逆');
+          if (yellow === 'off') patterns.add(revs.join(','));
+          else assert.deepEqual(revs, FL.init(3, k, { rules: { contrary } }).cmds.map((c, q) => (c.rev ? q : -1)).filter((q) => q >= 0), '印の付き方は種だけで決まる（黄色の有無で変わらない）');
+        }
+      }
+    }
+  }
+  assert.ok(patterns.size > 250, '印の付き方は種ごとにばらばら');
+  // 「赤下げて」から始まるお題: いつもは赤を上げるのが正解
+  {
+    let k = 0;
+    while (!/^(赤|白)下げて$/.test(FL.init(2, k, { rules: {} }).cmds[0].text)) k++;
+    const st = FL.init(2, k, { rules: { contrary: 'all' } });
+    const f = st.cmds[0].text[0] === '赤' ? 'r' : 'w';
+    assert.equal(st.cmds[0].pose[f], 1, '「下げて」の逆は上げる');
+    assert.equal(FL.init(2, k, { rules: {} }).cmds[0].pose[f], 0, 'なしなら下げたまま');
+  }
+  // 逆の形が正解・お題どおりの形はまちがい
+  {
+    let st = FL.init(3, 4, { rules: { contrary: 'all' } });
+    st.cmds = [{ text: '赤下げて、白上げて', pose: { r: 1, w: 0 }, rev: true }, ...st.cmds.slice(1)];
+    st = ref(FL, st, 'next');
+    st = FL.apply(st, { p: 0, t: 'pose', q: 0, r: 0, w: 1, ms: 300, n: 1 }); // お題どおり（まちがい）
+    st = FL.apply(st, { p: 1, t: 'pose', q: 0, r: 1, w: 1, ms: 500, n: 1 });
+    st = FL.apply(st, { p: 1, t: 'pose', q: 0, r: 1, w: 0, ms: 900, n: 2 }); // 白を上げてから戻した（正解）
+    assert.equal(FL.apply(st, { p: 1, t: 'pose', q: 0, r: 1, w: 0, ms: 900, n: 2 }), null, 'あまのじゃくでも同じ手の2回目は弾く');
+    st = FL.apply(st, { p: 2, t: 'pose', q: 0, r: 1, w: 0, ms: 600, n: 1 });
+    st = ref(FL, st, 'close');
+    assert.deepEqual(st.scores, [0, 2, 3], 'お題と逆の形が正解・お題どおりの形はまちがい');
+  }
+  // ときどき: 印のお題だけ時間が0.7秒長い
+  {
+    let a = 0;
+    while (!FL.init(2, a, { rules: { contrary: 'mix' } }).cmds[0].rev) a++;
+    let b = 0;
+    while (FL.init(2, b, { rules: { contrary: 'mix' } }).cmds[0].rev) b++;
+    const ms = (k, contrary) => FL.referee(ref(FL, FL.init(2, k, { rules: { contrary } }), 'next')).ms;
+    assert.equal(ms(a, 'mix') - ms(a, 'off'), 700, '印のお題は0.7秒長い');
+    assert.equal(ms(b, 'mix'), ms(b, 'off'), '印の無いお題は今と同じ時間');
+    assert.equal(ms(a, 'all'), ms(a, 'off'), 'いつもは時間を足さない');
+  }
+  // CPU どうしで最後まで（黄色い旗と一緒にも）
+  const realNow = performance.now;
+  let clock = 2e9;
+  Object.defineProperty(performance, 'now', { value: () => clock, configurable: true, writable: true });
+  try {
+    for (const [yellow, contrary, seed] of [['off', 'all', 7101], ['off', 'mix', 7102], ['on', 'all', 7103], ['on', 'mix', 7104]]) {
+      let g = FL.init(4, seed, { rules: { yellow, contrary } });
+      let steps = 0;
+      let rights = 0;
+      let answers = 0;
+      while (!FL.result(g)) {
+        const r = FL.referee(g);
+        assert.ok(r, '進行役の手がある');
+        if (g.phase === 'open') {
+          clock += 2300;
+          for (let p = 0; p < 4; p++) {
+            const m = FL.cpu(g, p);
+            if (!m) continue;
+            const next = FL.apply(g, { ...m, p });
+            assert.ok(next, 'CPU の答えを受け付ける');
+            g = next;
+          }
+        }
+        g = ref(FL, g, r.move.t);
+        if (g.phase === 'shown') { answers += 4; rights += g.last.filter((x) => x.ok).length; }
+        if (++steps > 100) throw new Error('旗揚げ（あまのじゃく）が終わらない');
+      }
+      assert.equal(answers, 60, '15問で終わる: ' + contrary);
+      assert.ok(rights > 25 && rights < 60, `CPU はあまのじゃくでもだいたい正解し、ときどき間違える（${yellow}/${contrary}: ${rights}/60）`);
+    }
+  } finally {
+    Object.defineProperty(performance, 'now', { value: realNow, configurable: true, writable: true });
+  }
+}
 
 // ---------- 難読漢字 ----------
 const KJ = GAMES.kanji;
@@ -2201,15 +2314,56 @@ assert.notEqual(GM.cpu(s, 0, { cpu: 'strong' }), 3, 'ぴったり五目の CPU �
   t = ref(ref(t, 'go'), 'open');
   assert.equal(t.seq.slice(0, 4).length, 4);
   assert.ok(KM.apply(t, { p: 1, t: 'in', r: 1, keys: t.seq.slice(0, 4) }), '次の回は1つ長い');
+  // 逆から押す（2026-10-07 の13回目）
+  {
+    const off = KM.init(3, 77, { rules: {} });
+    assert.deepEqual(KM.init(3, 77, { rules: { reverse: 'off' } }), off, 'なしでは局面の形も前と同じ');
+    assert.deepEqual(KM.init(3, 77, { rules: { reverse: 'all' } }).seq, off.seq, '光る順番は逆でも同じ');
+    assert.equal(KM.init(3, 77, { rules: { reverse: 'xx' } }).rules.reverse, undefined, '知らない値はなし');
+    // 逆にならない順番の種を選ぶ（前からでも逆からでも同じ並びだと見分けられないため）
+    let sd = 1;
+    while (KM.init(2, sd, { rules: {} }).seq.slice(0, 4).join() === KM.init(2, sd, { rules: {} }).seq.slice(0, 4).reverse().join()
+      || KM.init(2, sd, { rules: {} }).seq.slice(0, 3).join() === KM.init(2, sd, { rules: {} }).seq.slice(0, 3).reverse().join()) sd++;
+    // いつも: 毎回、逆が正解。前から押すと間違い
+    let a = ref(ref(KM.init(2, sd, { rules: { reverse: 'all', lives: 3 } }), 'go'), 'open');
+    const fwd3 = a.seq.slice(0, 3);
+    const rev3 = fwd3.slice().reverse();
+    const firstWrong = fwd3.findIndex((x, i) => x !== rev3[i]);
+    assert.equal(KM.apply(a, { p: 0, t: 'in', r: 0, keys: fwd3 }), null, '前から全部押した手は送れない（途中で間違えている）');
+    let b = KM.apply(a, { p: 0, t: 'in', r: 0, keys: fwd3.slice(0, firstWrong + 1) });
+    assert.equal(b.done[0], false, 'いつも: 前から押すと間違い');
+    b = KM.apply(b, { p: 1, t: 'in', r: 0, keys: rev3 });
+    assert.equal(b.done[1], true, 'いつも: 逆から押すと正解');
+    assert.equal(KM.referee(a).ms, KM.referee(ref(ref(KM.init(2, sd, { rules: { lives: 3 } }), 'go'), 'open')).ms + 2000, '逆の回は押す時間が2秒長い');
+    b = ref(ref(ref(b, 'close'), 'go'), 'open');
+    assert.equal(KM.apply(b, { p: 1, t: 'in', r: 1, keys: b.seq.slice(0, 4).reverse() }).done[1], true, 'いつも: 2回目も逆');
+    assert.ok(KM.phaseText(b).includes('逆'), '逆の回は状態の欄にも出す');
+    // 1回おき: 1回目は前から、2回目は逆、3回目は前から
+    let x = ref(ref(KM.init(2, sd, { rules: { reverse: 'mix', lives: 3 } }), 'go'), 'open');
+    assert.equal(KM.apply(x, { p: 0, t: 'in', r: 0, keys: x.seq.slice(0, 3) }).done[0], true, '1回おき: 1回目は前から');
+    assert.ok(!KM.phaseText(x).includes('逆'), '1回おき: 1回目は逆と出さない');
+    x = ref(ref(ref(KM.apply(x, { p: 0, t: 'in', r: 0, keys: x.seq.slice(0, 3) }), 'close'), 'go'), 'open');
+    assert.ok(KM.phaseText(x).includes('逆'), '1回おき: 2回目は逆と出す');
+    const f4 = x.seq.slice(0, 4);
+    const r4 = f4.slice().reverse();
+    assert.equal(KM.apply(x, { p: 0, t: 'in', r: 1, keys: r4 }).done[0], true, '1回おき: 2回目は逆から');
+    const w4 = f4.findIndex((v, i) => v !== r4[i]);
+    assert.equal(KM.apply(x, { p: 0, t: 'in', r: 1, keys: f4.slice(0, w4 + 1) }).done[0], false, '1回おき: 2回目に前から押すと間違い');
+    x = ref(ref(ref(KM.apply(x, { p: 0, t: 'in', r: 1, keys: r4 }), 'close'), 'go'), 'open');
+    assert.equal(KM.apply(x, { p: 0, t: 'in', r: 2, keys: x.seq.slice(0, 5) }).done[0], true, '1回おき: 3回目はまた前から');
+  }
   // CPU だけで最後まで（反則を出さない・必ず終わる）。CPU は画面に出てからの時間で押すので、時計（performance.now）を進めて試す
   const realNow = performance.now.bind(performance);
   let fake = realNow();
   performance.now = () => fake;
   try {
     const lens = [];
-    for (let g = 0; g < 40; g++) {
+    const revLens = { all: [], mix: [] };
+    for (let g = 0; g < 80; g++) {
       const n = 2 + (g % 5);
-      let st = KM.init(n, g * 131 + 7, { rules: { lives: g % 2 ? 3 : 1 } });
+      // 40局目からは逆から押す（いつも・1回おき）でも最後まで打つ
+      const reverse = g < 40 ? 'off' : g % 4 < 2 ? 'all' : 'mix';
+      let st = KM.init(n, g * 131 + 7, { rules: { lives: g % 2 ? 3 : 1, reverse } });
       let guard = 0;
       while (!KM.result(st)) {
         const r = KM.referee(st);
@@ -2224,9 +2378,10 @@ assert.notEqual(GM.cpu(s, 0, { cpu: 'strong' }), 3, 'ぴったり五目の CPU �
         }
         assert.ok(guard < 100000);
       }
-      lens.push(Math.max(...st.best));
+      (reverse === 'off' ? lens : revLens[reverse]).push(Math.max(...st.best));
     }
-    console.log('kioku CPU longest (avg)', (lens.reduce((x, y) => x + y, 0) / lens.length).toFixed(1));
+    const avg = (v) => (v.reduce((x, y) => x + y, 0) / v.length).toFixed(1);
+    console.log('kioku CPU longest (avg)', avg(lens), 'reverse all', avg(revLens.all), 'mix', avg(revLens.mix));
   } finally { performance.now = realNow; }
   console.log('kioku OK');
 }
@@ -2667,7 +2822,7 @@ for (let g = 0; g < 30; g++) {
 
 // ---------- ヨット ----------
 const YT = GAMES.yacht;
-const { scoreOf, totalOf } = await import('../app/js/games/yacht.js');
+const { scoreOf, totalOf, bonusInfo } = await import('../app/js/games/yacht.js');
 assert.equal(scoreOf(0, [1, 1, 3, 4, 1]), 3, '1の目の合計');
 assert.equal(scoreOf(5, [6, 6, 6, 2, 1]), 18);
 assert.equal(scoreOf(6, [1, 2, 3, 4, 6]), 16, 'チョイス');
@@ -2683,6 +2838,23 @@ assert.equal(scoreOf(10, [1, 2, 3, 4, 6]), 0);
 assert.equal(scoreOf(11, [2, 2, 2, 2, 2]), 50, 'ヨット');
 assert.deepEqual(totalOf([3, 6, 9, 12, 15, 18, null, null, null, null, null, 50]), { upper: 63, bonus: 35, total: 148 }, '63点でボーナス');
 assert.equal(totalOf([3, 6, 9, 12, 15, 17, 0, 0, 0, 0, 0, 0]).bonus, 0);
+// ボーナスまであと何点（表に出すだけ）: 獲得・無理（空いている役 k を全部 5k 点で埋めても届かない）・あと何点
+{
+  const N = null;
+  assert.deepEqual(bonusInfo(Array(12).fill(N)), { state: 'need', upper: 0, need: 63 }, '始めはあと63');
+  assert.deepEqual(bonusInfo([3, 6, 9, 12, 15, 18, N, N, N, N, N, N]), { state: 'got', upper: 63, need: 0 }, 'ちょうど63で獲得');
+  assert.equal(bonusInfo([5, 10, 15, 20, 25, N, N, N, N, N, N, N]).state, 'got', '埋まっていなくても63を超えたら獲得');
+  assert.deepEqual(bonusInfo([3, 6, 9, 12, 15, 17, 0, 0, 0, 0, 0, 0]), { state: 'no', upper: 62, need: 1 }, '全部埋まって62は無理');
+  assert.deepEqual(bonusInfo([1, 0, 9, 8, 15, N, N, N, N, N, N, N]), { state: 'need', upper: 33, need: 30 }, '6を5個そろえればちょうど届く');
+  assert.equal(bonusInfo([0, 0, 9, 8, 15, N, N, N, N, N, N, N]).state, 'no', '6を5個そろえても62なら無理');
+  assert.equal(bonusInfo([0, 0, 0, 0, N, N, N, N, N, N, N, N]).state, 'no', '5と6を最高点でも55で無理');
+  // 1〜6 だけを見る（ヨットの欄・2回目のヨットの設定とは関係ない）
+  const up = [3, 6, 9, 12, N, N];
+  assert.deepEqual(bonusInfo([...up, N, N, N, N, N, 50]), bonusInfo([...up, 30, 20, 25, 15, 30, 0]), '下の段は見ない');
+  const y5 = YT.init(2, 5, { rules: { bonusYacht: true } });
+  const y0 = YT.init(2, 5);
+  assert.deepEqual(bonusInfo(y5.pl[0].sheet), bonusInfo(y0.pl[0].sheet), '2回目のヨットの設定と関係ない');
+}
 s = YT.init(3, 21);
 assert.equal(YT.apply(s, { p: 0, t: 'score', r: 0, cat: 0 }), null, '振る前は書けない');
 assert.equal(YT.apply(s, { p: 0, t: 'roll', r: 0, k: 1, keep: [true, false, false, false, false] }), null, '1振り目は残せない');
