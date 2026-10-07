@@ -19,6 +19,10 @@
 // 詳細設定「いつも成る」（2026-10-07 本人の決定。最初は なし）: ありにすると、成れる手はいつも成る（成らない手 pr: false は反則）。
 //   局面に auto: true を持ち、pseudoMoves / legalMoves が成らない手を作らない（CPU の読みも同じ）。画面は「成りますか？」を出さずに成る。
 //   本将棋・5五将棋・3人将棋（shogi3.js）で効く。3×4 はもともとヒヨコが必ず成るので関係ない。なしのときの局面は今までと全く同じ。
+// 詳細設定「トライ」（2026-10-07 本人の決定。最初は なし）: ありにすると、自分の玉が相手の玉の最初のマス（本将棋は 5一・5九、5五将棋は 5一・1五）に
+//   入ったら勝ち。玉は利きのあるマスへ動けないので、入れた時点で「そこで取られない」は満たしている。入玉で長引いて 300手の引き分けになるのを防ぐ。
+//   本将棋と5五将棋の2人だけ（3×4 はもとからトライがある・3人は使わない）。駒落ち・持ち駒なし・いつも成ると一緒に使える。
+//   局面に trial: true を持つ（なしのときは今までと全く同じ形）。CPU の読みもトライを勝ちとして数える。
 
 import { CPU_SETTING } from './util.js';
 import * as three from './shogi3.js';
@@ -33,6 +37,10 @@ const MAX_PLY = 300;
 const NO_HAND = -1; // hands[p][0] がこれなら、取った駒を持ち駒にしない（詳細設定「持ち駒」の「使わない」）
 const MINI_MAX_PLY = 200;
 const sizeOf = (board) => (board.length === 25 ? 5 : 9);
+// トライのマス（side が入ったら勝ち）＝相手の玉の最初のマス。後手の玉は 5一（5五将棋も 5一）、先手の玉は 5九（5五将棋は 1五）
+const trySq = (side, N) => (side === 0 ? (N === 5 ? 0 : 4) : N === 5 ? 24 : 76);
+// m（王手を放置しない手）で side の玉がトライのマスに入るか
+const isTry = (board, side, m) => !m.d && m.t === trySq(side, sizeOf(board)) && board[m.f] === KING * sgnOf(side);
 
 const KANJI = { 1: '歩', 2: '香', 3: '桂', 4: '銀', 5: '金', 6: '角', 7: '飛', 8: '玉', 9: 'と', 10: '杏', 11: '圭', 12: '全', 14: '馬', 15: '龍' };
 const NOTE_NAME = { ...KANJI, 10: '成香', 11: '成桂', 12: '成銀' };
@@ -255,7 +263,8 @@ function evaluate(board, hands, side) {
 }
 
 // 決まった時間で打ち切る先読み。時間切れなら null
-function searchRoot(board, hands, side, moves, depth, deadline, auto) {
+// trial（詳細設定「トライ」）なら、玉がトライのマスに入る手（取られないとき）を勝ちとして読む
+function searchRoot(board, hands, side, moves, depth, deadline, auto, trial) {
   let nodes = 0;
   let aborted = false;
   const nega = (b, h, s, d, alpha, beta) => {
@@ -271,6 +280,7 @@ function searchRoot(board, hands, side, moves, depth, deadline, auto) {
     for (const [m] of scored) {
       if (!m.d && Math.abs(b[m.t]) === KING) return MATE + d; // 王が取れる＝相手は王手を放置した
       const n = make(b, h, s, m);
+      if (trial && isTry(b, s, m) && !attacked(n.b, m.t, 1 - s)) return MATE + d;
       const v = -nega(n.b, n.h, 1 - s, d - 1, -beta, -alpha);
       if (v > best) best = v;
       if (best > alpha) alpha = best;
@@ -281,7 +291,7 @@ function searchRoot(board, hands, side, moves, depth, deadline, auto) {
   const scores = [];
   for (const m of moves) {
     const n = make(board, hands, side, m);
-    const v = -nega(n.b, n.h, 1 - side, depth - 1, -Infinity, Infinity);
+    const v = trial && isTry(board, side, m) ? MATE + depth : -nega(n.b, n.h, 1 - side, depth - 1, -Infinity, Infinity);
     if (aborted) return null;
     scores.push([m, v]);
   }
@@ -297,7 +307,7 @@ function cpuMove(s, rules) {
   const deadline = Date.now() + 1500;
   let scores = null;
   for (let d = 1; d <= maxDepth; d++) { // 浅い読みから順に。時間切れならひとつ前の結果を使う
-    const r = searchRoot(s.board, s.hands, s.turn, moves, d, deadline, !!s.auto);
+    const r = searchRoot(s.board, s.hands, s.turn, moves, d, deadline, !!s.auto, !!s.trial);
     if (!r) break;
     scores = r;
   }
@@ -339,6 +349,7 @@ export default {
     { key: 'players', label: '人数', desc: '3人では六角形の盤で3人が向き合う。王を取られた人は脱落（駒落ちは使わない）', def: 2, choices: [[2, '2人'], [3, '3人']] },
     { key: 'size', label: '盤', desc: '5五将棋は 5×5 の盤に 王・金・銀・角・飛・歩 が1枚ずつ。成れるのは一番奥の1段だけ。3×4 は動物の駒（ライオン・キリン・ゾウ・ヒヨコ）で、ライオンを取るか、ライオンが相手の奥の段に入って取られなければ勝ち（どちらも2人のときだけ。駒落ちは使わない）', def: 'full', choices: [['full', '本将棋（9×9）'], ['mini', '5五将棋（5×5）'], ['zoo', '3×4（動物の駒）']] },
     { key: 'drops', label: '持ち駒', desc: '「使わない」にすると、取った駒は消えるだけで打てない（チェスのよう）。本将棋と5五将棋の2人だけ', def: 'on', choices: [['on', '使う'], ['off', '使わない']] },
+    { key: 'try', label: 'トライ', desc: '自分の玉が相手の玉の最初のマスに入ったら勝ち（入玉で長引かない）。本将棋と5五将棋の2人だけ', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'autopromo', label: 'いつも成る', desc: '成れるときは聞かずに自動で成る（わざと成らない手は指せない）。初めての人向け', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'handicap', label: '駒落ち', desc: '先手（上手）が駒を落として先に指す。腕の差があるときに', def: 'none', choices: Object.entries(HANDICAPS) },
     CPU_SETTING,
@@ -355,6 +366,7 @@ export default {
     if (rules.drops === 'off') { hands[0][0] = NO_HAND; hands[1][0] = NO_HAND; }
     const s = { board, hands, turn: 0, ply: 0, handicap, last: null, keys: [posKey(board, hands, 0)], checks: [false], result: null };
     if (auto) s.auto = true; // なしのときは局面に何も足さない（今までと同じ形）
+    if (rules.try === 'on') s.trial = true; // トライも同じ
     return s;
   },
 
@@ -383,7 +395,10 @@ export default {
       last: { ...mv, side: s.turn, note: notation(s, mv, s.last?.t), check },
     };
     if (s.auto) n.auto = true;
-    if (!legalMoves(b, h, next, true, !!s.auto).length) {
+    if (s.trial) n.trial = true;
+    if (s.trial && isTry(s.board, s.turn, mv)) {
+      n.result = { winner: s.turn, cells: [mv.t], reason: 'トライ（玉が相手の玉の最初のマスに入った）' };
+    } else if (!legalMoves(b, h, next, true, !!s.auto).length) {
       n.result = { winner: s.turn, cells: [], reason: '詰み' };
     } else if (keys.filter((k) => k === key).length >= 4) {
       // 千日手。くり返しの間ずっと王手をかけていた側の負け
@@ -410,6 +425,7 @@ export default {
     if (s.handicap !== 'none') parts.push(`${HANDICAPS[s.handicap]}（☗先手が上手）`);
     if (s.hands[0][0] === NO_HAND) parts.push('持ち駒なし');
     if (s.auto) parts.push('いつも成る');
+    if (s.trial) parts.push('トライあり');
     if (s.last?.note) parts.push(`${s.ply}手目 ${s.last.note}`);
     if (s.result) parts.push(s.result.reason);
     else if (s.last?.check) parts.push('<b class="sg-check-text">王手！</b>');
@@ -507,6 +523,7 @@ export default {
       if (i === ui.from) cell.classList.add('selected');
       if (isTarget) cell.classList.add('target');
       if (i === checkedKing) cell.classList.add('checked');
+      if (s.trial && (i === trySq(0, N) || i === trySq(1, N))) cell.classList.add('try'); // トライのマスに薄い印
       if (v) {
         const t = Math.abs(v);
         const owner = v > 0 ? 0 : 1;
@@ -572,4 +589,4 @@ export default {
 };
 
 // テスト用
-export const _test = { legalMoves, attacked, kingSq, initialBoard, miniBoard, evaluate };
+export const _test = { legalMoves, attacked, kingSq, initialBoard, miniBoard, evaluate, trySq };

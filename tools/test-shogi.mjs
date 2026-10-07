@@ -499,5 +499,57 @@ function perft(board, hands, side, d) {
   }
 }
 
+// トライ（詳細設定）: 玉が相手の玉の最初のマスに入ったら勝ち。利きのあるマスへは入れない。なしでは今と同じ
+{
+  const t0 = shogi.init({ rules: { try: 'on' } });
+  check('トライ: 局面に trial が付き、なしでは付かない', t0.trial === true && !('trial' in shogi.init()) && !('trial' in shogi.init({ rules: { try: 'off' } })));
+  check('トライ: 3×4・3人には付かない', !('trial' in shogi.init({ rules: { try: 'on', size: 'zoo' } })) && !('trial' in shogi.init({ rules: { try: 'on', players: 3 } })));
+  // 先手の玉 5二・後手の玉 1一
+  const base = position([[1, 4, 8], [0, 8, -8], [8, 0, 2]]);
+  const won = shogi.apply({ ...base, trial: true }, { f: sq(1, 4), t: sq(0, 4), pr: false });
+  check('トライ: 先手の玉が 5一 に入ったら先手の勝ち', won?.result?.winner === 0 && /トライ/.test(won.result.reason) && won.trial === true, won?.result?.reason);
+  const plain = shogi.apply(base, { f: sq(1, 4), t: sq(0, 4), pr: false });
+  check('トライ: なしでは 5一 に入っても続く', plain && !plain.result);
+  const side = shogi.apply({ ...base, trial: true }, { f: sq(1, 4), t: sq(0, 3), pr: false });
+  check('トライ: ほかのマスでは続く', side && !side.result);
+  // 後手の金が 4一 にいると 5一 に利いているので入れない
+  const guarded = position([[1, 4, 8], [0, 8, -8], [0, 3, -5]]);
+  check('トライ: 利きのある 5一 には入れない', shogi.apply({ ...guarded, trial: true }, { f: sq(1, 4), t: sq(0, 4), pr: false }) === null);
+  // 後手の玉が 5九 に入る
+  const gote = position([[7, 4, -8], [8, 0, 8]], { turn: 1 });
+  const gw = shogi.apply({ ...gote, trial: true }, { f: sq(7, 4), t: sq(8, 4), pr: false });
+  check('トライ: 後手の玉が 5九 に入ったら後手の勝ち', gw?.result?.winner === 1);
+  // 5五将棋: 先手は 5一（マス0）、後手は 1五（マス24）
+  check('トライ: 5五将棋のトライのマスは相手の玉の最初のマス', _test.trySq(0, 5) === _test.miniBoard().indexOf(-8) && _test.trySq(1, 5) === _test.miniBoard().indexOf(8)
+    && _test.trySq(0, 9) === _test.initialBoard('none').indexOf(-8) && _test.trySq(1, 9) === _test.initialBoard('none').indexOf(8));
+  const mini = shogi.init({ rules: { size: 'mini', try: 'on' } });
+  const mb = Array(25).fill(0);
+  mb[5] = 8; mb[24 - 4] = -8; // 先手の玉 5二・後手の玉 5五
+  const mk = `${mb.join(',')}|${mini.hands[0].join('')}|${mini.hands[1].join('')}|0`;
+  const mw = shogi.apply({ ...mini, board: mb, keys: [mk] }, { f: 5, t: 0, pr: false });
+  check('トライ: 5五将棋で先手の玉が 5一 に入ったら勝ち', mw?.result?.winner === 0);
+  // CPU（つよい・ふつう）はトライできるならする
+  const cpuTry = ['strong', 'normal'].every((cpu) => {
+    const m = shogi.cpu({ ...base, trial: true }, 0, { cpu });
+    return m && m.f === sq(1, 4) && m.t === sq(0, 4);
+  });
+  check('トライ: CPU（つよい・ふつう）は入れるならトライする', cpuTry);
+  // CPU どうしで最後まで（当て直すと同じ局面）
+  for (const [label, rules] of [['本将棋', {}], ['5五将棋', { size: 'mini' }]]) {
+    let x = shogi.init({ rules: { ...rules, try: 'on' } });
+    const moves = [];
+    let bad = 0;
+    while (!x.result) {
+      const mv = JSON.parse(JSON.stringify(shogi.cpu(x, x.turn, { cpu: 'weak' })));
+      const n = shogi.apply(x, mv);
+      if (!n) { bad++; break; }
+      moves.push(mv);
+      x = n;
+    }
+    const again = moves.reduce((y, m) => (y ? shogi.apply(y, m) : null), shogi.init({ rules: { ...rules, try: 'on' } }));
+    check(`トライ: ${label}の CPU どうしで最後まで指せ、当て直すと同じ局面`, !bad && again?.keys.at(-1) === x.keys.at(-1) && again.result?.reason === x.result.reason, `${x.ply}手・${x.result?.reason}`);
+  }
+}
+
 console.log(failed ? `\n${failed} 件の失敗` : '\nすべて OK');
 process.exit(failed ? 1 : 0);

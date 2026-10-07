@@ -479,6 +479,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .sg .sg-cell.last { background: #f5b98e; }
 .sg .sg-cell.selected { background: #f3c74b; }
 .sg .sg-cell.checked { background: #f08a7a; }
+.sg .sg-cell.try::before { content: ""; position: absolute; inset: 10%; border: 2px dashed rgba(198, 45, 31, .4); border-radius: 4px; pointer-events: none; } /* トライのマス */
 .sg button.sg-cell { cursor: pointer; }
 .sg .sg-cell.target::after { content: ""; position: absolute; width: 30%; height: 30%; border-radius: 50%; background: rgba(217, 100, 58, .7); pointer-events: none; }
 .sg .sg-cell.target:has(.sg-piece)::after { width: 88%; height: 88%; background: none; border: 3px solid rgba(217, 100, 58, .85); border-radius: 6px; }
