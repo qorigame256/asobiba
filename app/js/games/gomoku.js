@@ -9,13 +9,42 @@
 //   Claude の判断: 「三」は、もう1つ置くと両端の空いた四（達四）になる並び。その1つが禁じ手かどうかまでは見ない（正式にはさかのぼって見るが、まれなため）。
 //   同じ線の上の2つの四（●_●●●_● など）も四四に数える。黒が置ける点が禁じ手しか無くなったら引き分け。
 //   「ぴったり五目」と同時なら、白も6つ以上では勝てない（黒の長連は禁じ手のまま）。「はさみ取り」とも同時に使える（取る前の盤で見る）。
+// 詳細設定「じゃま石」（2026-10-07 の17回目。最初はなし）: 始める前に、だれの物でもない灰色の石（BLOCK）を置く。じゃま石には置けず、並びはそこで切れる。
+//   Claude の判断: 15路で6個・13路で5個。置き場所は対局の種（init の seed）から決める（全員の端末で同じ）。盤の一番外の線と、天元から2マス以内（真ん中の 5×5）には置かない。
+//   じゃま石どうしは縦・横・ななめに2マス以上あける（並ばない・すぐ近くに固まらない）。はさみ取りでは取れず、はさむ石にもならない。禁じ手では盤の外と同じに見る。
+//   CPU は置けない点・並びを切る石として見る（盤が空のときは真ん中に打つ。じゃま石のとなりを「石の近く」とは見ない）。
 // 盤は詳細設定で 15路（最初）か 13路。手 = 点の番号（段*路数+列。段0が一番上）。全部埋まったら引き分け。
 
-import { CPU_SETTING } from './util.js';
+import { CPU_SETTING, mulberry32 } from './util.js';
 
 const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
 const DIRS8 = [...DIRS, ...DIRS.map(([r, c]) => [-r, -c])];
 const CAP_GOAL = 5; // はさみ取り: この組数を取ったら勝ち
+const BLOCK = -1; // じゃま石（だれの物でもない）
+
+// じゃま石を置いた最初の盤（種から決める。乱数や時刻は使わない）
+function blockers(n, seed) {
+  const grid = Array(n * n).fill(null);
+  const rnd = mulberry32(seed ^ 0x90b0);
+  const count = n === 15 ? 6 : 5;
+  const mid = (n - 1) / 2;
+  const put = [];
+  for (let k = 0; k < count; k++) {
+    const free = [];
+    for (let r = 1; r < n - 1; r++) {
+      for (let c = 1; c < n - 1; c++) {
+        if (Math.max(Math.abs(r - mid), Math.abs(c - mid)) <= 2) continue; // 天元から2マス以内には置かない
+        if (put.some(([pr, pc]) => Math.max(Math.abs(r - pr), Math.abs(c - pc)) <= 2)) continue; // ほかのじゃま石と2マス以上あける
+        free.push([r, c]);
+      }
+    }
+    if (!free.length) break; // 15路・13路では起きない
+    const [r, c] = free[Math.floor(rnd() * free.length)];
+    put.push([r, c]);
+    grid[r * n + c] = BLOCK;
+  }
+  return grid;
+}
 
 // はさみ取り: 点 i に p が置いたときに取れる相手の石（点の番号の一覧。2つずつ）
 function captures(grid, n, i, p) {
@@ -206,7 +235,7 @@ function cellValue(s, i, p) {
   return v;
 }
 
-// 石の近く（2マス以内）の空いた点。盤が空なら真ん中
+// 石の近く（2マス以内）の空いた点。盤が空（じゃま石だけ）なら真ん中
 function candidates(s) {
   const n = s.size;
   const out = [];
@@ -219,7 +248,8 @@ function candidates(s) {
       for (let dc = -2; dc <= 2; dc++) {
         const rr = r + dr;
         const cc = c + dc;
-        if (rr >= 0 && rr < n && cc >= 0 && cc < n && s.grid[rr * n + cc] !== null) { near = true; break; }
+        const v = rr >= 0 && rr < n && cc >= 0 && cc < n ? s.grid[rr * n + cc] : null;
+        if (v === 0 || v === 1) { near = true; break; } // じゃま石は数えない
       }
     }
     if (near) out.push(i);
@@ -282,14 +312,16 @@ export default {
     { key: 'exact', label: 'ぴったり五目', desc: 'ちょうど5つで勝ち。6つ以上つながっても勝ちにならない', def: false },
     { key: 'renju', label: '禁じ手', desc: '先手の黒だけ、三三・四四・6つ以上並ぶ点に置けない（連珠のルール。先手の有利を消す）', def: false },
     { key: 'capture', label: 'はさみ取り', desc: '相手の石がちょうど2つ並んだ両側をはさむと取れる。5組（10個）取っても勝ち', def: false },
+    { key: 'blocks', label: 'じゃま石', desc: '始める前に、だれの物でもない灰色の石を数個置く（置けない・並びが切れる）。場所は毎回ちがう', def: false },
     CPU_SETTING,
   ],
 
   cpu(s, p, rules) { return gomokuCpu(s, rules); },
 
-  init({ rules = {} } = {}) {
+  init({ rules = {}, seed = 0 } = {}) {
     const size = rules.size === 13 ? 13 : 15;
-    return { size, exact: !!rules.exact, renju: !!rules.renju, capture: !!rules.capture, caps: [0, 0], taken: [], grid: Array(size * size).fill(null), turn: 0, last: null, won: null, count: 0 };
+    const grid = rules.blocks ? blockers(size, seed) : Array(size * size).fill(null);
+    return { size, exact: !!rules.exact, renju: !!rules.renju, capture: !!rules.capture, caps: [0, 0], taken: [], grid, turn: 0, last: null, won: null, count: 0 };
   },
 
   turn(s) { return s.turn; },
@@ -331,7 +363,17 @@ export default {
       cell.className = 'gm-pt' + (r === 0 ? ' t' : '') + (r === n - 1 ? ' b' : '') + (c === 0 ? ' l' : '') + (c === n - 1 ? ' r' : '');
       if (stars.includes(r) && stars.includes(c)) cell.classList.add('star');
       const v = s.grid[i];
-      if (v !== null) {
+      if (v === BLOCK) {
+        // じゃま石: 黒とも白とも見分けやすい、しま模様の灰色（style.css は使わず、ここで付ける）
+        const stone = document.createElement('span');
+        stone.className = 'gm-stone pn';
+        stone.style.background = 'repeating-linear-gradient(45deg, #7b8188 0 3px, #a4aab0 3px 6px)';
+        stone.style.boxShadow = 'inset 0 0 0 1.5px #5d636a, 0 1px 2px rgba(0, 0, 0, .4)';
+        stone.title = 'じゃま石';
+        cell.append(stone);
+        cell.tabIndex = -1;
+        cell.setAttribute('aria-label', `${r + 1}段目 ${c + 1}列目（じゃま石）`);
+      } else if (v !== null) {
         const stone = document.createElement('span');
         stone.className = 'gm-stone p' + v + (win.has(i) ? ' win' : '') + (i === s.last ? ' last' : '') + (i === s.last && o.fresh ? ' pop' : '');
         cell.append(stone);

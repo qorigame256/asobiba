@@ -1695,6 +1695,75 @@ for (let k = 0; k < 100; k++) {
   assert.equal(st.scores.reduce((a, b) => a + b, 0), st.cards.length / 2, '色もそろえるでも組の数の合計は枚数の半分');
 }
 console.log('memory color pairs', mmColor);
+// 13ならべ: 足して13の2枚で組（同じ数字では取れない）。ありのときは枚数の設定を見ず48枚。なしのときは今までと全く同じ
+{
+  const { createHash } = await import('node:crypto');
+  const { mulberry32 } = await import('../app/js/games/util.js');
+  // なしのとき: 決まった手順（種から作る乱数でめくる）で最後まで打った全部の局面の指紋が、13ならべを足す前と同じ
+  const h = createHash('sha256');
+  for (let k = 0; k < 12; k++) {
+    const rules = { size: [48, 36, 24][k % 3], streak: [0, 2, 3, 0][k % 4], hint: k % 2 ? 'on' : 'off', color: k % 5 === 0 ? 'on' : 'off' };
+    if (k % 4 === 1) rules.thirteen = 'off';
+    let st = MM.init(2 + (k % 7), k * 7 + 1, { rules });
+    const rnd = mulberry32(k + 100);
+    h.update(JSON.stringify(st));
+    while (!MM.result(st)) {
+      const fresh = st.open.length === 2 ? [] : st.open;
+      const left = st.cards.map((_, i) => i).filter((i) => st.taken[i] === null && !fresh.includes(i));
+      st = MM.apply(st, { p: st.turn, t: 'flip', i: left[Math.floor(rnd() * left.length)] });
+      h.update(JSON.stringify(st));
+    }
+  }
+  assert.equal(h.digest('hex').slice(0, 16), '043ab491af2df9f6', '13ならべ なしでは今までと全く同じ局面');
+  assert.ok(!('thirteen' in MM.init(2, 5, { rules: {} })) && !('thirteen' in MM.init(2, 5, { rules: { thirteen: 'off' } })), 'なしでは thirteen を持たない');
+  // 枚数: ありのときはいつも48枚（A〜Q）。同じ種なら なしの48枚と同じ並び
+  for (const size of [48, 36, 24]) {
+    const m = MM.init(3, 9, { rules: { size, thirteen: 'on' } });
+    assert.equal(m.thirteen, true);
+    assert.deepEqual(m.cards, MM.init(3, 9, { rules: { size: 48 } }).cards, `13ならべは${size}枚を選んでいても48枚`);
+  }
+  s = { ...MM.init(2, 0, { rules: { thirteen: 'on' } }), cards: ['s7', 'h7', 'c6', 'd12', 's1', 'h11', 'c2', 'd7'], taken: Array(8).fill(null), seen: Array(8).fill(false) };
+  t = mmFlip(s, 0, 0, 1);
+  assert.deepEqual([t.last.match, t.turn], [false, 1], '13ならべでは同じ数字（7と7）は取れない');
+  t = mmFlip(t, 1, 0, 2);
+  assert.deepEqual([t.last.match, t.taken[0], t.taken[2], t.turn], [true, 1, 1, 1], '7＋6＝13 で取れて、もう1回');
+  t = mmFlip(t, 1, 3, 4);
+  assert.deepEqual([t.last.match, t.scores[1]], [true, 2], 'Q＋A＝13 で取れる');
+  t = mmFlip(t, 1, 5, 6);
+  assert.equal(t.last.match, true, 'J＋2＝13 で取れる');
+  t = mmFlip(t, 1, 1, 7);
+  assert.deepEqual([t.last.match, t.turn], [false, 0], '合計14ははずれ');
+  // 色もそろえると一緒: 足して13で色も同じ2枚だけ
+  s = { ...MM.init(2, 0, { rules: { thirteen: 'on', color: 'on' } }), cards: ['s7', 'h6', 'c6', 'd6'], taken: Array(4).fill(null), seen: Array(4).fill(false) };
+  t = mmFlip(s, 0, 0, 1);
+  assert.deepEqual([t.last.match, t.last.hue, t.turn], [false, true, 1], '♠7＋♥6 は色が違うのではずれ');
+  t = mmFlip(t, 1, 0, 2);
+  assert.equal(t.last.match, true, '♠7＋♣6 は黒どうしで組');
+  t = mmFlip(t, 1, 1, 3);
+  assert.equal(t.last.match, false, '♥6＋♦6 は同じ色でも足して12なのではずれ');
+  // CPU どうしで最後まで（ほかの詳細設定とも一緒に）。取った組はどれも足して13で、全部取り切れる
+  let mm13 = 0;
+  for (let k = 0; k < 120; k++) {
+    const n = 2 + (k % 7);
+    const rules = { size: [48, 36, 24][k % 3], thirteen: 'on', color: k % 2 ? 'on' : 'off', streak: [0, 2, 3][k % 3], hint: k % 4 ? 'off' : 'on' };
+    let st = MM.init(n, k * 13 + 7, { rules });
+    let steps = 0;
+    while (!MM.result(st)) {
+      st = MM.apply(st, { ...MM.cpu(st, st.turn), p: st.turn });
+      assert.ok(st, '神経衰弱（13ならべ）の CPU が反則の手を出した');
+      if (st.last.t === 'pair' && st.last.match) {
+        const [a, b] = [st.cards[st.last.a], st.cards[st.last.b]];
+        assert.equal(Number(a.slice(1)) + Number(b.slice(1)), 13, '13ならべの組は足して13');
+        if (st.color) assert.ok((a[0] === 'h' || a[0] === 'd') === (b[0] === 'h' || b[0] === 'd'), '色もそろえるなら同じ色');
+        mm13++;
+      }
+      if (++steps > 8000) throw new Error('神経衰弱（13ならべ）が終わらない');
+    }
+    assert.ok(st.taken.every((x) => x !== null), '13ならべでも全部取り切れる');
+    assert.equal(st.scores.reduce((a, b) => a + b, 0), 24, '13ならべの組は24組');
+  }
+  console.log('memory thirteen pairs', mm13);
+}
 // ---------- 石取り ----------
 const NIM = GAMES.nim;
 const { goodMove } = await import('../app/js/games/nim.js');
@@ -1801,6 +1870,64 @@ for (let k = 0; k < 300; k++) {
     wonBy[res.winners.includes(st.ender) ? 0 : 1]++;
   }
   console.log('nim count: winner took last / not', wonBy.join(' / '));
+}
+// 残りを隠す（rules.hide。2026-10-07 の17回目）: 画面の中身に残りの数を入れない・残りより多く選ぶと残りを全部取る・なしでは前と同じ
+{
+  const { hiddenView } = await import('../app/js/games/nim.js');
+  const hb = (o) => nimBase({ rules: { last: 'lose', hide: true }, ...o });
+  assert.ok(NIM.settings.some((x) => x.key === 'hide' && x.def === false), '詳細設定に「残りを隠す」（最初はなし）がある');
+  // 画面に出す中身: 取られた数と直前の手だけ。残りの数・最初の数は入れない
+  let h = NIM.apply(hb({ piles: [20], start: [20] }), { p: 0, t: 'take', pile: 0, k: 3 });
+  const v = hiddenView(h, 1);
+  assert.equal(v.taken, 3, 'これまでに取られた数');
+  assert.deepEqual(v.last, { p: 0, k: 3, you: false }, '直前に取られた数');
+  assert.deepEqual(v.buttons, [1, 2, 3], '押せる数はいつも 1〜最大数');
+  assert.ok(!JSON.stringify(v).includes('17') && !JSON.stringify(v).includes('20'), '残りの数・最初の数は入れない');
+  assert.deepEqual(hiddenView(hb({ piles: [1], start: [9] }), 0).buttons, [1, 2, 3], '残りが少なくてもボタンは減らさない（減ると残りが分かる）');
+  // 残りより多く選ぶと、残りを全部取る（押した数は want に残す）
+  h = NIM.apply(hb({ piles: [2], start: [9] }), { p: 0, t: 'take', pile: 0, k: 3 });
+  assert.ok(h, '残りを隠すときは残りより多くても選べる');
+  assert.equal(h.piles[0], 0, '残りを全部取る');
+  assert.deepEqual(h.last, { p: 0, pile: 0, k: 2, want: 3 }, '取ったのは残りの数・押した数も残す');
+  assert.equal(NIM.result(h).loser, 0, '最後の1個まで取ったので負け');
+  assert.deepEqual(h, NIM.apply(hb({ piles: [2], start: [9] }), { p: 0, t: 'take', pile: 0, k: 3 }), '同じ手から同じ局面');
+  assert.equal(NIM.apply(hb({ piles: [2], start: [9] }), { p: 0, t: 'take', pile: 0, k: 4 }), null, '最大数より多くは選べない');
+  assert.equal(NIM.apply(hb({ piles: [5], start: [9] }), { p: 0, t: 'take', pile: 0, k: 2 }).last.want, undefined, '足りているときは want を付けない');
+  const hc = NIM.apply(hb({ rules: { last: 'count', hide: true }, got: [4, 0, 0], piles: [1], start: [9], turn: 1 }), { p: 1, t: 'take', pile: 0, k: 3 });
+  assert.deepEqual(hc.got, [4, 1, 0], '取った数で勝負でも、数えるのは実際に取った数');
+  assert.equal(NIM.result(hc).winners[0], 0, '取った数で勝負と一緒に使える');
+  const hw = NIM.apply(hb({ rules: { last: 'win', hide: true }, piles: [2], start: [9] }), { p: 0, t: 'take', pile: 0, k: 3 });
+  assert.equal(NIM.result(hw).winner, 0, '最後の1個で勝ちと一緒に使える');
+  // なしのときは前と全く同じ（同じ手で同じ局面・残りより多くは反則）
+  for (let k = 0; k < 40; k++) {
+    const rules = [{}, { last: 'win' }, { last: 'count' }][k % 3];
+    let a = NIM.init(3, k, { rules });
+    let b = NIM.init(3, k, { rules: { ...rules, hide: false } });
+    assert.deepEqual({ ...b, rules: a.rules }, a, 'なしの局面は前と同じ形');
+    for (let i = 0; !NIM.result(a); i++) {
+      const m = { p: a.turn, t: 'take', pile: 0, k: Math.min(1 + (i % a.max), a.piles[0]) };
+      a = NIM.apply(a, m);
+      b = NIM.apply(b, m);
+      assert.deepEqual({ ...b, rules: a.rules }, a, 'なしでは同じ手で前と同じ局面');
+    }
+  }
+  assert.equal(NIM.apply(nimBase({ rules: { last: 'lose', hide: false }, piles: [2], start: [2] }), { p: 0, t: 'take', pile: 0, k: 3 }), null, 'なしでは残りより多くは取れない（前と同じ）');
+  // CPU どうしで最後まで（勝ち負け3つ・2〜6人）。人がいつも最大数を押すと、最後は残りを全部取って終わる
+  for (let k = 0; k < 300; k++) {
+    const rules = { last: ['lose', 'win', 'count'][k % 3], hide: true, max: [0, 3, 4, 5][k % 4] };
+    const n = 2 + (k % 5);
+    let st = NIM.init(n, k, { rules });
+    let steps = 0;
+    while (!NIM.result(st)) {
+      const m = st.turn === 0 && k % 2 ? { t: 'take', pile: 0, k: st.max } : NIM.cpu(st, st.turn);
+      const next = NIM.apply(st, { ...m, p: st.turn });
+      assert.ok(next, '残りを隠すで反則の手: ' + JSON.stringify(m));
+      st = next;
+      if (++steps > 200) throw new Error('残りを隠すが終わらない');
+    }
+    assert.equal(st.piles[0], 0, '最後は山が空になる');
+    if (rules.last === 'count') assert.equal(st.got.reduce((x, y) => x + y, 0), st.start[0], '取った数の合計は最初の山の数');
+  }
 }
 
 // ---------- 旗揚げ ----------
@@ -2269,6 +2396,59 @@ for (const level of ['easy', 'hard', 'expert', 'mix']) {
     performance.now = realNow;
   }
 }
+// ふりかえり（2026-10-07 の17回目。いつも出す）: 出た順・自分の正解に ⭕・まちがい／答えなかったら ❌・観戦は印なし・いちばん速い人。点は変えない
+{
+  const { reviewOf } = await import('../app/js/games/kanji.js');
+  for (const [rules, seed] of [[{}, 31], [{ choice: true, hint: true, rounds: 15 }, 32], [{ choice: true, rounds: 20, level: 'mix' }, 33], [{ hint: true, rounds: 20, level: 'expert' }, 34]]) {
+    const choice = !!rules.choice;
+    let st = KJ.init(3, seed, { rules });
+    const try_ = (p, text, ms, n = 1) => { const x = KJ.apply(st, { p, t: 'try', q: st.q, text, ms, n }); assert.ok(x, 'ふりかえりの確認の手'); st = x; };
+    const wrongOf = () => (choice ? st.opts[st.q].find((x) => !isRight(st.qs[st.q][1], x)) : 'ちがうよみ');
+    while (!KJ.result(st)) {
+      st = ref(KJ, st, 'next');
+      if (KJ.result(st)) break;
+      const right = st.qs[st.q][1][0];
+      if (st.q % 4 === 0) { // 0は一度まちがえて（打ち込むなら答え直して正解）、2が速く正解
+        try_(0, wrongOf(), 2000);
+        if (!choice) try_(0, right, 4000, 2);
+        try_(2, right, 3500);
+      } else if (st.q % 4 === 1) { // だれも正解しない（0はまちがい）
+        try_(0, wrongOf(), 1000);
+      } else if (st.q % 4 === 2) { // 0と1が同じ速さで正解
+        try_(0, right, 5000);
+        try_(1, right, 5000);
+      } // 3: だれも答えない
+      st = ref(KJ, st, 'close');
+    }
+    const rows = reviewOf(st, 0);
+    assert.equal(rows.length, st.qs.length, 'ふりかえりは全部の問題: ' + st.qs.length);
+    assert.deepEqual(rows.map((r) => r.word), st.qs.map(([w]) => w), '出た順');
+    assert.deepEqual(rows.map((r) => r.n), st.qs.map((_, i) => i + 1), '問題の番号');
+    assert.deepEqual(rows.map((r) => r.yomi), st.qs.map(([, ys]) => ys.join('／')), '正しい読み（2つ以上は全部）');
+    rows.forEach((r, q) => {
+      const kind = q % 4;
+      const mine = choice ? kind === 2 : kind === 0 || kind === 2; // 4つから選ぶでは、まちがえたら答え直せない
+      assert.equal(r.mark, mine ? '⭕' : '❌', `自分の印 ${q + 1}問目`);
+      assert.deepEqual(r.fast, kind === 0 ? [2] : kind === 2 ? [0, 1] : [], `いちばん速い人 ${q + 1}問目`);
+      assert.equal(r.ms, kind === 0 ? 3500 : kind === 2 ? 5000 : null, '速さ');
+    });
+    assert.ok(reviewOf(st, 2).every((r, q) => r.mark === (q % 4 === 0 ? '⭕' : '❌')), 'ほかの人の印はその人の正解で決まる');
+    assert.ok(reviewOf(st, null).every((r) => r.mark === '') && reviewOf(st, -1).every((r) => r.mark === ''), '観戦の人には印を付けない');
+    // 点は今までどおり（ふりかえりの記録は点に使わない）
+    const quarter = (k) => st.qs.filter((_, q) => q % 4 === k).length;
+    assert.deepEqual(st.scores, [quarter(2), quarter(2), quarter(0)], '点は速く正解した人に1点のまま');
+    assert.deepEqual(rows.map((r) => r.fast), st.log.map((x) => x.winners), '点を付けた人とふりかえりの速い人は同じ');
+  }
+  // 途中では締め切った問題だけ。始める前は空
+  let st = KJ.init(2, 40, { rules: {} });
+  assert.deepEqual(reviewOf(st, 0), [], '始める前は空');
+  assert.equal(st.log, undefined, '始める前の局面は前と同じ形');
+  st = ref(KJ, st, 'next');
+  st = ref(KJ, st, 'close');
+  st = ref(KJ, st, 'next');
+  assert.equal(reviewOf(st, 0).length, 1, '締め切った問題だけ');
+  assert.deepEqual(reviewOf(st, 0)[0], { n: 1, word: st.qs[0][0], yomi: st.qs[0][1].join('／'), mark: '❌', fast: [], ms: null }, '答えなかった問題は ❌・速い人なし');
+}
 
 // ---------- ぴったりストップ ----------
 const PZ = GAMES.pittari;
@@ -2622,6 +2802,78 @@ assert.notEqual(GM.cpu(s, 0, { cpu: 'strong' }), 3, 'ぴったり五目の CPU �
   for (const m of [0, 16, 100, 32]) g = GM.apply(g, m);
   g = GM.apply(g, 48);
   assert.deepEqual([g.grid[16], g.grid[32], g.caps[0]], [null, null, 1], 'ななめにも取れる');
+}
+// じゃま石（2026-10-07 の17回目）: 数と場所・種で同じ・置けない・並びが切れる・はさみ取りと禁じ手と一緒・なしでは今と同じ・CPU どうしで最後まで
+{
+  const blocksOf = (st) => st.grid.flatMap((v, i) => (v === -1 ? [i] : []));
+  const shapes = new Set();
+  for (const n of [15, 13]) {
+    const mid = (n - 1) / 2;
+    for (let sd = 1; sd <= 60; sd++) {
+      const b = blocksOf(GM.init({ rules: { size: n, blocks: true }, seed: sd }));
+      assert.equal(b.length, n === 15 ? 6 : 5, `じゃま石の数（${n}路）`);
+      const rc = b.map((i) => [Math.floor(i / n), i % n]);
+      for (const [r, c] of rc) {
+        assert.ok(r > 0 && r < n - 1 && c > 0 && c < n - 1, 'じゃま石は一番外の線に置かない');
+        assert.ok(Math.max(Math.abs(r - mid), Math.abs(c - mid)) > 2, 'じゃま石は天元から2マス以内に置かない');
+      }
+      for (let a = 0; a < rc.length; a++) for (let z = a + 1; z < rc.length; z++) {
+        assert.ok(Math.max(Math.abs(rc[a][0] - rc[z][0]), Math.abs(rc[a][1] - rc[z][1])) > 2, 'じゃま石どうしは2マス以上あける');
+      }
+      assert.deepEqual(GM.init({ rules: { size: n, blocks: true }, seed: sd }).grid, GM.init({ rules: { size: n, blocks: true }, seed: sd }).grid, '同じ種なら同じ場所');
+      shapes.add(n + ':' + b.join());
+    }
+  }
+  assert.ok(shapes.size > 100, '種が違えば場所も変わる');
+  // なしでは今と同じ（種を渡しても）
+  assert.deepEqual(GM.init({ rules: {}, seed: 123 }), GM.init(), 'じゃま石なしでは局面が前と同じ');
+  assert.deepEqual(GM.init({ rules: { blocks: false }, seed: 9 }), GM.init(), 'じゃま石なし（false）でも前と同じ');
+  // 置けない
+  let g = GM.init({ rules: { blocks: true }, seed: 42 });
+  const b0 = blocksOf(g);
+  for (const i of b0) assert.equal(GM.apply(g, i), null, 'じゃま石には置けない');
+  assert.equal(GM.cpu(g, 0, { cpu: 'weak' }), 112, '盤が空（じゃま石だけ）なら CPU は真ん中に打つ');
+  assert.equal(GM.result(g), null);
+  // 並びが切れる: 黒 (3,1)〜(3,4) と (3,6)、(3,5) がじゃま石 → 6つ分あっても勝ちにならない
+  const withBlocks = (rules, list) => { const st = GM.init({ rules }); const grid = st.grid.slice(); for (const i of list) grid[i] = -1; return { ...st, grid }; };
+  g = withBlocks({}, [50]);
+  for (const m of [46, 200, 47, 201, 48, 203, 51, 205]) g = GM.apply(g, m);
+  g = GM.apply(g, 49);
+  assert.equal(GM.result(g), null, 'じゃま石で並びが切れる（その先の石と合わせて5つにならない）');
+  g = GM.init();
+  for (const m of [46, 200, 47, 201, 48, 203, 51, 205, 49, 206]) g = GM.apply(g, m);
+  assert.equal(GM.result(GM.apply(g, 50)).winner, 0, '（比べ: じゃま石が無ければそこに置いて勝ち）');
+  // はさみ取り: じゃま石は取れない・はさむ石にもならない
+  g = withBlocks({ capture: true }, [110, 111]);
+  g = GM.apply(GM.apply(GM.apply(g, 109), 0), 112);
+  assert.deepEqual([g.grid[110], g.grid[111], g.caps], [-1, -1, [0, 0]], 'じゃま石は取れない');
+  g = withBlocks({ capture: true }, [112]);
+  for (const m of [0, 110, 1, 111]) g = GM.apply(g, m);
+  g = GM.apply(g, 109);
+  assert.deepEqual([g.grid[110], g.grid[111], g.caps], [1, 1, [0, 0]], 'じゃま石ははさむ石にならない');
+  // 禁じ手: 3つ並びの先がじゃま石なら「三」にならない（盤の外と同じ）
+  const rj = (list) => { const st = withBlocks({ renju: true }, list); const grid = st.grid.slice(); for (const i of [110, 111, 82, 97]) grid[i] = 0; for (const i of [0, 2, 4, 6]) grid[i] = 1; return { ...st, grid, count: 8 }; };
+  assert.equal(GM.apply(rj([]), 112), null, '（比べ: じゃま石が無ければ三三で置けない）');
+  assert.ok(GM.apply(rj([113]), 112), 'じゃま石で片方が止まった三は数えない（三三にならない）');
+  // CPU どうしで最後まで（ほかの詳細設定とも）。同じ手の一覧から同じ局面になる
+  for (const [k, rules] of [{ blocks: true }, { blocks: true, size: 13 }, { blocks: true, capture: true }, { blocks: true, renju: true }, { blocks: true, exact: true, capture: true }].entries()) {
+    for (const cpu of ['weak', 'normal', 'strong']) {
+      const seed = 1000 + k * 7 + cpu.length;
+      let x = GM.init({ rules, seed });
+      const moves = [];
+      while (!GM.result(x)) {
+        const m = GM.cpu(x, x.turn, { ...rules, cpu });
+        const nx = GM.apply(x, m);
+        assert.ok(nx, `じゃま石ありの CPU（${cpu}）が反則の手 ${m} を出した`);
+        moves.push(m);
+        x = nx;
+        assert.ok(moves.length <= 230, 'じゃま石ありの対局が終わらない');
+      }
+      assert.deepEqual(blocksOf(x), blocksOf(GM.init({ rules, seed })), 'じゃま石は最後まで同じ場所に残る');
+      const y = moves.reduce((st, m) => GM.apply(st, m), GM.init({ rules, seed }));
+      assert.deepEqual(y.grid, x.grid, '同じ種・同じ手の一覧から同じ局面になる');
+    }
+  }
 }
 
 // ---------- 記憶リレー ----------
@@ -4421,6 +4673,63 @@ console.log('kaisen OK');
   assert.notEqual(flyAt(0.7, 0.15, 0.15, -3.85), 'in', 'カゴが動くと同じ投げ方では入らない');
   assert.equal(flyAt(0.7, 0.35, 0.15, -3.85), 'in', 'カゴと一緒にずらして投げれば入る');
   assert.equal(T.init(2, 1).rules.move, 'stay', '最初は止まっている');
+  // ラスト10秒は2点（2026-10-07）
+  assert.equal(T.init(2, 1).rules.last, 'off', '最初は なし');
+  for (const time of ['30', '60', '90']) {
+    const dur = Number(time);
+    const on = T.init(2, 1, { rules: { time, last: 'on' } });
+    assert.equal(TM.isDouble(on, dur - TM.LAST_SEC - 0.001), false, `${time}秒: 境目の前は1点`);
+    assert.equal(TM.isDouble(on, dur - TM.LAST_SEC), true, `${time}秒: 残り10秒からは2点`);
+    assert.equal(TM.isDouble(on, dur + 1), true, `${time}秒: 時間が来たあとに入った玉も2点`);
+    assert.equal(TM.isDouble(T.init(2, 1, { rules: { time } }), dur - 1), false, `${time}秒: なしではいつも1点`);
+  }
+  let w = run(T.init(4, 3, { rules: { last: 'on' } }), [{ p: -1, t: 'go' }, { p: 0, t: 'in', n: 3 }, { p: 1, t: 'in', n: 5 }]);
+  assert.deepEqual(w.bon, [0, 0, 0, 0], 'b が無い手は全部1点');
+  w = run(w, [{ p: 0, t: 'in', n: 5, b: 2 }]);
+  assert.deepEqual(TM.pointsOf(w), [7, 5, 0, 0], '2点の玉は2点');
+  assert.equal(T.apply(w, { p: 0, t: 'in', n: 6, b: 1 }), null, '2点の玉の数は減らない');
+  assert.equal(T.apply(w, { p: 0, t: 'in', n: 6, b: 4 }), null, '2点の玉は入った玉の増えた分まで');
+  assert.equal(T.apply(w, { p: 0, t: 'in', n: 6, b: 2.5 }), null, '2点の玉の数は整数だけ');
+  w = run(w, [{ p: 3, t: 'in', n: 1 }, { p: -1, t: 'end' }]);
+  const rw = T.result(w);
+  assert.deepEqual([rw.teams, rw.winners, rw.scores], [[7, 6], [0, 2], [7, 5, 0, 1]], '入った数は白が多くても、点の多い赤の勝ち');
+  // なしでは今と同じ: b を送られても数えない・点は入った数のまま
+  const off = run(T.init(2, 3), [{ p: -1, t: 'go' }, { p: 0, t: 'in', n: 4, b: 4 }, { p: 1, t: 'in', n: 4 }, { p: -1, t: 'end' }]);
+  assert.deepEqual([TM.pointsOf(off), T.result(off).draw], [[4, 4], true], 'なしでは b を数えない');
+  // CPU どうしで最後まで（時計を偽物にして、時間3つ・カゴ2つ・なし/ありで）
+  const realNow = Object.getOwnPropertyDescriptor(performance, 'now');
+  let fake = 0;
+  performance.now = () => fake;
+  try {
+    let doubled = 0; let seed = 7100;
+    for (const time of ['30', '60', '90']) for (const move of ['stay', 'move']) for (const last of ['off', 'on']) {
+      const dur = Number(time);
+      let st = run(T.init(4, ++seed, { rules: { time, move, last } }), [{ p: -1, t: 'go' }]);
+      fake = 0;
+      let atBorder = null;
+      for (; fake < dur * 1000 + 500; fake += 120) {
+        for (let p = 0; p < 4; p++) {
+          const m = T.cpu(st, p);
+          if (!m) continue;
+          assert.equal('b' in m, last === 'on', 'なしでは CPU の手も今と同じ形');
+          st = run(st, [{ ...m, p }]);
+        }
+        if (fake < (dur - TM.LAST_SEC) * 1000) atBorder = st.cnt.slice();
+      }
+      st = run(st, [{ p: -1, t: 'end' }]);
+      const res = T.result(st);
+      if (last === 'on') {
+        assert.deepEqual(st.bon, st.cnt.map((v, p) => v - atBorder[p]), `${time}秒: 残り10秒からの玉だけが2点`);
+        doubled += st.bon.reduce((a, v) => a + v, 0);
+      } else assert.deepEqual(st.bon, [0, 0, 0, 0], 'なしでは2点の玉は無い');
+      assert.deepEqual(res.teams, [0, 1].map((t) => st.cnt.reduce((a, v, p) => a + (p % 2 === t ? v + st.bon[p] : 0), 0)), '点は入った数＋2点の玉');
+      assert.ok(st.cnt.some((v) => v > 0), 'CPU も入れる');
+    }
+    assert.ok(doubled > 0, 'CPU も2点の玉を入れる');
+  } finally {
+    if (realNow) Object.defineProperty(performance, 'now', realNow);
+    else delete performance.now;
+  }
 }
 
 // ---------- 間違い探し ----------
