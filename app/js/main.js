@@ -64,7 +64,7 @@ function myName() {
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName', 'cpuAuto'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -1317,6 +1317,7 @@ function renderBoardLobby(game) {
   if (hist) board.append(hist);
   appendLobbyExtras(board);
   if (!game.live) board.append(stayPanel());
+  if (cpuLevels(game)) board.append(cpuAutoPanel(game));
   if (game.settings) board.append(rulesPanel(game));
   if (!S.isHost) { controls.append(readyButton(), voteSelect()); return; }
   const start = makeButton('始める', startRound);
@@ -1330,6 +1331,53 @@ function renderBoardLobby(game) {
 }
 
 // 勝ち残りの付け外し（ホストだけ。ほかの人には付いているときだけ出す）
+/* ---------- CPU の強さを自動で合わせる（2026-10-07 本人の決定）: 盤のゲームのもう一回で、人が CPU に勝ったら1段強く、負けたら1段弱く ---------- */
+// Claude の判断: ホストが待合室で付け外しする（部屋の設定。S.cpuAuto）。詳細設定「CPU の強さ」（key cpu）を持つ盤のゲームだけ。
+// 決着の勝った人に人がいて CPU がいなければ1段上げ、CPU がいて人がいなければ1段下げる。引き分け・人どうし・CPU どうしは変えない。
+// 変えた強さは詳細設定に入れる（全員の画面と「いまのルール」に出る）。エアホッケーは結果が main.js を通らないので変わらない。
+function cpuLevels(game) {
+  if (!game || game.multi || game.live) return null;
+  const x = (game.settings ?? []).find((t) => t.key === 'cpu');
+  return x?.choices ? x.choices.map(([v]) => v) : null;
+}
+function adjustCpu(game) {
+  const levels = cpuLevels(game);
+  if (!S.cpuAuto || !levels || S.mode !== 'online' || !S.order) return;
+  const st = replay(S);
+  const res = st && game.result(st);
+  if (!res) return;
+  const won = winnersOf(res).map((p) => S.order[p]);
+  const humanWon = won.some((id) => !isCpu(id));
+  const cpuWon = won.some((id) => isCpu(id));
+  if (humanWon === cpuWon || !S.order.some(isCpu) || S.order.every(isCpu)) return;
+  const cur = rulesOf(game.id, S.rules).cpu;
+  const i = levels.indexOf(cur);
+  const j = Math.max(0, Math.min(levels.length - 1, i + (humanWon ? 1 : -1)));
+  if (i < 0 || j === i) return;
+  S.rules = { ...S.rules, [game.id]: { ...rulesOf(game.id, S.rules), cpu: levels[j] } };
+  rememberRules();
+  const name = game.settings.find((t) => t.key === 'cpu').choices[j][1];
+  toast(`🤖 CPU の強さを「${name}」にしました`);
+}
+function cpuAutoPanel() {
+  const box = document.createElement('div');
+  box.className = 'lobby-stay';
+  if (!S.isHost) {
+    if (S.cpuAuto) box.innerHTML = '<p class="lobby-note">🤖 CPU の強さを自動で合わせます（人が勝つと強く、負けると弱く）</p>';
+    return box;
+  }
+  const label = document.createElement('label');
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.checked = !!S.cpuAuto;
+  input.onchange = () => { S.cpuAuto = input.checked; saveRoom(); sendState(); render(); };
+  const text = document.createElement('span');
+  text.innerHTML = '<b>🤖 CPU の強さを自動で合わせる</b> <small>もう一回のとき、人が CPU に勝ったら1段強く、負けたら1段弱くします</small>';
+  label.append(input, text);
+  box.append(label);
+  return box;
+}
+
 function stayPanel() {
   const box = document.createElement('div');
   box.className = 'lobby-stay';
@@ -1591,6 +1639,7 @@ function newRound(gameId, { lobby = false } = {}) {
     const ids = S.order.map((id) => (isCpu(id) ? 'cpu' : id));
     S.pick = next ? next.pick : [...ids.slice(1), ids[0]];
     if (next) S.line = next.line; // 勝ち残りで負けた人と観戦の人が交代する
+    adjustCpu(prevGame); // CPU の強さを自動で合わせる
   }
   if (gameId !== S.gameId) {
     S.carry = null;
@@ -1857,7 +1906,7 @@ function openNet() {
 function send(msg, qos) { S?.net?.send(msg, qos); }
 function sendState() {
   const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, undo, streak, beg } = S;
-  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {}, roomName: S.roomName ?? '' });
+  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {}, roomName: S.roomName ?? '', cpuAuto: !!S.cpuAuto });
 }
 function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves, u: S.undo ?? 0 }); }
 function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner, mark: myMark() }); }
@@ -1984,6 +2033,7 @@ function adoptState(msg) {
     : null;
   S.tally = msg.tally && Number.isInteger(msg.tally.games) && msg.tally.wins && typeof msg.tally.wins === 'object' ? msg.tally : null;
   S.stay = msg.stay === true;
+  S.cpuAuto = msg.cpuAuto === true;
   S.roomName = cleanRoomName(msg.roomName);
   S.marks = msg.marks && typeof msg.marks === 'object' ? Object.fromEntries(Object.entries(msg.marks).filter(([id, m]) => typeof id === 'string' && MARKS.includes(m) && m)) : {};
   const tm = msg.timer;
