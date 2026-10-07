@@ -1540,6 +1540,7 @@ function enterPlay() {
 
 function leave() {
   stopLive();
+  closeInvite();
   if (S?.mode === 'online') {
     if (!confirm('部屋を出ますか？')) return;
     send({ type: 'bye' });
@@ -1553,20 +1554,90 @@ function leave() {
   showScreen('home');
 }
 
-async function invite() {
+// 招待（2026-10-07 の13回目で QR コードを足した）: 「招待する」で小窓を開き、部屋に入るための QR コードと部屋コードを出す。
+// 「リンクを送る」で前と同じく共有の画面（無ければリンクのコピー）を出す。
+// QR コードを作る道具（qrcode-generator。MIT ライセンス）は mqtt.js と同じく unpkg から版を固定して、初めて開いたときだけ読む。
+// 読めないとき（電波が悪いなど）は QR コードを出さず、部屋コードとリンクを送るボタンだけにする（Claude の判断）。
+const QR_LIB = 'https://unpkg.com/qrcode-generator@1.4.4/qrcode.js';
+let qrLoading = null;
+function loadQr() {
+  if (typeof window.qrcode === 'function') return Promise.resolve(window.qrcode);
+  qrLoading ??= new Promise((resolve, reject) => {
+    const sc = document.createElement('script');
+    sc.src = QR_LIB;
+    sc.onload = () => (typeof window.qrcode === 'function' ? resolve(window.qrcode) : reject(new Error('qrcode')));
+    sc.onerror = () => { qrLoading = null; reject(new Error('qrcode')); };
+    document.head.append(sc);
+  });
+  return qrLoading;
+}
+// 文字から QR コードの SVG を作る（黒いマスを1本の path にまとめる）
+function qrSvg(qrcode, text) {
+  const qr = qrcode(0, 'M');
+  qr.addData(text);
+  qr.make();
+  const n = qr.getModuleCount();
+  const m = 4; // まわりの白い余白（4マス）
+  let d = '';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) d += `M${c + m} ${r + m}h1v1h-1z`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${n + m * 2} ${n + m * 2}" shape-rendering="crispEdges" role="img" aria-label="部屋に入るための QR コード"><rect width="100%" height="100%" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+}
+
+function inviteUrl() {
   const url = new URL(location.href);
   url.search = '?room=' + S.code;
   url.hash = '';
+  return url.href;
+}
+
+async function shareInvite() {
+  const href = inviteUrl();
   const text = `${GAMES[S.gameId]?.name ?? 'ボードゲーム'}で対戦しよう！ 部屋コード: ${S.code}`;
   if (navigator.share) {
-    try { await navigator.share({ title: '対戦しよう', text, url: url.href }); return; } catch (e) { if (e.name === 'AbortError') return; }
+    try { await navigator.share({ title: '対戦しよう', text, url: href }); return; } catch (e) { if (e.name === 'AbortError') return; }
   }
   try {
-    await navigator.clipboard.writeText(`${text}\n${url.href}`);
+    await navigator.clipboard.writeText(`${text}\n${href}`);
     toast('招待リンクをコピーしました');
   } catch {
-    prompt('このリンクを友だちに送ってください', url.href);
+    prompt('このリンクを友だちに送ってください', href);
   }
+}
+
+function closeInvite() { document.querySelector('.invite-pop')?.remove(); }
+
+function invite() {
+  closeInvite();
+  const href = inviteUrl();
+  const pop = document.createElement('div');
+  pop.className = 'invite-pop';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-modal', 'true');
+  pop.setAttribute('aria-label', '友だちを招待する');
+  pop.innerHTML = `<div class="invite-box">
+    <div class="invite-title">友だちを招待する</div>
+    <div class="invite-qr" aria-live="polite"><span class="invite-wait">QR コードを作っています…</span></div>
+    <p class="invite-note">そばにいる友だちは、スマホのカメラでこの QR コードを読み取ると入れます。</p>
+    <div class="invite-code">部屋コード <strong>${esc(S.code)}</strong></div>
+  </div>`;
+  const box = pop.querySelector('.invite-box');
+  const row = document.createElement('div');
+  row.className = 'invite-actions';
+  row.append(makeButton('リンクを送る', shareInvite), makeButton('閉じる', closeInvite, 'secondary'));
+  box.append(row);
+  pop.addEventListener('click', (e) => { if (e.target === pop) closeInvite(); }); // 外側を押したら閉じる
+  pop.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeInvite(); });
+  document.body.append(pop);
+  pop.querySelector('.invite-actions button')?.focus();
+  const code = S.code;
+  loadQr().then((qrcode) => {
+    const slot = pop.querySelector('.invite-qr');
+    if (slot && S?.code === code) slot.innerHTML = qrSvg(qrcode, href);
+  }).catch(() => {
+    const slot = pop.querySelector('.invite-qr');
+    if (slot) slot.innerHTML = '<span class="invite-wait">QR コードを作れませんでした（電波を確かめてください）。リンクを送ってください。</span>';
+    pop.querySelector('.invite-note')?.remove();
+  });
 }
 
 /* ---------- 通信 ---------- */
