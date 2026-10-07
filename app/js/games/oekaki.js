@@ -11,6 +11,11 @@
 // 2つのお題は、なしと同じく対局の種でまぜたお題の並びから、n回目（0から数える）は 2n番目とその次（ほかの回と重ならない。選ばなかったお題もその対局では出ない）。
 // 選ぶまでは描けず、答えも打てない。10秒たったら進行役が1つ目に決める（描く人が部屋を出ていても進む）。制限時間は選んだあとから数える。
 // なしのときは、お題の並びも局面の形も前と同じ。
+// 詳細設定「インクの量」をありにすると（2026-10-07 の14回目）、1回に描ける線の長さが INK まで（絵の幅の8本ぶん）。局面の ink に使った量を持つ
+// （ありのときだけ。なしでは局面の形は前と同じ）。量は線の長さだけで数え、太さは関係ない。消しゴムは使わない。
+// 「1つ戻す」「全部消す」で消した線のインクは戻る（失敗しても描き直せるように。Claude の判断）。
+// 長さは座標の整数から Math.sqrt で数えて丸める（どの端末でも同じ数になるように。Math.hypot は端末で末尾がずれることがある）。
+// 足りない線は届いた手の側で、インクがなくなる所で切る（clipInk）。描く人の画面でも同じ所でペンが止まる。
 //
 // 描いた線は、ペンを動かしている間 0.5秒ごとに区切って「線」の手として送る（離れていても描いている途中が見えるように）。
 // 座標は 0〜999（絵の左上が 0）を2文字ずつに縮めて送る（ENC）。手の一覧を毎回まるごと送る作りなので、送る量を小さくしたい。
@@ -33,6 +38,8 @@ const GUESS_PT = [10, 8, 6];
 const DRAWER_PT = 3;
 const HINT_AT = 0.75; // ヒントの最初の1文字を見せる時（制限時間のこの割合がたったら＝残り4分の1）
 const PICK_MS = 10000; // お題を選ぶ時間
+export const INK = 8000; // インクの量（詳細設定）: 1回に描ける線の長さ（座標 0〜999 で数える。絵の幅の8本ぶん）
+const ERASER = COLORS.length - 1;
 
 const ENC = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 export function encode(pts) {
@@ -48,6 +55,33 @@ export function decode(d) {
 }
 const validD = (d) => typeof d === 'string' && d.length >= 4 && d.length <= MAX_D && d.length % 4 === 0
   && [...d].every((ch) => ENC.includes(ch)) && decode(d).every(([x, y]) => x < 1000 && y < 1000);
+
+// インクの量: 線の長さ（座標の整数から数える。どの端末でも同じ数になるように丸める）
+const segInk = (a, b) => Math.round(Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2));
+export function inkOf(pts) {
+  let n = 0;
+  for (let i = 1; i < pts.length; i++) n += segInk(pts[i - 1], pts[i]);
+  return n;
+}
+// 残り rem で描ける所まで線を切る。{ pts, used }（1つも描けなければ pts は1点以下）
+export function clipInk(pts, rem) {
+  const out = [pts[0]];
+  let used = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const c = segInk(pts[i - 1], pts[i]);
+    if (used + c <= rem) { out.push(pts[i]); used += c; continue; }
+    const left = rem - used;
+    if (left > 0 && c > 0) {
+      const [x0, y0] = pts[i - 1];
+      const q = [Math.round(x0 + ((pts[i][0] - x0) * left) / c), Math.round(y0 + ((pts[i][1] - y0) * left) / c)];
+      const k = segInk(pts[i - 1], q);
+      if (k > 0 && used + k <= rem) { out.push(q); used += k; }
+    }
+    break;
+  }
+  return { pts: out, used };
+}
+const strokesInk = (strokes) => strokes.reduce((n, st) => n + (st.c === ERASER ? 0 : inkOf(decode(st.d))), 0);
 
 // 答えの読み（ひらがなだけの書き方）。文字数のヒントに使う
 export function readingOf(topic) {
@@ -71,6 +105,7 @@ const clone = (s) => ({ ...s, strokes: s.strokes.slice(), scores: s.scores.slice
 function newTurn(s) {
   s.phase = s.pick ? 'choose' : 'draw';
   s.strokes = [];
+  if (s.ink !== undefined) s.ink = 0;
   s.dn = 0;
   s.ver += 1;
   s.correct = [];
@@ -105,6 +140,7 @@ export default {
   settings: [
     { key: 'time', label: '1回の制限時間', desc: '全員が当てたら、時間の前でも次へ進む', def: 80, choices: [[60, '60秒'], [80, '80秒'], [120, '120秒']] },
     { key: 'hint', label: 'ヒント', desc: '残り時間が4分の1になると、当てる人に答えの最初の1文字を見せる（文字数はいつも見える）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
+    { key: 'ink', label: 'インクの量', desc: '1回に描ける線の長さに限りがある（絵の幅の8本ぶん）。少ない線で伝える工夫を楽しむ。「1つ戻す」「全部消す」でインクは戻る', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'pick', label: 'お題を選ぶ', desc: '描く人が2つのお題から描きやすい方を選んでから描く（選ぶ時間は10秒）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
   ],
 
@@ -121,6 +157,7 @@ export default {
       s.opts = Array.from({ length: n }, (_, t) => [order[2 * t], order[2 * t + 1]]);
       s.topics = Array(n).fill(null);
     }
+    if (rules.ink === 'on') s.ink = 0; // インクの量: 使った量（なしでは何も足さない）
     newTurn(s);
     return s;
   },
@@ -198,15 +235,28 @@ export default {
       } else if (m.t === 'line') {
         if (!Number.isInteger(m.c) || m.c < 0 || m.c >= COLORS.length || !Number.isInteger(m.w) || m.w < 0 || m.w >= WIDTHS.length) return null;
         if (!Number.isInteger(m.g) || !validD(m.d)) return null;
-        s.strokes.push({ g: m.g, c: m.c, w: m.w, d: m.d });
+        let d = m.d;
+        if (s.ink !== undefined && m.c !== ERASER) {
+          // インクの量: 足りなければ、なくなる所で切る（1つも描けなければ反則）
+          const all = decode(d);
+          const cut = clipInk(all, INK - s.ink);
+          if (cut.used < inkOf(all)) {
+            if (cut.pts.length < 2) return null;
+            d = encode(cut.pts);
+          }
+          s.ink += cut.used;
+        }
+        s.strokes.push({ g: m.g, c: m.c, w: m.w, d });
       } else if (m.t === 'undo') {
         if (!s.strokes.length) return null;
         const g = s.strokes[s.strokes.length - 1].g;
         while (s.strokes.length && s.strokes[s.strokes.length - 1].g === g) s.strokes.pop();
+        if (s.ink !== undefined) s.ink = strokesInk(s.strokes); // 消した線のインクは戻る
         s.ver += 1;
       } else if (m.t === 'clear') {
         if (!s.strokes.length) return null;
         s.strokes = [];
+        if (s.ink !== undefined) s.ink = 0;
         s.ver += 1;
       } else if (m.t === 'giveup') {
         endTurn(s, 'giveup');
@@ -281,6 +331,14 @@ export default {
     }
 
     paint(s);
+    // インクの量（詳細設定）: 残りを帯で見せる（当てる人にも見える）
+    ui.ink.hidden = res || s.ink === undefined || s.phase !== 'draw';
+    if (!ui.ink.hidden) {
+      const left = Math.max(0, INK - s.ink);
+      ui.ink.querySelector('i').style.width = `${(left / INK) * 100}%`;
+      ui.ink.querySelector('span').textContent = left ? `インク 残り ${Math.ceil((left / INK) * 100)}%` : 'インクがなくなりました（消しゴム・1つ戻すは使えます）';
+      ui.ink.classList.toggle('low', left < INK * 0.2);
+    }
     ui.canvas.classList.toggle('drawing', isDrawer && o.canMove);
     ui.tools.hidden = !(isDrawer && o.canMove);
     if (!ui.tools.hidden) syncTools();
@@ -385,6 +443,11 @@ function build(root, s, key, res) {
   ui.wrap.append(ui.canvas);
   hookPen(ui.canvas);
 
+  ui.ink = document.createElement('div');
+  ui.ink.className = 'oe-ink';
+  ui.ink.hidden = true;
+  ui.ink.innerHTML = '<b><i></i></b><span></span>';
+
   ui.tools = document.createElement('div');
   ui.tools.className = 'oe-tools';
   ui.tools.hidden = true;
@@ -459,7 +522,7 @@ function build(root, s, key, res) {
   };
 
   if (res) root.append(ui.chips, ui.topic); // 終わったら点数とお題の一覧だけ
-  else root.append(ui.chips, ui.topic, ui.pick, ui.bar, ui.wrap, ui.tools, ui.form, ui.note, ui.chat);
+  else root.append(ui.chips, ui.topic, ui.pick, ui.bar, ui.wrap, ui.ink, ui.tools, ui.form, ui.note, ui.chat);
 }
 
 function syncTools() {
@@ -517,9 +580,12 @@ function hookPen(canvas) {
     }
     if (final) { ui.pts = []; ui.curG = null; }
   };
+  // インクの量（詳細設定）: この線であと描ける長さ（消しゴム・なしなら限りなし）。送っていない点の分も引く
+  const inkLeft = () => (ui.s.ink === undefined || ui.c === ERASER ? Infinity : INK - ui.s.ink - inkOf(ui.pts));
   canvas.addEventListener('pointerdown', (e) => {
     if (!canvas.classList.contains('drawing')) return;
     e.preventDefault();
+    if (inkLeft() <= 0) return; // インクがない
     canvas.setPointerCapture?.(e.pointerId);
     ui.pts = [at(e)];
     ui.curG = null;
@@ -533,8 +599,10 @@ function hookPen(canvas) {
     const p = at(e);
     const q = ui.pts[ui.pts.length - 1];
     if (Math.hypot(p[0] - q[0], p[1] - q[1]) < 6) return; // 細かすぎる点は送らない
-    strokeTo(ui.ctx, [q, p], ui.c, ui.w);
-    ui.pts.push(p);
+    const cut = clipInk([q, p], inkLeft()); // インクが足りなければ、届いた手と同じ所で止める
+    if (cut.pts.length < 2) return;
+    strokeTo(ui.ctx, cut.pts, ui.c, ui.w);
+    ui.pts.push(cut.pts[1]);
   });
   const up = () => {
     if (!ui.pts.length) return;

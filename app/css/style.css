@@ -1380,6 +1380,11 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .oe-canvas { display: block; width: 100%; aspect-ratio: 1; background: #fff; border: 1.5px solid var(--line); border-radius: 10px; touch-action: none; }
 .oe-canvas.drawing { cursor: crosshair; border-color: var(--accent); }
 .oe-tools { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px 14px; }
+.oe-ink { display: flex; align-items: center; gap: 8px; max-width: 520px; margin: 6px auto; font-size: .85rem; color: var(--muted); } /* インクの量（詳細設定） */
+.oe-ink[hidden] { display: none; }
+.oe-ink b { flex: 0 0 34%; height: 10px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.oe-ink i { display: block; height: 100%; background: #2f6fb3; transition: width .2s; }
+.oe-ink.low i { background: #e04b3c; }
 .oe-colors, .oe-widths, .oe-acts { display: flex; gap: 6px; align-items: center; }
 .board button.oe-color { width: 30px; height: 30px; border-radius: 50%; background: var(--c); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line); cursor: pointer; font-size: .9rem; }
 .board button.oe-width { width: 34px; height: 34px; border-radius: 8px; background: #fff; border: 1.5px solid var(--line); display: grid; place-items: center; cursor: pointer; }

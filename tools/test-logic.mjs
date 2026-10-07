@@ -3409,6 +3409,37 @@ assert.deepEqual(OE.result(oe).winners, [2]);
 }
 console.log('oekaki OK');
 
+// お絵描き当ての「インクの量」: 線の長さが INK まで。足りなければ切る。戻す・消すで戻る。消しゴムは使わない。なしでは形が前と同じ
+{
+  const { INK, inkOf, clipInk } = await import('../app/js/games/oekaki.js');
+  assert.ok(!('ink' in OE.init(3, 41, { rules: {} })) && !('ink' in OE.init(3, 41, { rules: { ink: 'off' } })), 'インクなしでは ink を持たない');
+  let x = OE.init(2, 41, { rules: { ink: 'on' } });
+  assert.equal(x.ink, 0);
+  assert.equal(inkOf([[0, 0], [300, 400], [300, 500]]), 600, '長さは区切りごとに足す');
+  assert.deepEqual(clipInk([[0, 0], [300, 400]], 250), { pts: [[0, 0], [150, 200]], used: 250 }, '足りない所で切る');
+  assert.deepEqual(clipInk([[0, 0], [10, 0]], 0).pts.length, 1, '残り0なら描けない');
+  const ln = (k, g, pts, c = 0) => ({ p: 0, t: 'line', k, g, c, w: 1, d: encode(pts) });
+  // 横に 990 ずつ往復して使い切る
+  let k = 0;
+  for (let i = 0; i < 8; i++) x = OE.apply(x, ln(k++, 0, [[5, 10 + i * 10], [995, 10 + i * 10]]));
+  assert.equal(x.ink, 7920);
+  x = OE.apply(x, ln(k++, 0, [[5, 200], [505, 200]]));
+  assert.equal(x.ink, INK, 'なくなる所まで描ける');
+  assert.deepEqual(decode(x.strokes.at(-1).d), [[5, 200], [85, 200]], '足りない線は切って入れる');
+  assert.equal(OE.apply(x, ln(k, 0, [[5, 300], [100, 300]])), null, 'インクがなければ線は反則');
+  const er = OE.apply(x, ln(k, 1, [[5, 300], [600, 300]], 6));
+  assert.ok(er && er.ink === INK, '消しゴムはインクを使わない');
+  const back = OE.apply(er, { p: 0, t: 'undo', k: k + 1 });
+  assert.equal(back.ink, INK, '消しゴムを戻してもインクは同じ');
+  const back2 = OE.apply(back, { p: 0, t: 'undo', k: k + 2 });
+  assert.equal(back2.ink, 0, '同じひと筆（g）を戻すと、そのインクが戻る');
+  x = OE.apply(OE.apply(x, { p: 0, t: 'clear', k }), { p: 0, t: 'giveup', k: k + 1 });
+  // 次の回はインクが0から
+  x = OE.apply(x, { p: -1, t: 'next', turn: 0 });
+  assert.deepEqual([x.turn, x.ink], [1, 0], '描く人が替わるとインクは0から');
+  const cl = OE.apply(OE.apply(x, { p: 1, t: 'line', k: 0, g: 0, c: 0, w: 1, d: encode([[0, 0], [900, 0]]) }), { p: 1, t: 'clear', k: 1 });
+  assert.equal(cl.ink, 0, '全部消すとインクは戻る');
+}
 // ---------- ブラックジャック ----------
 const BJ = GAMES.blackjack;
 const { total: bjTotal } = await import('../app/js/games/blackjack.js');
