@@ -492,9 +492,10 @@ function rulesOf(gameId, rules) {
 // いろあわせの最初の手札（deal。長さと同じ）・麻雀の待ち牌の表示（waits。ヒントと同じ）・
 // 将棋のいつも成る（autopromo。初めての人向けの手助けなのでヒントと同じ）・麻雀のツモ切りの表示（tsumogiri。待ち牌の表示と同じ）・
 // ヒット＆ブローの桁数（digits。難しさと同じ。5桁を足したときに入れた）も好みなので抽選しない（Claude の判断）。
+// 将棋の王手の知らせ（check。19回目の案。初めての人向けの手助けなので、いつも成ると同じ）も抽選しない。
 // 将棋のトライ（try）・神経衰弱の色もそろえる（color）・お絵描き当てのインクの量（ink）は遊び方なので抽選する。
 // マルバツ・将棋の size は盤の大きさでなく遊び方（スーパー・消える・5五将棋）なので抽選する。
-const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match']);
+const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check']);
 const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
 
 // 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、エアホッケーは 2〜3。ほかは2）
@@ -875,6 +876,16 @@ function renderNetBanner() {
 window.addEventListener('online', () => { if (S) renderRoomBar(); });
 window.addEventListener('offline', () => { if (S) renderRoomBar(); });
 
+/* ---------- 観戦の人数（2026-10-07 の19回目の案）: オンラインの対局の画面に「👀 2人が観戦中（名前）」を出す ---------- */
+// 観戦の人 = 部屋にいて、この対局の顔ぶれ（order）に入っていない人（自分も含む）。いなければ出さない。
+// エアホッケーは状態の欄を描かないので出ない。名前は外から来た値なので esc() を通す。
+function watchHtml() {
+  if (S.mode !== 'online' || !S.order) return '';
+  const ids = S.members.filter((id) => !S.order.includes(id));
+  if (!ids.length) return '';
+  return `👀 ${ids.length}人が観戦中（${ids.map((id) => esc(id === S.myId ? 'あなた' : nameOf(id))).join('、')}）`;
+}
+
 function statusHtml(game, st, res) {
   const me = myPlayer();
   let main;
@@ -933,6 +944,8 @@ function statusHtml(game, st, res) {
   if (extra) html += `<div class="status-sub">${extra}</div>`;
   const streak = streakHtml();
   if (streak) html += `<div class="status-sub streak">${streak}</div>`;
+  const watch = watchHtml();
+  if (watch) html += `<div class="status-sub watch">${watch}</div>`;
   const preds = res ? predHtml(res) : '';
   if (preds) html += `<div class="status-sub pred">${preds}</div>`;
   const tally = res ? tallyHtml() : '';
