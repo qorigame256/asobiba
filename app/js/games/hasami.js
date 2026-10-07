@@ -4,20 +4,30 @@
 // 相手の駒を5個取ったら勝ち。詳細設定で「全部取ったら勝ち」も選べる（2026-10-06 本人の決定）。
 // Claude の判断: 自分から相手の駒の間に入っても取られない。隅の駒は、となりの2マスをふさげば取れる。
 //   動かせる駒が無くなった人の負け。同じ局面（次の番も同じ）が3回出たら引き分け、300手でも引き分け。
-// 手 = 動かす駒のマス * 81 + 行き先のマス（マス = 段*9+列。段0が一番上）。
+// 詳細設定「盤の大きさ」（2026-10-07 の11回目）: 9×9（最初）か 7×7。7×7 は手前の1段に7個ずつ並べ、「5個取ったら勝ち」は4個・「全部」は7個になる。
+//   一辺は局面の n。どちらの盤でも決まり（隅の取り方・同じ局面3回・300手）は同じ。
+// 手 = 動かす駒のマス * マスの数 + 行き先のマス（マス = 段*一辺+列。段0が一番上）。9×9 なら * 81 で、前と全く同じ。
 
 import { CPU_SETTING, boardCpu, mulberry32 } from './util.js';
 
-const N = 9;
-const CELLS = N * N;
 const DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-const CORNERS = [[0, [1, N]], [N - 1, [N - 2, 2 * N - 1]], [N * (N - 1), [N * (N - 2), N * (N - 1) + 1]], [CELLS - 1, [CELLS - 2, CELLS - 1 - N]]];
 const MAX_PLY = 300;
 const NAMES = ['歩', 'と'];
+const GOAL = { 9: 5, 7: 4 }; // 「少なめ」で何個取ったら勝ちか（盤の一辺ごと）
 
-const inside = (r, c) => r >= 0 && r < N && c >= 0 && c < N;
+// 盤の一辺ごとの形（マスの数・隅とそのとなりの2マス）。作るのは1回だけ
+const GEO = {};
+function geo(N) {
+  if (GEO[N]) return GEO[N];
+  const CELLS = N * N;
+  const CORNERS = [[0, [1, N]], [N - 1, [N - 2, 2 * N - 1]], [N * (N - 1), [N * (N - 2), N * (N - 1) + 1]], [CELLS - 1, [CELLS - 2, CELLS - 1 - N]]];
+  return (GEO[N] = { N, CELLS, CORNERS });
+}
+const sideOf = (board) => Math.round(Math.sqrt(board.length));
 
 function movesOf(board, p) {
+  const { N, CELLS } = geo(sideOf(board));
+  const inside = (r, c) => r >= 0 && r < N && c >= 0 && c < N;
   const list = [];
   for (let f = 0; f < CELLS; f++) {
     if (board[f] !== p) continue;
@@ -38,6 +48,7 @@ function movesOf(board, p) {
 
 // p に動かせる駒が1つでもあるか（movesOf より速い。apply が毎回使う）
 function canMoveAny(board, p) {
+  const { N, CELLS } = geo(sideOf(board));
   for (let f = 0; f < CELLS; f++) {
     if (board[f] !== p) continue;
     const r = Math.floor(f / N);
@@ -49,6 +60,8 @@ function canMoveAny(board, p) {
 
 // t に p の駒が来たときに取れる相手の駒
 function capturesAt(board, t, p) {
+  const { N, CORNERS } = geo(sideOf(board));
+  const inside = (r, c) => r >= 0 && r < N && c >= 0 && c < N;
   const out = [];
   const r0 = Math.floor(t / N);
   const c0 = t % N;
@@ -70,17 +83,20 @@ function capturesAt(board, t, p) {
 }
 
 // 局面の目印（ゾブリストハッシュ: マスと駒ごとに決めた乱数を XOR で重ねた32ビットの数を2つ）。決まった種から作るので全員同じ。
-// 盤を文字にして比べると、CPU の読みで1手に1秒かかった。動いた駒と取った駒の分だけ足し引きして作る
+// 盤を文字にして比べると、CPU の読みで1手に1秒かかった。動いた駒と取った駒の分だけ足し引きして作る。
+// 乱数の表は 9×9 の大きさで作り、7×7 はその前の方を使う（9×9 の目印は前と全く同じ）
+const BIG = 81;
 const rnd = mulberry32(0x5a17);
-const ZA = Array.from({ length: 2 * CELLS + 1 }, () => Math.floor(rnd() * 2 ** 32));
-const ZB = Array.from({ length: 2 * CELLS + 1 }, () => Math.floor(rnd() * 2 ** 32));
-const zi = (p, i) => p * CELLS + i;
-const TURN = 2 * CELLS; // 後手の番
+const ZA = Array.from({ length: 2 * BIG + 1 }, () => Math.floor(rnd() * 2 ** 32));
+const ZB = Array.from({ length: 2 * BIG + 1 }, () => Math.floor(rnd() * 2 ** 32));
+const zi = (p, i, cells) => p * cells + i;
+const TURN = 2 * BIG; // 後手の番
 
 export function hashOf(board, turn) {
+  const cells = board.length;
   let a = turn ? ZA[TURN] : 0;
   let b = turn ? ZB[TURN] : 0;
-  board.forEach((v, i) => { if (v !== null) { a ^= ZA[zi(v, i)]; b ^= ZB[zi(v, i)]; } });
+  board.forEach((v, i) => { if (v !== null) { a ^= ZA[zi(v, i, cells)]; b ^= ZB[zi(v, i, cells)]; } });
   return [a >>> 0, b >>> 0];
 }
 
@@ -102,11 +118,13 @@ export default {
   id: 'hasami',
   name: 'はさみ将棋',
   icon: '⚔️',
-  desc: '飛車のように動く駒で、相手の駒をたて・よこにはさんで取る。先に5個取った方の勝ち',
+  desc: '飛車のように動く駒で、相手の駒をたて・よこにはさんで取る。先に5個（7×7 は4個）取った方の勝ち',
   ready: true,
   players: ['先手（歩）', '後手（と）'],
   settings: [
-    { key: 'goal', label: '勝ち', desc: '何個取ったら勝ちか。「全部」は長くなる', def: 5, choices: [[5, '5個取ったら勝ち'], ['all', '全部（9個）取ったら勝ち']] },
+    { key: 'size', label: '盤の大きさ', desc: '7×7 は駒が7個ずつで、早く終わる', def: 9, choices: [[9, '9×9'], [7, '7×7（駒7個ずつ・短い）']] },
+    // 値（5・'all'）は前のまま（前の部屋の設定がそのまま使えるように）。盤で個数が変わるので表示に両方書く
+    { key: 'goal', label: '勝ち', desc: '何個取ったら勝ちか。「全部」は長くなる', def: 5, choices: [[5, '5個取ったら勝ち（7×7 は4個）'], ['all', '全部（9個）取ったら勝ち（7×7 は7個）']] },
     CPU_SETTING,
   ],
 
@@ -118,14 +136,16 @@ export default {
   },
 
   init({ rules = {} } = {}) {
-    const board = Array(CELLS).fill(null);
+    const N = rules.size === 7 ? 7 : 9;
+    const board = Array(N * N).fill(null);
     for (let c = 0; c < N; c++) { board[c] = 1; board[(N - 1) * N + c] = 0; }
-    return { board, goal: rules.goal === 'all' ? N : 5, turn: 0, taken: [0, 0], last: null, ply: 0, won: null, hist: (([a, b]) => ({ a, b, prev: null, cap: true }))(hashOf(board, 0)) };
+    return { n: N, board, goal: rules.goal === 'all' ? N : GOAL[N], turn: 0, taken: [0, 0], last: null, ply: 0, won: null, hist: (([a, b]) => ({ a, b, prev: null, cap: true }))(hashOf(board, 0)) };
   },
 
   turn(s) { return s.turn; },
 
   apply(s, m) {
+    const { N, CELLS } = geo(s.n ?? 9);
     if (s.won || !Number.isInteger(m) || m < 0 || m >= CELLS * CELLS) return null;
     const f = Math.floor(m / CELLS);
     const t = m % CELLS;
@@ -144,9 +164,9 @@ export default {
     const taken = s.taken.slice();
     taken[p] += cap.length;
     const turn = 1 - p;
-    let a = s.hist.a ^ ZA[zi(p, f)] ^ ZA[zi(p, t)] ^ ZA[TURN];
-    let b = s.hist.b ^ ZB[zi(p, f)] ^ ZB[zi(p, t)] ^ ZB[TURN];
-    for (const i of cap) { a ^= ZA[zi(1 - p, i)]; b ^= ZB[zi(1 - p, i)]; }
+    let a = s.hist.a ^ ZA[zi(p, f, CELLS)] ^ ZA[zi(p, t, CELLS)] ^ ZA[TURN];
+    let b = s.hist.b ^ ZB[zi(p, f, CELLS)] ^ ZB[zi(p, t, CELLS)] ^ ZB[TURN];
+    for (const i of cap) { a ^= ZA[zi(1 - p, i, CELLS)]; b ^= ZB[zi(1 - p, i, CELLS)]; }
     const hist = { a: a >>> 0, b: b >>> 0, prev: s.hist, cap: cap.length > 0 };
     const ply = s.ply + 1;
     let won = null;
@@ -170,9 +190,10 @@ export default {
   },
 
   render(root, s, o) {
+    const { N, CELLS } = geo(s.n ?? 9);
     const draw = () => this.render(root, s, o);
     const bottom = o.me === 1 ? 1 : 0; // 自分の駒が下に来るように。観戦と同じ画面の対局では先手が下
-    const key = `${s.ply}:${o.me}`;
+    const key = `${s.n}:${s.ply}:${o.me}`;
     if (ui.key !== key) ui = { key, from: null };
     const can = o.canMove && !s.won;
     const legal = can ? movesOf(s.board, s.turn) : [];

@@ -761,6 +761,61 @@ console.log('colors stack OK');
   console.log('colors challenge: CPU games', JSON.stringify(seen));
 }
 
+// いろあわせの最初の手札: 5・10枚で配る枚数・7枚は今までと同じ配り方・人数が多い10枚は山が38枚残るように減らす・
+// 札は108枚のまま・手札の上限は25枚のまま・CPU どうしで最後まで（ほかの詳細設定とも混ぜる）
+{
+  const deal = (n, seed, d, more = {}) => U.init(n, seed, { rules: { deal: d, ...more } });
+  for (const n of [2, 4, 7]) {
+    assert.ok(deal(n, 5, 5).hands.every((h) => h.length === 5), `${n}人の5枚`);
+    assert.ok(deal(n, 5, 10).hands.every((h) => h.length === 10), `${n}人の10枚`);
+  }
+  // 7枚（と、決めていないとき・おかしな値）は今までと全く同じ配り方
+  for (let k = 0; k < 40; k++) {
+    const n = 2 + (k % 9);
+    const old = U.init(n, k * 131 + 7);
+    for (const st of [deal(n, k * 131 + 7, 7), deal(n, k * 131 + 7, 8), U.init(n, k * 131 + 7, { rules: {} })]) {
+      assert.deepEqual([st.hands, st.deck, st.discard, st.color], [old.hands, old.deck, old.discard, old.color], '7枚は今までと同じ配り方');
+    }
+  }
+  assert.deepEqual(deal(4, 99, 10), deal(4, 99, 10), '10枚でも同じ種なら同じ配り方');
+  // 人数が多いと減らす: 10枚は8人で8枚・9〜10人で7枚（山は38枚以上残る）
+  assert.deepEqual([8, 9, 10].map((n) => deal(n, 3, 10).hands[0].length), [8, 7, 7], '人数が多い10枚は減らす');
+  for (let k = 0; k < 200; k++) {
+    const n = 2 + (k % 9);
+    for (const d of [5, 10]) {
+      const st = deal(n, k * 53 + 1, d);
+      assert.equal(total(st), 108, '最初の手札を変えても108枚');
+      assert.ok(st.deck.length >= 37, '配ったあとの山が少なすぎる'); // 38枚から最初にめくった1枚を引いた数
+      assert.match(st.discard[0], /^[rygb]\d$/, '最初の札は数字');
+    }
+  }
+  // 手札の上限は最初の手札より多い（10枚でも25枚）
+  const capSt = { ...deal(3, 1, 10, { cap: true }), deck: ['b1', 'b2'], discard: ['r5'], color: 'r', turn: 0, drawn: null, hands: [Array(25).fill('y1'), ['g1'], ['g2']] };
+  assert.equal(U.apply(capSt, { p: 0, t: 'draw' }).out?.[0], true, '10枚でも26枚になったら脱落');
+  assert.ok(!U.apply({ ...capSt, hands: [Array(24).fill('y1'), ['g1'], ['g2']] }, { p: 0, t: 'draw' }).out?.[0], '10枚でも25枚までは残る');
+  // CPU どうしで最後まで: 反則なし・札は108枚のまま
+  const steps = { 5: [], 10: [] };
+  for (let k = 0; k < 240; k++) {
+    const n = 2 + (k % 9);
+    const d = k % 2 ? 10 : 5;
+    let st = deal(n, k * 4421 + 9, d, { stack: k % 3 === 0, challenge: k % 4 === 1, multi: k % 5 === 2, untilPlay: k % 6 === 3, call: k % 7 === 4, sevenZero: k % 3 === 2, cap: k % 4 === 3 });
+    let c = 0;
+    while (!U.result(st)) {
+      const p = U.turn(st);
+      assert.ok(!st.out?.[p], '脱落した人の番が来た');
+      const next = U.apply(st, { ...U.cpu(st, p), p });
+      assert.ok(next, `最初の手札${d}枚で CPU が反則の手を出した`);
+      assert.equal(total(next), 108, `最初の手札${d}枚で札の枚数が変わった`);
+      st = next;
+      if (++c > 6000) throw new Error(`最初の手札${d}枚のいろあわせが終わらない`);
+    }
+    steps[d].push(c);
+  }
+  const avg = (a) => Math.round(a.reduce((x, y) => x + y, 0) / a.length);
+  assert.ok(avg(steps[5]) < avg(steps[10]), '5枚の方が10枚より早く終わる');
+  console.log('colors deal: average moves 5/10', avg(steps[5]), avg(steps[10]));
+}
+
 // ---------- 大富豪 ----------
 const D = GAMES.daifugo;
 const ALL = Object.fromEntries(D.settings.map((x) => [x.key, true]));
@@ -1909,6 +1964,73 @@ for (let k = 0; k < 100; k++) {
   const b = posOf({ x: 0.9, y: 0.5, vx: 0.2, vy: 0 }, 1000); // 0.9 → ふち 0.95 で跳ね返って 0.8
   assert.ok(Math.abs(b.x - 0.8) < 1e-9 && Math.abs(b.y - 0.5) < 1e-9, 'ふちで跳ね返る ' + JSON.stringify(b));
 }
+// 小さい的は高い点（詳細設定）: なしでは前と同じ的と点・ありでは赤と青が3つの大きさで出て、点が 1・2・3倍
+{
+  const { sizeOf, ptOf } = await import('../app/js/games/targets.js');
+  const { createHash } = await import('node:crypto');
+  const fp = [];
+  for (let k = 0; k < 100; k++) for (const time of ['20', '30', '45']) {
+    const st = TG.init(3, k, { rules: { time, bombs: k % 2 === 0, move: k % 3 === 0 } });
+    assert.deepEqual(st.targets, TG.init(3, k, { rules: { time, bombs: k % 2 === 0, move: k % 3 === 0, sizes: false } }).targets, 'なしを選んでも同じ');
+    assert.ok(st.targets.every((t) => t.sz === undefined && ptOf(t) === KINDS[t.kind].pt && sizeOf(t) === KINDS[t.kind].size), 'なしなら大きさと点は前のまま');
+    fp.push(st.targets.map((t) => [t.id, t.at, t.kind, t.x, t.y, t.life, t.vx ?? '', t.vy ?? '', ptOf(t)].join(',')).join(';'));
+  }
+  // 「小さい的は高い点」を足す前の的の出方と点の指紋（seed 0〜99・時間3つ・ドクロと動く的のあり・なし）
+  assert.equal(createHash('sha256').update(fp.join('|')).digest('hex').slice(0, 16), 'bf618902e739c33e', 'なしでは前と全く同じ的と点');
+  const count = { 1: 0, 2: 0, 3: 0 };
+  for (let k = 0; k < 100; k++) {
+    const rules = { time: '30', bombs: true, move: k % 2 === 0, sizes: true };
+    const plain = TG.init(3, k, { rules: { ...rules, sizes: false } }).targets;
+    const sized = TG.init(3, k, { rules }).targets;
+    assert.deepEqual(sized, TG.init(3, k, { rules }).targets, '大きさも seed から毎回同じ');
+    assert.deepEqual(sized.map(({ sz, ...rest }) => rest), plain, 'ありでも出る的・時刻・場所・動きは同じ');
+    for (const t of sized) {
+      if (t.kind === 'big' || t.kind === 'mid') {
+        assert.ok([1, 2, 3].includes(t.sz), '赤と青には大きさの段がある');
+        count[t.sz] += 1;
+        assert.equal(ptOf(t), KINDS[t.kind].pt * t.sz, '点は 1・2・3倍');
+      } else {
+        assert.equal(t.sz, undefined, '紫・金・ドクロは変えない');
+        assert.equal(ptOf(t), KINDS[t.kind].pt);
+      }
+      assert.ok(sizeOf(t) >= 0.11 || t.kind === 'gold' || t.kind === 'small', '小さい的もスマホで押せる大きさ');
+    }
+  }
+  assert.ok(count[1] > 300 && count[2] > 300 && count[3] > 300, '3つの大きさが出る ' + JSON.stringify(count));
+  assert.deepEqual(['big', 'mid'].map((kind) => [1, 2, 3].map((sz) => ptOf({ kind, sz }))), [[1, 2, 3], [2, 4, 6]], '赤 1・2・3点、青 2・4・6点');
+  assert.ok(sizeOf({ kind: 'big', sz: 1 }) === KINDS.big.size && sizeOf({ kind: 'mid', sz: 1 }) === KINDS.mid.size, '大きいのは今と同じ大きさ');
+  assert.ok(sizeOf({ kind: 'big', sz: 1 }) > sizeOf({ kind: 'big', sz: 2 }) && sizeOf({ kind: 'big', sz: 2 }) > sizeOf({ kind: 'big', sz: 3 }), '段が上がるほど小さい');
+  // 取った的の点は大きさの段で変わる
+  let z = ref(TG, TG.init(2, 5, { rules: { sizes: true, bombs: false } }), 'go');
+  const small = z.targets.find((t) => t.sz === 3 && t.kind === 'mid');
+  z = TG.apply(z, { p: 1, t: 'hit', id: small.id, ms: 500 });
+  assert.equal(TG.apply(z, { p: 1, t: 'hit', id: small.id, ms: 400 }), null, '同じ的は1人1回');
+  assert.deepEqual(scoresOf(z), [0, 6], '小さい青の的は6点');
+  // CPU どうしで最後まで（時計を進めて試す）。小さいほど取られにくい
+  const realNow = performance.now;
+  let clock = 1e9;
+  performance.now = () => clock;
+  try {
+    const got = { 1: [0, 0], 2: [0, 0], 3: [0, 0] };
+    for (let k = 0; k < 6; k++) {
+      let st = TG.init(3, 700 + k, { rules: { time: '20', bombs: true, move: k % 2 === 1, sizes: true } });
+      st = ref(TG, st, 'go');
+      const start = clock;
+      while (clock - start < 20000 + 500) {
+        for (let p = 0; p < 3; p++) {
+          const m = TG.cpu(st, p);
+          if (m) { const nx = TG.apply(st, { ...m, p }); assert.ok(nx, 'CPU の手は通る'); st = nx; }
+        }
+        clock += 50;
+      }
+      st = ref(TG, st, 'end');
+      assert.ok(TG.result(st) && TG.result(st).winners.length >= 1, '最後まで打てる');
+      for (const t of st.targets) if (t.sz) { got[t.sz][1] += 1; if (st.best[t.id]) got[t.sz][0] += 1; }
+    }
+    const rate = (sz) => got[sz][0] / got[sz][1];
+    assert.ok(rate(1) > rate(3), 'CPU は小さい的を取りそこねやすい ' + JSON.stringify(got));
+  } finally { performance.now = realNow; }
+}
 s = TG.init(3, 4, { rules: { time: '30', bombs: true } });
 assert.equal(TG.apply(s, { p: 0, t: 'hit', id: 0, ms: 300 }), null, '始まる前は押せない');
 s = ref(TG, s, 'go');
@@ -2205,6 +2327,55 @@ assert.notEqual(GM.cpu(s, 0, { cpu: 'strong' }), 3, 'ぴったり五目の CPU �
       st = HS.apply(st, HS.cpu(st, st.turn, { cpu: ['weak', 'normal'][g % 2] }));
       assert.ok(st, 'はさみ将棋の CPU が反則');
       assert.deepEqual([st.hist.a, st.hist.b], hashOf(st.board, st.turn), 'はさみ将棋: 足し引きで作った局面の目印が、盤から作り直したものと同じ');
+    }
+  }
+  // 盤の大きさ 7×7（2026-10-07 の11回目）。マス = 段*7+列、手 = 元 * 49 + 先
+  const at7 = (r, c) => r * 7 + c;
+  const mv7 = (f, t) => f * 49 + t;
+  const hs7 = (cells, o = {}) => {
+    const board = Object.assign(Array(49).fill(null), cells);
+    const [ha, hb] = hashOf(board, o.turn ?? 0);
+    return { ...HS.init({ rules: { size: 7, ...(o.rules ?? {}) } }), board, hist: { a: ha, b: hb, prev: null, cap: true }, ...o };
+  };
+  h = HS.init({ rules: { size: 7 } });
+  assert.deepEqual([h.n, h.board.length, h.goal], [7, 49, 4], '7×7 は 49マス・4個で勝ち');
+  assert.deepEqual([0, 1].map((p) => h.board.map((v, i) => (v === p ? i : -1)).filter((i) => i >= 0)), [[42, 43, 44, 45, 46, 47, 48], [0, 1, 2, 3, 4, 5, 6]], '7×7 は手前の1段に7個ずつ');
+  assert.equal(HS.init({ rules: { size: 7, goal: 'all' } }).goal, 7, '7×7 の「全部」は7個');
+  assert.ok(HS.apply(h, mv7(at7(6, 0), at7(1, 0))), '7×7: たてに何マスでも');
+  assert.equal(HS.apply(h, mv7(at7(6, 0), at7(0, 0))), null, '7×7: 相手の駒のあるマスには動けない');
+  assert.equal(HS.apply(h, 49 * 49), null, '7×7: 盤の外の手は反則');
+  h = hs7({ [at7(3, 1)]: 0, [at7(3, 2)]: 1, [at7(3, 3)]: 1, [at7(6, 4)]: 0, [at7(0, 6)]: 1 });
+  t = HS.apply(h, mv7(at7(6, 4), at7(3, 4)));
+  assert.deepEqual([t.board[at7(3, 2)], t.board[at7(3, 3)], t.taken[0]], [null, null, 2], '7×7: 一列に並んだ2個をまとめてはさんで取る');
+  h = hs7({ [at7(6, 6)]: 1, [at7(6, 5)]: 0, [at7(2, 6)]: 0, [at7(0, 0)]: 1 });
+  t = HS.apply(h, mv7(at7(2, 6), at7(5, 6)));
+  assert.deepEqual([t.board[at7(6, 6)], t.taken[0]], [null, 1], '7×7: 隅の駒はとなりの2マスをふさげば取れる');
+  h = hs7({ [at7(3, 1)]: 0, [at7(3, 2)]: 1, [at7(6, 3)]: 0, [at7(0, 6)]: 1, [at7(0, 0)]: 1 }, { taken: [3, 0] });
+  assert.equal(HS.result(HS.apply(h, mv7(at7(6, 3), at7(3, 3)))).winner, 0, '7×7: 4個取ったら勝ち');
+  h = hs7({ [at7(3, 1)]: 0, [at7(3, 2)]: 1, [at7(6, 3)]: 0, [at7(0, 6)]: 1, [at7(0, 0)]: 1 }, { rules: { goal: 'all' }, taken: [3, 0] });
+  t = HS.apply(h, mv7(at7(6, 3), at7(3, 3)));
+  assert.deepEqual([t.taken[0], HS.result(t)], [4, null], '7×7 の「全部」は4個では終わらない');
+  h = hs7({ [at7(3, 1)]: 0, [at7(3, 2)]: 1, [at7(6, 3)]: 0 }, { rules: { goal: 'all' }, taken: [6, 0] });
+  assert.equal(HS.result(HS.apply(h, mv7(at7(6, 3), at7(3, 3)))).winner, 0, '7×7 の「全部」は7個取ったら勝ち');
+  h = hs7({ [at7(6, 0)]: 0, [at7(0, 6)]: 1 });
+  for (let k = 0; !HS.result(h); k++) h = HS.apply(h, [mv7(at7(6, 0), at7(5, 0)), mv7(at7(0, 6), at7(1, 6)), mv7(at7(5, 0), at7(6, 0)), mv7(at7(1, 6), at7(0, 6))][k % 4]);
+  assert.deepEqual([h.won.repeat, h.ply], [true, 8], '7×7: 同じ局面が3回出たら引き分け');
+  // 9×9 は前と同じ（size を付けても付けなくても同じ局面・同じ手の形）
+  assert.deepEqual(HS.init({ rules: { size: 9 } }), HS.init({}), '9×9 は前と同じ最初の局面');
+  assert.equal(HS.init({}).n, 9);
+  {
+    let a9 = HS.init({});
+    let b9 = HS.init({ rules: { size: 9 } });
+    for (const m of [mv(at(8, 0), at(3, 0)), mv(at(0, 1), at(3, 1)), mv(at(8, 2), at(3, 2))]) { a9 = HS.apply(a9, m); b9 = HS.apply(b9, m); }
+    assert.deepEqual([a9.board, a9.hist.a, a9.hist.b, a9.taken], [b9.board, b9.hist.a, b9.hist.b, b9.taken], '9×9 は手の形（元 * 81 + 先）も結果も前と同じ');
+  }
+  for (let g = 0; g < 6; g++) {
+    let st = HS.init({ rules: { size: 7, goal: g % 2 ? 'all' : 5 } });
+    while (!HS.result(st)) {
+      st = HS.apply(st, HS.cpu(st, st.turn, { cpu: ['weak', 'normal', 'strong'][g % 3] }));
+      assert.ok(st, 'はさみ将棋 7×7 の CPU が反則');
+      assert.ok(st.board.length === 49 && st.n === 7, '7×7 のまま');
+      assert.deepEqual([st.hist.a, st.hist.b], hashOf(st.board, st.turn), 'はさみ将棋 7×7: 局面の目印が盤から作り直したものと同じ');
     }
   }
   console.log('hasami OK');
@@ -3325,6 +3496,67 @@ console.log('kaisen OK');
   }
   assert.equal(g.phase, 'end', '3枚目の答えのあとで終わる');
   assert.deepEqual(G.result(g).winners, [0]);
+  // 左右反転（2026-10-07）
+  assert.equal(G.init(2, 11).rules.mirror, 'off', '最初は反転なし');
+  const fnv = (t) => { let h = 0x811c9dc5; for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h; };
+  // なしでは今と同じ絵（反転を足す前の makeScene と絵の中身から取った指紋）
+  assert.equal(fnv(JSON.stringify(MG.makeScene(11, 0, 5))), 517907555, 'なしの絵は前と同じ');
+  assert.equal(fnv(JSON.stringify(MG.makeScene(12345, 2, 7))), 835267603, 'なしの絵は前と同じ（7か所）');
+  assert.equal(fnv(MG.sideSvg(MG.makeScene(11, 0, 5), 'right', false)), 299000682, 'なしの右の絵の描き方も前と同じ');
+  for (const side of ['left', 'right']) assert.ok(!MG.sideSvg(sc, side, false).includes('scale(-1'), 'なしでは反転しない');
+  assert.ok(!MG.sideSvg(sc, 'left', true).includes('scale(-1'), '左の絵は反転しない');
+  assert.ok(MG.sideSvg(sc, 'right', true).startsWith(`<g transform="translate(${MG.VW} 0) scale(-1 1)">`), '右の絵は絵も印もまとめて反転する');
+  assert.ok(/^<g [^>]*>.*<g class="mg-marks"><\/g><g class="mg-miss"><\/g><\/g>$/.test(MG.sideSvg(sc, 'right', true)), '印の入れ物も反転の中');
+  // 押した位置の直し方
+  assert.deepEqual(MG.toScene(100, 200, false), { x: 100, y: 200 }, '反転しない絵はそのまま');
+  assert.deepEqual(MG.toScene(100, 200, true), { x: MG.VW - 100, y: 200 }, '反転した絵は左右を入れ替える');
+  assert.deepEqual(MG.toScene(MG.VW / 2, 50, true), { x: MG.VW / 2, y: 50 }, '真ん中は動かない');
+  for (let x = 0; x <= MG.VW; x += 125) { const a = MG.toScene(x, 10, true); assert.deepEqual(MG.toScene(a.x, a.y, true), { x, y: 10 }, '2回直すと元に戻る'); }
+  // 反転でも違いの数は同じ: 反転した右の絵の上で、違いの見える所（左右を入れ替えた所）を押すと全部見つかる
+  for (const [seed, nd] of [[11, 5], [77, 3], [2026, 7]]) {
+    const scn = MG.makeScene(seed, 1, nd);
+    const hit = new Set();
+    scn.diffs.forEach((d, i) => {
+      for (const [x, y] of d.hit) {
+        const p = MG.toScene(MG.VW - x, y, true); // 画面の右の絵では、元の x の鏡の位置に見えている
+        assert.equal(MG.diffAt(scn, p.x, p.y), i, '反転した絵で違いを押すと当たる');
+        if (d.hit.length === 1 && Math.abs(x - MG.VW / 2) > d.hit[0][2]) assert.equal(MG.diffAt(scn, MG.VW - x, y, (j) => j !== i), -1, '直さずに確かめると外れる（直し方が要る）');
+        hit.add(i);
+      }
+    });
+    assert.equal(hit.size, nd, '反転でも違いの数は同じ');
+  }
+  // CPU どうしで最後まで（反転あり・なし）。CPU は画面に出てからの時間で押すので、時計（performance.now）を進めて試す
+  const realNow = performance.now.bind(performance);
+  let fake = realNow();
+  performance.now = () => fake;
+  try {
+    const avgFound = {};
+    for (const mirror of ['off', 'on']) {
+      let found = 0;
+      for (let k = 0; k < 6; k++) {
+        const n = 2 + (k % 3);
+        let st = G.init(n, (mirror === 'on' ? 900 : 500) + k * 37, { rules: { rounds: '3', diffs: '5', time: '60', mirror } }); // 種を分ける（画面に出た時刻と CPU の予定は種ごとに覚えるため）
+        let refKey = null; let refAt = 0; let guard = 0;
+        while (!G.result(st)) {
+          let moved = false;
+          for (let p = 0; p < n; p++) {
+            const m = G.cpu(st, p);
+            if (m) { st = G.apply(st, { ...m, p }); assert.ok(st, '間違い探しの CPU が反則'); moved = true; }
+          }
+          if (moved) continue;
+          const r = G.referee(st);
+          if (r.key !== refKey) { refKey = r.key; refAt = fake; }
+          if (fake - refAt >= r.ms) { st = G.apply(st, { ...r.move, p: -1 }); assert.ok(st, '進行の手'); continue; }
+          fake += 250;
+          assert.ok(++guard < 100000, '間違い探しが終わらない');
+        }
+        found += Object.keys(st.best).length;
+      }
+      avgFound[mirror] = found / 6;
+    }
+    console.log('machigai CPU found per game (off/on)', avgFound.off.toFixed(1), avgFound.on.toFixed(1));
+  } finally { performance.now = realNow; }
 }
 
 // ---------- 2色爆弾サバイバル ----------

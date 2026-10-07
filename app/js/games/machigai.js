@@ -3,6 +3,8 @@
 // 右の絵だけ何か所か変える（消す・別の絵文字に替える・大きくする・ずらす・図形の色を変える）。
 // 速さは各自の端末で「その絵が出てから押すまで」を測って送り、同じ違いはいちばん短い人の点（通信の遅れで不利にならないように）。
 // 違いでない所を押すと、その端末だけ1.5秒押せなくなる（でたらめな連打で見つけられないように。点は減らない）。
+// 詳細設定「左右反転」（2026-10-07）: ありのとき、右の絵を鏡に映したように左右反転して描くだけ（絵の作り方・答えは同じ）。
+//   右の絵で押した所は toScene で元の絵の位置に直して確かめる。印も反転した絵の中に描くので、正しい所に出る。
 //
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready →(3秒)→ go → play（1枚目）→ 全部見つかるか時間切れ → next → show（答えを3秒見せる）
 //   → go → play（2枚目）… 最後の show のあとは end。
@@ -70,7 +72,12 @@ export function makeScene(seed, r, ndiff) {
   return { sky: pick(SKY), ground: pick(GROUND), horizon: 0.55 + rng() * 0.15, left, right, diffs };
 }
 
-// 押した点（絵の座標）がどの違いに当たるか。無ければ -1
+// 画面の絵の上で押した位置を、元の絵（makeScene の座標）の位置に直す。反転した右の絵では左右を入れ替える
+export function toScene(x, y, flipped) {
+  return { x: flipped ? VW - x : x, y };
+}
+
+// 押した点（元の絵の座標）がどの違いに当たるか。無ければ -1
 export function diffAt(scene, x, y, skip = () => false) {
   for (let i = 0; i < scene.diffs.length; i++) {
     if (skip(i)) continue;
@@ -93,10 +100,17 @@ function pictureSvg(scene, parts) {
   return `<rect width="${VW}" height="${VH}" fill="${scene.sky}"/><rect y="${hy}" width="${VW}" height="${VH}" fill="${scene.ground}"/>`
     + parts.map(partSvg).join('');
 }
+const flippedSide = (side, mirror) => mirror && side === 'right';
+// 片方の絵の中身。反転する絵は、絵と印をまとめて鏡に映す（印も元の絵の座標で描けば、反転した絵の正しい所に出る）
+export function sideSvg(scene, side, mirror) {
+  const inner = pictureSvg(scene, scene[side]) + '<g class="mg-marks"></g><g class="mg-miss"></g>';
+  return flippedSide(side, mirror) ? `<g transform="translate(${VW} 0) scale(-1 1)">${inner}</g>` : inner;
+}
 
 const ndiffOf = (s) => Number(s.rules.diffs);
 const roundsOf = (s) => Number(s.rules.rounds);
 const limitOf = (s) => Number(s.rules.time) * 1000;
+const mirrorOf = (s) => s.rules.mirror === 'on';
 const playKey = (s) => `machigai:${s.seed}:${s.r}`;
 const clone = (s) => ({ ...s, best: { ...s.best }, got: s.got.map((g) => g.slice()) });
 const foundIn = (s, r) => Object.keys(s.best).filter((k) => k.startsWith(r + ':')).length;
@@ -168,10 +182,11 @@ export default {
     { key: 'rounds', label: '絵の枚数', desc: '1回の勝負で探す絵の数', def: '3', choices: [['3', '3枚'], ['5', '5枚']] },
     { key: 'diffs', label: '違いの数', desc: '1枚の絵の中の違いの数', def: '5', choices: [['3', '3か所'], ['5', '5か所'], ['7', '7か所']] },
     { key: 'time', label: '1枚の時間', desc: 'この時間が来たら答えを見せて次の絵へ', def: '60', choices: [['45', '45秒'], ['60', '60秒'], ['90', '90秒']] },
+    { key: 'mirror', label: '左右反転', desc: '右の絵が、鏡に映したように左右反転して出る（むずかしい）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { rounds: '3', diffs: '5', time: '60', ...rules };
+    const r = { rounds: '3', diffs: '5', time: '60', mirror: 'off', ...rules };
     return { n, seed, rules: r, phase: 'ready', r: 0, best: {}, got: Array.from({ length: n }, () => []), step: 0 };
   },
 
@@ -190,7 +205,7 @@ export default {
   phaseText(s) {
     if (s.phase === 'ready') return 'まもなく始まります…';
     if (s.phase === 'show') return '答え合わせ';
-    return '右と左の絵の違いを押そう！';
+    return mirrorOf(s) ? '右と左の絵の違いを押そう！（右の絵は左右反転）' : '右と左の絵の違いを押そう！';
   },
 
   referee(s) {
@@ -230,7 +245,7 @@ export default {
     return s;
   },
 
-  // CPU: 違いごとに、見つけるかどうか（6割）と、見つける時刻（8〜40秒）を1回だけ決める
+  // CPU: 違いごとに、見つけるかどうか（6割）と、見つける時刻（8〜40秒。左右反転では2割遅く 9.6〜48秒）を1回だけ決める
   cpuDelay(s) { return s.phase === 'play' ? 250 : 500; },
   cpu(s, p) {
     if (s.phase !== 'play') return null;
@@ -241,7 +256,7 @@ export default {
       const key = `${s.seed}:${k}:${p}`;
       let plan = cpuPlan.get(key);
       if (!plan) {
-        plan = { find: Math.random() < 0.6, at: 8000 + Math.random() * 32000 };
+        plan = { find: Math.random() < 0.6, at: (8000 + Math.random() * 32000) * (mirrorOf(s) ? 1.2 : 1) };
         cpuPlan.set(key, plan);
         if (cpuPlan.size > 3000) cpuPlan.delete(cpuPlan.keys().next().value);
       }
@@ -267,18 +282,18 @@ export default {
       since(`machigai:${s.seed}:ready`);
       if (s.phase !== 'ready') {
         const scene = sceneOf(s);
+        const mirror = mirrorOf(s);
         for (const side of ['left', 'right']) {
           const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
           svg.setAttribute('viewBox', `0 0 ${VW} ${VH}`);
           svg.setAttribute('class', 'mg-pic');
-          svg.innerHTML = pictureSvg(scene, scene[side]) + '<g class="mg-marks"></g><g class="mg-miss"></g>';
+          svg.innerHTML = sideSvg(scene, side, mirror);
           svg.addEventListener('pointerdown', (e) => {
             const { s: cur, o: co } = ui.cur;
             if (me === null || cur.phase !== 'play' || !co.canMove || cur.r !== s.r) return;
             e.preventDefault();
             const rect = svg.getBoundingClientRect();
-            const x = ((e.clientX - rect.left) / rect.width) * VW;
-            const y = ((e.clientY - rect.top) / rect.height) * VH;
+            const { x, y } = toScene(((e.clientX - rect.left) / rect.width) * VW, ((e.clientY - rect.top) / rect.height) * VH, flippedSide(side, mirror));
             const now = performance.now();
             if (now < ui.lockUntil) return;
             const ms = since(playKey(cur));
@@ -302,7 +317,8 @@ export default {
       } else {
         const wait = document.createElement('div');
         wait.className = 'mg-wait';
-        wait.textContent = '左と右の絵の違いを探します。違いは右の絵にも左の絵にも押せます。';
+        wait.textContent = '左と右の絵の違いを探します。違いは右の絵にも左の絵にも押せます。'
+          + (mirrorOf(s) ? '右の絵は、鏡に映したように左右反転しています。' : '');
         pics.append(wait);
       }
       if (s.phase !== 'end') window.scrollTo(0, 0);

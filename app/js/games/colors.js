@@ -42,6 +42,13 @@
 //   たまった枚数がちょうど4（最初のドロー4）のときだけチャレンジでき（重ねて返す・チャレンジ・受けるの3つ）、重ねられたらできない。
 //   CPU は場の色を持っていても3割ほどドロー4を出し（うそ）、チャレンジは3割前後（出した人の手札が少ない・自分の手札が多いと少し増える）。
 //   CPU は全員の札を見られる作りだが、bluff や出した人の手札は見ずに決める。
+// 詳細設定「最初の手札」（2026-10-07 本人の決定。5枚・7枚（最初。今までと同じ）・10枚）: 配る枚数だけを変える。配り方（山の後ろから
+//   1人ずつまとめて取る）は今までと同じなので、7枚なら今までと全く同じ配り方になる。Claude の判断:
+//   - 配ったあとの山は、今までのいちばん少ない場合（10人×7枚のあとの38枚）より少なくしない。足りなければ配る枚数を減らす
+//     （10枚なら 8人で8枚、9〜10人で7枚。5枚・7枚は何人でも減らない）。最初にめくる札は数字の札が出るまでめくり直すので、
+//     山に数字でない札（32枚）より多く残っていないと終わらなくなるため。減らしたときは最初の説明に「手札は○枚ずつ」と出す。
+//   - 「手札の上限」は、最初の手札＋15枚と25枚の大きい方（capOf）。今選べる枚数（10枚まで）ではいつも25枚のまま。
+//     上限が最初の手札に近すぎる（少なすぎる）ことが無いように、の守りとして書いておく。
 
 import { mulberry32, shuffle } from './util.js';
 
@@ -50,8 +57,15 @@ const COLOR_NAME = { r: '赤', y: '黄', g: '緑', b: '青' };
 const KINDS = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'S', 'R', 'D'];
 const KIND_LABEL = { S: '⊘', R: '⇄', D: '+2', W: '', W4: '+4' };
 const KIND_NAME = { S: 'スキップ', R: 'リバース', D: 'ドロー2' };
-const HAND_SIZE = 7;
+const HAND_SIZE = 7; // 最初の手札（詳細設定「最初の手札」の最初の値）
+const DEALS = [5, 7, 10]; // 最初の手札で選べる枚数
+const DECK_MIN = 108 - 10 * HAND_SIZE; // 配ったあとの山に残す枚数（今までのいちばん少ない場合。38枚）
 const CAP = 25; // 手札の上限（詳細設定）。これを超えたら脱落
+
+// 最初の手札（詳細設定）で配る枚数。山が DECK_MIN より少なくなるときは減らす
+const dealOf = (n, rules) => Math.min(DEALS.includes(rules?.deal) ? rules.deal : HAND_SIZE, Math.floor((108 - DECK_MIN) / n));
+// 手札の上限。最初の手札＋15枚より少なくしない（今選べる枚数ではいつも25枚）
+const capOf = (s) => Math.max(CAP, dealOf(s.n, s.rules) + 15);
 
 const isOut = (s, q) => !!s.out?.[q];
 const aliveCount = (s) => s.hands.filter((_, q) => !isOut(s, q)).length;
@@ -63,7 +77,7 @@ const stepAlive = (s, from, k, dir = s.dir) => {
 };
 // 手札の上限（詳細設定）を超えたら脱落させる（手札は山の下へ）。残りが1人ならその人の勝ち
 function checkCap(s, q) {
-  if (!s.rules?.cap || isOut(s, q) || s.hands[q].length <= CAP) return;
+  if (!s.rules?.cap || isOut(s, q) || s.hands[q].length <= capOf(s)) return;
   s.out = (s.out ?? Array(s.n).fill(false)).slice();
   s.out[q] = true;
   s.deck = [...s.hands[q], ...s.deck];
@@ -175,19 +189,24 @@ function cardEl(card, tag = 'div') {
 }
 
 // 手札の上限（詳細設定）で脱落した人
-const outText = (L, nameP) => (L.out?.length ? `。${L.out.map(nameP).join('・')}は手札が${CAP}枚を超えたので脱落` : '');
+const outText = (s, L, nameP) => (L.out?.length ? `。${L.out.map(nameP).join('・')}は手札が${capOf(s)}枚を超えたので脱落` : '');
 
 function logText(s, nameP) {
   const L = s.last;
-  if (!L) return `最初の札は「${cardName(s.discard[0])}」`;
-  if (L.t === 'draw') return (L.got ? `${nameP(L.p)}が山から${L.got}枚引いた${L.got > 1 && L.drew ? '（出せる札が来た）' : ''}` : '山札が無いので引けなかった') + outText(L, nameP);
+  if (!L) {
+    // 最初の手札（詳細設定）を人数に合わせて減らしたときは、その枚数も出す
+    const k = dealOf(s.n, s.rules);
+    const less = DEALS.includes(s.rules?.deal) && k < s.rules.deal ? `（人数が多いので、手札は${k}枚ずつ）` : '';
+    return `最初の札は「${cardName(s.discard[0])}」${less}`;
+  }
+  if (L.t === 'draw') return (L.got ? `${nameP(L.p)}が山から${L.got}枚引いた${L.got > 1 && L.drew ? '（出せる札が来た）' : ''}` : '山札が無いので引けなかった') + outText(s, L, nameP);
   if (L.t === 'pass') return `${nameP(L.p)}は引いた札を出さずに次へ`;
-  if (L.t === 'take') return `${nameP(L.p)}が${L.got}枚引いて1回休み` + outText(L, nameP);
+  if (L.t === 'take') return `${nameP(L.p)}が${L.got}枚引いて1回休み` + outText(s, L, nameP);
   if (L.t === 'challenge') { // チャレンジ（詳細設定）の結果。手札そのものは見せない
     const t = `${nameP(L.p)}がチャレンジ → ${nameP(L.by)}は場の色（${COLOR_NAME[L.color]}）の札を`;
     return (L.bluff
       ? t + `持っていた。チャレンジ成功で、${nameP(L.by)}が${L.got}枚引いた`
-      : t + `持っていなかった。チャレンジ失敗で、${nameP(L.p)}が${L.got}枚引いて1回休み`) + outText(L, nameP);
+      : t + `持っていなかった。チャレンジ失敗で、${nameP(L.p)}が${L.got}枚引いて1回休み`) + outText(s, L, nameP);
   }
   let t = L.n > 1 ? `${nameP(L.p)}が「${kindOf(L.card)}」を${L.n}枚まとめて出した（一番上は${COLOR_NAME[L.color]}）` : `${nameP(L.p)}が「${cardName(L.card)}」を出した`;
   if (L.card[0] === 'W') t += `（次の色: ${COLOR_NAME[L.color]}）`;
@@ -201,7 +220,7 @@ function logText(s, nameP) {
   else if (L.victim !== undefined) t += ` → ${nameP(L.victim)}が${L.got}枚引いて1回休み`;
   if (L.call) t += '。「いろあわせ！」';
   else if (L.forgot) t += `。宣言を忘れたので${L.forgot}枚引いた`;
-  return t + outText(L, nameP);
+  return t + outText(s, L, nameP);
 }
 
 export default {
@@ -215,6 +234,7 @@ export default {
   maxPlayers: 10,
 
   settings: [
+    { key: 'deal', label: '最初の手札', desc: '最初に配る枚数。5枚は短い勝負、10枚は長い勝負（人数が多いと山が足りるように少し減らす）', def: HAND_SIZE, choices: [[5, '5枚'], [7, '7枚'], [10, '10枚']] },
     { key: 'stack', label: '重ねて返す', desc: 'ドロー2にはドロー2、ドロー4にはドロー4を重ねて次の人へ回せる。重ねなかった人が、たまった枚数を全部引く', def: false },
     { key: 'multi', label: '同じ数字まとめ出し', desc: '同じ数字の札を何枚でもまとめて出せる（数字の札だけ）。最後に置いた札の色が場の色になる', def: false },
     { key: 'untilPlay', label: '出せるまで引く', desc: '山を1回押すと、出せる札が来るまでまとめて引く（来た札は出しても出さなくてもよい）', def: false },
@@ -226,7 +246,8 @@ export default {
 
   init(n, seed, { rules = {} } = {}) {
     const deck = shuffle(makeDeck(), mulberry32(seed));
-    const hands = Array.from({ length: n }, () => sortHand(deck.splice(-HAND_SIZE)));
+    const k = dealOf(n, rules); // 最初の手札（詳細設定）。7枚なら今までと同じ配り方
+    const hands = Array.from({ length: n }, () => sortHand(deck.splice(-k)));
     let top = deck.pop();
     while (!isNumber(top)) { deck.unshift(top); top = deck.pop(); }
     return { n, seed, rules: { stack: false, sevenZero: false, ...rules }, pend: null, shuffles: 0, deck, discard: [top], hands, turn: 0, dir: 1, color: top[0], drawn: null, winner: null, step: 0, last: null };
@@ -511,7 +532,7 @@ export default {
 
     const head = document.createElement('div');
     head.className = 'cc-hand-head';
-    head.textContent = isOut(s, me) ? `あなたは手札が${CAP}枚を超えたので脱落しました` : `あなたの手札（${s.hands[me].length}枚）${s.rules?.cap ? `／上限 ${CAP}枚` : ''}`;
+    head.textContent = isOut(s, me) ? `あなたは手札が${capOf(s)}枚を超えたので脱落しました` : `あなたの手札（${s.hands[me].length}枚）${s.rules?.cap ? `／上限 ${capOf(s)}枚` : ''}`;
     if (myTurn) {
       const hint = document.createElement('small');
       hint.textContent = s.drawn !== null

@@ -8,6 +8,11 @@
 // 詳細設定「動く的」（2026-10-06 本人の決定。最初はなし）: 的が出ている間ゆっくり動き、場のふちで跳ね返る。
 //   動く向きと速さも seed から全員同じに作る（的の出方の乱数とは別の乱数にして、なしのときの的の出方は変えない）。
 //   見た目だけで、手（どの的を何秒で押したか）は変わらない（Claude の判断）。速さは 1秒に場の幅の 0.12〜0.24。CPU の反応は0.15秒遅くする。
+// 詳細設定「小さい的は高い点」（2026-10-07 の11回目。最初はなし）: 赤（1点）と青（2点）の的が3つの大きさで出て、
+//   大きい（今と同じ大きさ）は今と同じ点・中くらいは2倍・小さいは3倍（赤 1・2・3点、青 2・4・6点）。的には点を書く。
+//   紫・金はもとから小さいので変えない（これより小さいとスマホで押しにくい）。ドクロも変えない（Claude の判断）。
+//   大きさも seed から全員同じに作る（的の出方とは別の乱数にして、なしのときの的の出方と点は変えない）。
+//   いちばん小さいのは場の幅の 0.11（スマホで直径約38ピクセル）。CPU は小さいほど少し遅く、押しそこねやすい。
 // 手: { p: -1, t: 'go' | 'end' } / { p, t: 'hit', id: 的の番号, ms } / { p, t: 'miss', n: 何回目か }
 
 import { mulberry32 } from './util.js';
@@ -23,6 +28,10 @@ export const KINDS = {
   bomb: { pt: -2, size: 0.16, life: 2000, w: 17 },
 };
 const MISS_PT = -1;
+// 小さい的は高い点（詳細設定）: 大きさの段（sz 1〜3）ごとの場の幅に対する大きさ。点は 的の点 × sz
+const SIZES = { big: [0.2, 0.15, 0.11], mid: [0.15, 0.13, 0.11] };
+export const sizeOf = (tg) => (tg.sz ? SIZES[tg.kind][tg.sz - 1] : KINDS[tg.kind].size);
+export const ptOf = (tg) => KINDS[tg.kind].pt * (tg.sz || 1);
 
 function pickKind(rng, bombs) {
   const list = Object.entries(KINDS).filter(([k]) => bombs || k !== 'bomb');
@@ -65,6 +74,16 @@ function addMotion(list, seed) {
   return list;
 }
 
+// 小さい的は高い点（詳細設定）: 赤と青の的に大きさの段を足す（的の出方とは別の乱数）。大 4割・中 3割・小 3割
+function addSizes(list, seed) {
+  const rng = mulberry32(seed ^ 0x51a35);
+  for (const tg of list) {
+    const x = rng();
+    if (SIZES[tg.kind]) tg.sz = x < 0.4 ? 1 : x < 0.7 ? 2 : 3;
+  }
+  return list;
+}
+
 // 出てから ms たった的の真ん中の位置。動く的は場のふち（0.05〜0.95）で跳ね返る
 export function posOf(tg, ms) {
   if (!tg.vx && !tg.vy) return { x: tg.x, y: tg.y };
@@ -80,7 +99,7 @@ export function posOf(tg, ms) {
 
 export function scoresOf(s) {
   const sc = Array(s.n).fill(0);
-  for (const [id, b] of Object.entries(s.best)) sc[b.p] += KINDS[s.targets[id].kind].pt;
+  for (const [id, b] of Object.entries(s.best)) sc[b.p] += ptOf(s.targets[id]);
   s.hits.forEach((ids, p) => { for (const id of ids) if (s.targets[id].kind === 'bomb') sc[p] += KINDS.bomb.pt; });
   s.misses.forEach((k, p) => { sc[p] += k * MISS_PT; });
   return sc;
@@ -135,11 +154,11 @@ function loop(token) {
         e = document.createElement('button');
         e.type = 'button';
         e.className = `tg-target ${tg.kind}`;
-        const k = KINDS[tg.kind];
-        e.style.width = e.style.height = (k.size * 100) + '%';
+        const pt = ptOf(tg);
+        e.style.width = e.style.height = (sizeOf(tg) * 100) + '%';
         e.style.left = (tg.x * 100) + '%';
         e.style.top = (tg.y * 100) + '%';
-        e.innerHTML = tg.kind === 'bomb' ? '<span>☠</span>' : `<span>${k.pt}</span>`;
+        e.innerHTML = tg.kind === 'bomb' ? '<span>☠</span>' : `<span>${pt}</span>`;
         if (me !== null && o.canMove) {
           e.onpointerdown = (ev) => {
             ev.preventDefault();
@@ -150,7 +169,7 @@ function loop(token) {
             e.remove();
             ui.els.delete(tg.id);
             const at = posOf(tg, ms);
-            float(ui.field, at.x, at.y, tg.kind === 'bomb' ? '−2' : '+' + k.pt, tg.kind === 'bomb' ? 'bad' : 'good');
+            float(ui.field, at.x, at.y, tg.kind === 'bomb' ? '−2' : '+' + pt, tg.kind === 'bomb' ? 'bad' : 'good');
             o.onMove({ t: 'hit', id: tg.id, ms });
           };
         }
@@ -185,12 +204,14 @@ export default {
     { key: 'time', label: '時間', desc: '1回の勝負の長さ', def: '30', choices: [['20', '20秒'], ['30', '30秒'], ['45', '45秒']] },
     { key: 'bombs', label: 'ドクロの的を混ぜる', desc: '押すと2点減る的', def: true },
     { key: 'move', label: '動く的', desc: '的が出ている間ゆっくり動き、ふちで跳ね返る', def: false },
+    { key: 'sizes', label: '小さい的は高い点', desc: '赤と青の的が小さく出ると、点が2倍・3倍', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { time: '30', bombs: true, move: false, ...rules };
+    const r = { time: '30', bombs: true, move: false, sizes: false, ...rules };
     const targets = makeTargets(mulberry32(seed), Number(r.time) * 1000, r.bombs);
     if (r.move) addMotion(targets, seed);
+    if (r.sizes) addSizes(targets, seed);
     return { n, seed, rules: r, targets, phase: 'ready', best: {}, hits: Array.from({ length: n }, () => []), misses: Array(n).fill(0), step: 0 };
   },
 
@@ -251,6 +272,7 @@ export default {
   },
 
   // CPU: 出ている的ごとに、押すかどうかと反応の速さ（0.45〜1.1秒）を1回だけ決める。ドクロはたまにうっかり押す
+  // 小さい的は高い点（詳細設定）: 中くらいは押す割合 0.85倍・0.12秒遅れ、小さいは 0.7倍・0.24秒遅れ
   cpuDelay(s) { return s.phase === 'play' ? 120 : 500; },
   cpu(s, p) {
     if (s.phase !== 'play') return null;
@@ -260,8 +282,9 @@ export default {
       const key = `${s.seed}:${tg.id}:${p}`;
       let plan = cpuPlan.get(key);
       if (!plan) {
-        const rate = tg.kind === 'bomb' ? 0.08 : tg.kind === 'gold' ? 0.4 : 0.6;
-        plan = { hit: Math.random() < rate, react: 450 + Math.random() * 650 + (tg.vx || tg.vy ? 150 : 0) }; // 動く的は少し遅れる
+        const sz = tg.sz || 1;
+        const rate = (tg.kind === 'bomb' ? 0.08 : tg.kind === 'gold' ? 0.4 : 0.6) * [1, 0.85, 0.7][sz - 1];
+        plan = { hit: Math.random() < rate, react: 450 + Math.random() * 650 + (tg.vx || tg.vy ? 150 : 0) + (sz - 1) * 120 }; // 動く的・小さい的は少し遅れる
         cpuPlan.set(key, plan);
         if (cpuPlan.size > 2000) cpuPlan.delete(cpuPlan.keys().next().value);
       }
@@ -298,7 +321,8 @@ export default {
     const legend = document.createElement('div');
     legend.className = 'tg-legend';
     legend.innerHTML = '<span class="tg-dot big"></span>1点 <span class="tg-dot mid"></span>2点 <span class="tg-dot small"></span>3点 <span class="tg-dot gold"></span>5点'
-      + (s.rules.bombs ? ' <span class="tg-dot bomb">☠</span>−2点' : '') + '<br>的が無いときに押すと −1点';
+      + (s.rules.bombs ? ' <span class="tg-dot bomb">☠</span>−2点' : '')
+      + (s.rules.sizes ? '<br>赤と青の的は小さく出ると点が2倍・3倍' : '') + '<br>的が無いときに押すと −1点';
 
     ui = { mount, field, chips, clock, els: new Map(), tapped: new Set(), n: 0, visible: 0, cur: { s, o } };
     top.append(chips, clock);
