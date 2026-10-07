@@ -633,7 +633,7 @@ export default {
       const giving = myTurn && s.phase === 'exchange';
       const bombing = myTurn && s.pend?.[0].t === 'bomb'; // 12ボンバー
       const pd = myTurn && s.pend && !bombing ? { ...s.pend[0], k: Math.min(s.pend[0].k, s.hands[me].length) } : null; // 7渡し・10捨て
-      const legal = myTurn && s.phase === 'play' && !pd ? legalPlays(s, me) : [];
+      const legal = myTurn && s.phase === 'play' && !pd && !bombing ? legalPlays(s, me) : [];
       const usable = new Set(legal.flatMap((m) => m.cards));
       const head = document.createElement('div');
       head.className = 'cc-hand-head';
