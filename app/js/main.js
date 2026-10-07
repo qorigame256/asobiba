@@ -333,6 +333,22 @@ function roomNamePanel() {
 /* ---------- いまのルール（2026-10-07 本人の決定）: 「？遊び方」の下に、詳細設定で最初と変えたルールの一覧を出す ---------- */
 // Claude の判断: 対局中も見られるように「？遊び方」の欄の下に足す（上の段にボタンを増やすとスマホ幅で入りきらないため）。
 // 最初の設定と同じものは出さない。人数・CPU の強さ・盤の大きさなども、最初と違えば出す（何で遊んでいるか分かるように）。
+/* ---------- 詳細設定を覚える（2026-10-07 本人の決定）: ホストが変えた詳細設定を端末に覚え、次に部屋を作ったときにそのまま使う ---------- */
+// Claude の判断: ゲームごとに覚える（localStorage の bg-rules）。部屋を作るときだけ読む（同じ画面の対局は詳細設定を選ぶ所が無いので使わない）。
+// おかしな値は rulesOf が最初の値に直すので、読むときは形だけ確かめる。「↺ 最初の設定に戻す」で、そのゲームの分を消せる。
+const RULES_KEY = 'bg-rules';
+function savedRules() {
+  try {
+    const r = JSON.parse(localStorage.getItem(RULES_KEY) ?? '{}');
+    if (!r || typeof r !== 'object' || Array.isArray(r)) return {};
+    return Object.fromEntries(Object.entries(r).filter(([id, v]) => GAMES[id] && v && typeof v === 'object' && !Array.isArray(v)));
+  } catch { return {}; }
+}
+function rememberRules() {
+  if (S?.mode !== 'online' || !S.isHost) return;
+  try { localStorage.setItem(RULES_KEY, JSON.stringify(S.rules ?? {})); } catch { /* 覚えられなくても、この部屋では使える */ }
+}
+
 function changedRules(game) {
   const cur = rulesOf(game.id, S?.rules);
   return (game.settings ?? []).filter((x) => cur[x.key] !== x.def).map((x) => {
@@ -1343,6 +1359,7 @@ function rulesPanel(game) {
   const cur = rulesOf(S.gameId, S.rules);
   const set = (key, value) => {
     S.rules = { ...S.rules, [S.gameId]: { ...cur, [key]: value } };
+    rememberRules();
     saveRoom();
     sendState();
     render();
@@ -1357,6 +1374,7 @@ function rulesPanel(game) {
       }
       S.rules = { ...S.rules, [S.gameId]: next };
       S.rulesOpen = true;
+      rememberRules();
       saveRoom();
       sendState();
       render();
@@ -1364,6 +1382,19 @@ function rulesPanel(game) {
     }, 'secondary small');
     btn.classList.add('luck-btn');
     det.append(btn);
+  }
+  if (S.isHost && changedRules(game).length) {
+    const back = makeButton('↺ 最初の設定に戻す', () => {
+      const { [S.gameId]: _, ...rest } = S.rules;
+      S.rules = rest;
+      rememberRules();
+      saveRoom();
+      sendState();
+      render();
+      toast('このゲームの詳細設定を最初に戻しました');
+    }, 'secondary small');
+    back.classList.add('luck-btn');
+    det.append(back);
   }
   for (const x of game.settings) {
     const label = document.createElement('label');
@@ -1667,7 +1698,7 @@ function createRoom(gameId) {
   S = {
     mode: 'online', code: randomString(CODE_LEN, CODE_CHARS), myId, isHost: true,
     gameId, round: 1, first: crypto.getRandomValues(new Uint8Array(1))[0] & 1, seed: 0, order: null, cpus: 0, moves: [],
-    members: [myId], names: { [myId]: myName() || 'プレイヤー1' }, marks: myMark() ? { [myId]: myMark() } : {}, rules: {}, prev: null, carry: null, pick: null, banned: [],
+    members: [myId], names: { [myId]: myName() || 'プレイヤー1' }, marks: myMark() ? { [myId]: myMark() } : {}, rules: savedRules(), prev: null, carry: null, pick: null, banned: [],
   };
   saveRoom();
   setUrlRoom(S.code);
