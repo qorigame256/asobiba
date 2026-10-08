@@ -1300,6 +1300,114 @@ for (let k = 0; k < 300; k++) {
   assert.equal(DEF.numLock, false, '最初はなし');
 }
 console.log('daifugo games', dgames);
+// 何回か勝負（2026-10-08 の23回目の案）: 1つの対局の中で決めた回数だけ配り直し、順位の点（最下位 0点・1つ上がるごとに +1点）の合計で勝負
+{
+  const { createHash } = await import('node:crypto');
+  const { mulberry32 } = await import('../app/js/games/util.js');
+  assert.ok(D.settings.some((x) => x.key === 'match' && x.def === 1 && x.choices.map(([v]) => v).join() === '1,3,5'), '何回か勝負の設定（最初は1回）');
+  assert.equal(D.init(4, 5, { rules: { ...DEF, match: 1 } }).match, undefined, '1回では局面に何も足さない');
+  assert.deepEqual({ ...D.init(4, 5, { rules: { ...DEF, match: 3 } }), match: undefined, rules: undefined }, { ...D.init(4, 5, { rules: DEF }), match: undefined, rules: undefined }, '1回目の配りは今までと同じ');
+  // 1回のとき: 決まった手順（CPU の乱数を種から作る）で最後まで打った全部の局面の指紋が、何回か勝負を足す前と同じ（rules の match は除いて比べる）
+  {
+    const keys = D.settings.map((x) => x.key).filter((key) => key !== 'match');
+    const h = createHash('sha256');
+    const orig = Math.random;
+    try {
+      for (let k = 0; k < 30; k++) {
+        const n = 3 + (k % 6);
+        const rules = Object.fromEntries(keys.map((key, i) => { const d = D.settings.find((x) => x.key === key).def; return [key, ((k * 7 + i * 3) % 5) < 2 ? !d : d]; }));
+        if (k % 3 === 1) rules.match = 1;
+        Math.random = mulberry32(k + 500);
+        let prev = null;
+        for (let g = 0; g < 2; g++) {
+          let st = D.init(n, k * 7919 + g, { rules, prev });
+          const put = (x) => { const r = { ...x.rules }; delete r.match; h.update(JSON.stringify({ ...x, rules: r })); };
+          put(st);
+          while (!D.result(st)) {
+            const p = st.phase === 'exchange' ? st.gives[0].from : D.turn(st);
+            st = D.apply(st, { ...D.cpu(st, p), p });
+            put(st);
+          }
+          prev = Array.from({ length: n }, (_, p) => D.carry(st, p));
+        }
+      }
+    } finally { Math.random = orig; }
+    assert.equal(h.digest('hex').slice(0, 16), '5273288f537b5003', '1回では今までと全く同じ局面');
+  }
+  // 回が終わると点を足して回の間（gap）。回の間は札を出せず、だれでも「次の回へ」を押せる。次の回は前の回の順位でカード交換
+  const RM = { ...ALL, five: false, seven: false, ten: false, bomber: false, match: 3 };
+  const mb = (pts, no) => dbase([['s3'], ['h4'], ['c6', 'c7']], { rules: RM, match: { of: 3, no, pts, seed: 77, gain: null } });
+  t = dplay(dplay(mb([0, 0, 0], 1), 0, ['s3']), 1, ['h4']);
+  assert.deepEqual([t.phase, t.ranking, t.match.gain, t.match.pts], ['gap', [0, 1, 2], [2, 1, 0], [2, 1, 0]], '順位で点（最下位 0点）');
+  assert.equal(D.result(t), null, '途中の回では決着しない');
+  assert.equal(D.turn(t), null, '回の間はだれの番でもない');
+  assert.equal(dplay(t, 2, ['c6']), null, '回の間は出せない');
+  assert.equal(D.apply(t, { p: 3, t: 'next' }), null, '対局していない人は押せない');
+  assert.equal(D.apply(mb([0, 0, 0], 1), { p: 0, t: 'next' }), null, '回の途中で「次の回へ」は押せない');
+  const n2 = D.apply(t, { p: 2, t: 'next' });
+  assert.deepEqual(n2, D.apply(t, { p: 0, t: 'next' }), 'だれが押しても同じ配り');
+  assert.deepEqual([n2.match.no, n2.match.gain, n2.match.pts, n2.phase, n2.prevRank, n2.turn], [2, null, [2, 1, 0], 'exchange', [0, 1, 2], 2], '次の回は前の回の順位でカード交換・前の大貧民から');
+  assert.equal(n2.swaps[0].from, 2, '大貧民から大富豪へ強い札が渡る');
+  assert.equal(dcount(n2), 53, '配り直したら53枚');
+  assert.deepEqual(n2.hands, D.init(3, (77 ^ Math.imul(2, 0x9e3779b1)) >>> 0, { rules: RM, prev: [0, 1, 2] }).hands, '配りは対局の種と回の数から');
+  assert.equal(D.apply(n2, { p: 0, t: 'next' }), null, '配ったあとは「次の回へ」を押せない');
+  // 最後の回: 合計点の多い順（同じ点なら最後の回の順位）。いちばん多い人が2人以上なら全員の勝ち
+  t = dplay(dplay(mb([0, 3, 0], 3), 0, ['s3']), 1, ['h4']);
+  assert.deepEqual([t.phase, t.match.final, D.result(t)], ['done', true, { winner: 1, ranking: [1, 0, 2], pts: [2, 4, 0] }], '合計点で順位');
+  assert.equal(D.resultText(D.result(t), 0, (p) => 'P' + p), 'あなたは2位（2点）。優勝はP1（4点）');
+  assert.deepEqual([0, 1, 2].map((p) => D.carry(t, p)), [1, 0, 2], '次の対局へは合計点の順で引き継ぐ');
+  assert.equal(D.apply(t, { p: 0, t: 'next' }), null, '最後の回のあとは次の回が無い');
+  t = dplay(dplay(mb([0, 1, 2], 3), 0, ['s3']), 1, ['h4']);
+  assert.deepEqual([D.result(t).winners, D.result(t).ranking], [[0, 1, 2], [0, 1, 2]], '同じ点なら全員の勝ち（並びは最後の回の順位）');
+  assert.equal(D.resultText(D.result(t), 2, (p) => 'P' + p), 'P0・P1・P2が同じ点で優勝！（2点）🎉');
+  // CPU どうしで最後まで: 反則なし・回の数・点の合計・回ごとの札の数・手の一覧から当て直して同じ局面
+  let dm = 0;
+  for (let k = 0; k < 48; k++) {
+    const n = 3 + (k % 6);
+    const of = k % 2 ? 3 : 5;
+    const rules = { ...[DEF, ALL, NONE][k % 3], match: of };
+    const prev = k % 4 === 0 ? Array.from({ length: n }, (_, p) => (p + k) % n) : null;
+    const st0 = D.init(n, k * 9973 + 3, { rules, prev });
+    let st = st0;
+    const moves = [];
+    let steps = 0;
+    let played = 0;
+    let hands = 1;
+    while (!D.result(st)) {
+      const p = st.phase === 'gap' ? (k % n) : st.phase === 'exchange' ? st.gives[0].from : D.turn(st);
+      const move = { ...D.cpu(st, p), p };
+      const next = D.apply(st, move);
+      assert.ok(next, `何回か勝負で CPU が反則（${n}人）`);
+      moves.push(move);
+      if (move.t === 'play' || move.t === 'ten') played += move.cards.length;
+      if (move.t === 'bomb') played += st.hands.reduce((a, h, q) => a + (st.out.includes(q) || st.fouls.includes(q) ? 0 : h.filter((c) => c !== 'JK' && Number(c.slice(1)) === move.r).length), 0);
+      if (next.match.no > st.match.no) {
+        hands++;
+        played = 0;
+        assert.deepEqual(next.prevRank, Array.from({ length: n }, (_, q) => st.ranking.indexOf(q)), '前の回の順位を引き継ぐ');
+        assert.equal(next.phase, rules.exchange ? 'exchange' : 'play', '回の間のカード交換');
+        assert.deepEqual(next.match.pts, st.match.pts, '点は持ち越す');
+      }
+      assert.equal(dcount(next) + played, 53, '何回か勝負で札の枚数が合わない');
+      if (next.phase === 'gap' || (next.phase === 'done' && st.phase !== 'done')) {
+        assert.equal(next.match.gain.reduce((a, x) => a + x, 0), n * (n - 1) / 2, '1回の点の合計');
+        assert.deepEqual(next.match.gain, Array.from({ length: n }, (_, q) => n - 1 - next.ranking.indexOf(q)));
+      }
+      st = next;
+      if (++steps > 20000) throw new Error('何回か勝負が終わらない');
+    }
+    assert.equal(hands, of, '決めた回数だけ遊ぶ');
+    assert.ok(st.match.final);
+    assert.equal(st.match.pts.reduce((a, x) => a + x, 0), of * n * (n - 1) / 2, '点の合計');
+    const res = D.result(st);
+    assert.deepEqual(res.ranking.slice().sort((a, b) => a - b), Array.from({ length: n }, (_, i) => i), '順位が全員分');
+    assert.ok(res.ranking.every((p, i) => !i || st.match.pts[res.ranking[i - 1]] >= st.match.pts[p]), '合計点の多い順');
+    assert.deepEqual(Array.from({ length: n }, (_, p) => D.carry(st, p)).sort((a, b) => a - b), Array.from({ length: n }, (_, i) => i), '引き継ぐ順位が全員分');
+    assert.deepEqual(moves.reduce((s, m) => D.apply(s, m), st0), st, '手の一覧から当て直して同じ局面');
+    dm++;
+  }
+  console.log('daifugo match games', dm);
+}
 
 // ---------- ポーカー（5カードドロー） ----------
 const P = GAMES.poker;
@@ -3981,6 +4089,85 @@ for (let g = 0; g < 20; g++) {
   const tot = st.pl.map((x) => totalOf(x.sheet).total);
   assert.ok(tot.every((v) => v > 60 && v < 400), 'CPU の点がふつうの範囲 ' + tot);
 }
+// 短い版（詳細設定）: 役は 1〜6 の6つだけで6回。ボーナスは同じ。2回目のヨット・ジョーカーは切る。なしでは今までと全く同じ
+{
+  const { createHash } = await import('node:crypto');
+  const { mulberry32 } = await import('../app/js/games/util.js');
+  // なしのとき: 決まった手順（種から作る乱数で振る・書く）で最後まで打った全部の局面の指紋が、短い版を足す前と同じ
+  const h = createHash('sha256');
+  for (let k = 0; k < 12; k++) {
+    const rules = { bonusYacht: k % 3 === 0, joker: k % 2 === 1 };
+    if (k % 4 === 2) rules.short = false;
+    let st = YT.init(2 + (k % 4), k * 13 + 5, { rules });
+    const rnd = mulberry32(k + 300);
+    h.update(JSON.stringify(st));
+    while (!YT.result(st)) {
+      for (let p = 0; p < st.n; p++) {
+        if (!YT.canAct(st, p)) continue;
+        const x = st.pl[p];
+        let m;
+        if (x.rolls === 0) m = { t: 'roll', r: st.round, k: 1, keep: [false, false, false, false, false] };
+        else if (x.rolls < 3 && rnd() < 0.6) { const keep = x.dice.map(() => rnd() < 0.5); keep[Math.floor(rnd() * 5)] = false; m = { t: 'roll', r: st.round, k: x.rolls + 1, keep }; }
+        else { const open = x.sheet.map((v, c) => (v === null ? c : -1)).filter((c) => c >= 0); m = { t: 'score', r: st.round, cat: open[Math.floor(rnd() * open.length)] }; }
+        st = YT.apply(st, { p, ...m });
+        assert.ok(st);
+        h.update(JSON.stringify(st));
+      }
+    }
+    h.update(JSON.stringify(YT.result(st)));
+  }
+  assert.equal(h.digest('hex').slice(0, 16), '705f2dc797153558', '短い版 なしでは今までと全く同じ局面');
+  assert.deepEqual(YT.init(3, 21, { rules: { short: false } }), YT.init(3, 21), 'なしでは short を持たない');
+  // ありの局面: 表は6つ・2回目のヨットとジョーカーは切る
+  const sh = YT.init(2, 7, { rules: { short: true, bonusYacht: true, joker: true } });
+  assert.deepEqual([sh.short, sh.bonusYacht, 'joker' in sh, sh.pl[0].sheet.length], [true, false, false, 6], '短い版の局面');
+  assert.match(YT.phaseText(sh, 0), /全6回/);
+  // 7つ目より後の役（チョイス〜ヨット）は反則
+  let st = YT.apply(sh, { p: 0, t: 'roll', r: 0, k: 1, keep: [false, false, false, false, false] });
+  for (const cat of [6, 7, 8, 9, 10, 11, 12, -1]) assert.equal(YT.apply(st, { p: 0, t: 'score', r: 0, cat }), null, `短い版で役 ${cat} は書けない`);
+  assert.ok(YT.apply(st, { p: 0, t: 'score', r: 0, cat: 5 }), '6の役は書ける');
+  // 点: 1〜6 の合計とボーナス（63点以上で+35）。5個そろいでも +100 は付かない
+  {
+    const one = (sheet, dice, cat) => {
+      const s0 = YT.init(2, 7, { rules: { short: true, bonusYacht: true, joker: true } });
+      s0.pl[0] = { ...s0.pl[0], dice, rolls: 1, sheet };
+      s0.round = sheet.filter((v) => v !== null).length;
+      s0.pl[1] = { ...s0.pl[1], sheet: s0.pl[1].sheet.map((v, c) => (c < s0.round ? 0 : null)) };
+      return YT.apply(s0, { p: 0, t: 'score', r: s0.round, cat });
+    };
+    let y = one([3, 6, 9, 12, 15, null], [6, 6, 6, 1, 2], 5);
+    assert.deepEqual(totalOf(y.pl[0].sheet, y.pl[0].extra), { upper: 63, bonus: 35, total: 98 }, '短い版でも63点でボーナス');
+    y = one([3, 6, 9, 12, 15, null], [6, 6, 6, 6, 6], 5);
+    assert.deepEqual([y.pl[0].sheet[5], y.pl[0].extra], [30, 0], '短い版では5個そろいでも +100 なし');
+    assert.equal(bonusInfo(y.pl[0].sheet).state, 'got');
+  }
+  // 6回で終わる: 全員が 1〜6 を順に書く
+  st = YT.init(3, 33, { rules: { short: true } });
+  for (let r = 0; r < 6; r++) {
+    assert.equal(YT.result(st), null, `${r}回目ではまだ終わらない`);
+    for (let p = 0; p < 3; p++) {
+      st = YT.apply(st, { p, t: 'roll', r, k: 1, keep: [false, false, false, false, false] });
+      st = YT.apply(st, { p, t: 'score', r, cat: r });
+      assert.ok(st);
+    }
+  }
+  assert.equal(st.round, 6);
+  const res = YT.result(st);
+  assert.ok(res && res.ranking.length === 3, '6回で終わる');
+  assert.ok(!YT.canAct(st, 0), '終わったら振れない');
+  const tot = st.pl.map((x) => totalOf(x.sheet).total);
+  assert.equal(tot[res.winner], Math.max(...tot), '点の多い人の勝ち');
+  // CPU どうしで最後まで（6回）
+  for (let g = 0; g < 20; g++) {
+    let c = YT.init(2 + (g % 4), 500 + g, { rules: { short: true, joker: g % 2 === 1, bonusYacht: g % 3 === 0 } });
+    let guard = 0;
+    while (!YT.result(c)) {
+      for (let p = 0; p < c.n; p++) if (YT.canAct(c, p)) { c = YT.apply(c, { p, ...YT.cpu(c, p) }); assert.ok(c, '短い版で CPU が反則を出した'); }
+      assert.ok(++guard < 100);
+    }
+    assert.ok(c.round === 6 && c.pl.every((x) => x.sheet.length === 6 && x.sheet.every((v) => v !== null) && !x.extra), '短い版の CPU が6つ埋める');
+  }
+}
 
 // ---------- ワードウルフ ----------
 const WW = GAMES.wordwolf;
@@ -4321,6 +4508,24 @@ for (let g = 0; g < 12; g++) {
     assert.ok(++guard < 600);
   }
   assert.equal(st.pits[6] + st.pits[13] + st.pits[20], total, '3人: 石の数が崩れない');
+}
+// 石の数を隠す（hide。23回目の案）: なしの局面は前と同じ・ありは次の局面へ続く・とった数を出さない・終わっても局面は続く
+const mcText = (st) => MC.info(st).replace(/<[^>]*>/g, '');
+assert.ok(MC.settings.some((x) => x.key === 'hide' && x.def === false), '石の数を隠すの設定（最初はなし）');
+assert.ok(!('hide' in MC.init()) && !('hide' in MC.init({ rules: { hide: false } })) && !('hide' in MC.apply(MC.init(), 2)), 'なしの局面に hide を足さない');
+assert.match(MC.info(MC.apply({ ...mc, pits: [1, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 5, 0, 0] }, 0)), /（6個）/, 'なしならとった数が出る');
+t = MC.apply({ ...mc, hide: true, pits: [1, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 5, 0, 0] }, 0);
+assert.ok(t.hide && !t.over && t.last.capture.got === 6 && /とった/.test(MC.info(t)) && !/\d+個/.test(mcText(t)), 'ありではとった数を出さない');
+for (const rules of [{}, { players: 3 }, { pits: 4, nocap: true }, { stones: 6, pits: 5 }, { players: 3, stones: 3, nocap: true }]) {
+  let st = MC.init({ rules: { ...rules, hide: true } });
+  assert.equal(st.hide, true);
+  let guard = 0;
+  while (!MC.result(st)) {
+    assert.doesNotMatch(mcText(st), /\d+個/, '石の数を隠す: 対局の間は数を出さない ' + JSON.stringify(rules));
+    st = MC.apply(st, MC.cpu(st, st.turn, { cpu: 'weak' }));
+    assert.ok(st && st.hide === true && ++guard < 600, '石の数を隠す: CPU が反則を出した・設定が続かない');
+  }
+  assert.ok(st.over && MC.result(st), '石の数を隠す: 最後まで打てる（終わったら画面はいつもどおり数を出す）');
 }
 console.log('mancala OK');
 

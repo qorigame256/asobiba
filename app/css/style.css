@@ -927,6 +927,9 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .df .cc-actions.df-bomb .btn small { font-size: .7rem; font-weight: 400; }
 .df-bomb-wait { margin: 0; text-align: center; font-weight: 700; color: #b06a00; }
 .df-ranking { margin: 0 auto; padding-left: 1.4em; font-weight: 700; }
+.df-gap .df-ranking { text-align: left; } /* 大富豪の何回か勝負: 回の結果 */
+.df-gap .df-total { list-style: none; padding-left: 0; color: var(--accent); }
+.df-gap-sub { margin: 0; font-size: .85rem; font-weight: 700; color: var(--muted); }
 .df-rules { color: var(--muted); font-size: .8rem; text-align: center; }
 .cc-tag.rank { background: var(--win); color: #3b2a00; font-weight: 700; }
 .cc-tag.prev { background: #e8e1f5; color: #5a3f8a; }
@@ -1503,6 +1506,10 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .mc-tri .mc-pit.p2 { border-color: color-mix(in srgb, var(--p2) 75%, transparent); }
 .mc-tri .mc-num { font-size: .7rem; }
 .mc-pit.store.p2 .mc-num { color: var(--p2); }
+/* マンカラの「石の数を隠す」: 数の代わりに石を全部描く。13個以上の穴とゴールは列を増やして小さく詰める（--cols は mancala.js） */
+.mc-stones.mc-many { gap: 1px; }
+.mc-stones.mc-many i { width: calc((100% - (var(--cols) - 1) * 1px) / var(--cols)); }
+.mc-pit.store .mc-stones.mc-many { display: flex; width: 78%; height: auto; }
 
 /* ---------- 海戦ゲーム ---------- */
 .board.ks { width: min(100%, 460px, max(280px, calc((100dvh - 230px) / 1.75))); display: flex; /* 2つの海が画面の高さに収まるように */ flex-direction: column; gap: 10px; }

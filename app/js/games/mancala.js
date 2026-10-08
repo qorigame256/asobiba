@@ -12,6 +12,10 @@
 // 詳細設定「穴の数」（鍵は pits。2026-10-07。10回目の案）: 2人のときだけ、片側の穴を 6（最初）・5・4 にできる（局面の holes。3人はいつも 6）。
 //   番号の形は同じで、1人ぶんが「穴 holes 個＋ゴール」になる（穴4つなら 0〜3 = 先手の穴、4 = 先手のゴール、5〜8 = 後手の穴、9 = 後手のゴール）。
 //   向かいの穴は 2*holes - i（穴6つなら 12 - i で前と同じ）。手は 0〜holes-1。
+// 詳細設定「石の数を隠す」（鍵は hide。2026-10-08 の23回目の案）: 対局の間は穴とゴールの数（白い丸の数字・とった石の数・読み上げ用の aria-label）を出さない。
+//   Claude の判断: 局面には、ありのときだけ hide: true を足す（なしの局面・画面は前と全く同じ）。数の代わりに石を全部描く
+//   （いつもは穴に12個まで・ゴールは数だけなので、ありのときはゴールにも石を描き、13個以上の穴とゴールは列を増やして小さく詰める。列の数は --cols）。
+//   終わったら（over）いつもどおり数を出す。ふりかえりの途中の局面は終わっていないので隠れたまま。CPU は変えない。
 
 import { CPU_SETTING, boardCpu } from './util.js';
 
@@ -40,6 +44,7 @@ const game = {
     { key: 'stones', label: '最初の石の数', desc: '穴1つあたり。多いほど長くなる', def: 4, choices: [[3, '3個'], [4, '4個'], [5, '5個'], [6, '6個']] },
     { key: 'pits', label: '穴の数', desc: '片側の穴の数（2人のときだけ。3人はいつも6つ）。少ないほど早く終わる', def: 6, choices: [[6, '6つ'], [5, '5つ'], [4, '4つ']] },
     { key: 'nocap', label: '捕獲なし', desc: '自分の空いた穴で止まっても、向かいの石をとらない。ゴールに入れた石だけで勝負', def: false },
+    { key: 'hide', label: '石の数を隠す', desc: '終わるまで、穴とゴールの石の数が出ない。石を見て数えよう', def: false },
     CPU_SETTING,
   ],
 
@@ -48,7 +53,7 @@ const game = {
     const np = rules.players === 3 ? 3 : 2;
     const holes = np === 2 && HOLES.includes(rules.pits) ? rules.pits : 6;
     const pits = Array(np * (holes + 1)).fill(n);
-    const s = { n: np, holes, nocap: !!rules.nocap, pits, turn: 0, last: null, over: false, count: 0 };
+    const s = { n: np, holes, nocap: !!rules.nocap, pits, turn: 0, last: null, over: false, count: 0, ...(rules.hide ? { hide: true } : {}) };
     for (let p = 0; p < np; p++) pits[storeOf(s, p)] = 0;
     return s;
   },
@@ -89,7 +94,7 @@ const game = {
       pits[i] = 0;
       for (const j of opp) pits[j] = 0;
     }
-    const t = { n: np, holes: H, nocap: s.nocap, pits, turn, last, over: false, count: s.count + 1 };
+    const t = { n: np, holes: H, nocap: s.nocap, pits, turn, last, over: false, count: s.count + 1, ...(s.hide ? { hide: true } : {}) };
     // 誰かの側が空になったら、残りをそれぞれのゴールへ
     if (Array.from({ length: np }, (_, q) => side(t, q).every((x) => !x)).some(Boolean)) {
       for (let q = 0; q < np; q++) {
@@ -152,7 +157,7 @@ const game = {
     if (!l || s.over) return '';
     const name = game.players[l.p];
     if (l.extra) return `<b class="pl p${l.p}">${name}</b>はゴールで止まったので、もう1回！`;
-    if (l.capture) return `<b class="pl p${l.p}">${name}</b>が向かいの石をとった（${l.capture.got}個）`;
+    if (l.capture) return `<b class="pl p${l.p}">${name}</b>が向かいの石をとった` + (s.hide ? '' : `（${l.capture.got}個）`);
     return '';
   },
 
@@ -166,6 +171,7 @@ const game = {
     const sown = new Set(o.fresh && s.last ? s.last.sown : []);
 
     const H = holesOf(s);
+    const hide = s.hide && !res; // 石の数を隠す（終わるまで）
     const pitEl = (i, owner) => {
       const store = i === storeOf(s, owner);
       const k = i - pitOf(s, owner, 0);
@@ -174,13 +180,19 @@ const game = {
       if (can) {
         e.type = 'button';
         e.onclick = () => o.onMove(k);
-        e.setAttribute('aria-label', `${k + 1}番目の穴（石${s.pits[i]}個）`);
+        e.setAttribute('aria-label', hide ? `${k + 1}番目の穴` : `${k + 1}番目の穴（石${s.pits[i]}個）`);
       }
       e.className = 'mc-pit p' + owner + (store ? ' store' : '') + (can ? ' playable' : '') + (sown.has(i) ? ' sown' : '')
         + (s.last?.from === i ? ' from' : '') + (s.last?.capture && (s.last.capture.at === i || [s.last.capture.opp].flat().includes(i)) ? ' cap' : '');
       const stones = document.createElement('div');
       stones.className = 'mc-stones';
-      const shown = Math.min(s.pits[i], store ? 0 : 12);
+      const shown = hide ? s.pits[i] : Math.min(s.pits[i], store ? 0 : 12);
+      if (hide && (store || shown > 12)) {
+        // 数を出さないので全部描く。2人のゴールは縦長なので列を少なめに
+        const cols = store && np === 2 ? Math.max(2, Math.ceil(Math.sqrt(shown * 0.6))) : Math.max(store ? 3 : 4, Math.ceil(Math.sqrt(shown)) + (store ? 1 : 0));
+        stones.classList.add('mc-many');
+        stones.style.setProperty('--cols', cols);
+      }
       for (let j = 0; j < shown; j++) {
         const d = document.createElement('i');
         d.style.setProperty('--h', ((i * 7 + j * 53) % 360) + 'deg');
@@ -189,7 +201,8 @@ const game = {
       const num = document.createElement('div');
       num.className = 'mc-num';
       num.textContent = s.pits[i];
-      e.append(stones, num);
+      e.append(stones);
+      if (!hide) e.append(num);
       if (store) {
         const who = document.createElement('div');
         who.className = 'mc-who';
@@ -203,6 +216,7 @@ const game = {
     note.className = 'cc-log';
     const meName = o.me === bottom ? 'あなた' : game.players[bottom];
     if (res) note.textContent = 'ゴールの石: ' + stores(s).map((v, p) => `${game.players[p]} ${v}個`).join(' ／ ');
+    const secret = hide ? '。石の数はひみつ（終わったら出ます）' : '';
 
     if (np === 3) {
       // 三角形: 下の辺 = 自分（左→右、右下の角にゴール）、右の辺 = 次の人（下→上、てっぺんにゴール）、左の辺 = その次（上→下、左下にゴール）
@@ -229,7 +243,7 @@ const game = {
         put(pitEl(storeOf(s, owner), owner), to, 13.5);
       });
       root.append(tri);
-      if (!res) note.textContent = `下の辺が${meName}の穴、右下の角がゴール。石は反時計回りに配ります（ほかの人のゴールは飛ばす）`;
+      if (!res) note.textContent = `下の辺が${meName}の穴、右下の角がゴール。石は反時計回りに配ります（ほかの人のゴールは飛ばす）${secret}`;
       root.append(note);
       return;
     }
@@ -249,7 +263,7 @@ const game = {
     mid.append(rowTop, rowBottom);
     wrap.append(mid, pitEl(storeOf(s, bottom), bottom)); // 右はし = 下の人のゴール
     root.append(wrap);
-    if (!res) note.textContent = `下の列が${meName}の穴、右はしがゴール。石は反時計回りに配ります`;
+    if (!res) note.textContent = `下の列が${meName}の穴、右はしがゴール。石は反時計回りに配ります${secret}`;
     root.append(note);
   },
 };

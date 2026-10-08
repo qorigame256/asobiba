@@ -14,6 +14,10 @@
 // 点数の表の「ボーナス」の欄に、あと何点でボーナスか・獲得・無理を出す（2026-10-07 本人の承認。見せるだけで、手も点の付け方も変えない）。
 //   無理は、まだ空いている 1〜6 の役を全部いちばん高い点（5個そろい）で埋めても 63点に届かないとき（bonusInfo）。
 //   自分が振ったあとは、1〜6 の役のボタンに、そこに書いたあとの見込み（あと◯・獲得・無理）を小さく出す（まだ届くかどうかの途中のときだけ）。
+// 詳細設定「短い版」（2026-10-08 本人の決定。23回目の案。最初はなし）: 役を 1〜6 の6つだけにして、6回で終わる（だいたい半分の長さ）。
+//   Claude の判断: 1〜6 の合計 63点以上でボーナス 35点はそのまま（1〜6 しか無いので、ボーナスを取れるかが勝負の分かれ目になる）。
+//   ヨットの役が無いので「2回目のヨット」「ジョーカー」は使わない（設定はそのまま残し、局面では切る。説明にそう書いた）。
+//   ありのときだけ局面に short: true を持ち、点数の表（sheet）は6つの長さ（なしでは今までと全く同じ形）。7つ目より後の役を選ぶ手は反則で弾く。
 // サイコロの目は、対局の種・人・回・何回目の振りから作る（apply が乱数を使わず全員の端末で同じになるように）。
 // 手: { p, t: 'roll', r: 何回目, k: 何振り目(1〜3), keep: [残す5つの真偽] } / { p, t: 'score', r: 何回目, cat: 役の番号 }。
 // r と k を入れているので、同じ手が2回届いても2回目は弾かれる（realtime）。
@@ -91,6 +95,8 @@ function rollDice(seed, p, r, k) {
 
 const clone = (s) => ({ ...s, pl: s.pl.map((x) => ({ ...x, dice: x.dice.slice(), sheet: x.sheet.slice() })) });
 const filled = (x) => x.sheet.filter((v) => v !== null).length;
+const SHORT_CATS = 6; // 短い版（詳細設定）の役の数（1〜6）
+const catCount = (s) => (s.short ? SHORT_CATS : ROUNDS); // この対局の役の数＝回の数
 
 /* ---------- CPU ---------- */
 
@@ -138,22 +144,26 @@ export default {
   settings: [
     { key: 'bonusYacht', label: '2回目のヨット', desc: 'ヨットの役に50点を書いたあとで、もう一度5個そろえたら +100点（そのときも、ほかの役を1つ選んで書く）', def: false },
     { key: 'joker', label: 'ジョーカー', desc: 'ヨットの役を書いたあと（0点でも）にまた5個そろえたら、Sストレート・Bストレートにも満点（15点・30点）で書ける', def: false },
+    { key: 'short', label: '短い版', desc: '役を 1〜6 の6つだけにして6回で終わる（ボーナスは今までどおり63点以上で+35点）。ヨットの役が無いので、2回目のヨット・ジョーカーは使わない', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
+    const short = !!rules.short; // 短い版はヨットの役が無いので、2回目のヨット・ジョーカーは切る
     const s = {
-      n, seed, round: 0, step: 0, bonusYacht: !!rules.bonusYacht,
-      pl: Array.from({ length: n }, () => ({ dice: [1, 2, 3, 4, 5], rolls: 0, keep: [false, false, false, false, false], sheet: Array(ROUNDS).fill(null), extra: 0 })),
+      n, seed, round: 0, step: 0, bonusYacht: !short && !!rules.bonusYacht,
+      pl: Array.from({ length: n }, () => ({ dice: [1, 2, 3, 4, 5], rolls: 0, keep: [false, false, false, false, false], sheet: Array(short ? SHORT_CATS : ROUNDS).fill(null), extra: 0 })),
     };
-    if (rules.joker) s.joker = true; // なしのときは局面に何も足さない（今までと同じ形）
+    if (rules.joker && !short) s.joker = true; // なしのときは局面に何も足さない（今までと同じ形）
+    if (short) s.short = true;
     return s;
   },
 
   turn() { return null; },
-  canAct(s, p) { return s.round < ROUNDS && p >= 0 && p < s.n && filled(s.pl[p]) === s.round; },
+  canAct(s, p) { return s.round < catCount(s) && p >= 0 && p < s.n && filled(s.pl[p]) === s.round; },
   phaseText(s, me) {
-    if (me >= 0 && me < s.n && !this.canAct(s, me) && s.round < ROUNDS) return `${s.round + 1}回目（全${ROUNDS}回）: ほかの人を待っています…`;
-    return `${s.round + 1}回目（全${ROUNDS}回）: みんな同時に振っています`;
+    const all = catCount(s);
+    if (me >= 0 && me < s.n && !this.canAct(s, me) && s.round < all) return `${s.round + 1}回目（全${all}回）: ほかの人を待っています…`;
+    return `${s.round + 1}回目（全${all}回）: みんな同時に振っています`;
   },
   // 鳴らすのは自分の手と、次の回へ進んだときだけ（ほかの人の分まで鳴らすとにぎやかすぎるため）
   sound(a, b, m, me) {
@@ -164,7 +174,7 @@ export default {
   cpuDelay() { return 700; },
 
   result(s) {
-    if (s.round < ROUNDS) return null;
+    if (s.round < catCount(s)) return null;
     const totals = s.pl.map((x) => totalOfPl(x).total);
     const winners = leaders(totals);
     const rk = ranks(totals);
@@ -190,7 +200,7 @@ export default {
       return s;
     }
     if (m.t === 'score') {
-      if (x0.rolls < 1 || !Number.isInteger(m.cat) || m.cat < 0 || m.cat >= ROUNDS || x0.sheet[m.cat] !== null) return null;
+      if (x0.rolls < 1 || !Number.isInteger(m.cat) || m.cat < 0 || m.cat >= catCount(s0) || x0.sheet[m.cat] !== null) return null;
       const s = clone(s0);
       const x = s.pl[m.p];
       if (yachtBonus(s, x, m.cat)) x.extra = (x.extra ?? 0) + YACHT_BONUS;
@@ -296,7 +306,7 @@ export default {
       for (const p of order) tr.append(cell(p));
       table.append(tr);
     };
-    CATS.forEach((label, cat) => {
+    CATS.slice(0, catCount(s)).forEach((label, cat) => { // 短い版（詳細設定）は 1〜6 だけ
       addRow(label, (p) => {
         const td = document.createElement('td');
         const v = s.pl[p].sheet[cat];

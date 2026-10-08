@@ -3,9 +3,10 @@
 // 強い CPU が弱い CPU に勝ち越す、を確かめる。3人（六角形の盤）も同じことを確かめる。画面は使わない。
 // ゴールの広さ（せまい・ひろい）でも、決着が付く・パックが壁を抜けない・ひろいほど1試合が短い、を確かめる。
 // じゃまブロックでも、パックがブロックを抜けない・マレットが入らない・決着が付く・強さの順が崩れない・なしなら前と同じ、を確かめる。
+// マレットの大きさ（小さい・大きい）でも、範囲と当たりが半径に合う・決着が付く・強さの順が崩れない・ふつうなら前と同じ、を確かめる。
 import HOCKEY, {
   stepPuck, cpuTarget, clampMallet, CPU_LEVELS, stepHex, clampHex, cpuHex, zoneHex, addGoal, overOf, HEX_A, HEX_R, GOAL3, bouncePucks, scoreOf,
-  GOAL_SIZES, table, moveMallet, BLOCK2, BLOCK3, blockDist,
+  GOAL_SIZES, table, moveMallet, BLOCK2, BLOCK3, blockDist, MALLET_SIZES,
 } from '../app/js/games/hockey.js';
 import { mulberry32 } from '../app/js/games/util.js';
 
@@ -494,9 +495,10 @@ function match3(lvs, seed, target = 7, goal = GOAL3) {
       !passes(plain) && passes(dodge) && JSON.stringify(cpuTarget(far, m, L.strong, still)) === JSON.stringify(cpuTarget(far, m, L.strong, still, GOAL, BLOCK2)));
   }
 
-  // CPU どうしの試合（台の関数をそのまま使う）。n = 人数・goalKey = ゴールの広さ・npk = パックの数・block = じゃまブロック
-  function matchT(n, goalKey, block, lvs, seed, npk = 1, target = 7) {
-    const T = table(n, goalKey, block);
+  // CPU どうしの試合（台の関数をそのまま使う）。n = 人数・goalKey = ゴールの広さ・npk = パックの数・block = じゃまブロック・mk = マレットの大きさ
+  function matchT(n, goalKey, block, lvs, seed, npk = 1, target = 7, mk = 'normal') {
+    const T = table(n, goalKey, block, mk);
+    const rm = T.rm;
     const b = T.block;
     const rnd = mulberry32(seed);
     const seats = n === 2 ? [0, 1] : [0, 1, 2];
@@ -524,8 +526,9 @@ function match3(lvs, seed, target = 7, goal = GOAL3) {
       for (let i = 0; i < 4; i++) {
         for (const p of seats) {
           moveMallet(ms[p], p, aim[p], lvs[p].speed, dt / 4, T.clamp, T.keep);
-          if (b && blockDist(b, ms[p].x, ms[p].y) < R_M + b.r - 1e-9) return { error: `マレット${p}がブロックに入った (${ms[p].x.toFixed(3)}, ${ms[p].y.toFixed(3)})` };
-          if (n === 3 && (!insideHex(ms[p], R_M, false) || !inSector(p, ms[p], R_M))) return { error: `マレット${p}が範囲の外` };
+          if (b && blockDist(b, ms[p].x, ms[p].y) < rm + b.r - 1e-9) return { error: `マレット${p}がブロックに入った (${ms[p].x.toFixed(3)}, ${ms[p].y.toFixed(3)})` };
+          if (n === 3 && (!insideHex(ms[p], rm, false) || !inSector(p, ms[p], rm))) return { error: `マレット${p}が範囲の外` };
+          if (n === 2 && (ms[p].x < rm - 1e-9 || ms[p].x > W - rm + 1e-9 || (p === 0 ? ms[p].y < H / 2 + rm - 1e-9 || ms[p].y > H - rm + 1e-9 : ms[p].y < rm - 1e-9 || ms[p].y > H / 2 - rm + 1e-9))) return { error: `マレット${p}が範囲の外` };
         }
         if (ps.length === 2) bouncePucks(ps[0], ps[1]); // hockey.js と同じく、パックどうしを先に・壁を後に
         for (let k = 0; k < ps.length; k++) {
@@ -637,6 +640,133 @@ function match3(lvs, seed, target = 7, goal = GOAL3) {
   check('じゃまブロック: つよいはよわいに勝ち越す（2人・40試合）', sw >= 30, `${sw}勝`);
   check('じゃまブロック: ふつうはよわいに勝ち越す（2人・40試合）', nw >= 24, `${nw}勝`);
   check('じゃまブロック: つよい1人と よわい2人では、つよいがたいてい1位（3人・30試合）', first3 >= 20, `${first3}回`);
+
+  // マレットの大きさ（詳細設定 mallet）
+  {
+    const setting = HOCKEY.settings.find((x) => x.key === 'mallet');
+    check('マレットの大きさ: 詳細設定は 小さい・ふつう・大きい で、最初は ふつう（前と同じ大きさ）',
+      setting?.def === 'normal' && JSON.stringify(setting.choices) === '[["small","小さい"],["normal","ふつう"],["large","大きい"]]'
+      && MALLET_SIZES.normal.mul === 1 && table(2).rm === R_M && table(3).rm === R_M);
+    // ふつう: 台の関数が前と同じ（同じ関数）。ふつうを渡しても渡さなくても同じ動き
+    {
+      let same = true;
+      for (const n of [2, 3]) {
+        const A = table(n, 'normal', false, 'normal');
+        if (A.clamp !== (n === 2 ? clampMallet : clampHex)) same = false;
+        for (const blk of [false, true]) {
+          const P = table(n, 'wide', blk);
+          const Q = table(n, 'wide', blk, 'normal');
+          const r = mulberry32(9);
+          for (let i = 0; i < 500; i++) {
+            const q = n === 2 ? { x: r(), y: r() * H, vx: (r() - 0.5) * 6, vy: (r() - 0.5) * 6 } : { x: (r() - 0.5) * 1.4, y: (r() - 0.5) * 1.4, vx: (r() - 0.5) * 6, vy: (r() - 0.5) * 6 };
+            const ms = [{ x: q.x + (r() - 0.5) * 0.3, y: q.y + (r() - 0.5) * 0.3, vx: (r() - 0.5) * 8, vy: (r() - 0.5) * 8 }];
+            const a = { ...q };
+            const c = { ...q };
+            if (P.step(a, ms, 1 / 240) !== Q.step(c, ms, 1 / 240) || JSON.stringify(a) !== JSON.stringify(c)) same = false;
+            const px = (r() - 0.5) * 3 + (n === 2 ? W / 2 : 0);
+            const py = (r() - 0.5) * 3 + (n === 2 ? H / 2 : 0);
+            if (JSON.stringify(P.clamp(i % n, px, py)) !== JSON.stringify(Q.clamp(i % n, px, py))) same = false;
+          }
+        }
+      }
+      check('マレットの大きさ: ふつうでは台の関数が前と全く同じ動きをする', same);
+    }
+    // 大きさが当たりと動ける範囲に効く: どこを指しても壁・陣地の境目から rm 離れ、パックは中心から rm + R_P の所で跳ね返る
+    {
+      let ok = true;
+      const rnd = mulberry32(13);
+      for (const mk of ['small', 'large']) {
+        for (const n of [2, 3]) {
+          for (const blk of [false, true]) {
+            const T = table(n, 'normal', blk, mk);
+            const rm = T.rm;
+            if (Math.abs(rm - R_M * MALLET_SIZES[mk].mul) > 1e-12) ok = false;
+            for (let i = 0; i < 2000; i++) {
+              const p = i % n;
+              const q = T.clamp(p, (rnd() - 0.5) * 3 + (n === 2 ? W / 2 : 0), (rnd() - 0.5) * 3 + (n === 2 ? H / 2 : 0));
+              if (n === 3 && (!insideHex(q, rm, false) || !inSector(p, q, rm))) ok = false;
+              if (n === 2 && (q.x < rm - 1e-9 || q.x > W - rm + 1e-9 || (p === 0 ? q.y < H / 2 + rm - 1e-9 || q.y > H - rm + 1e-9 : q.y < rm - 1e-9 || q.y > H / 2 - rm + 1e-9))) ok = false;
+              if (T.block && blockDist(T.block, q.x, q.y) < rm + T.block.r - 1e-9) ok = false;
+            }
+            // 止まったマレットへまっすぐ向かうパックは、中心どうしが rm + R_P 離れた所で跳ね返る
+            const c = n === 2 ? { x: 0.3, y: 1.3 } : { x: -0.2, y: 0.45 };
+            const m = { ...c, vx: 0, vy: 0 };
+            const puck = { x: c.x, y: c.y - 0.3, vx: 0, vy: 3 };
+            let min = Infinity;
+            for (let k = 0; k < 40; k++) { T.step(puck, [m], 1 / 240); min = Math.min(min, Math.hypot(puck.x - m.x, puck.y - m.y)); }
+            if (Math.abs(min - (rm + R_P)) > 1e-6 || puck.vy >= 0) ok = false;
+          }
+        }
+      }
+      check('マレットの大きさ: 小さい・大きいでも、マレットは壁・陣地・ブロックから自分の半径だけ離れ、パックは半径に合わせて跳ね返る（2人・3人）', ok);
+    }
+    // CPU どうし: 大きさ・人数・ゴールの広さ・パックの数・じゃまブロックのどれでも、抜けない・止まり続けない・必ず決着する
+    const mavg = {};
+    for (const mk of ['small', 'large']) {
+      for (const n of [2, 3]) {
+        let err = 0;
+        let cnt = 0;
+        for (const goalKey of ['narrow', 'normal', 'wide']) {
+          for (const [npk, blk] of [[1, false], [2, false], [1, true]]) {
+            const games = goalKey === 'normal' && npk === 1 && !blk ? 12 : 3;
+            let sum = 0;
+            let c = 0;
+            for (let seed = 1; seed <= games; seed++) {
+              const r = matchT(n, goalKey, blk, Array(n).fill(L.normal), seed + 4000 + n * 100 + npk * 50 + (blk ? 25 : 0), npk, 7, mk);
+              cnt++;
+              if (r.error) { err++; if (err <= 3) console.log('   ' + r.error); continue; }
+              sum += r.t; c++;
+            }
+            if (npk === 1 && !blk) mavg[`${mk}-${n}-${goalKey}`] = c ? Math.round(sum / c) : '-';
+          }
+        }
+        check(`マレット${MALLET_SIZES[mk].name}: ${n}人の CPU どうし${cnt}試合（ゴールの広さ3つ・パック2つ・じゃまブロックも）で、抜けない・止まり続けない・必ず決着する`, err === 0, `${err}件`);
+      }
+    }
+    // くらべるための、ふつうの大きさの1試合の平均（同じ種）
+    for (const n of [2, 3]) {
+      for (const goalKey of ['narrow', 'normal', 'wide']) {
+        const games = goalKey === 'normal' ? 12 : 3;
+        let sum = 0;
+        let c = 0;
+        for (let seed = 1; seed <= games; seed++) {
+          const r = matchT(n, goalKey, false, Array(n).fill(L.normal), seed + 4000 + n * 100 + 50, 1, 7);
+          if (!r.error) { sum += r.t; c++; }
+        }
+        mavg[`normal-${n}-${goalKey}`] = c ? Math.round(sum / c) : '-';
+      }
+    }
+    const line = (n) => ['small', 'normal', 'large'].map((mk) => `${MALLET_SIZES[mk].name} ${['narrow', 'normal', 'wide'].map((g) => mavg[`${mk}-${n}-${g}`]).join('/')}秒`).join('・');
+    console.log(`   マレットの大きさごとの1試合の平均（ふつう対ふつう・7点・パック1つ。ゴール せまい/ふつう/ひろい）: 2人 ${line(2)}、3人 ${line(3)}`);
+    // 強さの順が崩れない（なしと同じ基準）
+    for (const mk of ['small', 'large']) {
+      let sw = 0;
+      let nw = 0;
+      let first3 = 0;
+      let err = 0;
+      for (let seed = 1; seed <= 20; seed++) {
+        for (const [a, b, add] of [[L.strong, L.weak, (x) => { sw += x; }], [L.normal, L.weak, (x) => { nw += x; }]]) {
+          const r1 = matchT(2, 'normal', false, [a, b], seed + 5000, 1, 7, mk);
+          const r2 = matchT(2, 'normal', false, [b, a], seed + 5100, 1, 7, mk);
+          for (const [r, side] of [[r1, 0], [r2, 1]]) {
+            if (r.error) { err++; continue; }
+            add(r.rank[side] === 1 ? 1 : 0);
+          }
+        }
+      }
+      for (let seed = 1; seed <= 30; seed++) {
+        const sp = seed % 3;
+        const r = matchT(3, 'normal', false, [0, 1, 2].map((p) => (p === sp ? L.strong : L.weak)), seed + 5500, 1, 7, mk);
+        if (r.error) { err++; continue; }
+        if (r.rank[sp] === 1) first3++;
+      }
+      const name = MALLET_SIZES[mk].name;
+      check(`マレット${name}: 強さを比べる試合も、抜けない・必ず決着する`, err === 0, `${err}件`);
+      check(`マレット${name}: つよいはよわいに勝ち越す（2人・40試合）`, sw >= 30, `${sw}勝`);
+      check(`マレット${name}: ふつうはよわいに勝ち越す（2人・40試合）`, nw >= 24, `${nw}勝`);
+      check(`マレット${name}: つよい1人と よわい2人では、つよいがたいてい1位（3人・30試合）`, first3 >= 20, `${first3}回`);
+    }
+  }
 }
 
 console.log(failed ? `\n${failed} 件の失敗` : '\nすべて OK');

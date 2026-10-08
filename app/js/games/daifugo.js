@@ -33,6 +33,13 @@
 //     2（革命中は3）の次は出せる数字が無いので、ジョーカー1枚出しのほかは全員パスになる。局面の nlock（なしのときは持たない）。
 //   - カード交換: 大貧民の一番強い2枚 → 大富豪、大富豪が選んだ2枚 → 大貧民。4人以上なら貧民と富豪で1枚ずつも。
 //     前の対局と顔ぶれが違うときは交換しない。
+//   - 何回か勝負（詳細設定。2026-10-08 の23回目の案。1回（最初。今までどおり）・3回・5回）: 1つの対局の中で決めた回数だけ配り直す。
+//     1回ごとに順位で点をもらう（最下位 0点・1つ上がるごとに +1点。4人なら 大富豪 3・富豪 2・貧民 1・大貧民 0、3人なら 2・1・0）。
+//     全部の回の合計点がいちばん多い人の優勝（同じ点なら全員の勝ち。順位は同じ点なら同じ順位）。
+//     1回が終わると順位と点を見せ（phase 'gap'）、対局しているだれかが「次の回へ」（手 { p, t: 'next' }）を押すと配る（CPU は4秒で押す）。
+//     2回目からは前の回の順位で、いつものカード交換・前の大貧民から・都落ちをする（対局をまたぐ引き継ぎと同じ形）。
+//     配りの種は対局の種と回の数から（handSeed。1回目は今までと同じ配り）。局面の match（{ of, no, pts, seed, gain: その回の点 }）。
+//     対局をまたぐ順位の引き継ぎ（carry）は合計点の順（同じ点なら最後の回の順位で決める）。1回のときは match を持たず、今までと全く同じ局面。
 
 import { mulberry32, shuffle } from './util.js';
 import { JOKER, SUITS, SUIT_MARK, suitOf, rankOf, rankLabel, makeDeck, cardEl, cardLabel } from './cards.js';
@@ -216,8 +223,29 @@ function finishIfOver(s) {
   if (rest.length > 1) return false;
   s.ranking = [...s.out, ...rest, ...s.fouls.slice().reverse()];
   s.phase = 'done';
+  if (s.match) settle(s);
   return true;
 }
+
+/* ---------- 何回か勝負（詳細設定） ---------- */
+
+const MATCHES = [3, 5];
+const handSeed = (seed, no) => (no === 1 ? seed : (seed ^ Math.imul(no, 0x9e3779b1)) >>> 0);
+
+// 回が終わった局面に、順位の点（最下位 0点・1つ上がるごとに +1点）を足す。最後の回でなければ回の間（gap）へ
+function settle(s) {
+  const gain = Array(s.n).fill(0);
+  s.ranking.forEach((p, i) => { gain[p] = s.n - 1 - i; });
+  const pts = s.match.pts.map((x, p) => x + gain[p]);
+  s.match = { ...s.match, pts, gain };
+  if (s.match.no < s.match.of) s.phase = 'gap';
+  else s.match.final = true;
+}
+
+// 合計点の順（同じ点なら最後の回の順位）
+const matchOrder = (s) => s.ranking.slice().sort((a, b) => s.match.pts[b] - s.match.pts[a] || s.ranking.indexOf(a) - s.ranking.indexOf(b));
+// 同じ点なら同じ順位
+const placeOf = (pts, p) => 1 + pts.filter((x) => x > pts[p]).length;
 
 function validCards(cards, hand) {
   if (!Array.isArray(cards) || !cards.length) return false;
@@ -296,13 +324,15 @@ const RULE_LIST = [
   { key: 'spe3', label: 'スペ3返し', desc: 'ジョーカー1枚には ♠3 で勝てる', def: false },
   { key: 'miyako', label: '都落ち', desc: '大富豪が1番に上がれないと、その時点で大貧民になる', def: false },
   { key: 'foul', label: '反則上がり', desc: '2・ジョーカー・8（革命中は3）で上がると最下位', def: false },
+  { key: 'match', label: '何回か勝負', desc: '決めた回数だけ続けて遊ぶ。1回ごとに順位で点（最下位 0点・1つ上がるごとに +1点）をもらい、合計点がいちばん多い人の優勝。2回目からは前の回の順位でカード交換', def: 1, choices: [[1, '1回'], [3, '3回'], [5, '5回']] },
 ];
 
 function logText(s, nameP) {
   const L = s.last;
   if (!L) {
-    if (s.phase === 'exchange') return 'カード交換: 下位の人の強い札は、上位の人へ自動で渡りました';
-    return s.prevRank ? '前の大貧民から始めます' : '♦3 を持っている人から始めます';
+    const no = s.match && s.match.no > 1 ? `${s.match.no}回目を配りました。` : ''; // 何回か勝負
+    if (s.phase === 'exchange') return no + 'カード交換: 下位の人の強い札は、上位の人へ自動で渡りました';
+    return no + (s.prevRank ? '前の大貧民から始めます' : '♦3 を持っている人から始めます');
   }
   let t;
   if (L.t === 'give' || L.t === 'seven') t = `${nameP(L.p)}が${nameP(L.to)}に${L.n}枚渡した${L.t === 'seven' ? '（7渡し）' : ''}`;
@@ -358,21 +388,54 @@ export default {
       s.phase = 'exchange';
     }
     s.turn = s.prevRank ? s.prevRank.indexOf(n - 1) : hands.findIndex((h) => h.includes('d3'));
+    // 何回か勝負（詳細設定）。1回のときは局面に何も足さない
+    if (MATCHES.includes(rules.match)) s.match = { of: rules.match, no: 1, pts: Array(n).fill(0), seed, gain: null };
+    return s;
+  },
+
+  // 何回か勝負: 次の回を配る。前の回の順位でカード交換・前の大貧民から（対局をまたぐ引き継ぎと同じ）
+  nextHand(s0) {
+    const M = s0.match;
+    const no = M.no + 1;
+    const prev = Array.from({ length: s0.n }, (_, p) => s0.ranking.indexOf(p));
+    const s = this.init(s0.n, handSeed(M.seed, no), { rules: s0.rules, prev });
+    s.match = { ...M, no, gain: null };
+    s.step = s0.step + 1;
     return s;
   },
 
   turn(s) { return s.phase === 'play' ? s.turn : null; },
   canAct(s, p) {
+    if (s.phase === 'gap') return Number.isInteger(p) && p >= 0 && p < s.n; // 何回か勝負の回の間は、だれでも「次の回へ」
     if (s.phase === 'exchange') return s.gives[0].from === p;
     return s.phase === 'play' && s.turn === p;
   },
-  result(s) { return s.phase === 'done' ? { winner: s.ranking[0], ranking: s.ranking } : null; },
+  result(s) {
+    if (s.phase !== 'done') return null;
+    if (!s.match) return { winner: s.ranking[0], ranking: s.ranking };
+    // 何回か勝負: 合計点の順。いちばん多い人が2人以上なら全員の勝ち
+    const ranking = matchOrder(s);
+    const pts = s.match.pts;
+    const top = ranking.filter((p) => pts[p] === pts[ranking[0]]);
+    return top.length > 1 ? { winner: ranking[0], winners: top, ranking, pts } : { winner: ranking[0], ranking, pts };
+  },
   startSound: 'shuffle',
   // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
-  sound(a, b, m) { return m.t === 'bomb' ? 'call' : m.t === 'pass' ? 'pop' : m.t === 'play' && b.last?.effects?.length ? 'call' : 'card'; },
-  carry(s, p) { return s.ranking.indexOf(p); },
+  sound(a, b, m) { return m.t === 'next' ? 'shuffle' : m.t === 'bomb' ? 'call' : m.t === 'pass' ? 'pop' : m.t === 'play' && b.last?.effects?.length ? 'call' : 'card'; },
+  // 次の対局のカード交換に使う順位（何回か勝負は合計点の順）
+  carry(s, p) { return (s.match ? matchOrder(s) : s.ranking).indexOf(p); },
+  cpuDelay(s) { return s.phase === 'gap' ? 4000 : undefined; }, // 何回か勝負: 回の結果は少し長めに見せる
 
   resultText(res, me, pn) {
+    if (res.pts) { // 何回か勝負: 合計点で
+      const pt = (p) => `${res.pts[p]}点`;
+      if (res.winners) return `${res.winners.map(pn).join('・')}が同じ点で優勝！（${pt(res.winners[0])}）${res.winners.includes(me) ? '🎉' : ''}`;
+      if (me >= 0) {
+        const i = placeOf(res.pts, me);
+        return i === 1 ? `あなたの優勝！🎉（${pt(me)}）` : `あなたは${i}位（${pt(me)}）。優勝は${pn(res.winner)}（${pt(res.winner)}）`;
+      }
+      return `${pn(res.winner)}の優勝！（${pt(res.winner)}）`;
+    }
     const t = titles(res.ranking.length);
     if (me >= 0) {
       const i = res.ranking.indexOf(me);
@@ -381,6 +444,10 @@ export default {
     return `${pn(res.winner)}が大富豪！`;
   },
   phaseText(s, me, pn) {
+    if (s.phase === 'gap') {
+      const w = s.ranking[0];
+      return `${s.match.no}回目は${pn(w)}が大富豪（+${s.match.gain[w]}点）。「次の回へ」で配ります`;
+    }
     if (s.phase !== 'exchange') return '';
     const g = s.gives[0];
     return g.from === me ? 'カード交換: 渡す札を選んでください' : `カード交換中: ${pn(g.from)}が渡す札を選んでいます…`;
@@ -388,6 +455,7 @@ export default {
 
   apply(s0, m) {
     if (!m || !Number.isInteger(m.p) || !this.canAct(s0, m.p)) return null;
+    if (s0.phase === 'gap') return m.t === 'next' ? this.nextHand(s0) : null; // 何回か勝負: 回の間は「次の回へ」だけ
     const s = clone(s0);
     const p = m.p;
     s.step += 1;
@@ -511,6 +579,7 @@ export default {
   // CPU: 場が空なら弱い札から（なるべく枚数の多い組で）。場があれば勝てる中で一番弱い組。
   // 2・ジョーカーなど強い札は手札が多いうちは温存しがち。強くなりすぎないよう、ときどき適当に選ぶ。
   cpu(s, p) {
+    if (s.phase === 'gap') return { t: 'next' }; // 何回か勝負: 回の間
     const hand = s.hands[p];
     if (s.phase === 'exchange') return { t: 'give', cards: hand.slice(0, s.gives[0].k) };
     if (s.pend?.[0].t === 'bomb') {
@@ -561,6 +630,13 @@ export default {
 
     root.innerHTML = '';
     root.className = 'board df';
+    const M = s.match; // 何回か勝負（詳細設定）
+    if (M) {
+      const head = document.createElement('p');
+      head.className = 'cc-match';
+      head.textContent = `${M.of}回勝負の${M.no}回目`;
+      root.append(head);
+    }
 
     // ほかの人
     const opps = document.createElement('div');
@@ -576,6 +652,12 @@ export default {
       count.className = 'cc-opp-count';
       count.innerHTML = `<span class="ccard mini back"></span>×${s.hands[p].length}`;
       chip.append(name, count);
+      if (M) {
+        const pt = document.createElement('div');
+        pt.className = 'cc-opp-pts';
+        pt.textContent = `合計 ${M.pts[p]}点`;
+        chip.append(pt);
+      }
       const tags = [];
       if (s.ranking) tags.push(['rank', `${s.ranking.indexOf(p) + 1}位 ${endTitles[s.ranking.indexOf(p)]}`]);
       else if (s.out.includes(p)) tags.push(['rank', `${s.out.indexOf(p) + 1}位で上がり`]);
@@ -639,13 +721,41 @@ export default {
       list.className = 'df-ranking';
       s.ranking.forEach((p, i) => {
         const li = document.createElement('li');
-        li.textContent = `${endTitles[i]}: ${nameP(p)}${s.fouls.includes(p) ? '（反則・都落ち）' : ''}`;
+        li.textContent = `${endTitles[i]}: ${nameP(p)}${s.fouls.includes(p) ? '（反則・都落ち）' : ''}${M ? `　+${M.gain[p]}点` : ''}`;
         list.append(li);
       });
-      root.append(list);
+      if (!M) root.append(list);
+      else {
+        // 何回か勝負: その回の順位と点・合計点（回の間は「次の回へ」も）
+        const box = document.createElement('div');
+        box.className = 'cc-gap df-gap';
+        const title = document.createElement('p');
+        title.className = 'cc-gap-title';
+        title.textContent = `${M.no}回目${M.final ? '（最後）' : ''}の結果`;
+        const sub = document.createElement('p');
+        sub.className = 'df-gap-sub';
+        sub.textContent = '合計点';
+        const total = document.createElement('ol');
+        total.className = 'df-ranking df-total';
+        for (const p of matchOrder(s)) {
+          const li = document.createElement('li');
+          li.textContent = `${placeOf(M.pts, p)}位　${nameP(p)}　${M.pts[p]}点`;
+          total.append(li);
+        }
+        box.append(title, list, sub, total);
+        if (s.phase === 'gap' && me !== null && o.canMove) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'btn primary';
+          b.textContent = M.no + 1 === M.of ? '最後の回へ' : '次の回へ';
+          b.onclick = () => o.onMove({ t: 'next' });
+          box.append(b);
+        }
+        root.append(box);
+      }
     }
 
-    if (me !== null) {
+    if (me !== null && s.phase !== 'gap') {
       const myTurn = o.canMove;
       const giving = myTurn && s.phase === 'exchange';
       const bombing = myTurn && s.pend?.[0].t === 'bomb'; // 12ボンバー
@@ -655,7 +765,7 @@ export default {
       const head = document.createElement('div');
       head.className = 'cc-hand-head';
       const myTitle = prevTitles && !s.ranking ? `・前回 ${prevTitles[s.prevRank[me]]}` : '';
-      head.textContent = `あなたの手札（${s.hands[me].length}枚${myTitle}）`;
+      head.textContent = `あなたの手札（${s.hands[me].length}枚${myTitle}${M ? `・合計 ${M.pts[me]}点` : ''}）`;
       const got = s.swaps.filter((x) => x.to === me);
       if (s.phase !== 'done' && got.length) {
         const g = document.createElement('small');
@@ -733,7 +843,7 @@ export default {
 
     const rules = document.createElement('p');
     rules.className = 'df-rules';
-    rules.textContent = 'ルール: ' + (RULE_LIST.filter((r) => s.rules[r.key]).map((r) => r.label).join('・') || 'なし');
+    rules.textContent = 'ルール: ' + (RULE_LIST.filter((r) => !r.choices && s.rules[r.key]).map((r) => r.label).join('・') || 'なし'); // 何回か勝負は上に出す
     root.append(rules);
   },
 };
