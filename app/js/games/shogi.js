@@ -391,6 +391,7 @@ export default {
   id: 'shogi',
   name: '将棋',
   icon: '☗',
+  flip: true, // 盤の向きを変える（⇅）ボタンを出す（main.js）
   desc: '本将棋。駒落ちのハンデも選べる。オンラインでは小さい盤の5五将棋・動物の駒の 3×4 や、3人（六角形の盤）も選べる',
   ready: true,
   players: three.NAMES, // 3人目は3人将棋だけ
@@ -506,8 +507,8 @@ export default {
     const draw = () => this.render(root, s, o);
     const N = sizeOf(s.board);
     const last = N * N - 1;
-    // 自分の駒が下に来るように。観戦と同じ画面の対局では先手が下
-    const bottom = o.me === 1 ? 1 : 0;
+    // 自分の駒が下に来るように。観戦と同じ画面の対局では先手が下。盤の向きを変えた（⇅）ときは o.view の人が下
+    const bottom = Number.isInteger(o.view) ? o.view : o.me === 1 ? 1 : 0;
     const key = `${s.ply}:${o.me}`;
     if (ui.key !== key) ui = { key, from: null, drop: null, promo: null };
     const can = o.canMove && !s.result;

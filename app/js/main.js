@@ -188,9 +188,70 @@ function tallyLine() {
       toast('成績表を0に戻しました');
     }, 'ghost small');
     b.classList.add('tally-reset');
-    p.append(' ', b);
+    const aw = makeButton('🏆 お開きの表彰', () => { send({ type: 'award' }); showAward(); }, 'ghost small');
+    aw.classList.add('tally-reset');
+    p.append(' ', aw, ' ', b);
   }
   return p;
+}
+
+/* ---------- お開きの表彰（2026-10-07。20回目の案。Claude の案から本人が推奨どおり選んだ） ---------- */
+// 待合室でホストが「🏆 お開きの表彰」を押すと、部屋の成績表から1〜3位を表彰する小窓と紙吹雪を全員の画面に出す（オンラインだけ）。
+// Claude の判断: 表彰するだけで、部屋も成績表もそのまま（閉じればいつもの待合室。続けて遊んでもよい）。成績表に1回でも対局があるときだけ押せる。
+// 送るのは「表彰して」という合図（type: 'award'）だけで、順位は受け取った端末がそれぞれ自分の成績表（state で全員同じ）から作る。
+// ホストからの合図だけ受け付け、送りっぱなし（あとから入った人には出ない）。勝った回数が同じ人は同じ順位。だれも勝っていなければ「みんな引き分け」。
+// 予想の当たりが1回でもあれば「🔮 予想王」（いちばん多く当てた人。同じ回数なら全員）も添える。紙吹雪は動きを減らす設定の端末では出ない（confetti）。
+function awardRanks() {
+  const t = S.tally;
+  const w = (id) => (Number.isInteger(t?.wins?.[id]) ? t.wins[id] : 0);
+  const ids = [...new Set([...S.members, ...Object.keys(t?.wins ?? {})])].filter((id) => !isCpu(id) && w(id) > 0 && (S.members.includes(id) || S.names[id]));
+  const counts = [...new Set(ids.map(w))].sort((a, b) => b - a).slice(0, 3);
+  return counts.map((n) => ({ n, ids: ids.filter((id) => w(id) === n) })); // 上から順に、同じ勝ち数の人をまとめる
+}
+
+function closeAward() { document.querySelector('.award-pop')?.remove(); }
+
+function showAward() {
+  const games = S.tally?.games;
+  if (S.mode !== 'online' || !Number.isInteger(games) || games < 1) return; // 届いた数は整数だけ使う（外から来た値なので）
+  closeAward();
+  closeInvite();
+  const who = (id) => `<b>${esc(id === S.myId ? 'あなた' : nameOf(id))}</b>`; // 名前は外から来た文字なので esc()
+  const medal = ['🥇', '🥈', '🥉'];
+  const ranks = awardRanks();
+  let place = 1; // 同じ勝ち数の人が2人いたら、次は3位（よくある順位の付け方）。3位までを出す
+  const rows = [];
+  for (const r of ranks) {
+    if (place > 3) break;
+    rows.push(`<li class="award-row"><span class="award-medal">${medal[place - 1]}</span><span class="award-place">${place}位</span><span class="award-who">${r.ids.map(who).join('・')}</span><span class="award-n">${r.n}勝</span></li>`);
+    place += r.ids.length;
+  }
+  const pr = S.tally.preds && typeof S.tally.preds === 'object' ? S.tally.preds : {};
+  const hit = (id) => (Number.isInteger(pr[id]) && pr[id] > 0 ? pr[id] : 0);
+  const seers = Object.keys(pr).filter((id) => !isCpu(id) && hit(id) && (S.members.includes(id) || S.names[id]));
+  const best = Math.max(0, ...seers.map(hit));
+  const kings = seers.filter((id) => hit(id) === best);
+  const pop = document.createElement('div');
+  pop.className = 'invite-pop award-pop';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-modal', 'true');
+  pop.setAttribute('aria-label', 'お開きの表彰');
+  pop.innerHTML = `<div class="invite-box award-box">
+    <div class="invite-title">🏆 今日の表彰</div>${S.roomName ? `<div class="invite-room">🏷 ${esc(S.roomName)}</div>` : ''}
+    <p class="invite-note">この部屋で ${games}回 遊びました。おつかれさま！</p>
+    ${rows.length ? `<ol class="award-list">${rows.join('')}</ol>` : '<p class="award-none">だれも勝たず、みんな引き分けでした</p>'}
+    ${kings.length ? `<p class="award-seer">🔮 予想王: ${kings.map(who).join('・')}（${best}回 当てた）</p>` : ''}
+  </div>`;
+  const row = document.createElement('div');
+  row.className = 'invite-actions';
+  row.append(makeButton('閉じる', closeAward, 'secondary'));
+  pop.querySelector('.award-box').append(row);
+  pop.addEventListener('click', (e) => { if (e.target === pop) closeAward(); });
+  pop.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAward(); });
+  document.body.append(pop);
+  row.querySelector('button')?.focus();
+  play('win');
+  confetti();
 }
 
 /* ---------- 対局の履歴（2026-10-07 本人の決定）: この部屋で遊んだゲームとだれが勝ったかを、待合室に新しい順で出す ---------- */
@@ -1106,7 +1167,7 @@ function renderPage() {
   if (S.shownKey !== key && !S.moves.length && game.startSound) play(game.startSound);
   S.shownKey = key;
   S.shownLen = S.moves.length;
-  const opts = { canMove: canMove(game, st, res), onMove: onBoardMove, fresh, me: myPlayer() };
+  const opts = { canMove: canMove(game, st, res), onMove: onBoardMove, fresh, me: myPlayer(), view: boardView(game) };
   if (game.multi) {
     Object.assign(opts, {
       names: S.order.map(nameOf),
@@ -1137,12 +1198,48 @@ function renderPage() {
   } else if (S.mode === 'online' && !game.multi) {
     appendUndo(game);
   }
+  appendFlip(game);
   appendPredict(game, res);
   appendReactions();
   if (S.mode === 'online' && S.isHost) controls.append(gameSelect());
   appendMemberPanel();
   scheduleCpu(game, st, res);
   scheduleReferee(game, st, res);
+}
+
+/* ---------- 盤の向きを変える（2026-10-07。20回目の案。Claude の案から本人が推奨どおり選んだ） ---------- */
+// 対局の画面の下の段の「⇅ 盤の向き」で、自分の画面だけ盤を回し、下に来る人を次の人へ替える（観戦の人が応援している人の側から見られる）。
+// Claude の判断: 向きに意味のある、陣地の決まったゲーム（game.flip。将棋（5五・3×4・3人も）・はさみ将棋・マンカラ）だけに出す。
+// マルバツ・リバーシ・五目並べなどはどちらから見ても同じ盤なので出さない。ほかの人には送らない・保存しない（この端末のこの部屋の間だけ）。
+// オンラインでは「下に来る人」を人の id で覚える（もう一回で先手と後手が入れ替わっても、同じ人の側から見続けられるように）。
+// 同じ画面の対局では席の番号で覚える。ゲームには、下に来る席の番号を o.view で渡す（替えていなければ渡さず、ゲームのいつもの向き）。
+function boardView(game) {
+  if (!game?.flip || game.multi) return undefined;
+  const n = boardSeats(S.gameId, S.rules);
+  if (S.mode === 'online') {
+    const i = S.viewId ? roundOrder().indexOf(S.viewId) : -1;
+    return i >= 0 && i < n ? i : undefined;
+  }
+  return Number.isInteger(S.viewLocal) && S.viewLocal < n ? S.viewLocal : undefined;
+}
+
+function appendFlip(game) {
+  if (!game?.flip || game.multi || (S.mode === 'online' && !S.order)) return;
+  const n = boardSeats(S.gameId, S.rules);
+  const me = myPlayer();
+  const cur = boardView(game) ?? (Number.isInteger(me) && me >= 0 && me < n ? me : 0); // ゲームのいつもの向きと同じ（自分、観戦・同じ画面では先手）
+  const who = (p) => {
+    if (S.mode !== 'online') return game.players?.[p] ?? `${p + 1}番目`;
+    const id = roundOrder()[p];
+    return id === S.myId ? 'あなた' : id ? nameOf(id) : `${p + 1}番目`;
+  };
+  const b = makeButton(`⇅ 盤の向き（下: ${who(cur)}）`, () => {
+    const next = (cur + 1) % n;
+    if (S.mode === 'online') S.viewId = roundOrder()[next] ?? null; else S.viewLocal = next;
+    render();
+  }, 'ghost small');
+  b.setAttribute('aria-label', `盤の向きを変える。いま下にいるのは ${who(cur)}`);
+  ctl().append(b); // 名前は textContent で入る（makeButton）ので、外から来た文字でもそのまま使える
 }
 
 /* ---------- 対局のふりかえり（2026-10-06 本人の決定）: 盤のゲームが終わったあと、最初から1手ずつ見返せる ---------- */
@@ -1161,8 +1258,9 @@ function renderReview(game) {
   const extra = game.info?.(view);
   el('status').innerHTML = `<div class="status-main">ふりかえり</div><div class="status-sub">${k}手目 / ${S.moves.length}手${k ? '' : '（始めの局面）'}</div>`
     + (extra ? `<div class="status-sub">${extra}</div>` : '');
-  game.render(el('board'), view, { canMove: false, onMove: () => {}, fresh: false, me: myPlayer() });
+  game.render(el('board'), view, { canMove: false, onMove: () => {}, fresh: false, me: myPlayer(), view: boardView(game) });
   appendReview(game);
+  appendFlip(game);
   ctl().append(makeButton('もう一回', rematch));
   if (S.mode === 'online' && S.isHost) ctl().append(makeButton('メンバーを変える', () => newRound(S.gameId, { lobby: true }), 'secondary'));
   appendReactions();
@@ -2050,6 +2148,9 @@ function onMessage(msg) {
       break;
     case 'pred': // 勝敗予想。対局が同じで、番号が正しく、まだ予想していない人の分だけ覚える
       if (msg.gameId === S.gameId && msg.round === S.round && S.order && Number.isInteger(msg.p) && msg.p >= 0 && msg.p < S.order.length && S.members.includes(msg.from)) setPred(msg.from, msg.p);
+      return;
+    case 'award': // お開きの表彰（ホストからだけ）。描き直さない
+      if (!S.isHost && S.members.length && msg.from === S.members[0]) showAward();
       return;
     case 'ready': // 準備OK（待合室の間だけ。古い待合室の知らせは捨てる）
       if (S.isHost && msg.from !== S.myId && S.members.includes(msg.from) && msg.round === S.round && !S.order) {

@@ -8,7 +8,7 @@
 //   赤ドラ（4人は五萬・五筒・五索を1枚ずつ、3人は五筒・五索）、喰い替え禁止（ポンは現物、チーは現物と筋）、
 //   フリテン（捨て牌・同巡・リーチ後。ツモ和了は止めない）、形式聴牌・空聴も聴牌、リーチは聴牌のときだけ・海底ではできない、
 //   リーチ後はツモ切りだけ（待ちが変わらない暗槓はできる・加槓はできない）、カンは1局4回まで、山が0枚なら鳴けない（ロンだけ）、
-//   人和は役満、オーラスの親がトップで和了したら終わり（アガリやめ）、0点未満でトビ終了、ノーテン罰符は4人3000点・3人2000点、
+//   人和は役満、オーラスの親がトップで和了したら終わり（アガリやめ）、0点未満でトビ終了（詳細設定「トビ」を なし にすると、マイナスのまま最後の局まで続ける。2026-10-07）、ノーテン罰符は4人3000点・3人2000点、
 //   本場は1本300点（3人は200点）、持ち点は4人25000点・3人35000点。
 //   3人麻雀: 二萬〜八萬を抜いた108枚、チーなし、北は抜きドラ（抜いた北1枚で1翻）と役牌、ツモ損（いない北家の分は誰も払わない）、
 //   ドラ表示牌が一萬なら九萬・九萬なら一萬がドラ。
@@ -456,7 +456,7 @@ function finishHand(s, end, renchan, winner) {
   end.deltas.forEach((d, p) => { s.scores[p] += d; });
   const last = s.rules.length === 'south' ? 2 * s.n - 1 : s.n - 1;
   const dealer = dealerOf(s);
-  let over = s.scores.some((x) => x < 0); // トビ
+  let over = s.rules.tobi !== false && s.scores.some((x) => x < 0); // トビ（詳細設定で なし なら、マイナスのまま続ける）
   if (!over && s.kyoku === last && winner === dealer && s.scores[dealer] >= Math.max(...s.scores)) over = true; // アガリやめ
   const next = { kyoku: renchan ? s.kyoku : s.kyoku + 1, honba: end.type === 'draw' || renchan ? s.honba + 1 : 0 };
   if (!over && next.kyoku > last) over = true;
@@ -1169,6 +1169,7 @@ export default {
     { key: 'kuitan', label: '喰いタン', desc: '鳴いた手でも断幺九（2〜8だけの手）が役になる', def: true },
     { key: 'waits', label: '待ち牌の表示', desc: '聴牌したら、何で和了れるか（待ちの牌）を自分の画面に出す。初めての人向け', def: false },
     { key: 'shanten', label: 'テンパイまであと何枚', desc: '自分の手が、あと何枚でテンパイになるか（向聴数）を自分の画面に出す。切る牌を選ぶと、それを切ったときの枚数になる。初めての人向け', def: false },
+    { key: 'tobi', label: 'トビ', desc: '持ち点が0点を下回った人が出たら、その局で対局が終わる。なし では、マイナスのまま最後の局まで続ける（だれも途中で抜けない）', def: true },
     { key: 'tsumogiri', label: 'ツモ切りの表示', desc: '引いた牌をそのまま捨てた牌（ツモ切り）を、河で少し暗く出す。相手の手を読む手がかりになる', def: false },
     { key: 'players', label: '人数', desc: '3人麻雀は二萬〜八萬を抜いた108枚・チーなし・北は抜きドラ。5人麻雀は5人目に自風がなく、ツモは4人から受け取る', def: 4, choices: [[4, '4人'], [3, '3人（三人麻雀）'], [5, '5人（五人麻雀）']] },
   ],
@@ -1176,7 +1177,7 @@ export default {
 
   init(n, seed, { rules = {} } = {}) {
     const s = {
-      n, seed, rules: { length: rules.length === 'south' ? 'south' : 'east', red: rules.red !== false, kuitan: rules.kuitan !== false, waits: rules.waits === true, tsumogiri: rules.tsumogiri === true, shanten: rules.shanten === true }, scores: Array(n).fill(n === 3 ? 35000 : 25000),
+      n, seed, rules: { length: rules.length === 'south' ? 'south' : 'east', red: rules.red !== false, kuitan: rules.kuitan !== false, waits: rules.waits === true, tsumogiri: rules.tsumogiri === true, shanten: rules.shanten === true, tobi: rules.tobi !== false }, scores: Array(n).fill(n === 3 ? 35000 : 25000),
       kyoku: 0, honba: 0, kyotaku: 0, handNo: 0, seq: 0, over: false, ranking: null, h: null,
     };
     startHand(s);

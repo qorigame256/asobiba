@@ -430,7 +430,7 @@ let ui = { key: null, from: null, drop: null, promo: null };
 
 export function render(root, s, o) {
   const draw = () => render(root, s, o);
-  const bottom = o.me >= 0 && o.me <= 2 ? o.me : 0;
+  const bottom = Number.isInteger(o.view) ? o.view : o.me >= 0 && o.me <= 2 ? o.me : 0; // 盤の向きを変えた（⇅）ときは o.view の人が下
   const key = `${s.ply}:${o.me}`;
   if (ui.key !== key) ui = { key, from: null, drop: null, promo: null };
   const can = o.canMove && !s.result;

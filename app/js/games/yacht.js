@@ -6,7 +6,11 @@
 //   Sストレート … 4つ続いた目なら 15点 / Bストレート … 5つ続いた目なら 30点 / ヨット … 5個同じなら 50点
 //   1〜6 の合計が 63点以上なら、ボーナス 35点。
 // 詳細設定「2回目のヨット」（2026-10-06 本人の決定。最初はなし）: ヨットの役に50点を書いたあとで、もう一度5個そろえて
-//   ほかの役に書いたら、そのたびに +100点（よくあるヤッツィーのボーナスと同じ。好きな役に書ける特別な決まり（ジョーカー）は入れない。Claude の判断）。
+//   ほかの役に書いたら、そのたびに +100点（よくあるヤッツィーのボーナスと同じ。好きな役に書ける特別な決まり（ジョーカー）は別の詳細設定）。
+// 詳細設定「ジョーカー」（2026-10-07 本人の決定。20回目の案。最初はなし）: ヨットの役がもう埋まっている（50点でも0点でも）ときに5個そろえたら、
+//   Sストレート・Bストレートにも満点（15点・30点）で書ける（フルハウス・フォーダイスは5個そろいでもともと合計が入る）。
+//   Claude の判断: 本家のような「先に同じ目の 1〜6 の役に書く」順番の決まりは付けない（分かりやすさのため。どの役に書いてもよい）。
+//   2回目のヨットと一緒なら、+100点とどちらも付く。ありのときだけ局面に joker: true を持つ（なしでは今までと全く同じ形）。
 // 点数の表の「ボーナス」の欄に、あと何点でボーナスか・獲得・無理を出す（2026-10-07 本人の承認。見せるだけで、手も点の付け方も変えない）。
 //   無理は、まだ空いている 1〜6 の役を全部いちばん高い点（5個そろい）で埋めても 63点に届かないとき（bonusInfo）。
 //   自分が振ったあとは、1〜6 の役のボタンに、そこに書いたあとの見込み（あと◯・獲得・無理）を小さく出す（まだ届くかどうかの途中のときだけ）。
@@ -69,6 +73,13 @@ function subLine(text, color) {
   return sm;
 }
 const totalOfPl = (x) => totalOf(x.sheet, x.extra ?? 0);
+// ジョーカー（詳細設定）が効く出目か: ヨットの役がもう埋まっていて、5個そろっている
+const jokerOn = (s, x, d = x.dice) => !!s.joker && x.sheet[11] !== null && scoreOf(11, d) === 50;
+// 人 x がこの出目 d を役 cat に書いたときの点（ジョーカーならストレートも満点）
+export function catScore(s, x, cat, d = x.dice) {
+  if (jokerOn(s, x, d) && (cat === 9 || cat === 10)) return cat === 9 ? 15 : 30;
+  return scoreOf(cat, d);
+}
 // この出目を役 cat に書くと 2回目からのヨットのボーナスが付くか
 const yachtBonus = (s, x, cat) => !!s.bonusYacht && cat !== 11 && x.sheet[11] === 50 && scoreOf(11, x.dice) === 50;
 
@@ -86,12 +97,12 @@ const filled = (x) => x.sheet.filter((v) => v !== null).length;
 // それぞれの役の「ふつうに取れる点」。これより高い点が書けるほど得とみなす（0点を書くならいちばん損の少ない役）
 const PAR = [2, 5, 8.5, 12, 15.5, 19, 22, 12, 15, 10, 8, 6];
 
-function bestCat(x, d) {
+function bestCat(s, x, d) {
   let best = null;
   let bv = -Infinity;
   x.sheet.forEach((v, cat) => {
     if (v !== null) return;
-    const sc = scoreOf(cat, d);
+    const sc = catScore(s, x, cat, d);
     const val = sc - PAR[cat] + Math.random() * 3; // 少し気まぐれに（弱めるため）
     if (val > bv) { bv = val; best = cat; }
   });
@@ -126,13 +137,16 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'bonusYacht', label: '2回目のヨット', desc: 'ヨットの役に50点を書いたあとで、もう一度5個そろえたら +100点（そのときも、ほかの役を1つ選んで書く）', def: false },
+    { key: 'joker', label: 'ジョーカー', desc: 'ヨットの役を書いたあと（0点でも）にまた5個そろえたら、Sストレート・Bストレートにも満点（15点・30点）で書ける', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    return {
+    const s = {
       n, seed, round: 0, step: 0, bonusYacht: !!rules.bonusYacht,
       pl: Array.from({ length: n }, () => ({ dice: [1, 2, 3, 4, 5], rolls: 0, keep: [false, false, false, false, false], sheet: Array(ROUNDS).fill(null), extra: 0 })),
     };
+    if (rules.joker) s.joker = true; // なしのときは局面に何も足さない（今までと同じ形）
+    return s;
   },
 
   turn() { return null; },
@@ -180,7 +194,7 @@ export default {
       const s = clone(s0);
       const x = s.pl[m.p];
       if (yachtBonus(s, x, m.cat)) x.extra = (x.extra ?? 0) + YACHT_BONUS;
-      x.sheet[m.cat] = scoreOf(m.cat, x.dice);
+      x.sheet[m.cat] = catScore(s, x, m.cat);
       x.last = m.cat;
       s.step += 1;
       if (s.pl.every((y) => filled(y) === s.round + 1)) {
@@ -195,7 +209,7 @@ export default {
   cpu(s, p) {
     const x = s.pl[p];
     if (x.rolls === 0) return { t: 'roll', r: s.round, k: 1, keep: [false, false, false, false, false] };
-    const { cat, val } = bestCat(x, x.dice);
+    const { cat, val } = bestCat(s, x, x.dice);
     if (x.rolls >= 3 || val >= 15) return { t: 'score', r: s.round, cat };
     const keep = keepFor(x, x.dice);
     if (keep.every(Boolean)) return { t: 'score', r: s.round, cat };
@@ -294,7 +308,8 @@ export default {
           const b = document.createElement('button');
           b.type = 'button';
           b.className = 'yt-pick';
-          const sc = scoreOf(cat, s.pl[me].dice);
+          const sc = catScore(s, s.pl[me], cat);
+          const joker = jokerOn(s, s.pl[me]) && (cat === 9 || cat === 10);
           const plus = yachtBonus(s, s.pl[me], cat) ? YACHT_BONUS : 0;
           b.textContent = plus ? `${sc}+${plus}` : sc;
           if (!sc && !plus) b.classList.add('zero');
@@ -306,8 +321,9 @@ export default {
             b.style.padding = '1px 2px';
             b.append(subLine(bonusShort(after), after.state === 'no' ? '#b54a3c' : after.state === 'got' ? 'var(--p2)' : 'var(--muted)'));
           }
-          b.setAttribute('aria-label', `${label}に ${sc}点を書く${plus ? `（ヨットのボーナス +${plus}点）` : ''}${ahead ? `。書くと ${ahead}` : ''}`);
+          b.setAttribute('aria-label', `${label}に ${sc}点を書く${joker ? '（ジョーカー）' : ''}${plus ? `（ヨットのボーナス +${plus}点）` : ''}${ahead ? `。書くと ${ahead}` : ''}`);
           if (ahead) b.title = `書くと ${ahead}`;
+          if (joker) { b.style.padding = '1px 2px'; b.append(subLine('ジョーカー', 'var(--p2)')); b.title = 'ジョーカー: 5個そろいをストレートに満点で書ける'; }
           b.onclick = () => { if (sc || confirm(`${label}に 0点を書きますか？`)) o.onMove({ t: 'score', r: s.round, cat }); };
           td.append(b);
         }

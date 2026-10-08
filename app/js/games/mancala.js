@@ -32,6 +32,7 @@ const game = {
   desc: '穴の石を1個ずつ配っていき、自分のゴールに多く集めた方の勝ち',
   ready: true,
   players: ['先手', '後手', '三番手'],
+  flip: true, // 盤の向きを変える（⇅）ボタンを出す（main.js）
   // 詳細設定の人数（2〜3人）。待合室の席の数になる
   seatCount(rules) { return rules?.players === 3 ? 3 : 2; },
   settings: [
@@ -158,7 +159,7 @@ const game = {
   render(root, s, o) {
     const res = this.result(s);
     const np = nOf(s);
-    const bottom = Number.isInteger(o.me) && o.me > 0 && o.me < np ? o.me : 0; // 自分の側を下に
+    const bottom = Number.isInteger(o.view) && o.view >= 0 && o.view < np ? o.view : Number.isInteger(o.me) && o.me > 0 && o.me < np ? o.me : 0; // 自分の側を下に。盤の向きを変えた（⇅）ときは o.view の人が下
     const top = 1 - bottom;
     root.innerHTML = '';
     root.className = 'board mc';
@@ -200,7 +201,7 @@ const game = {
 
     const note = document.createElement('p');
     note.className = 'cc-log';
-    const meName = Number.isInteger(o.me) && o.me >= 0 ? 'あなた' : game.players[bottom];
+    const meName = o.me === bottom ? 'あなた' : game.players[bottom];
     if (res) note.textContent = 'ゴールの石: ' + stores(s).map((v, p) => `${game.players[p]} ${v}個`).join(' ／ ');
 
     if (np === 3) {

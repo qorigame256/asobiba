@@ -118,6 +118,7 @@ export default {
   id: 'hasami',
   name: 'はさみ将棋',
   icon: '⚔️',
+  flip: true, // 盤の向きを変える（⇅）ボタンを出す（main.js）
   desc: '飛車のように動く駒で、相手の駒をたて・よこにはさんで取る。先に5個（7×7 は4個）取った方の勝ち',
   ready: true,
   players: ['先手（歩）', '後手（と）'],
@@ -192,7 +193,7 @@ export default {
   render(root, s, o) {
     const { N, CELLS } = geo(s.n ?? 9);
     const draw = () => this.render(root, s, o);
-    const bottom = o.me === 1 ? 1 : 0; // 自分の駒が下に来るように。観戦と同じ画面の対局では先手が下
+    const bottom = Number.isInteger(o.view) ? o.view : o.me === 1 ? 1 : 0; // 自分の駒が下に来るように。観戦と同じ画面の対局では先手が下。盤の向きを変えた（⇅）ときは o.view の人が下
     const key = `${s.n}:${s.ply}:${o.me}`;
     if (ui.key !== key) ui = { key, from: null };
     const can = o.canMove && !s.won;

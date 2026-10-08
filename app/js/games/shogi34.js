@@ -236,7 +236,7 @@ let ui = { key: null, from: null, drop: null }; // 選んでいる駒（描き�
 export function render(root, s, o, players) {
   const draw = () => render(root, s, o, players);
   const last = W * H - 1;
-  const bottom = o.me === 1 ? 1 : 0; // 自分の駒が下。観戦と同じ画面の対局では先手が下
+  const bottom = Number.isInteger(o.view) ? o.view : o.me === 1 ? 1 : 0; // 自分の駒が下。観戦と同じ画面の対局では先手が下。盤の向きを変えた（⇅）ときは o.view の人が下
   const key = `${s.ply}:${o.me}`;
   if (ui.key !== key) ui = { key, from: null, drop: null };
   const can = o.canMove && !s.result;

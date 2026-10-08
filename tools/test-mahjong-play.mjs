@@ -29,11 +29,11 @@ function invariant(s, start) {
   return null;
 }
 
-function play(n, length, seed, style) {
+function play(n, length, seed, style, more = {}) {
   const rng = mulberry32(seed * 7 + 1);
-  let s = mahjong.init(n, seed, { rules: { length, players: n } });
+  let s = mahjong.init(n, seed, { rules: { length, players: n, ...more } });
   const start = s.scores[0];
-  const stats = { moves: 0, hands: 0, ron: 0, tsumo: 0, draw: 0, calls: 0, riichi: 0, kans: 0, nuki: 0, tg: 0 };
+  const stats = { negGo: 0, moves: 0, hands: 0, ron: 0, tsumo: 0, draw: 0, calls: 0, riichi: 0, kans: 0, nuki: 0, tg: 0 };
   // ツモ切りの見分け（河の tsumogiri）: 最後に手牌へ入った牌（ツモ・嶺上・抜いたあとの補充）をそのまま捨てたらツモ切り。
   // 鳴いたあとの打牌は手出し。局の始めの配牌は数えない（その人が1枚引くまでは確かめない）
   let lastIn = [];
@@ -83,7 +83,17 @@ function play(n, length, seed, style) {
     if (m.r) stats.riichi++;
     if (m.a === 'ankan' || m.a === 'kakan') stats.kans++;
     if (m.a === 'nuki') stats.nuki++;
-    if (next.h.phase === 'end' && prevPhase !== 'end') { stats.hands++; if (next.h.end.type === 'draw') stats.draw++; }
+    if (next.h.phase === 'end' && prevPhase !== 'end') {
+      stats.hands++;
+      if (next.h.end.type === 'draw') stats.draw++;
+      // トビ（詳細設定）: ありならマイナスの人が出た局で終わる。なしならマイナスでも、最後の局まで続く
+      const neg = next.scores.some((x) => x < 0);
+      const last = length === 'south' ? 2 * n - 1 : n - 1;
+      if (more.tobi === false) {
+        if (neg && !next.h.end.over) stats.negGo++;
+        if (next.h.end.over && next.kyoku !== last && next.h.end.next.kyoku <= last) return { error: 'トビなしなのに最後の局より前で終わった' };
+      } else if (neg && !next.h.end.over) return { error: 'マイナスの人がいるのに続いた（トビ）' };
+    }
     s = next;
     stats.moves++;
     const bad = invariant(s, start);
@@ -156,6 +166,19 @@ for (const n of [4, 3, 5]) {
       }
     }
   }
+}
+// トビなし（詳細設定）: マイナスのまま続き、最後の局まで打つ。無作為の手は点が大きく動くので、マイナスになる局がよく出る
+{
+  let go = 0;
+  for (const n of [4, 3]) {
+    for (let seed = 11; seed <= 13; seed++) {
+      const r = play(n, 'east', seed, 'random', { tobi: false });
+      games++;
+      if (r.error) { check(`トビなし ${n}人 種${seed}`, false, r.error); continue; }
+      go += r.stats.negGo;
+    }
+  }
+  check('トビなし: マイナスになっても対局が続いた局がある', go > 0, `${go}局`);
 }
 // 5人麻雀の自風: 親から数えて東南西北、5人目は無し（-1）
 {

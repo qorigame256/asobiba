@@ -1588,6 +1588,16 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .invite-code strong { letter-spacing: .12em; font-size: 1.2rem; }
 .invite-actions { display: flex; gap: 8px; margin-top: 14px; }
 .invite-actions .btn { flex: 1; }
+/* お開きの表彰（main.js の showAward） */
+.award-list { list-style: none; margin: 12px 0 4px; padding: 0; text-align: left; }
+.award-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: #fff7e0; margin-bottom: 6px; }
+.award-row:first-child { background: #ffe9a8; font-size: 1.08rem; }
+.award-medal { font-size: 1.4rem; line-height: 1; }
+.award-place { font-weight: 700; white-space: nowrap; }
+.award-who { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.award-n { font-weight: 700; color: #6b5a2e; white-space: nowrap; }
+.award-none { margin: 12px 0; color: var(--muted); }
+.award-seer { margin: 8px 0 0; font-size: .9rem; color: #6a4fa0; overflow-wrap: anywhere; }
 
 /* 部屋の名前・いまのルール */
 .room-name { flex-basis: 100%; font-weight: 700; overflow-wrap: anywhere; }

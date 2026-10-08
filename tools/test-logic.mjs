@@ -1851,6 +1851,7 @@ console.log('memory color pairs', mmColor);
   for (let k = 0; k < 12; k++) {
     const rules = { size: [48, 36, 24][k % 3], streak: [0, 2, 3, 0][k % 4], hint: k % 2 ? 'on' : 'off', color: k % 5 === 0 ? 'on' : 'off' };
     if (k % 4 === 1) rules.thirteen = 'off';
+    if (k % 4 === 2) rules.show = 'long'; // 札が見える時間の「次の人がめくるまで」も今までと同じ局面
     let st = MM.init(2 + (k % 7), k * 7 + 1, { rules });
     const rnd = mulberry32(k + 100);
     h.update(JSON.stringify(st));
@@ -1862,6 +1863,15 @@ console.log('memory color pairs', mmColor);
     }
   }
   assert.equal(h.digest('hex').slice(0, 16), '043ab491af2df9f6', '13ならべ なしでは今までと全く同じ局面');
+  // 札が見える時間（短い）は見せ方だけ: 局面には short が付くだけで、手の進み方は同じ
+  {
+    const a = MM.init(3, 77, { rules: { show: 'short' } });
+    const b = MM.init(3, 77, { rules: {} });
+    assert.equal(a.short, true);
+    assert.ok(!('short' in b) && !('short' in MM.init(3, 77, { rules: { show: 'long' } })), 'なしでは short を持たない');
+    const { short, ...rest } = a;
+    assert.deepEqual(rest, b, '短い以外は同じ局面');
+  }
   assert.ok(!('thirteen' in MM.init(2, 5, { rules: {} })) && !('thirteen' in MM.init(2, 5, { rules: { thirteen: 'off' } })), 'なしでは thirteen を持たない');
   // 枚数: ありのときはいつも48枚（A〜Q）。同じ種なら なしの48枚と同じ並び
   for (const size of [48, 36, 24]) {
@@ -3830,9 +3840,30 @@ assert.deepEqual(YT.init(3, 21), YT.init(3, 21));
   y = { ...y, round: 12, pl: y.pl.map((x) => ({ ...x, sheet: x.sheet.map((v) => v ?? 0) })) };
   assert.equal(YT.result(y).winner, 0, 'ボーナスも合計に入って勝ち負けを決める');
 }
+// ジョーカー（詳細設定）: ヨットの役が埋まっている（50点でも0点でも）ときの5個そろいは、ストレートにも満点
+{
+  const five = (rules, yachtCol, dice = [4, 4, 4, 4, 4]) => {
+    const st = YT.init(2, 5, { rules });
+    st.pl[0] = { ...st.pl[0], dice, rolls: 1, sheet: [null, null, null, null, null, null, null, null, null, null, null, yachtCol] };
+    st.round = yachtCol === null ? 0 : 1;
+    return st;
+  };
+  const r = (yachtCol) => (yachtCol === null ? 0 : 1);
+  const put = (rules, yachtCol, cat, dice) => YT.apply(five(rules, yachtCol, dice), { p: 0, t: 'score', r: r(yachtCol), cat }).pl[0];
+  assert.equal(put({ joker: true }, 50, 9).sheet[9], 15, 'ジョーカーで Sストレートに15点');
+  assert.equal(put({ joker: true }, 0, 10).sheet[10], 30, 'ヨットが0点でもジョーカーで Bストレートに30点');
+  assert.equal(put({ joker: false }, 50, 10).sheet[10], 0, 'なしなら0点');
+  assert.equal(put({ joker: true }, null, 10).sheet[10], 0, 'ヨットの役が空いているうちは効かない');
+  assert.equal(put({ joker: true }, 50, 10, [4, 4, 4, 4, 3]).sheet[10], 0, '5個そろっていなければ効かない');
+  assert.equal(put({ joker: true }, 50, 3).sheet[3], 20, 'ストレート以外はいつもの点');
+  const both = put({ joker: true, bonusYacht: true }, 50, 10);
+  assert.deepEqual([both.sheet[10], both.extra], [30, 100], '2回目のヨットと一緒なら +100 も付く');
+  assert.deepEqual(YT.init(3, 21, { rules: { joker: false } }), YT.init(3, 21), 'なしでは今までと同じ局面');
+  assert.equal(YT.init(3, 21, { rules: { joker: true } }).joker, true);
+}
 // CPU どうしで最後まで
 for (let g = 0; g < 20; g++) {
-  let st = YT.init(2 + (g % 4), 100 + g);
+  let st = YT.init(2 + (g % 4), 100 + g, { rules: { joker: g % 2 === 1, bonusYacht: g % 3 === 0 } });
   let guard = 0;
   while (!YT.result(st)) {
     for (let p = 0; p < st.n; p++) if (YT.canAct(st, p)) { st = YT.apply(st, { p, ...YT.cpu(st, p) }); assert.ok(st, 'ヨットの CPU が反則を出した'); }

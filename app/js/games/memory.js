@@ -12,6 +12,10 @@
 //   A〜Q のときだけ どの札にも相方があるので、ありのときは枚数の設定を見ず いつも48枚にする。数 r の札と 13−r の札は4枚ずつで、
 //   1組取るとどちらも1枚ずつ減るので、必ず全部取り切れる。色もそろえると一緒なら「足して13で、色も同じ」（黒2枚・赤2枚ずつなので、これも取り切れる）。
 //   ありのときだけ局面に thirteen: true を持つ（なしでは今までと全く同じ形）。画面には、めくった2枚の合計を「7＋6＝13 ⭕」のように出す。
+// 詳細設定「札が見える時間」（2026-10-07 本人の決定。20回目の案。最初は「次の人がめくるまで」＝今まで）: 短い（1秒）では、はずれた2枚が
+//   1秒たつと画面の上で裏に戻る（局面は今までどおり次の人がめくるまで open のまま。見せ方だけ変える。apply は時刻を使わない決まりのため）。
+//   Claude の判断: 1枚目をめくって2枚目を選んでいる間は表のまま（自分でめくった札が消えると分かりにくいので）。0.5秒ではスマホで数字を読み切れないので1秒にした。
+//   1秒は各端末が局面を画面に出したときから数える。ありのときだけ局面に short: true を持つ（なしでは今までと全く同じ形）。
 // 手: { p, t: 'flip', i: 何枚目の札か }。めくった札がもう表なら反則なので、同じ手が2回来ても2回目は弾かれる。
 
 import { mulberry32, shuffle } from './util.js';
@@ -43,6 +47,7 @@ export default {
     { key: 'hint', label: '見た札のヒント', desc: '一度めくった札は、伏せたあとも小さく数字が残る（覚えなくても取れるので、小さい子と遊ぶとき向け）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'color', label: '色もそろえる', desc: '同じ数字でも、色（黒の♠♣・赤の♥♦）が同じ2枚でないと取れない。覚えることが増えてむずかしくなる', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'thirteen', label: '13ならべ', desc: '同じ数字でなく、足して13になる2枚を取る（A=1・J=11・Q=12）。ありのときは枚数はいつも48枚（A〜Q）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
+    { key: 'show', label: '札が見える時間', desc: 'はずれた2枚が表のまま見えている時間。短いと覚えるのがむずかしくなる', def: 'long', choices: [['long', '次の人がめくるまで'], ['short', '短い（1秒）']] },
     { key: 'streak', label: '続けて取れる組', desc: '組を取ったあと続けてめくれるのは、この数の組まで。覚えるのが得意な人の独走を防ぐ', def: 0, choices: [[0, '何組でも'], [2, '2組まで'], [3, '3組まで']] },
   ],
 
@@ -57,6 +62,7 @@ export default {
     };
     if (rules.color === 'on') s.color = true; // なしのときは局面に何も足さない（今までと同じ形）
     if (thirteen) s.thirteen = true; // 13ならべも同じ
+    if (rules.show === 'short') s.short = true; // 札が見える時間も同じ
     return s;
   },
 
@@ -184,12 +190,22 @@ export default {
     grid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
     grid.style.maxWidth = `${cols * 60}px`;
     const fresh = s.open.length === 2 ? [] : s.open;
+    // 札が見える時間（短い）: はずれた2枚は、この端末で出してから SHORT_MS たったら裏に戻して描く
+    let hidden = false;
+    clearTimeout(missTimer); // 前に描いた局面の予約は捨てる（新しい局面で古い局面を描き直さないように）
+    if (s.short && s.open.length === 2) {
+      const key = `${s.step}:${s.open.join(',')}:${s.cards.join('')}`;
+      if (missShown.key !== key) missShown = { key, at: Date.now() };
+      const left = SHORT_MS - (Date.now() - missShown.at);
+      hidden = left <= 0;
+      if (!hidden) missTimer = setTimeout(() => { if (root.isConnected && missShown.key === key) this.render(root, s, o); }, left + 20);
+    }
     s.cards.forEach((card, i) => {
       let e;
       if (s.taken[i] !== null) {
         e = cardEl(card);
         e.classList.add('taken');
-      } else if (s.open.includes(i)) {
+      } else if (s.open.includes(i) && !hidden) {
         // 前の人がはずした2枚は、次の人がめくり直してもよい
         const again = can && s.open.length === 2;
         e = cardEl(card, again ? 'button' : 'div');
@@ -199,7 +215,7 @@ export default {
           e.onclick = () => o.onMove({ t: 'flip', i });
         }
         if (o.fresh && s.last && (s.last.i === i || s.last.b === i)) e.classList.add('pop');
-      } else if (can && !fresh.includes(i)) {
+      } else if (can && !fresh.includes(i)) { // 裏に戻したはずれの2枚も、ほかの裏の札と同じにめくれる
         e = document.createElement('button');
         e.type = 'button';
         e.className = 'pcard back usable';
@@ -208,7 +224,7 @@ export default {
       } else {
         e = backEl();
       }
-      if (s.hint && s.seen[i] && s.taken[i] === null && !s.open.includes(i)) {
+      if (s.hint && s.seen[i] && s.taken[i] === null && (!s.open.includes(i) || hidden)) {
         const h = document.createElement('span');
         h.className = 'mm-hint' + (s.color && isRed(card) ? ' red' : ''); // 色もそろえるなら色も分かるように
         h.textContent = rankLabel(rankOf(card));
@@ -220,6 +236,10 @@ export default {
     root.append(grid);
   },
 };
+
+const SHORT_MS = 1000; // 札が見える時間（短い）
+let missShown = { key: '', at: 0 }; // いま見せているはずれの2枚と、出した時刻（この端末だけ）
+let missTimer = null;
 
 function tag(cls, text) {
   const t = document.createElement('span');
