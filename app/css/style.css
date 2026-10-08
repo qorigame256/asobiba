@@ -691,6 +691,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .lobby-pick { display: grid; gap: 8px; margin: 10px 0; }
 .lobby-pick label { display: flex; justify-content: space-between; align-items: center; gap: 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; }
 .lobby-pick select { font: inherit; padding: 4px 8px; border-radius: 8px; border: 1.5px solid var(--line); background: #fff; max-width: 60%; }
+.lobby-lot { margin: -2px 0 10px; }
 .controls .btn:disabled { opacity: .4; cursor: default; }
 
 /* ---------- いろあわせ（カード） ---------- */

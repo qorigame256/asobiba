@@ -106,6 +106,24 @@ for (const [g, n] of [[C, 20], [R, 12], [RS, 12], [RC, 12], [TS, 12], [TV, 20], 
     results['tictactoe' + n + ':' + wide] = { strongWinRate: Math.round(strongWins / G * 100) + '%' };
     assert.ok(strongWins / G > 1.5 / n, `${n}人マルバツ(${wide}): つよいが よわい より多く勝つ ${strongWins}/${G}`);
   }
+  // 2人の広い盤（4つ並べ。22回目の案）: 強さの順。先手を交互に入れ替える（6×6 は先手がかなり有利なため）
+  for (const [a, b] of [['normal', 'weak'], ['strong', 'normal']]) {
+    const G = 80;
+    let aWins = 0;
+    let bWins = 0;
+    for (let g = 0; g < G; g++) {
+      const seat = g % 2;
+      let x = T.init({ rules: { size: 'wide' } });
+      while (!T.result(x)) {
+        x = T.apply(x, T.cpu(x, x.turn, { size: 'wide', cpu: x.turn === seat ? a : b }));
+        assert.ok(x, '2人の広い盤: 反則を出さない');
+      }
+      const win = T.result(x).winner;
+      if (win === seat) aWins++; else if (win !== null) bWins++;
+    }
+    results['tictactoe2wide:' + a + '-' + b] = aWins + '勝' + bWins + '敗';
+    assert.ok(aWins > bWins * 1.5, `2人の広い盤マルバツ: ${a} が ${b} に勝ち越す ${aWins}勝${bWins}敗`);
+  }
 }
 // 3〜4人のコネクトフォー: 勝てる手を打つ・次の人の4つ目をふさぐ・上に乗せられて負ける所へ落とさない・つよい1人が よわい2人より多く勝つ
 {

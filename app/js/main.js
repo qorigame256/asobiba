@@ -85,7 +85,7 @@ function wasKicked(code) {
 function setUrlRoom(code) {
   const url = new URL(location.href);
   if (code) url.searchParams.set('room', code); else url.searchParams.delete('room');
-  history.replaceState(null, '', url);
+  history.replaceState(history.state, '', url); // うっかり閉じない確認の目印（bgGuard）は残す
 }
 
 /* ---------- 参加者と局面 ---------- */
@@ -1566,6 +1566,7 @@ function renderBoardLobby(game) {
     list.append(row);
   });
   board.append(list);
+  if (S.isHost && !game.live) board.append(lotButton(game, pick));
   const watchers = S.members.filter((id) => !pick.includes(id));
   if (watchers.length) {
     const w = document.createElement('p');
@@ -1590,6 +1591,42 @@ function renderBoardLobby(game) {
     board.insertAdjacentHTML('beforeend', '<p class="lobby-total">友だちが部屋に入ると始められます</p>');
   }
   controls.append(start, gameSelect(), rouletteButton());
+}
+
+/* ---------- 先手をくじで決める（2026-10-08。22回目の案。Claude が出した15の案から本人が推奨どおり選んだ） ---------- */
+// Claude の判断: 盤のゲームの待合室で、ホストが「🎲 先手をくじで決める」（3人以上は「順番を…」）を押すと、いま選んである顔ぶれ（CPU も）はそのままで、
+// 席の順番だけをまぜる。何度でも引き直せる。結果はいつもの席の選び方と同じく pick に入れて state で送り、くじの合図（type: 'lot'。まぜた pick 付き）も
+// 送りっぱなしにして、全員の画面に結果を一言（toast）で出す。エアホッケーは席が打つ順番でないので出さない。席の顔ぶれが1つ（CPU だけ）なら押せない。
+function lotButton(game, pick) {
+  const b = makeButton(pick.length > 2 ? '🎲 順番をくじで決める' : `🎲 ${game.players[0]}をくじで決める`, () => {
+    const next = pick.slice();
+    for (let i = next.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [next[i], next[j]] = [next[j], next[i]];
+    }
+    S.pick = next;
+    saveRoom();
+    sendState();
+    send({ type: 'lot', gameId: S.gameId, pick: next });
+    render();
+    lotToast(game, next);
+  }, 'secondary small');
+  b.classList.add('lobby-lot');
+  b.disabled = new Set(pick).size < 2;
+  return b;
+}
+
+function lotToast(game, pick) {
+  const who = (v) => (v === 'cpu' ? 'CPU' : v === S.myId ? 'あなた' : nameOf(v));
+  toast(pick.length > 2 ? '🎲 くじの結果: ' + pick.map(who).join(' → ') : `🎲 くじの結果: ${game.players[0]}は ${who(pick[0])}`);
+}
+
+// くじの合図を受け取った（ホストからだけ・待合室の間だけ。中身は部屋の人か cpu のときだけ使う）
+function onLot(msg) {
+  const game = GAMES[S.gameId];
+  if (S.isHost || !S.members.length || msg.from !== S.members[0] || S.order || msg.gameId !== S.gameId || !game || game.multi || game.live) return;
+  if (!Array.isArray(msg.pick) || msg.pick.length !== boardSeats(S.gameId, S.rules) || !msg.pick.every((v) => v === 'cpu' || S.members.includes(v))) return;
+  lotToast(game, msg.pick);
 }
 
 // 勝ち残りの付け外し（ホストだけ。ほかの人には付いているときだけ出す）
@@ -1776,6 +1813,7 @@ function onKicked() {
   forgetRoom(S.code);
   const net = S.net;
   setTimeout(() => net?.close(), 300);
+  dropBack();
   S = null;
   setTurnTitle(false);
   setUrlRoom(null);
@@ -2045,14 +2083,17 @@ function enterPlay() {
     shownKey: null, shownLen: 0, lostKey: '', cpuKeys: {}, refKey: null, couldMove: null, waitFrom: Date.now(), undoAsk: null,
   });
   showScreen('play');
+  armBack();
   render();
 }
 
-function leave() {
+// ask = false は、もう聞いたあと（ブラウザの「戻る」で聞いた）
+function leave(ask = true) {
+  if (S?.mode === 'online' && ask && !confirm('部屋を出ますか？')) return;
   stopLive();
   closeInvite();
+  dropBack();
   if (S?.mode === 'online') {
-    if (!confirm('部屋を出ますか？')) return;
     send({ type: 'bye' });
     forgetRoom(S.code);
     const net = S.net;
@@ -2063,6 +2104,42 @@ function leave() {
   setUrlRoom(null);
   showScreen('home');
 }
+
+/* ---------- うっかり閉じない確認（2026-10-08。22回目の案。Claude が出した15の案から本人が推奨どおり選んだ） ---------- */
+// Claude の判断: 部屋（同じ画面の対局も）にいる間に、
+//  - ブラウザの「戻る」（iPhone の左の端からなぞる操作も）で「部屋を出ますか？」と聞く。出るなら「部屋を出る」ボタンと同じ（ホームへ）。出ないならそのまま。
+//    仕組み: 部屋に入ったとき履歴に受け皿を1つ足しておき（history.pushState）、「戻る」でそれが消えたとき（popstate）に聞く。出ないときは足し直す。
+//    「部屋を出る」で出たときは受け皿を自分で消す（dropBack）。再読み込みしたときは、もう受け皿の上にいるので足さない（history.state の bgGuard）。
+//  - タブを閉じる・再読み込み・ほかのページへ移るときは、ブラウザの確認（beforeunload）を出す。文はブラウザが決める（iPhone の Safari では出ないことがある）。
+//    再読み込みでも出るが、そのまま進めば今までどおり部屋に戻れる。
+let backArmed = false; // 受け皿がいまの位置にあるか
+let backDropping = false; // 自分で受け皿を消している途中（その popstate は聞かない）
+function armBack() {
+  if (backArmed) return;
+  backArmed = true;
+  if (history.state?.bgGuard) return;
+  history.pushState({ bgGuard: true }, '', location.href);
+}
+function dropBack() {
+  if (!backArmed) return;
+  backArmed = false;
+  backDropping = true;
+  history.back();
+}
+window.addEventListener('popstate', () => {
+  const asking = backArmed && !backDropping;
+  backDropping = false;
+  backArmed = false;
+  if (!S) { setUrlRoom(null); return; } // 前の部屋のリンクのままの履歴に戻ったときも、部屋には入らない
+  if (!asking) return;
+  if (confirm(S.mode === 'online' ? '部屋を出ますか？' : '対局をやめてホームに戻りますか？')) leave(false);
+  else armBack();
+});
+window.addEventListener('beforeunload', (e) => {
+  if (!S) return;
+  e.preventDefault();
+  e.returnValue = ''; // 古いブラウザ向け
+});
 
 // 招待（2026-10-07 の13回目で QR コードを足した）: 「招待する」で小窓を開き、部屋に入るための QR コードと部屋コードを出す。
 // 「リンクを送る」で前と同じく共有の画面（無ければリンクのコピー）を出す。
@@ -2234,6 +2311,9 @@ function onMessage(msg) {
       break;
     case 'pred': // 勝敗予想。対局が同じで、番号が正しく、まだ予想していない人の分だけ覚える
       if (msg.gameId === S.gameId && msg.round === S.round && S.order && Number.isInteger(msg.p) && msg.p >= 0 && msg.p < S.order.length && S.members.includes(msg.from)) setPred(msg.from, msg.p);
+      return;
+    case 'lot': // 先手をくじで決めた（ホストからだけ）。席は state で届くので、ここでは一言だけ出す
+      onLot(msg);
       return;
     case 'award': // お開きの表彰（ホストからだけ）。描き直さない
       if (!S.isHost && S.members.length && msg.from === S.members[0]) showAward();
@@ -2551,7 +2631,7 @@ el('join-form').addEventListener('submit', (e) => {
   e.preventDefault();
   joinRoom(el('join-code').value);
 });
-el('btn-leave').onclick = leave;
+el('btn-leave').onclick = () => leave();
 el('btn-invite').onclick = invite;
 el('btn-howto').onclick = () => {
   const box = el('howto');

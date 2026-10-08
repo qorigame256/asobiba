@@ -26,6 +26,11 @@
 //     8切りなどで流れるときも、選び終えてから流す。出して上がったとき・7渡しや10捨てで上がったときは選ばない。
 //     捨てて手札がなくなった人は上がり（反則上がりにしない）。上がる順は、選んだ人から順番の向きに席の順。都落ちは最初に上がった人で見る（ふだんと同じ）。
 //     CPU は自分が一番多く持っている数字（同じなら、いまの強さ（革命を見る）で弱い方）。2割は持っている数字から適当に選ぶ。
+//   - 数しばり（詳細設定。2026-10-08 の22回目の案。細かい所は Claude の判断）: 同じ数字の組（1枚出し・2枚組など）で、前の組より
+//     いまの強さでちょうど1つ強い数字を出すと掛かり、場が流れるまで、1つずつ強い数字しか出せない（例: 5 → 6 → 7）。
+//     ジョーカーの入った組はその数字として数える。階段・ジョーカー1枚出しでは掛からない。ジョーカー1枚出しは数しばりでも出せる（マークのしばりと同じ）。
+//     革命・11バックで強さの向きが変わったら、そのあとは変わった向きで1つ強い数字（例: 革命中の 7 の次は 6）。マークのしばりとは別で、両方同時にも掛かる。
+//     2（革命中は3）の次は出せる数字が無いので、ジョーカー1枚出しのほかは全員パスになる。局面の nlock（なしのときは持たない）。
 //   - カード交換: 大貧民の一番強い2枚 → 大富豪、大富豪が選んだ2枚 → 大貧民。4人以上なら貧民と富豪で1枚ずつも。
 //     前の対局と顔ぶれが違うときは交換しない。
 
@@ -102,6 +107,7 @@ function beats(m, s) {
   if (f.solo) return !!s.rules.spe3 && m.cards[0] === 's3';
   if (m.solo) return true;
   if (s.lock && !fitsLock(m, s.lock)) return false;
+  if (s.nlock && m.lo !== f.lo + (reversed(s) ? -1 : 1)) return false;
   if (m.kind === 'set') return reversed(s) ? m.lo < f.lo : m.lo > f.lo;
   return reversed(s) ? m.hi < f.hi : m.lo > f.lo;
 }
@@ -186,6 +192,7 @@ function clearField(s) {
   s.by = null;
   s.passed = s.passed.map(() => false);
   s.lock = null;
+  if (s.nlock) delete s.nlock;
   s.back = false;
 }
 
@@ -278,6 +285,7 @@ const RULE_LIST = [
   { key: 'eight', label: '8切り', desc: '8を出すと場が流れ、出した人から始める', def: true },
   { key: 'stairs', label: '階段', desc: '同じマークで3枚以上の連番を出せる', def: true },
   { key: 'shibari', label: 'しばり', desc: '前と同じマークを出すと、場が流れるまでそのマークしか出せない', def: true },
+  { key: 'numLock', label: '数しばり', desc: '前の組より1つ強い数字（5 の次の 6 など）を出すと、場が流れるまで1つずつ強い数字しか出せない（同じ数字の組だけ。階段では掛からない）', def: false },
   { key: 'exchange', label: 'カード交換', desc: '2戦目から、大富豪と大貧民（4人以上なら富豪と貧民も）が札を交換', def: true },
   { key: 'five', label: '5飛び', desc: '5を出すと、出した5の枚数だけ次の人を飛ばす（飛ばされた人はパスと同じ）', def: false },
   { key: 'seven', label: '7渡し', desc: '7を出すと、出した7の枚数だけ好きな札を次の人に渡す（必ず）', def: false },
@@ -455,6 +463,11 @@ export default {
       s.lock = lockKey(meld);
       effects.push('しばり ' + s.lock.map((x) => SUIT_MARK[x]).join(''));
     }
+    if (s.rules.numLock && f && !s.nlock && meld.kind === 'set' && f.kind === 'set' && !meld.solo && !f.solo
+      && meld.lo === f.lo + (reversed(s) ? -1 : 1)) {
+      s.nlock = true;
+      effects.push('数しばり');
+    }
     s.field = meld;
     s.by = p;
     if (s.rules.revolution && meld.kind === 'set' && meld.n >= 4) { s.rev = !s.rev; effects.push(s.rev ? '革命' : '革命返し'); }
@@ -589,6 +602,10 @@ export default {
     if (s.back) badges.push('11バック中');
     if (s.dir === -1) badges.push('逆回り');
     if (s.lock) badges.push('しばり ' + s.lock.map((x) => SUIT_MARK[x]).join(''));
+    if (s.nlock) {
+      const next = s.field.lo + (reversed(s) ? -1 : 1);
+      badges.push('数しばり（次は ' + (next >= 3 && next <= 15 ? powerLabel(next) : 'なし') + '）');
+    }
     if (badges.length) {
       const b = document.createElement('div');
       b.className = 'df-badges';

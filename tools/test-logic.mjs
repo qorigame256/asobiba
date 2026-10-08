@@ -45,7 +45,7 @@ s = T.init({ rules: { players: 3 } });
 assert.equal(s.w * 100 + s.k, 503, '3人のおまかせは 5×5 で3つ');
 assert.equal(T.init({ rules: { players: 4 } }).w, 8, '4人のおまかせは 8×8');
 assert.equal(T.init({ rules: { players: 3, wide: '7-3' } }).w, 7, '盤の大きさを選べる');
-assert.equal(T.init({ rules: { players: 2, wide: '7-3' } }).board.length, 9, '2人なら3人以上の盤の設定は見ない');
+assert.equal(T.init({ rules: { players: 2, wide: '7-3' } }).board.length, 9, '2人の ふつうの盤なら広い盤の大きさは見ない');
 assert.equal(T.init({ rules: { players: 3, size: 'super' } }).big, undefined, '3人ではスーパーにならない');
 assert.equal(T.seatCount({ players: 4 }), 4);
 s = wide({ players: 3 }, [0, 1, 2]);
@@ -70,6 +70,20 @@ for (let k = 0; seq.length < 25; k++) for (const p of [0, 1, 2]) if (order[p][k]
 s = wide({ players: 3 }, seq);
 assert.deepEqual(T.result(s), { winner: null, cells: [] }, '3人で埋まったら引き分け');
 assert.equal(T.result(big({ owner: [0, 1, 0, 'd', null, 0, 1, 0, 1] })), null, 'まだ置ける盤があれば続く');
+// 2人の広い盤（詳細設定「盤」の wide。22回目の案）: 4つ並べ
+s = T.init({ rules: { size: 'wide' } });
+assert.deepEqual([s.n, s.w, s.k], [2, 6, 4], '2人の広い盤のおまかせは 6×6 で4つ');
+assert.deepEqual([T.init({ rules: { size: 'wide', wide: '9-3' } }).w, T.init({ rules: { size: 'wide', wide: '9-3' } }).k], [9, 4], '2人は大きさだけ見て、いつも4つ並べ');
+assert.equal(T.init({ rules: { players: 3, size: 'wide', wide: '9-3' } }).k, 3, '3人は3つ並べのまま');
+s = wide({ size: 'wide' }, [0, 6, 1, 7, 2]);
+assert.equal(T.result(s), null, '3つではまだ勝ちでない');
+assert.equal(T.turn(s), 1, '2人で交代');
+s = T.apply(T.apply(s, 8), 3);
+assert.deepEqual(T.result(s), { winner: 0, cells: [0, 1, 2, 3] }, '4つ並べたら勝ち');
+{
+  let x = T.init({ rules: { size: 'wide' } });
+  for (let k = 0; k < 40 && !T.result(x); k++) { x = T.apply(x, T.cpu(x, x.turn, { size: 'wide', cpu: k % 2 ? 'weak' : 'strong' })); assert.ok(x, '2人の広い盤で CPU が反則を出した'); }
+}
 
 // コネクトフォー
 s = play(C, [0, 1, 0, 1, 0, 1, 0]);
@@ -679,6 +693,41 @@ console.log('colors stack OK');
   assert.ok(calls > 40 && forgot > 3 && forgot < calls, `CPU はたいてい宣言し、ときどき忘れる: ${calls} / ${forgot}`);
 }
 
+// いろあわせの記号の札で上がれない（22回目の案）: 最後の1枚が記号の札なら出せない・数字なら上がれる・重ね返しでも同じ・CPU も従う
+{
+  const U = GAMES.colors;
+  const pb = (hands, o = {}, rules = { plainOut: true }) => ({ ...U.init(3, 1, { rules }), deck: ['b1', 'b2', 'b3', 'b4'], discard: ['r5'], hands, color: 'r', turn: 0, drawn: null, ...o });
+  for (const card of ['rS', 'rR', 'rD', 'W', 'W4']) {
+    const st = pb([[card], ['b1', 'b2'], ['y1', 'y2']]);
+    assert.equal(U.apply(st, { p: 0, t: 'play', i: 0, ...(card[0] === 'W' ? { c: 'g' } : {}) }), null, `最後の1枚の ${card} は出せない`);
+    assert.deepEqual(U.cpu(st, 0), { t: 'draw' }, `CPU は最後の1枚の ${card} を出さずに引く`);
+    assert.ok(U.apply(pb([[card], ['b1', 'b2'], ['y1', 'y2']], {}, {}), { p: 0, t: 'play', i: 0, ...(card[0] === 'W' ? { c: 'g' } : {}) }), `なしなら ${card} で上がれる`);
+  }
+  assert.equal(U.apply(pb([['r7'], ['b1', 'b2'], ['y1', 'y2']]), { p: 0, t: 'play', i: 0 }).winner, 0, '数字の札なら上がれる');
+  assert.ok(U.apply(pb([['rS', 'g1'], ['b1', 'b2'], ['y1', 'y2']]), { p: 0, t: 'play', i: 0 }), '2枚あれば記号の札も出せる');
+  assert.equal(U.apply(pb([['rS', 'rD'], ['b1', 'b2'], ['y1', 'y2']]), { p: 0, t: 'play', i: 0 }).hands[0].length, 1, '記号の札を残すのは自由');
+  const st = pb([['rD'], ['b1', 'b2'], ['y1', 'y2']], { pend: { k: 'D', n: 2 } }, { plainOut: true, stack: true });
+  assert.equal(U.apply(st, { p: 0, t: 'play', i: 0 }), null, '重ね返しでも最後の1枚のドロー2では返せない');
+  assert.equal(U.apply(st, { p: 0, t: 'draw' }).hands[0].length, 3, '引き取る');
+  let wins = 0;
+  for (let k = 0; k < 60; k++) {
+    let x = U.init(2 + (k % 5), k * 977 + 3, { rules: { plainOut: true, multi: k % 2 === 1, stack: k % 3 === 0, untilPlay: k % 4 === 0 } });
+    let steps = 0;
+    while (!U.result(x)) {
+      const p = U.turn(x);
+      const next = U.apply(x, { ...U.cpu(x, p), p });
+      assert.ok(next, '記号の札で上がれないで CPU が反則の手を出した');
+      assert.equal(total(next), 108);
+      x = next;
+      if (++steps > 6000) throw new Error('記号の札で上がれないいろあわせが終わらない');
+    }
+    const w = U.result(x).winner;
+    assert.ok(/^[rygb]\d$/.test(x.discard[x.discard.length - 1]), '上がった札は数字');
+    wins += w >= 0 ? 1 : 0;
+  }
+  assert.equal(wins, 60);
+}
+
 // いろあわせの手札の上限: 26枚になったら脱落（手札は山の下へ）・脱落した人を飛ばす・残り1人なら勝ち・札の数は108のまま
 {
   const U = GAMES.colors;
@@ -1216,6 +1265,39 @@ for (let k = 0; k < 300; k++) {
   assert.equal(D.apply(t, { p: 1, t: 'bomb', r: 3 }), null, 'なしではボンバーの手は弾く');
   assert.deepEqual(Object.keys(D.init(4, 5, { rules: DEF })).sort(), Object.keys(D.init(4, 5, { rules: { ...DEF, bomber: true } })).sort(), '局面の形は同じ');
   assert.equal(DEF.bomber, false, '最初はなし');
+}
+// 数しばり（22回目の案）: 1つ強い数字が続くと、場が流れるまで1つずつ強い数字だけ
+{
+  const RN = { ...NONE, numLock: true };
+  const nb = (hands, o = {}) => dbase(hands, { rules: RN, ...o });
+  s = nb([['s5', 'c9', 'd3'], ['h6', 'd8', 'c4'], ['c7', 's8', 'h3'], ['JK', 'h13', 'c3']]);
+  t = dplay(s, 0, ['s5']);
+  assert.equal(t.nlock, undefined, '1枚目ではまだ掛からない');
+  t = dplay(t, 1, ['h6']);
+  assert.deepEqual([t.nlock, t.last.effects], [true, ['数しばり']], '5 の次に 6 で数しばり');
+  assert.equal(dplay(t, 2, ['s8']), null, '数しばりでは 8 は出せない');
+  t = dplay(t, 2, ['c7']);
+  assert.equal(t.field.lo, 7, '7 は出せる');
+  assert.equal(dplay(t, 3, ['h13']), null, 'K も出せない');
+  assert.ok(dplay(t, 3, ['JK']), 'ジョーカー1枚出しは出せる');
+  t = dpass(dpass(dpass(t, 3), 0), 1);
+  assert.deepEqual([t.field, t.nlock, t.turn], [null, undefined, 2], '流れると数しばりも解ける');
+  // 2枚組・ジョーカー入り・飛ばした数字では掛からない・革命中は1つ弱い数字
+  s = nb([['s5', 'h5', 'c9'], ['h7', 'JK', 'c4'], ['d6', 'c6', 'h3']]);
+  t = dplay(s, 0, ['s5', 'h5']);
+  assert.equal(dplay(t, 1, ['h7', 'JK']).nlock, undefined, '5 の次の 7 では掛からない');
+  t = dplay(dpass(t, 1), 2, ['d6', 'c6']);
+  assert.equal(t.nlock, true, '2枚組でも掛かる');
+  s = nb([['s7', 'c9'], ['h6', 'c4'], ['d8', 'h5']], { rev: true });
+  t = dplay(dplay(s, 0, ['s7']), 1, ['h6']);
+  assert.equal(t.nlock, true, '革命中は 7 の次の 6 で掛かる');
+  assert.ok(dplay(t, 2, ['h5']) && !dplay(t, 2, ['d8']), '革命中は1つ弱い数字だけ');
+  s = nb([['s3', 's4', 's5', 'c9'], ['h6', 'h7', 'h8', 'c4'], ['d8', 'h3']], { rules: { ...RN, stairs: true } });
+  assert.equal(dplay(dplay(s, 0, ['s3', 's4', 's5']), 1, ['h6', 'h7', 'h8']).nlock, undefined, '階段では掛からない');
+  s = nb([['s5', 'c9'], ['h6', 'c4'], ['d8', 'h3']], { rules: { ...NONE } });
+  t = dplay(dplay(s, 0, ['s5']), 1, ['h6']);
+  assert.ok(t.nlock === undefined && dplay(t, 2, ['d8']), 'なしなら掛からない');
+  assert.equal(DEF.numLock, false, '最初はなし');
 }
 console.log('daifugo games', dgames);
 
@@ -3969,6 +4051,46 @@ for (let seed = 1; seed <= 30; seed++) {
   assert.deepEqual(WW.result(WW.apply(j, { p: town2[0], t: 'judge', ok: true })).winners, w.wolves, '逆転したらウルフ2人とも勝ち');
   assert.deepEqual(WW.result(WW.apply(j, { p: town2[0], t: 'judge', ok: false })).winners, town2, 'はずれならウルフ以外の勝ち');
   assert.deepEqual(WW.result(voteAll(w, (p) => (p === town2[0] ? town2[1] : town2[0]))).winners, w.wolves, 'ウルフ以外が選ばれたらウルフ2人の勝ち');
+}
+// ウルフがいない回（22回目の案）: 4回に1回ほど・なしなら局面も配り方も前と同じ・「ウルフはいない」で投票できる
+{
+  const off = WW.init(5, 77, {});
+  assert.equal(off.peace, undefined, 'なしなら局面の形は前と同じ');
+  assert.ok(!off.cands.includes(-1), 'なしなら「ウルフはいない」に入れられない');
+  let none = 0;
+  let seedNone = null;
+  let seedWolf = null;
+  for (let seed = 1; seed <= 400; seed++) {
+    const a = WW.init(5, seed, {});
+    const b = WW.init(5, seed, { rules: { peace: true } });
+    assert.deepEqual([b.words, b.cands.includes(-1), b.wolfCount], [a.words, true, 1]);
+    if (b.wolves.length) assert.deepEqual(b.wolves, a.wolves, 'いる回のウルフはなしと同じ');
+    else { none++; seedNone ??= seed; }
+    if (b.wolves.length) seedWolf ??= seed;
+  }
+  assert.ok(none > 70 && none < 130, `いない回は4回に1回ほど: ${none}/400`);
+  const w2 = Array.from({ length: 60 }, (_, k) => WW.init(8, k + 1, { rules: { peace: true, wolves: 2 } }));
+  assert.ok(w2.every((x) => x.wolves.length === 0 || x.wolves.length === 2) && w2.some((x) => !x.wolves.length), 'ウルフ2人でも、いない回は0人');
+  // いない回: 全員同じお題。「ウルフはいない」が多ければ全員の勝ち・だれかを選んだら全員の負け・並んでも決まらなければ全員の負け
+  let p0 = WW.init(5, seedNone, { rules: { peace: true } });
+  assert.ok([1, 2, 3, 4].every((p) => WW.wordOf(p0, p) === WW.wordOf(p0, 0)), 'いない回は全員同じお題');
+  p0 = WW.apply(p0, { p: -1, t: 'tovote' });
+  assert.equal(WW.apply(p0, { p: 0, t: 'vote', to: 5, v: 1 }), null, '候補でない番号は弾く');
+  let r = voteAll(p0, (p) => (p < 3 ? -1 : 0));
+  assert.deepEqual([r.phase, WW.result(r).winners, WW.result(r).nowolf], ['end', [0, 1, 2, 3, 4], true], '「ウルフはいない」を当てたら全員の勝ち');
+  r = voteAll(p0, (p) => (p === 0 ? 1 : 0));
+  assert.deepEqual([WW.result(r).winners, WW.result(r).side], [[], 'none'], 'いない回にだれかを選んだら全員の負け');
+  r = voteAll(p0, (p) => [-1, -1, 0, 0, 2][p]);
+  assert.deepEqual([r.vote, r.cands], [2, [0, -1]], '「ウルフはいない」も並べばやり直しの候補');
+  r = voteAll(r, (p) => [-1, -1, 0, 0, 0][p]);
+  assert.equal(WW.result(r).side, 'none', 'やり直しで3対2でだれかに決まっても全員の負け');
+  // いる回に「ウルフはいない」が多ければウルフの逃げ切り
+  let q = WW.apply(WW.init(5, seedWolf, { rules: { peace: true } }), { p: -1, t: 'tovote' });
+  r = voteAll(q, () => -1);
+  assert.deepEqual(WW.result(r).winners, q.wolves, 'いる回に「ウルフはいない」ならウルフの勝ち');
+  const wolfP = q.wolves[0];
+  r = voteAll(q, (p) => (p === wolfP ? -1 : wolfP));
+  assert.equal(r.phase, 'guess', 'いる回にウルフを当てればいつもどおり');
 }
 console.log('babanuki / doubt / yacht / wordwolf OK');
 
