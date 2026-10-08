@@ -5370,6 +5370,30 @@ console.log('kaisen OK');
   assert.deepEqual([W2.slow, W2.dead], [[3000, 4500, null], [null, 8000, null]], '当たったあとでも残機があれば使える');
   assert.equal(D.apply(W2, { p: 1, t: 'slow', ms: 9000 }), null, '脱落した人は使えない');
   assert.deepEqual(D.result(run(W2, [{ p: -1, t: 'end' }])).winners, [0, 2], 'スローは順位に関わらない');
+  // 暗やみ（25回目の案）: 見た目だけで局面は同じ。CPU は気づくのが遅いので、当たるまでの時間が少し短い（ただし弱すぎない）
+  {
+    assert.equal(D.init(2, 1).rules.dark, 'off', '最初は なし');
+    const mv = [{ p: -1, t: 'go' }, { p: 0, t: 'hit', ms: 4000 }];
+    const darkSt = run(D.init(2, 5, { rules: { dark: 'on' } }), mv);
+    assert.deepEqual({ ...darkSt, rules: null }, { ...run(D.init(2, 5), mv), rules: null }, '暗やみでも手と局面は同じ');
+    const { mulberry32 } = await import('../app/js/games/util.js');
+    const lifeOf = (seed, sense) => {
+      const rnd = mulberry32(seed * 31 + 7);
+      const view = DM.tracker(DM.makeBullets(seed, 90));
+      const c = { x: 0.5, y: DM.H - 0.15, vx: 0, vy: 0, timer: 0 };
+      for (let t = 0; t < 90; t += 1 / 30) {
+        const act = view(t);
+        DM.cpuStep(c, act, t, 1 / 30, rnd, sense);
+        if (DM.hitAt(act, t, c.x, c.y)) return t;
+      }
+      return 90;
+    };
+    const median = (sense) => { const v = Array.from({ length: 40 }, (_, i) => lifeOf(100 + i, sense)).sort((a, b) => a - b); return (v[19] + v[20]) / 2; };
+    const mNormal = median(DM.CPU_SENSE);
+    const mDark = median(DM.CPU_SENSE_DARK);
+    console.log('danmaku CPU median life (s) normal/dark', mNormal.toFixed(1), mDark.toFixed(1));
+    assert.ok(mDark < mNormal && mDark > mNormal * 0.5, '暗やみの CPU は少し早く当たるが、弱すぎない');
+  }
   // 弾の時計: 使う前は同じ・3秒のあいだ 0.4倍・そのあとは 1.8秒遅れたまま
   assert.equal(DM.slowClock(10, null), 10);
   assert.equal(DM.slowClock(10, 12), 10, '使う前は同じ');

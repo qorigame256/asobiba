@@ -18,6 +18,9 @@
 //   全員を遅くする形は、各自の時計がそろっていないので「いつから遅くするか」が端末ごとにずれ、押した人に有利な形にもなるので選ばなかった。
 //   残り時間・もった時間（手の ms）・脱落の順位は実の時計のまま。使ったことは手 { p, t: 'slow', ms: 押した時刻 } で送る
 //   （局面の slow[p] に覚えて2回目を弾く。ほかの人の画面に「○○ がスロー！」を出す）。CPU は弾がすぐそばに来たときに、ときどき使う。
+// 詳細設定「暗やみ」（2026-10-08 の25回目の案。最初は なし＝前と全く同じ。細かい所は Claude の判断）: ありなら、自分の自機のまわり
+//   （LIGHT_IN まではよく見え、LIGHT_OUT でほぼ真っ暗）しか見えない。弾・ほかの人の自機も暗やみの中では見えない。見た目だけで、手と順位は変わらない。
+//   脱落した人・観戦の人は暗くしない（全部見られる）。CPU は暗やみでは近くの弾に気づくのが遅い（気づく距離 CPU_SENSE → CPU_SENSE_DARK）。
 
 import { mulberry32 } from './util.js';
 import { since, scoreChips, esc } from './party.js';
@@ -34,6 +37,9 @@ const SAFE_SEC = 2; // 残機があって当たったあと、当たらない秒
 export const SLOW_SEC = 3; // スローの長さ（実の秒）
 export const SLOW_RATE = 0.4; // スローの間の弾の速さ（倍）
 const SLOW_NOTE_MS = 2500; // 「○○ がスロー！」を出す長さ
+export const LIGHT_IN = 0.17; // 暗やみ: ここまでは明るい（盤の横幅を1として）
+export const LIGHT_OUT = 0.3; // 暗やみ: ここから外はほぼ真っ暗
+const DARK = 'rgba(4,6,14,'; // 暗やみの色（あとに透明さを足す）
 
 // スローを at 秒（実の時計。null なら使っていない）に使ったときの、実の時刻 sec での「弾の時計」（戻らない）
 export function slowClock(sec, at) {
@@ -41,6 +47,7 @@ export function slowClock(sec, at) {
   return sec - (1 - SLOW_RATE) * Math.min(sec - at, SLOW_SEC);
 }
 const slowOn = (s) => Array.isArray(s.slow); // スロー ありの局面だけ slow を持つ
+const darkOn = (s) => s.rules.dark === 'on';
 
 /* ---------- 弾の作り方（全員同じ） ---------- */
 
@@ -137,8 +144,10 @@ export function dangerAt(active, sec, x, y) {
 /* ---------- CPU のよけ方 ---------- */
 
 export const CPU_SPEED = 0.42; // 盤の横幅 / 秒
+export const CPU_SENSE = 0.16; // CPU が弾に気づく距離
+export const CPU_SENSE_DARK = 0.13; // 暗やみのとき
 // 0.1〜0.22 秒ごとに向きを決め直す。近くの弾の少し先の位置から離れ、下の真ん中へ戻ろうとする。ときどき考えずに動く
-export function cpuStep(c, active, sec, dt, rnd) {
+export function cpuStep(c, active, sec, dt, rnd, sense = CPU_SENSE) {
   c.timer -= dt;
   if (c.timer <= 0) {
     c.timer = 0.1 + rnd() * 0.12;
@@ -148,8 +157,8 @@ export function cpuStep(c, active, sec, dt, rnd) {
       const [bx, by] = posOf(b, sec + 0.22);
       const dx = c.x - bx; const dy = c.y - by;
       const d = Math.hypot(dx, dy);
-      if (d > 0.16 || d < 1e-6) continue;
-      const f = ((0.16 - d) / 0.16) ** 2 * 6;
+      if (d > sense || d < 1e-6) continue;
+      const f = ((sense - d) / sense) ** 2 * 6;
       fx += (dx / d) * f; fy += (dy / d) * f;
     }
     if (rnd() < 0.06) { const a = rnd() * Math.PI * 2; fx = Math.cos(a); fy = Math.sin(a); } // うっかり
@@ -275,6 +284,19 @@ function draw() {
     g.dy = g.dy === undefined ? g.y : g.dy + (g.y - g.dy) * 0.3;
     ship(g.dx, g.dy, p, 0.4, o.names[p]);
   }
+  // 暗やみ: 自機のまわりだけ明るく残し、ほかを暗くする（自分が残っている間だけ。始まる前もかける）
+  if (darkOn(s) && ui.me !== null && s.dead[ui.me] === null && !ui.hit && s.phase !== 'end') {
+    const g = ctx.createRadialGradient(ui.x * k, ui.y * k, LIGHT_IN * k, ui.x * k, ui.y * k, LIGHT_OUT * k);
+    g.addColorStop(0, DARK + '0)');
+    g.addColorStop(1, DARK + '0.97)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, k, k * H);
+    if (slowing) { // スローのふちは暗やみの上にも出す
+      ctx.strokeStyle = 'rgba(180,160,255,0.85)';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(2, 2, k - 4, k * H - 4);
+    }
+  }
   // 自分
   if (ui.me !== null) {
     if (s.dead[ui.me] === null && !ui.hit) {
@@ -397,11 +419,12 @@ export default {
     { key: 'time', label: '時間', desc: 'この時間まで残った人は全員1位。後ほど弾が多く速くなる', def: '90', choices: [['60', '60秒'], ['90', '90秒'], ['120', '120秒']] },
     { key: 'lives', label: '残機', desc: '何回当たったら脱落するか。2機・3機なら、当たっても2秒は当たらずに続けられる', def: 1, choices: [[1, '1機（当たったら脱落）'], [2, '2機'], [3, '3機']] },
     { key: 'level', label: '難しさ', desc: '弾の数と速さ。やさしいは少なく遅く、むずかしいは多く速い', def: 'normal', choices: [['easy', 'やさしい'], ['normal', 'ふつう'], ['hard', 'むずかしい']] },
+    { key: 'dark', label: '暗やみ', desc: '自分の自機のまわりしか見えない。弾が近くに来てから見えるので、すばやくよける', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'slow', label: 'スロー', desc: 'ありなら1人1回、⏱ スローを押すと3秒のあいだ自分の画面の弾がゆっくりになる（危ないときの切り札）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { time: '90', level: 'normal', lives: 1, slow: 'off', ...rules };
+    const r = { time: '90', level: 'normal', lives: 1, slow: 'off', dark: 'off', ...rules };
     const s = { n, seed, rules: r, phase: 'ready', dead: Array(n).fill(null), hits: Array(n).fill(0), step: 0 };
     if (r.slow === 'on') s.slow = Array(n).fill(null); // スローを使った時刻（ms）。なしのときは持たない
     return s;
@@ -430,7 +453,7 @@ export default {
   phaseText(s, me) {
     if (s.phase === 'ready') return 'まもなく始まります…';
     if (me >= 0 && s.dead[me] !== null) return `あなたは ${(s.dead[me] / 1000).toFixed(1)}秒 もちました。ほかの人を見ています…`;
-    return '弾をよけ続けよう！';
+    return darkOn(s) ? '暗やみ: 自分のまわりしか見えない。弾をよけ続けよう！' : '弾をよけ続けよう！';
   },
 
   referee(s) {
@@ -495,7 +518,7 @@ export default {
       c.sec += dt;
       const bt = slowClock(c.sec, c.slowAt); // 弾の時計（スローを使ったあとは遅れる）
       const active = c.view(bt);
-      cpuStep(c, active, bt, dt, Math.random);
+      cpuStep(c, active, bt, dt, Math.random, darkOn(s) ? CPU_SENSE_DARK : CPU_SENSE);
       // スロー: 弾がすぐそばに来たとき、ときどき使う（1回だけ）
       if (slowOn(s) && c.slowAt === null && c.sec >= c.safe && Math.random() < 0.15 && dangerAt(active, bt, c.x, c.y)) { c.slowAt = c.sec; c.timer = 0; } // すぐよけ直す
       if (c.sec >= c.safe && hitAt(active, bt, c.x, c.y)) {
