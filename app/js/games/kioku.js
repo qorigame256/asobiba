@@ -6,6 +6,8 @@
 // 詳細設定「逆から押す」（2026-10-07 の13回目）: なし（最初。今と同じ）・いつも・1回おき（2回目・4回目…だけ）。
 //   逆の回は、光った順番の逆（最後に光ったものから）が正解。光り方は同じで、正解の並べ方だけ変える（`want`）。
 //   逆の回は押す時間を2秒足す（REV_EXTRA_MS）。画面に「🔁 逆から！」を出す。CPU は逆の回で少し間違えやすい。
+// 詳細設定「増え方」（2026-10-07 本人の決定。21回目の案。最初は 1つずつ）: 2つずつにすると 3・5・7…と長くなる（早く決着がつく。上級者向け）。
+//   Claude の判断: いちばん長いのは同じ30個（29個の次は30個）。2つずつのときだけ局面の rules に step: 2 を持つ（1つずつでは今までと全く同じ形）。
 //
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → go → show（光る）→ open → input →（全員押した / 時間切れ）→ close → shown → go …
 // 手: { p: -1, t: 'go' | 'open' | 'close' } / { p, t: 'in', r: 何回目, keys: [押したボタン 0〜3 …] }（1回に1人1度だけ）
@@ -25,7 +27,7 @@ const GRACE_MS = 1500;
 const REV_EXTRA_MS = 2000; // 逆の回に足す押す時間（頭の中で並べ替える分）
 const COLORS = ['赤', '青', '黄', '緑'];
 
-const lenOf = (s) => FIRST + s.round;
+const lenOf = (s) => Math.min(MAX, FIRST + s.round * (s.rules.step === 2 ? 2 : 1));
 const showMs = (len) => LEAD_MS + len * STEP_MS;
 const inputMs = (len, rev = false) => 4000 + len * 800 + (rev ? REV_EXTRA_MS : 0);
 // 今の回が逆から押す回か（いつも: 毎回。1回おき: 2回目・4回目…＝ round が奇数）
@@ -71,6 +73,7 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'lives', label: '間違えられる回数', desc: '何回間違えたら脱落か', def: 1, choices: [[1, '1回で脱落'], [3, '3回まで']] },
+    { key: 'step', label: '増え方', desc: '1回ごとに光る数がいくつ増えるか。2つずつは早く長くなる（上級者向け）', def: 1, choices: [[1, '1つずつ'], [2, '2つずつ']] },
     { key: 'reverse', label: '逆から押す', desc: '光った順番を、最後から逆に押す', def: 'off', choices: [['off', 'なし'], ['all', 'いつも'], ['mix', '1回おき']] },
   ],
 
@@ -81,6 +84,7 @@ export default {
     // なしのときは局面の形も前と同じにする（reverse を持たない）
     const r = { lives };
     if (rules.reverse === 'all' || rules.reverse === 'mix') r.reverse = rules.reverse;
+    if (rules.step === 2) r.step = 2; // 2つずつ（1つずつのときは持たない）
     return {
       n, seed, rules: r, seq, round: -1, phase: 'ready', lives: Array(n).fill(lives), done: Array(n).fill(null),
       best: Array(n).fill(0), outAt: Array(n).fill(-1), last: null, step: 0,

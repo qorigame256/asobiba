@@ -4,7 +4,7 @@
 // 出題者は対局ごとに交代（これまで出題者をした回数がいちばん少ない人。同じ顔ぶれで続けたときに引き継ぐ）。
 // CPU は入れない（質問も判定もできないため）。部屋を出た人の番は自動でパス、出題者が出たら答えを明かして終わる。
 // 手: { p, t: 'pick', idx } / { p, t: 'custom', q, a } / { p, t: 'ask' | 'guess', text } / { p, t: 'pass' }
-//     / { p, t: 'reply', r: 'yes' | 'no' | 'na' } / { p, t: 'judge', ok } / { p, t: 'reveal' }
+//     / { p, t: 'reply', r: 'yes' | 'no' | 'na' | 'part'（部分的にはい。詳細設定があるときだけ） } / { p, t: 'judge', ok } / { p, t: 'reveal' }
 
 import { esc } from './util.js';
 import { PUZZLES } from './umigame-data.js';
@@ -15,7 +15,9 @@ import { PUZZLES } from './umigame-data.js';
 const LIMITS = [[0, '決めない'], [20, '20回'], [30, '30回']];
 const MAX_TEXT = 120;
 const MAX_PUZZLE = 300;
-export const REPLY = { yes: 'はい', no: 'いいえ', na: '関係ありません' };
+export const REPLY = { yes: 'はい', no: 'いいえ', na: '関係ありません', part: '部分的にはい' };
+// 詳細設定「部分的にはい」（2026-10-07 本人の決定。21回目の案。最初は なし）: 出題者の答えに「部分的にはい」（質問の一部は合っている）を足す。
+//   Claude の判断: ボタンは「はい」と「いいえ」の間に置く。ありのときだけ局面に partial: true を持つ（なしでは今までと全く同じ形で、part の答えは反則）。
 
 const okText = (t, max) => typeof t === 'string' && t.trim().length > 0 && t.length <= max;
 
@@ -75,6 +77,7 @@ export default {
   minPlayers: 2,
   maxPlayers: 10,
   settings: [
+    { key: 'partial', label: '部分的にはい', desc: '出題者の答えに「部分的にはい」（質問の一部は合っている）を足す。話が進みやすくなる', def: false },
     { key: 'limit', label: '質問の数', desc: '全員で合わせて何回まで質問できるか。使い切ったら1人1回ずつ最後の解答をして、だれも当てられなければ出題者の勝ち', def: 0, choices: LIMITS },
   ],
 
@@ -84,7 +87,9 @@ export default {
     const low = Math.min(...counts);
     const setter = counts.indexOf(low);
     // limit = 質問できる回数（0 は決めない）・asked = 答えた質問の数・final = 最後の解答の残りの番の数（使い切るまでは null）
-    return { n, seed, counts, setter, limit, asked: 0, final: null, phase: 'pick', puzzle: null, turn: nextAsker({ n, setter }, setter), pending: null, log: [], winner: null, step: 0 };
+    const s = { n, seed, counts, setter, limit, asked: 0, final: null, phase: 'pick', puzzle: null, turn: nextAsker({ n, setter }, setter), pending: null, log: [], winner: null, step: 0 };
+    if (rules.partial) s.partial = true; // なしのときは局面に何も足さない（今までと同じ形）
+    return s;
   },
 
   turn(s) {
@@ -136,7 +141,7 @@ export default {
         s.turn = nextAsker(s, s.turn);
         return s;
       case 'reply':
-        if (!isSetter || s.phase !== 'reply' || s.pending.kind !== 'ask' || !REPLY[m.r]) return null;
+        if (!isSetter || s.phase !== 'reply' || s.pending.kind !== 'ask' || !Object.hasOwn(REPLY, m.r) || (m.r === 'part' && !s.partial)) return null;
         s.log.push({ ...s.pending, r: m.r });
         s.pending = null;
         s.phase = 'ask';
@@ -323,6 +328,7 @@ export default {
         if (s.pending.kind === 'ask') {
           note('質問に答えてください');
           row(button('はい', 'primary', () => o.onMove({ t: 'reply', r: 'yes' })),
+            ...(s.partial ? [button('部分的にはい', 'primary', () => o.onMove({ t: 'reply', r: 'part' }))] : []),
             button('いいえ', 'primary', () => o.onMove({ t: 'reply', r: 'no' })),
             button('関係ありません', 'secondary', () => o.onMove({ t: 'reply', r: 'na' })));
         } else {

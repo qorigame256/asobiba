@@ -1,7 +1,7 @@
 // 麻雀（リーチ麻雀）。4人・3人・5人。役・符・点数・向聴数は mahjong-engine.js（本人が別に作っている麻雀アプリ＝元のアプリのエンジンを写したもの）。
 //
 // 決めごと（本人の判断・2026-10-03）: 元のアプリの通常ルールを流用し、作りはシンプルに。
-//   長さは東風戦・半荘戦を詳細設定で選ぶ。3人麻雀も詳細設定で選ぶ。鳴き・ロンはできる人だけに聞き、答えるまで待つ
+//   長さは東風戦・半荘戦を詳細設定で選ぶ（2026-10-07 の21回目の案で「1局だけ」も足した。親が和了っても流局でも、東1局の1局で終わり、その点で順位を決める）。3人麻雀も詳細設定で選ぶ。鳴き・ロンはできる人だけに聞き、答えるまで待つ
 //   （2026-10-04 本人の決定で、前の「10秒で自動で見送る」をやめた。古い手の一覧の timeout は当て直しのため受け付ける）。
 //   省いたもの: 途中流局（九種九牌・四風連打）・流し満貫・責任払い・延長戦・ウマとオカ・ダブロン（打った人に近い1人だけ和了）。
 // 元のアプリから写した決めごと: 喰いタン・後付けあり、一発・裏ドラ（リーチした人だけ）・カンドラ（カンしたその場でめくる）、
@@ -454,12 +454,13 @@ function exhaustiveDraw(s) {
 function finishHand(s, end, renchan, winner) {
   const h = s.h;
   end.deltas.forEach((d, p) => { s.scores[p] += d; });
-  const last = s.rules.length === 'south' ? 2 * s.n - 1 : s.n - 1;
+  const last = s.rules.length === 'south' ? 2 * s.n - 1 : s.rules.length === 'one' ? 0 : s.n - 1;
   const dealer = dealerOf(s);
   let over = s.rules.tobi !== false && s.scores.some((x) => x < 0); // トビ（詳細設定で なし なら、マイナスのまま続ける）
   if (!over && s.kyoku === last && winner === dealer && s.scores[dealer] >= Math.max(...s.scores)) over = true; // アガリやめ
   const next = { kyoku: renchan ? s.kyoku : s.kyoku + 1, honba: end.type === 'draw' || renchan ? s.honba + 1 : 0 };
   if (!over && next.kyoku > last) over = true;
+  if (s.rules.length === 'one') over = true; // 1局だけ: 親の連荘・流局の本場でも続けない
   end.over = over;
   end.next = next;
   end.title = handTitle(s);
@@ -1164,7 +1165,7 @@ export default {
   minPlayers: 3,
   maxPlayers: 5,
   settings: [
-    { key: 'length', label: '長さ', desc: '東風戦は親が1周（4人なら4局ほど）、半荘戦は2周', def: 'east', choices: [['east', '東風戦'], ['south', '半荘戦']] },
+    { key: 'length', label: '長さ', desc: '東風戦は親が1周（4人なら4局ほど）、半荘戦は2周。1局だけは東1局の1局で終わる（お試し・時間の無いとき向け）', def: 'east', choices: [['east', '東風戦'], ['south', '半荘戦'], ['one', '1局だけ']] },
     { key: 'red', label: '赤ドラ', desc: '赤い五（4人・5人は五萬・五筒・五索、3人は五筒・五索）を1枚ずつ入れ、持っているだけで1翻', def: true },
     { key: 'kuitan', label: '喰いタン', desc: '鳴いた手でも断幺九（2〜8だけの手）が役になる', def: true },
     { key: 'waits', label: '待ち牌の表示', desc: '聴牌したら、何で和了れるか（待ちの牌）を自分の画面に出す。初めての人向け', def: false },
@@ -1177,7 +1178,7 @@ export default {
 
   init(n, seed, { rules = {} } = {}) {
     const s = {
-      n, seed, rules: { length: rules.length === 'south' ? 'south' : 'east', red: rules.red !== false, kuitan: rules.kuitan !== false, waits: rules.waits === true, tsumogiri: rules.tsumogiri === true, shanten: rules.shanten === true, tobi: rules.tobi !== false }, scores: Array(n).fill(n === 3 ? 35000 : 25000),
+      n, seed, rules: { length: ['south', 'one'].includes(rules.length) ? rules.length : 'east', red: rules.red !== false, kuitan: rules.kuitan !== false, waits: rules.waits === true, tsumogiri: rules.tsumogiri === true, shanten: rules.shanten === true, tobi: rules.tobi !== false }, scores: Array(n).fill(n === 3 ? 35000 : 25000),
       kyoku: 0, honba: 0, kyotaku: 0, handNo: 0, seq: 0, over: false, ranking: null, h: null,
     };
     startHand(s);

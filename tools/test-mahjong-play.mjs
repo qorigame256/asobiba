@@ -171,7 +171,7 @@ for (const n of [4, 3, 5]) {
 {
   let go = 0;
   for (const n of [4, 3]) {
-    for (let seed = 11; seed <= 13; seed++) {
+    for (let seed = 11; seed <= 16; seed++) {
       const r = play(n, 'east', seed, 'random', { tobi: false });
       games++;
       if (r.error) { check(`トビなし ${n}人 種${seed}`, false, r.error); continue; }
@@ -179,6 +179,20 @@ for (const n of [4, 3, 5]) {
     }
   }
   check('トビなし: マイナスになっても対局が続いた局がある', go > 0, `${go}局`);
+}
+// 1局だけ（長さ）: 親が和了っても流局でも、1局で終わる
+{
+  let ok = 0;
+  for (const n of [4, 3, 5]) {
+    for (let seed = 21; seed <= 24; seed++) {
+      const r = play(n, 'one', seed, seed % 2 ? 'random' : 'cpu');
+      games++;
+      if (r.error) { check(`1局だけ ${n}人 種${seed}`, false, r.error); continue; }
+      if (r.stats.hands === 1 && r.res.ranking.length === n) ok++;
+      else check(`1局だけ ${n}人 種${seed}`, false, `${r.stats.hands}局打った`);
+    }
+  }
+  check('1局だけ: どれも1局で終わり、順位が付く', ok === 12, `${ok}/12`);
 }
 // 5人麻雀の自風: 親から数えて東南西北、5人目は無し（-1）
 {

@@ -1025,6 +1025,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .react-bubble { background: var(--ink); color: #fff; border-radius: 999px; padding: 6px 14px; display: flex; gap: 8px; align-items: baseline; box-shadow: 0 3px 10px rgba(0, 0, 0, .2); animation: react-in .25s ease-out, react-out .4s ease-in 2.2s forwards; }
 .react-bubble small { opacity: .75; max-width: 9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .react-bubble b { font-size: 1.1rem; }
+.react-bubble.cpu { background: #3d5a80; } /* CPU のひとこと（main.js の cpuSay） */
 @keyframes react-in { from { transform: translateY(-10px) scale(.8); opacity: 0; } }
 @keyframes react-out { to { opacity: 0; transform: translateY(-6px); } }
 .react-bar { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; width: 100%; }
@@ -1298,6 +1299,7 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .um-r.yes { background: #3a9d55; }
 .um-r.no { background: #e04b3c; }
 .um-r.na { background: #8a8a8a; }
+.um-r.part { background: #d08a1c; } /* 部分的にはい（詳細設定） */
 .um-muted { color: var(--muted); }
 .um-pending { text-align: center; background: #fff7ef; border: 1.5px solid var(--accent); border-radius: var(--radius); padding: 8px 12px; }
 .um-left { font-weight: 700; color: #b06a00; margin: 6px 0; } /* ウミガメの残りの質問（詳細設定「質問の数」） */

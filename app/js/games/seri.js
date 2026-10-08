@@ -7,13 +7,17 @@
 // たまった札は全部まとめて取る。最後の回で持ち越しになった札は誰も取らない。
 // 詳細設定「次の札」（2026-10-07。10回目の案）: 見せるにすると、次の回に表になる点数の札を、いまの札の横に小さく見せる（山の順番は前から決まっているので、見せるだけ）。
 //   CPU は次の札を見ない（今までどおりの腕前のまま）。
+// 詳細設定「プラスの札だけ」（2026-10-07 本人の決定。21回目の案。最初は なし）: マイナスの札を抜いた 1〜10 の10枚で競る。
+//   Claude の判断: 回数も10回にし、数字の札も 1〜10 の10枚にする（15枚のままだと5枚余り、小さい札を捨て札にできて駆け引きが変わるため）。
+//   なしのときは今までと全く同じ（山の切り方も同じ）。局面の rules.plus で見分ける。
 // 手: { p, t: 'bid', r: 何回目か（0から）, v: 出す数 }。r と「この回はもう出したか」で、同じ手が2回来ても2回目は反則になる。
 
 import { mulberry32, shuffle, esc } from './util.js';
 import { scoreChips, leaders, winnersText, ranks } from './party.js';
 
 const POINTS = [-5, -4, -3, -2, -1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-const BIDS = 15;
+const PLUS = POINTS.filter((v) => v > 0); // プラスの札だけ（詳細設定）
+const roundsOf = (s) => s.deck.length; // 回数 = 点数の札の数 = 数字の札の数（15 か 10）
 const clone = (s) => ({ ...s, bids: s.bids.slice(), hands: s.hands.map((h) => h.slice()), scores: s.scores.slice(), pot: s.pot.slice(), taken: s.taken.map((t) => t.slice()) });
 const sum = (a) => a.reduce((x, y) => x + y, 0);
 
@@ -30,19 +34,20 @@ export default {
   minPlayers: 2,
   maxPlayers: 6,
   settings: [
+    { key: 'plus', label: 'プラスの札だけ', desc: 'マイナスの札を抜いて、1〜10 の点数の札を 1〜10 の数字の札で競る（10回）。決まりが分かりやすい', def: false },
     { key: 'peek', label: '次の札', desc: '次の回に表になる点数の札を、先に見せる（いまの札を見送って次を狙う駆け引きができる）', def: false, choices: [[false, '見せない'], [true, '見せる']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const deck = shuffle(POINTS, mulberry32(seed));
+    const deck = shuffle(rules.plus ? PLUS : POINTS, mulberry32(seed));
     return {
       n, deck, rules: { peek: false, ...rules }, round: 0, pot: [deck[0]], bids: Array(n).fill(null),
-      hands: Array.from({ length: n }, () => Array.from({ length: BIDS }, (_, i) => i + 1)),
+      hands: Array.from({ length: n }, () => Array.from({ length: deck.length }, (_, i) => i + 1)),
       scores: Array(n).fill(0), taken: Array.from({ length: n }, () => []), last: null, step: 0,
     };
   },
 
-  ended(s) { return s.round >= POINTS.length; },
+  ended(s) { return s.round >= roundsOf(s); },
   turn() { return null; },
   canAct(s, p) { return !this.ended(s) && p >= 0 && p < s.n && s.bids[p] === null; },
   cpuDelay() { return 1000; },
@@ -157,7 +162,7 @@ export default {
     const next = s.rules?.peek ? s.deck[s.round + 1] : undefined;
     const nextHtml = next === undefined ? (s.rules?.peek ? '<span class="sr-next">次の札<br>なし（最後）</span>' : '')
       : `<span class="sr-next">次の札<span class="sr-point small${next < 0 ? ' minus' : ''}">${potText(next)}</span></span>`;
-    now.innerHTML = `<div class="um-label">${s.round + 1}回目 / ${POINTS.length}</div>`
+    now.innerHTML = `<div class="um-label">${s.round + 1}回目 / ${roundsOf(s)}</div>`
       + `<div class="sr-pots">${s.pot.map((v) => `<span class="sr-point${v < 0 ? ' minus' : ''}">${potText(v)}</span>`).join('')}${nextHtml}</div>`
       + `<small>${s.pot.length > 1 ? `持ち越し込みで合計 ${potText(sum(s.pot))}。` : ''}${card > 0 ? '一番<b>大きい</b>数を出した人が取る' : '一番<b>小さい</b>数を出した人が取る（取りたくない札）'}</small>`;
     root.append(now);
@@ -169,7 +174,7 @@ export default {
     root.append(head);
     const row = document.createElement('div');
     row.className = 'sr-hand';
-    for (let v = 1; v <= BIDS; v++) {
+    for (let v = 1; v <= roundsOf(s); v++) {
       const has = s.hands[me].includes(v);
       const b = document.createElement('button');
       b.type = 'button';

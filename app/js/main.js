@@ -169,6 +169,29 @@ function tallyHtml() {
   return `🏆 この部屋の成績（${t.games}回）: ${list}` + (seers.length ? `<br>🔮 予想の当たり: ${seerList}` : '');
 }
 
+/* ---------- 同じ画面の成績（2026-10-07。21回目の案。Claude の案から本人が推奨どおり選んだ） ---------- */
+// 同じ画面の対局でも、結果の画面に「🏆 この画面の成績（3回）: 先手 2勝・後手 1勝・引き分け 0回」を出す。
+// Claude の判断: 同じ画面の対局は名前が無く、もう一回でも先手と後手が入れ替わらないので、席（先手・後手）ごとに数える。
+// 対局ごとに1回だけ数える（同じ画面の対局は もう一回 で seed を作り直すので、seed で見分ける）。この端末の S の中だけで、ホームに戻ると0に戻る（保存しない）。
+function countLocal(game, res) {
+  if (S.mode !== 'local' || game.multi) return;
+  const t = S.localTally ?? { key: null, games: 0, wins: [], draws: 0 };
+  if (t.key === S.seed) return;
+  t.key = S.seed;
+  t.games += 1;
+  if (Number.isInteger(res.winner)) t.wins[res.winner] = (t.wins[res.winner] ?? 0) + 1;
+  else t.draws += 1;
+  S.localTally = t;
+}
+
+function localTallyHtml(game) {
+  const t = S.localTally;
+  if (S.mode !== 'local' || !t?.games) return '';
+  const n = Math.max(2, t.wins.length);
+  const list = Array.from({ length: n }, (_, p) => `<b class="pl p${p}">${esc(game.players?.[p] ?? `${p + 1}番目`)}</b> ${t.wins[p] ?? 0}勝`).join('・');
+  return `🏆 この画面の成績（${t.games}回）: ${list}${t.draws ? `・引き分け ${t.draws}回` : ''}`;
+}
+
 // 待合室に出す成績表の行。ホストには「成績を0に戻す」も付ける（2026-10-06 本人の決定。日をまたいで同じ部屋を使うときのため）
 function tallyLine() {
   const html = tallyHtml();
@@ -520,6 +543,7 @@ function countResult(res) {
   S.history = [{ g: S.gameId, w: names }, ...(S.history ?? [])].slice(0, HISTORY_MAX);
   saveRoom();
   sendState();
+  cpuResultSay(res);
 }
 
 // 状態の欄に出す「🔥 ◯◯ 3連勝中」（2連勝から）
@@ -697,6 +721,57 @@ function toast(text) {
 
 /* ---------- リアクション（2026-10-06 本人の決定）: 対局中にだれでも短い言葉を送り、みんなの画面に少しだけ出す ---------- */
 
+/* ---------- CPU のひとこと（2026-10-07。21回目の案。Claude の案から本人が推奨どおり選んだ） ---------- */
+// CPU が、勝ったとき・負けたとき・引き分けのときと、たまに打ったあとに、リアクションと同じ吹き出しで短く言う（オンラインだけ）。
+// Claude の判断: 言うかどうかと言葉はホストの端末だけが決め、type: 'cpusay'（CPU の id・種類・何番目の言葉）を送りっぱなしにする（受け手はホストからの分だけ出す）。
+//   決着: CPU が勝てばその CPU が必ず1回。人が勝てば CPU の1人が7割で、引き分けは5割で言う（CPU が何人いても1つだけ。にぎやかすぎないように）。
+//   対局の途中: CPU が打ったあとに6%の見込みで、部屋の中で25秒に1回まで。言うのは本物の CPU だけ（部屋を出た人の代わりに打っている CPU は言わない）。
+//   エアホッケーは CPU が main.js を通らないので言わない。言葉は下の CPU_LINES だけ（外から来た番号は一覧にあるときだけ使う）。
+const CPU_LINES = {
+  win: ['やった〜、勝ったよ！', 'よしっ！', 'ふふん、どうだ！', 'うまくいった〜'],
+  lose: ['まいった〜', 'つよいね！', 'くやしい…', 'つぎは負けないぞ'],
+  draw: ['いい勝負だった！', '引き分けか〜'],
+  mid: ['うーん…', 'ここだ！', 'どうしようかな', 'ふむふむ', 'それっ'],
+};
+const CPU_MID_RATE = 0.06;
+const CPU_MID_GAP_MS = 25000;
+
+function cpuSay(id, kind) {
+  const list = CPU_LINES[kind];
+  if (!list || !isCpu(id)) return;
+  const w = Math.floor(Math.random() * list.length);
+  send({ type: 'cpusay', gameId: S.gameId, round: S.round, id, kind, w }, 0);
+  showBubble(nameOf(id), list[w], 'cpu');
+}
+
+// 決着のとき（ホストが countResult で1回だけ呼ぶ）
+function cpuResultSay(res) {
+  const cpus = S.order.filter(isCpu);
+  if (!cpus.length) return;
+  const won = winnersOf(res).map((p) => S.order[p]);
+  const pickOne = (a) => a[Math.floor(Math.random() * a.length)];
+  const wonCpu = won.filter(isCpu);
+  if (wonCpu.length) cpuSay(pickOne(wonCpu), 'win');
+  else if (won.length && Math.random() < 0.7) cpuSay(pickOne(cpus), 'lose');
+  else if (!won.length && Math.random() < 0.5) cpuSay(pickOne(cpus), 'draw');
+}
+
+// CPU が打ったあと（ホストの scheduleCpu から）
+function cpuMidSay(id) {
+  if (!isCpu(id) || Math.random() >= CPU_MID_RATE || Date.now() - (S.cpuSaidAt ?? 0) < CPU_MID_GAP_MS) return;
+  S.cpuSaidAt = Date.now();
+  cpuSay(id, 'mid');
+}
+
+// 受け取った cpusay。ホストから・いまの対局の CPU の分だけ
+function onCpuSay(msg) {
+  if (S.isHost || !S.members.length || msg.from !== S.members[0]) return;
+  if (msg.gameId !== S.gameId || msg.round !== S.round || !isCpu(msg.id) || !S.order?.includes(msg.id)) return;
+  const list = Object.hasOwn(CPU_LINES, msg.kind) ? CPU_LINES[msg.kind] : null;
+  if (!list || !Number.isInteger(msg.w) || !list[msg.w]) return;
+  showBubble(nameOf(msg.id), list[msg.w], 'cpu');
+}
+
 const REACTIONS = ['ナイス！', 'おしい！', 'えー！', 'やった！', 'まって！', 'ｗ']; // 言葉は本人が選んだ
 const REACT_GAP_MS = 1200; // 1人がこれより短い間に送った分は出さない（連打で画面が埋まらないように）
 const reactAt = {}; // 人の id → 最後に出した時刻
@@ -706,6 +781,11 @@ function showReaction(id, w) {
   const now = Date.now();
   if (now - (reactAt[id] ?? 0) < REACT_GAP_MS) return;
   reactAt[id] = now;
+  showBubble(id === S?.myId ? 'あなた' : nameOf(id), REACTIONS[w]);
+}
+
+// 画面の上に名前と言葉の吹き出しを2.6秒出す（リアクションと CPU のひとこと）
+function showBubble(name, text, cls = '') {
   let box = el('reactions');
   if (!box) {
     box = document.createElement('div');
@@ -715,11 +795,11 @@ function showReaction(id, w) {
     document.body.append(box);
   }
   const b = document.createElement('div');
-  b.className = 'react-bubble';
+  b.className = 'react-bubble' + (cls ? ' ' + cls : '');
   const who = document.createElement('small');
-  who.textContent = id === S?.myId ? 'あなた' : nameOf(id); // 名前は外から来た文字なので textContent
+  who.textContent = name; // 名前は外から来た文字なので textContent
   const word = document.createElement('b');
-  word.textContent = REACTIONS[w];
+  word.textContent = text;
   b.append(who, word);
   box.append(b);
   while (box.children.length > 5) box.firstChild.remove();
@@ -1009,7 +1089,7 @@ function statusHtml(game, st, res) {
   if (watch) html += `<div class="status-sub watch">${watch}</div>`;
   const preds = res ? predHtml(res) : '';
   if (preds) html += `<div class="status-sub pred">${preds}</div>`;
-  const tally = res ? tallyHtml() : '';
+  const tally = res ? tallyHtml() || localTallyHtml(game) : '';
   if (tally) html += `<div class="status-sub tally">${tally}</div>`;
   const took = res ? timeHtml() : '';
   if (took) html += `<div class="status-sub">${took}</div>`;
@@ -1157,6 +1237,7 @@ function renderPage() {
   if (!game.multi) tickClock(game, st, res);
   trackTime(res);
   if (res) countResult(res);
+  if (res) countLocal(game, res);
   status.innerHTML = statusHtml(game, st, res);
   if (res && !game.multi && renderReview(game, st)) return; // ふりかえりで途中の局面を見ている
 
@@ -1783,7 +1864,8 @@ function scheduleCpu(game, st, res) {
       const now = replay(S);
       const m = now && !game.result(now) && canAct(now, p) ? game.cpu(now, p, rulesOf(S.gameId, S.rules)) : null; // null = いまは何もしない
       const move = game.multi && m ? { ...m, p } : m; // 盤のゲームの手には p を付けない（手が 0 のこともある）
-      if (move !== null && game.apply(now, move)) pushMove(move);
+      const after = move !== null ? game.apply(now, move) : null;
+      if (after) { pushMove(move); if (!game.result(after)) cpuMidSay(S.order[p]); } // 決着した手では、決着のひとことだけにする
       else render(); // 打てなかったら予約し直す
     }, game.cpuDelay?.(st, p) ?? CPU_DELAY_MS);
   }
@@ -2113,6 +2195,10 @@ function onMessage(msg) {
   if (msg.type === 'stream') { // 見た目だけの中身。手の一覧には入れず、描き直しもしない
     if (msg.gameId === S.gameId && msg.round === S.round) GAMES[S.gameId]?.onStream?.(msg.d, S.order?.indexOf(msg.from) ?? -1);
     if (!wasAlive) render();
+    return;
+  }
+  if (msg.type === 'cpusay') { // CPU のひとこと。描き直さない
+    onCpuSay(msg);
     return;
   }
   if (msg.type === 'react') { // リアクション。描き直さない

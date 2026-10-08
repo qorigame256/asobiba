@@ -2996,6 +2996,15 @@ assert.deepEqual([0, 1, 2].map((p) => UM.carry(s, p)), [1, 0, 0], '出題者を�
 assert.equal(UM.init(3, 2, { prev: [1, 0, 0] }).setter, 1, '次は出題者をしていない人');
 assert.equal(UM.result(UM.apply(UM.apply(UM.init(2, 3, {}), { p: 0, t: 'pick', idx: 0 }), { p: 0, t: 'reveal' })).winner, null, '答えを明かして終わる');
 assert.equal(UM.apply(UM.init(2, 3, {}), { p: 1, t: 'reveal' }), null, '出題者でない人は明かせない');
+// ウミガメの「部分的にはい」（詳細設定）: ありのときだけ part で答えられる。なしでは今までと同じ局面
+{
+  const ask = (rules) => UM.apply(UM.apply(UM.init(3, 1, { rules }), { p: 0, t: 'pick', idx: 0 }), { p: 1, t: 'ask', text: 'しつもん' });
+  assert.equal(UM.apply(ask({}), { p: 0, t: 'reply', r: 'part' }), null, 'なしでは部分的にはいで答えられない');
+  const u = UM.apply(ask({ partial: true }), { p: 0, t: 'reply', r: 'part' });
+  assert.ok(u && u.log.at(-1).r === 'part' && u.asked === 1, 'ありなら部分的にはいで答えられ、質問の数にも入る');
+  assert.equal(UM.apply(ask({ partial: true }), { p: 0, t: 'reply', r: 'toString' }), null, 'ない答えは反則');
+  assert.deepEqual(UM.init(3, 1, { rules: { partial: false } }), UM.init(3, 1, {}), 'なしでは今までと同じ局面');
+}
 // ウミガメの質問の数（詳細設定）: 答えた質問だけ数える・使い切ったら質問できず、回答者が1人1回ずつ最後の解答・だれも当てなければ出題者の勝ち
 {
   const go = (st, ms) => ms.reduce((x, m) => { const y = UM.apply(x, m); assert.ok(y, JSON.stringify(m)); return y; }, st);
@@ -3225,6 +3234,23 @@ assert.notEqual(GM.cpu(s, 0, { cpu: 'strong' }), 3, 'ぴったり五目の CPU �
     x = ref(ref(ref(KM.apply(x, { p: 0, t: 'in', r: 1, keys: r4 }), 'close'), 'go'), 'open');
     assert.equal(KM.apply(x, { p: 0, t: 'in', r: 2, keys: x.seq.slice(0, 5) }).done[0], true, '1回おき: 3回目はまた前から');
   }
+  // 増え方（2026-10-07 の21回目）: 2つずつなら 3・5・7…、いちばん長いのは30個。1つずつでは局面の形も前と同じ
+  {
+    assert.deepEqual(KM.init(3, 77, { rules: { step: 1 } }), KM.init(3, 77, { rules: {} }), '1つずつでは局面の形も前と同じ');
+    let x = ref(ref(KM.init(2, 9, { rules: { step: 2, lives: 3 } }), 'go'), 'open');
+    const lens = [];
+    for (let r = 0; r < 16; r++) {
+      const len = x.seq.length && KM.phaseText(x).match(/（(\d+)個）/)[1];
+      lens.push(Number(len));
+      const y = KM.apply(KM.apply(x, { p: 0, t: 'in', r, keys: x.seq.slice(0, Number(len)) }), { p: 1, t: 'in', r, keys: x.seq.slice(0, Number(len)) });
+      assert.ok(y && y.done[0] === true && y.done[1] === true, '2つずつ: その長さで正解 ' + len);
+      x = ref(y, 'close');
+      if (x.phase === 'end') break;
+      x = ref(ref(x, 'go'), 'open');
+    }
+    assert.deepEqual(lens, [3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 30], '2つずつ増え、最後は30個');
+    assert.equal(x.phase, 'end', '30個で終わる');
+  }
   // CPU だけで最後まで（反則を出さない・必ず終わる）。CPU は画面に出てからの時間で押すので、時計（performance.now）を進めて試す
   const realNow = performance.now.bind(performance);
   let fake = realNow();
@@ -3236,7 +3262,7 @@ assert.notEqual(GM.cpu(s, 0, { cpu: 'strong' }), 3, 'ぴったり五目の CPU �
       const n = 2 + (g % 5);
       // 40局目からは逆から押す（いつも・1回おき）でも最後まで打つ
       const reverse = g < 40 ? 'off' : g % 4 < 2 ? 'all' : 'mix';
-      let st = KM.init(n, g * 131 + 7, { rules: { lives: g % 2 ? 3 : 1, reverse } });
+      let st = KM.init(n, g * 131 + 7, { rules: { lives: g % 2 ? 3 : 1, reverse, step: g % 3 === 2 ? 2 : 1 } });
       let guard = 0;
       while (!KM.result(st)) {
         const r = KM.referee(st);
@@ -4221,6 +4247,25 @@ for (let g = 0; g < 20; g++) {
   assert.equal(a.rules.peek, false);
   const ta = bidAll(a, [3, 7, 9]), tb = bidAll(b, [3, 7, 9]);
   assert.deepEqual([ta.scores, ta.pot], [tb.scores, tb.pot], '次の札を見せても結果は同じ');
+}
+{
+  // プラスの札だけ: 1〜10 の10枚を、1〜10 の数字の札で10回。なしのときの山は今までと同じ
+  assert.deepEqual(SR.init(3, 77).deck, SR.init(3, 77, { rules: { plus: false } }).deck, 'なしでは山の順番が今までと同じ');
+  for (let g = 0; g < 10; g++) {
+    let st = SR.init(2 + (g % 5), 300 + g, { rules: { plus: true } });
+    assert.deepEqual([...st.deck].sort((x, y) => x - y), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 'プラスの10枚');
+    assert.deepEqual(st.hands[0], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], '数字の札も 1〜10');
+    assert.equal(SR.apply(st, { p: 0, t: 'bid', r: 0, v: 11 }), null, '11 は出せない');
+    let guard = 0;
+    while (!SR.result(st)) {
+      for (let p = 0; p < st.n; p++) if (SR.canAct(st, p)) { st = SR.apply(st, { p, ...SR.cpu(st, p) }); assert.ok(st, 'せりあい（プラスだけ）の CPU が反則を出した'); }
+      assert.ok(++guard < 100);
+    }
+    assert.equal(st.round, 10, '10回で終わる');
+    assert.ok(st.hands.every((h) => h.length === 0), '10回で全部の札を使い切る');
+    const lost = st.last.lost ?? [];
+    assert.equal(st.scores.reduce((a, b) => a + b, 0) + lost.reduce((a, b) => a + b, 0), 55, '点数の合計は55');
+  }
 }
 console.log('seri OK');
 
