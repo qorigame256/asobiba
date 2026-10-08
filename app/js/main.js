@@ -32,7 +32,7 @@ import { GAMES, GAME_ORDER } from './games/index.js';
 import { connectRoom } from './net.js';
 import { esc } from './games/util.js';
 import { isOwner, unlockOwner, forgetOwner } from './owner.js';
-import { play, endSound, isMuted, setMuted, isVoice } from './sound.js';
+import { play, endSound, isMuted, setMuted, isVoice, speak } from './sound.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 見間違えやすい I O 0 1 を除く
 const CODE_LEN = 5;
@@ -1236,6 +1236,7 @@ function renderPage() {
   S.myTurnNow = myTurnNow(game, st, res);
   if (!game.multi) tickClock(game, st, res);
   trackTime(res);
+  greetStart(res);
   if (res) countResult(res);
   if (res) countLocal(game, res);
   status.innerHTML = statusHtml(game, st, res);
@@ -1461,13 +1462,42 @@ function moveSound(game, st, res, prevLen, mine) {
     const end = endSound(res, me);
     if (isVoice(said)) { play(said); setTimeout(() => play(end), 700); } else play(end);
     if (end === 'win') confetti(); // 勝ちの音を鳴らす画面には紙吹雪
+    greet('end', isVoice(said) ? 1900 : 1200);
     return;
   }
   const name = game.sound ? game.sound(before, st, m, me) : game.multi ? 'card' : 'place';
   if (name) play(name);
   if (mine && S.mode === 'online' && !game.realtime && !canMove(game, before, null) && Date.now() - S.waitFrom > TURN_PING_MS) {
-    setTimeout(() => play('turn'), 300);
+    setTimeout(() => { play('turn'); sayTurn(); }, 300);
   }
+}
+
+/* ---------- 番が来たら名前を読み上げ・あいさつ（2026-10-08 の23回目の案。Claude の案から本人が推奨どおり選んだ） ---------- */
+// 番が来たら名前を読み上げ: オンラインで5秒より長く待ったあとに自分の番が来たとき（「番が来た」音と同じとき）、音のあとに「○○さんの番です」と言う。
+//   読むのは自分の端末に入れた自分の名前（マーク・🔰 は付けない）。名前が空なら「あなたの番です」。
+// あいさつ: 対局の始め（手がまだ無い局面を初めて描いたとき）に「よろしくお願いします」、決着した手が届いたときに勝ち負けの音のあとで「ありがとうございました」。
+//   画面の下に一言（toast）を出して読み上げる。オンラインも同じ画面の対局も。各自の端末が自分で出す（送らない）。
+//   途中から入った・再読み込みで手がある局面を開いたときは、始めのあいさつは出さない。エアホッケーは main.js で描かないので出ない。
+// 声は 🔇 なら出さない（一言は出す）。Claude の判断: 「番が来た」音は残し、そのあとに声を足した（声が出ない端末でも気づけるように）。
+function sayTurn() {
+  const name = myName();
+  speak(name ? `${name}さんの番です` : 'あなたの番です', 'turn-voice');
+}
+
+const GREET = { start: 'よろしくお願いします', end: 'ありがとうございました' };
+function greet(kind, delay = 0) {
+  setTimeout(() => {
+    toast(`🙇 ${GREET[kind]}`);
+    speak(GREET[kind], 'greet');
+  }, delay);
+}
+
+// render から毎回呼ぶ。対局（ゲーム・回・種）ごとに、手がまだ無いところを初めて描いたときだけ始めのあいさつ
+function greetStart(res) {
+  const key = timerKey();
+  if (S.greetKey === key) return;
+  S.greetKey = key;
+  if (!S.moves.length && !res) greet('start', 300);
 }
 
 function renderLobby(game) {

@@ -94,6 +94,16 @@ export function play(name, vol = 1) {
   src.start();
 }
 
+// 決まった言葉でない文を読み上げる（番が来たときの「○○さんの番です」・対局の始めと終わりのあいさつ。2026-10-08 の23回目の案）。
+// 音と同じく 🔇 のときと、まだ画面に触れていないときは言わない。key ごとに GAP_MS より短い間の重なりは1回だけ
+export function speak(text, key = 'speak') {
+  if (muted || !ctx || !text) return;
+  const now = performance.now();
+  if (now - (lastAt[key] ?? -1e9) < GAP_MS) return;
+  lastAt[key] = now;
+  say(text);
+}
+
 // 対局が終わったときの音。自分の勝ち → win、負け → lose、引き分け → draw_game。
 // 観戦と同じ画面の対局（me が -1 か null）は、決着が付けば win
 export function endSound(res, me) {
