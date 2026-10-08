@@ -5,6 +5,10 @@
 // 違いでない所を押すと、その端末だけ1.5秒押せなくなる（でたらめな連打で見つけられないように。点は減らない）。
 // 詳細設定「左右反転」（2026-10-07）: ありのとき、右の絵を鏡に映したように左右反転して描くだけ（絵の作り方・答えは同じ）。
 //   右の絵で押した所は toScene で元の絵の位置に直して確かめる。印も反転した絵の中に描くので、正しい所に出る。
+// 詳細設定「じわじわ変わる」（2026-10-08 の24回目の案。細かい所は Claude の判断）: ありのとき、右の絵は始めは左と同じで、違いが1つずつ
+//   時間をかけて（MORPH_MS）変わっていく（大きさ・位置は少しずつ動き、消える・替わる・色は薄れて入れ替わる）。変わり始める時刻は slowPlan
+//   （種と何枚目かから決める。全員同じ）。変わり始めてから MORPH_MS の SEEN_AT 割を過ぎるまでは、その違いを押しても外れ（apply も ms で弾く）。
+//   変わり方は各自の端末の時計（その絵が出てから）で描く。答えの画面では全部変わり終えた絵を出す。
 //
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready →(3秒)→ go → play（1枚目）→ 全部見つかるか時間切れ → next → show（答えを3秒見せる）
 //   → go → play（2枚目）… 最後の show のあとは end。
@@ -18,6 +22,8 @@ const SHOW_MS = 3000;
 const GRACE_MS = 1500;
 const ALL_FOUND_MS = 1200;
 const LOCK_MS = 1500;
+const MORPH_MS = 10000; // じわじわ変わる: 1つの違いが変わり終えるまで
+const SEEN_AT = 0.3; // じわじわ変わる: 変わり始めてからこの割合を過ぎると見つけられる
 export const VW = 1000;
 export const VH = 750;
 
@@ -102,15 +108,58 @@ function pictureSvg(scene, parts) {
 }
 const flippedSide = (side, mirror) => mirror && side === 'right';
 // 片方の絵の中身。反転する絵は、絵と印をまとめて鏡に映す（印も元の絵の座標で描けば、反転した絵の正しい所に出る）
-export function sideSvg(scene, side, mirror) {
-  const inner = pictureSvg(scene, scene[side]) + '<g class="mg-marks"></g><g class="mg-miss"></g>';
+// slow（じわじわ変わる）のときは、右の絵の違いの部品を mg-d の入れ物に入れ、始めは左の絵と同じに描く（morphSvg で変えていく）
+export function sideSvg(scene, side, mirror, slow = false) {
+  const pic = slow && side === 'right' ? morphPicture(scene) : pictureSvg(scene, scene[side]);
+  const inner = pic + '<g class="mg-marks"></g><g class="mg-miss"></g>';
   return flippedSide(side, mirror) ? `<g transform="translate(${VW} 0) scale(-1 1)">${inner}</g>` : inner;
 }
+
+// じわじわ変わる: 違い d を、変わり具合 a（0 = 左の絵のまま 〜 1 = 右の絵）で描く
+export function morphSvg(scene, d, a) {
+  const from = scene.left[d.item];
+  const to = scene.right[d.item];
+  if (a <= 0) return partSvg(from);
+  if (a >= 1) return partSvg(to);
+  if (d.type === 'size' || d.type === 'move') {
+    const mix = (k) => from[k] + (to[k] - from[k]) * a;
+    return partSvg({ ...from, x: mix('x'), y: mix('y'), s: mix('s') });
+  }
+  // 消える・替わる・色: 前の部品が薄れ、あとの部品が濃くなる
+  const fade = (it, op) => (it ? `<g opacity="${op.toFixed(2)}">${partSvg(it)}</g>` : '');
+  return fade(from, 1 - a) + fade(to, a);
+}
+function morphPicture(scene) {
+  const hy = (scene.horizon * VH).toFixed(1);
+  const di = new Map(scene.diffs.map((d, i) => [d.item, i]));
+  return `<rect width="${VW}" height="${VH}" fill="${scene.sky}"/><rect y="${hy}" width="${VW}" height="${VH}" fill="${scene.ground}"/>`
+    + scene.left.map((it, k) => (di.has(k) ? `<g class="mg-d" data-d="${di.get(k)}">${partSvg(it)}</g>` : partSvg(it))).join('');
+}
+// じわじわ変わる: 違いごとの変わり始める時刻（その絵が出てからの ms）。種と何枚目かから決めるので全員同じ。
+// 順番はばらばらにし、2秒から「1枚の時間」の55%までの間に等しい間で並べる（最後の違いも、見つけられるようになってから時間が残る）
+const planCache = new Map();
+export function slowPlan(seed, r, ndiff, limit) {
+  const key = `${seed}:${r}:${ndiff}:${limit}`;
+  if (!planCache.has(key)) {
+    const rng = mulberry32((seed ^ (0x5bd1e995 * (r + 7))) >>> 0);
+    const order = shuffle(Array.from({ length: ndiff }, (_, i) => i), rng);
+    const at = Array(ndiff);
+    order.forEach((i, j) => { at[i] = Math.round(2000 + (limit * 0.55 * j) / ndiff); });
+    planCache.set(key, at);
+    if (planCache.size > 20) planCache.delete(planCache.keys().next().value);
+  }
+  return planCache.get(key);
+}
+// じわじわ変わる: 違い i を見つけられるようになる時刻（ms）・ms のときの変わり具合
+export const seenAt = (plan, i) => plan[i] + MORPH_MS * SEEN_AT;
+export const morphAt = (plan, i, ms) => Math.min(1, Math.max(0, (ms - plan[i]) / MORPH_MS));
 
 const ndiffOf = (s) => Number(s.rules.diffs);
 const roundsOf = (s) => Number(s.rules.rounds);
 const limitOf = (s) => Number(s.rules.time) * 1000;
 const mirrorOf = (s) => s.rules.mirror === 'on';
+const slowOf = (s) => s.rules.slow === 'on';
+const planOf = (s) => slowPlan(s.seed, s.r, ndiffOf(s), limitOf(s));
 const playKey = (s) => `machigai:${s.seed}:${s.r}`;
 const clone = (s) => ({ ...s, best: { ...s.best }, got: s.got.map((g) => g.slice()) });
 const foundIn = (s, r) => Object.keys(s.best).filter((k) => k.startsWith(r + ':')).length;
@@ -165,7 +214,22 @@ function clock() {
     text = left > 0 ? `${left}…` : 'スタート！';
   } else text = 'おしまい！';
   if (ui.clockText !== text) { ui.clock.textContent = text; ui.clockText = text; }
+  if (ui.morph) drawMorph(s);
   requestAnimationFrame(clock);
+}
+
+// じわじわ変わる: 右の絵の違いの部品を、いまの変わり具合で描き直す（変わったものだけ。答え・おしまいでは変わり終えた絵）
+function drawMorph(s) {
+  const scene = sceneOf(s);
+  const plan = planOf(s);
+  const ms = s.phase === 'play' ? since(playKey(s)) : Infinity;
+  for (const g of ui.morph) {
+    const i = Number(g.dataset.d);
+    const a = Math.round(morphAt(plan, i, ms) * 50) / 50;
+    if (g._a === a) continue;
+    g._a = a;
+    g.innerHTML = morphSvg(scene, scene.diffs[i], a);
+  }
 }
 
 export default {
@@ -183,10 +247,12 @@ export default {
     { key: 'diffs', label: '違いの数', desc: '1枚の絵の中の違いの数', def: '5', choices: [['3', '3か所'], ['5', '5か所'], ['7', '7か所']] },
     { key: 'time', label: '1枚の時間', desc: 'この時間が来たら答えを見せて次の絵へ', def: '60', choices: [['45', '45秒'], ['60', '60秒'], ['90', '90秒']] },
     { key: 'mirror', label: '左右反転', desc: '右の絵が、鏡に映したように左右反転して出る（むずかしい）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
+    { key: 'slow', label: 'じわじわ変わる', desc: '右の絵は始めは左と同じで、違いが1つずつ時間をかけて少しずつ表れる。変わっていく所に先に気づいた人の点', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const r = { rounds: '3', diffs: '5', time: '60', mirror: 'off', ...rules };
+    if (r.slow !== 'on') delete r.slow; // なしのときは局面の形を今までと同じにする
     return { n, seed, rules: r, phase: 'ready', r: 0, best: {}, got: Array.from({ length: n }, () => []), step: 0 };
   },
 
@@ -205,6 +271,7 @@ export default {
   phaseText(s) {
     if (s.phase === 'ready') return 'まもなく始まります…';
     if (s.phase === 'show') return '答え合わせ';
+    if (slowOf(s)) return '右の絵がじわじわ変わっていく。変わった所を押そう！' + (mirrorOf(s) ? '（右の絵は左右反転）' : '');
     return mirrorOf(s) ? '右と左の絵の違いを押そう！（右の絵は左右反転）' : '右と左の絵の違いを押そう！';
   },
 
@@ -235,6 +302,7 @@ export default {
     if (s0.phase !== 'play' || m.t !== 'find' || !Number.isInteger(m.p) || m.p < 0 || m.p >= s0.n) return null;
     if (m.r !== s0.r || !Number.isInteger(m.i) || m.i < 0 || m.i >= ndiffOf(s0)) return null;
     if (typeof m.ms !== 'number' || !(m.ms >= 0) || m.ms > limitOf(s0) + GRACE_MS) return null;
+    if (slowOf(s0) && m.ms < seenAt(planOf(s0), m.i)) return null; // じわじわ変わる: まだ見えていない違い
     const k = `${m.r}:${m.i}`;
     if (s0.got[m.p].includes(k)) return null;
     const s = clone(s0);
@@ -245,7 +313,8 @@ export default {
     return s;
   },
 
-  // CPU: 違いごとに、見つけるかどうか（6割）と、見つける時刻（8〜40秒。左右反転では2割遅く 9.6〜48秒）を1回だけ決める
+  // CPU: 違いごとに、見つけるかどうか（6割）と、見つける時刻（8〜40秒。左右反転では2割遅く 9.6〜48秒）を1回だけ決める。
+  // じわじわ変わるでは、見つけられるようになってから 2〜14秒（左右反転では2割遅く）
   cpuDelay(s) { return s.phase === 'play' ? 250 : 500; },
   cpu(s, p) {
     if (s.phase !== 'play') return null;
@@ -256,7 +325,9 @@ export default {
       const key = `${s.seed}:${k}:${p}`;
       let plan = cpuPlan.get(key);
       if (!plan) {
-        plan = { find: Math.random() < 0.6, at: (8000 + Math.random() * 32000) * (mirrorOf(s) ? 1.2 : 1) };
+        const slow = slowOf(s);
+        const wait = (slow ? 2000 + Math.random() * 12000 : 8000 + Math.random() * 32000) * (mirrorOf(s) ? 1.2 : 1);
+        plan = { find: Math.random() < 0.6, at: (slow ? seenAt(planOf(s), i) : 0) + wait };
         cpuPlan.set(key, plan);
         if (cpuPlan.size > 3000) cpuPlan.delete(cpuPlan.keys().next().value);
       }
@@ -277,17 +348,18 @@ export default {
       clockEl.className = 'mg-clock';
       const pics = document.createElement('div');
       pics.className = 'mg-pics';
-      ui = { key, pics, chips, clock: clockEl, clockText: null, cur: { s, o }, svgs: [], lockUntil: 0 };
+      ui = { key, pics, chips, clock: clockEl, clockText: null, cur: { s, o }, svgs: [], lockUntil: 0, morph: null };
       root.append(chips, clockEl, pics);
       since(`machigai:${s.seed}:ready`);
       if (s.phase !== 'ready') {
         const scene = sceneOf(s);
         const mirror = mirrorOf(s);
+        const slow = slowOf(s);
         for (const side of ['left', 'right']) {
           const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
           svg.setAttribute('viewBox', `0 0 ${VW} ${VH}`);
           svg.setAttribute('class', 'mg-pic');
-          svg.innerHTML = sideSvg(scene, side, mirror);
+          svg.innerHTML = sideSvg(scene, side, mirror, slow);
           svg.addEventListener('pointerdown', (e) => {
             const { s: cur, o: co } = ui.cur;
             if (me === null || cur.phase !== 'play' || !co.canMove || cur.r !== s.r) return;
@@ -298,7 +370,8 @@ export default {
             if (now < ui.lockUntil) return;
             const ms = since(playKey(cur));
             if (ms > limitOf(cur)) return;
-            const i = diffAt(scene, x, y, (j) => !!cur.best[`${cur.r}:${j}`] || cur.got[me].includes(`${cur.r}:${j}`));
+            const i = diffAt(scene, x, y, (j) => !!cur.best[`${cur.r}:${j}`] || cur.got[me].includes(`${cur.r}:${j}`)
+              || (slow && ms < seenAt(planOf(cur), j))); // じわじわ変わる: まだ見えていない違いは外れ
             if (i < 0) {
               ui.lockUntil = now + LOCK_MS;
               for (const sv of ui.svgs) {
@@ -314,11 +387,13 @@ export default {
           ui.svgs.push(svg);
         }
         if (s.phase === 'play') since(playKey(s));
+        if (slow) ui.morph = [...ui.svgs[1].querySelectorAll('.mg-d')];
       } else {
         const wait = document.createElement('div');
         wait.className = 'mg-wait';
         wait.textContent = '左と右の絵の違いを探します。違いは右の絵にも左の絵にも押せます。'
-          + (mirrorOf(s) ? '右の絵は、鏡に映したように左右反転しています。' : '');
+          + (mirrorOf(s) ? '右の絵は、鏡に映したように左右反転しています。' : '')
+          + (slowOf(s) ? '右の絵は始めは左と同じで、少しずつ変わっていきます。' : '');
         pics.append(wait);
       }
       if (s.phase !== 'end') window.scrollTo(0, 0);
@@ -333,6 +408,7 @@ export default {
     if (ui.svgs.length) {
       const html = marks(s, sceneOf(s), me);
       for (const svg of ui.svgs) svg.querySelector('.mg-marks').innerHTML = html;
+      if (ui.morph) drawMorph(s);
     }
   },
 };

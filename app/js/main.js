@@ -20,7 +20,8 @@
 // 部屋を作る・同じ画面で遊ぶのは持ち主の端末だけ（owner.js）。ほかの人は招待された部屋に入るだけ。
 // banned = ホストが退出させた人の id。あいさつが来ても入れず、もう一度「退出」を送る。
 // streak = 連勝（2026-10-06 本人の決定）。{ key: ゲームと顔ぶれ, counted: 数え終えた対局, wins: 人の id → 連勝の数 }。ホストだけが数えて全員へ送る。
-// tally = 部屋の成績表（2026-10-06 本人の決定）。{ games: 決着した対局の数, wins: 人の id → 勝った回数, preds: 人の id → 勝敗予想が当たった回数（10回目に足した。無いこともある） }。ゲームをまたいで数える。ホストが数えて全員へ送る。
+// tally = 部屋の成績表（2026-10-06 本人の決定）。{ games: 決着した対局の数, wins: 人の id → 勝った回数, preds: 人の id → 勝敗予想が当たった回数（10回目に足した。無いこともある）,
+//   played: 人の id → 対局した回数（勝率のため。24回目に足した。無いこともある） }。ゲームをまたいで数える。ホストが数えて全員へ送る。
 // preds = 勝敗予想（2026-10-06 本人の決定）。{ key: どの対局か, by: 人の id → 勝つと予想したプレイヤー番号 }。各自が全員へ送りっぱなしにし、受け取った端末がそれぞれ覚える。
 // beg = 初心者マークを付けている人の id の一覧（各自が自分の端末で付け外しし、ホストが集めて全員へ送る）。
 // undo = この対局で「待った」をした回数（盤のゲームのオンライン）。待ったをすると手の一覧が短くなり、ふつうの同期（長い方が正）では
@@ -64,7 +65,7 @@ function myName() {
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName', 'cpuAuto'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName', 'cpuAuto', 'rps'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -160,13 +161,21 @@ function tallyHtml() {
   const w = (id) => (Number.isInteger(t.wins[id]) ? t.wins[id] : 0); // 届いた数は整数だけ使う（外から来た値なので）
   const ids = [...new Set([...S.members, ...Object.keys(t.wins)])].filter((id) => !isCpu(id) && (S.members.includes(id) || w(id)));
   ids.sort((a, b) => w(b) - w(a));
-  const list = ids.map((id) => `<b>${esc(id === S.myId ? 'あなた' : nameOf(id))}</b> ${w(id)}勝`).join('・');
+  const list = ids.map((id) => `<b>${esc(id === S.myId ? 'あなた' : nameOf(id))}</b> ${w(id)}勝${rateText(t, id, w(id))}`).join('・');
   // 勝敗予想の当たり（2026-10-07。10回目の案）: 1回でも当たった人だけ、当たった回数の多い順に出す（観戦だけの人も入る）
   const pr = t.preds && typeof t.preds === 'object' ? t.preds : {};
   const hits = (id) => (Number.isInteger(pr[id]) && pr[id] > 0 ? pr[id] : 0);
   const seers = Object.keys(pr).filter((id) => !isCpu(id) && hits(id) && (S.members.includes(id) || S.names[id])).sort((a, b) => hits(b) - hits(a));
   const seerList = seers.map((id) => `<b>${esc(id === S.myId ? 'あなた' : nameOf(id))}</b> ${hits(id)}回`).join('・');
   return `🏆 この部屋の成績（${t.games}回）: ${list}` + (seers.length ? `<br>🔮 予想の当たり: ${seerList}` : '');
+}
+
+// 成績表の勝率（2026-10-08。24回目の案。本人が選んだ）:「（3戦・67%）」。対局した回数で割る（観戦していた対局は数えない）。
+// 対局した回数を数え始める前の成績表（played が無い・勝ちより少ない）や、対局していない人には出さない（Claude の判断）。
+function rateText(t, id, wins) {
+  const n = t.played && typeof t.played === 'object' ? t.played[id] : undefined;
+  if (!Number.isInteger(n) || n <= 0 || n < wins) return '';
+  return `（${n}戦・${Math.round((wins / n) * 100)}%）`;
 }
 
 /* ---------- 同じ画面の成績（2026-10-07。21回目の案。Claude の案から本人が推奨どおり選んだ） ---------- */
@@ -449,6 +458,85 @@ function appendLobbyExtras(board) {
   if (r) board.append(r);
   const v = voteLine();
   if (v) board.append(v);
+  board.append(rpsPanel());
+}
+
+/* ---------- 待合室でじゃんけん（2026-10-08。24回目の案。本人が選んだ）: 人がそろうのを待つ間のおまけ ---------- */
+// Claude の判断: 待合室にいる部屋の人（ホストも観戦の人も）が ✊✌️✋ から1つ出す（出したら変えられない）。全員が出したら手を見せて勝ち負けを出す。
+// 部屋に1人のときは CPU が相手（出した瞬間にホストの端末が CPU の手を決める）。勝ち負けはおまけなので、成績表・連勝には入れない。
+// 出した手は、全員が出すまで「✓」とだけ見せる（簡易な隠し方。開発用の道具では覗ける）。
+// ゲストは type: 'rps'（回の番号 n と手 h）を送り、ホストが S.rps（{ n, hands: 人の id → 手 }）に集めて state で送る。
+// 手を見せたあとにだれかが出すと、次の回（n + 1）が始まる。見せた直後に何人かが同時に出しても、1つ前の回の番号で届いた手は次の回に入れる。
+const RPS = { g: '✊', c: '✌️', p: '✋' };
+const RPS_NAME = { g: 'グー', c: 'チョキ', p: 'パー' };
+const RPS_BEATS = { g: 'c', c: 'p', p: 'g' };
+// 1人で CPU とした回が残っているところに、だれかが入ってきた（その回は終わったものとして、次に出した人から新しい回）
+const rpsSolo = () => S.members.length >= 2 && !!RPS[S.rps?.hands?.cpu];
+const rpsHands = () => (rpsSolo() ? {} : S.rps?.hands ?? {});
+const rpsPlayers = () => (S.members.length >= 2 ? S.members : [...S.members, 'cpu']);
+const rpsShown = () => rpsPlayers().every((id) => RPS[rpsHands()[id]]);
+// 手を入れる（ホストは届いた手も。ゲストは自分の手を先に入れて見せ、ホストからの state で置き換わる）。入れられなければ false
+function rpsPut(id, h, n) {
+  const cur = S.rps ?? { n: 0, hands: {} };
+  if (n === cur.n - 1) n = cur.n; // 見せた直後に、ほかの人と同時に出した
+  if (n !== cur.n || !RPS[h]) return false;
+  let next;
+  if (rpsShown() || rpsSolo()) next = { n: cur.n + 1, hands: { [id]: h } };
+  else if (RPS[rpsHands()[id]] && S.members.length >= 2) return false; // 1人（CPU が相手）なら出し直せる（相手が抜けて1人になったときに止まらないように）
+  else next = { n: cur.n, hands: { ...cur.hands, [id]: h } };
+  if (S.isHost && S.members.length < 2) next.hands.cpu = 'gcp'[Math.floor(Math.random() * 3)];
+  S.rps = next;
+  saveRoom();
+  return true;
+}
+// 勝った手（あいこなら null）
+function rpsWinHand(hands) {
+  const kinds = [...new Set(hands)];
+  if (kinds.length !== 2) return null;
+  return RPS_BEATS[kinds[0]] === kinds[1] ? kinds[0] : kinds[1];
+}
+function rpsPanel() {
+  const box = document.createElement('div');
+  box.className = 'lobby-rps';
+  const hands = rpsHands();
+  const players = rpsPlayers();
+  const shown = rpsShown();
+  const who = (id) => esc(id === 'cpu' ? '🤖 CPU' : id === S.myId ? 'あなた' : nameOf(id));
+  let line;
+  if (shown) {
+    const win = rpsWinHand(players.map((id) => hands[id]));
+    const winners = players.filter((id) => hands[id] === win);
+    line = 'ぽん！ ' + players.map((id) => `${who(id)} ${RPS[hands[id]]}`).join('・')
+      + ` → <b>${win ? `${winners.map(who).join('・')}の勝ち！` : 'あいこ！'}</b>`;
+    // 手を見せた回ごとに1回だけ音を鳴らす（勝った人は「正解」の音）
+    if (S.rpsHeard !== S.rps.n) {
+      if (S.rpsHeard !== undefined && players.includes(S.myId)) play(winners.includes(S.myId) ? 'correct' : 'pop'); // 部屋に入ったときに見せてあった回では鳴らさない
+      S.rpsHeard = S.rps.n;
+    }
+  } else {
+    S.rpsHeard ??= null; // これより後に見せた回は鳴らす
+    const done = players.filter((id) => RPS[hands[id]]);
+    const wait = players.filter((id) => !RPS[hands[id]]);
+    line = done.length
+      ? `出した: ${done.map((id) => `${who(id)} ✓`).join('・')}<small>（まだ: ${wait.map(who).join('・')}）</small>`
+      : (S.members.length < 2 ? 'CPU と勝負できます' : '全員が出したら「ぽん！」');
+  }
+  const mine = !shown && RPS[hands[S.myId]];
+  box.innerHTML = `<p>✊ じゃんけん（待っている間のおまけ）${mine ? ` <small>あなたは ${RPS[mine]}</small>` : ''}</p><p class="rps-line">${line}</p>`;
+  const row = document.createElement('div');
+  row.className = 'rps-btns';
+  for (const h of ['g', 'c', 'p']) {
+    const b = makeButton(`${RPS[h]} ${RPS_NAME[h]}`, () => {
+      const n = S.rps?.n ?? 0;
+      if (!rpsPut(S.myId, h, n)) return;
+      if (S.isHost) sendState(); else send({ type: 'rps', n, h });
+      render();
+    }, 'secondary small');
+    b.disabled = !!mine && S.members.length >= 2;
+    row.append(b);
+  }
+  box.append(row);
+  return box;
 }
 
 /* ---------- 対局の時間（2026-10-07 本人の決定）: 結果の画面に「この対局は ◯分◯秒」と出す ---------- */
@@ -537,7 +625,12 @@ function countResult(res) {
   const by = predsNow();
   const wonP = winnersOf(res);
   for (const id of Object.keys(by)) if (!isCpu(id) && wonP.includes(by[id])) preds[id] = (preds[id] ?? 0) + 1;
-  S.tally = { games: t.games + 1, wins, preds };
+  // 勝率のため、対局した人（人だけ）の対局の数も数える。前の形の成績表（played が無いまま対局がある）は、勝ちの数と合わなくなるので
+  // 「成績を0に戻す」まで数えない
+  const old = t.games > 0 && !t.played;
+  const played = { ...(t.played ?? {}) };
+  if (!old) for (const id of new Set(S.order)) if (id && !isCpu(id)) played[id] = (played[id] ?? 0) + 1;
+  S.tally = { games: t.games + 1, wins, preds, ...(old ? {} : { played }) };
   // 対局の履歴: 新しいものから HISTORY_MAX 個。勝った人はそのときの表示名で覚える（CPU の名前は対局ごとに変わるため）
   const names = [...won].map((id) => nameOf(id));
   S.history = [{ g: S.gameId, w: names }, ...(S.history ?? [])].slice(0, HISTORY_MAX);
@@ -2278,7 +2371,7 @@ function openNet() {
 function send(msg, qos) { S?.net?.send(msg, qos); }
 function sendState() {
   const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, undo, streak, beg } = S;
-  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {}, roomName: S.roomName ?? '', cpuAuto: !!S.cpuAuto });
+  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {}, roomName: S.roomName ?? '', cpuAuto: !!S.cpuAuto, rps: S.rps ?? null });
 }
 function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves, u: S.undo ?? 0 }); }
 function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner, mark: myMark() }); }
@@ -2355,6 +2448,12 @@ function onMessage(msg) {
         sendState();
       }
       break;
+    case 'rps': // 待合室でじゃんけん
+      if (S.isHost && msg.from !== S.myId && S.members.includes(msg.from) && !S.order && Number.isInteger(msg.n) && rpsPut(msg.from, msg.h, msg.n)) {
+        sendState();
+        render();
+      }
+      break;
     case 'vote': // 次のゲームの投票
       if (S.isHost && msg.from !== S.myId && S.members.includes(msg.from) && (msg.g === null || typeof msg.g === 'string')) {
         setVote(msg.from, msg.g);
@@ -2427,6 +2526,8 @@ function adoptState(msg) {
   S.line = Array.isArray(msg.line) ? msg.line.filter((id) => typeof id === 'string') : [];
   const rd = msg.ready;
   S.ready = rd && Number.isInteger(rd.round) && Array.isArray(rd.ids) ? { round: rd.round, ids: rd.ids.filter((id) => typeof id === 'string') } : null;
+  const rp = msg.rps; // 待合室でじゃんけん
+  S.rps = rp && Number.isInteger(rp.n) && rp.hands && typeof rp.hands === 'object' ? { n: rp.n, hands: Object.fromEntries(Object.entries(rp.hands).filter(([id, h]) => typeof id === 'string' && RPS[h])) } : null;
   S.votes = msg.votes && typeof msg.votes === 'object' ? Object.fromEntries(Object.entries(msg.votes).filter(([id, g]) => typeof id === 'string' && typeof g === 'string' && GAMES[g]?.ready)) : {};
   for (const id of S.members) S.seen[id] ??= Date.now();
   const sameRound = S.gameId === msg.gameId && S.round === msg.round;

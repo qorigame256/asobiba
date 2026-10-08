@@ -685,6 +685,12 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .lobby-ready, .lobby-vote { margin: 8px 0 0; font-size: .9rem; } /* 準備OK・次のゲームの投票 */
 .lobby-ready small { color: var(--muted); margin-left: 4px; }
 .lobby-ready.all { color: #2e7d32; font-weight: 700; }
+/* 待合室でじゃんけん */
+.lobby-rps { margin-top: 10px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 10px; font-size: .9rem; }
+.lobby-rps p { margin: 0 0 4px; }
+.lobby-rps small { color: var(--muted); margin-left: 4px; }
+.rps-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.rps-btns .btn { padding: 6px 12px; }
 .btn.ready-go { animation: ready-go 1.2s ease-in-out infinite; } /* 全員の準備ができたら「始める」を目立たせる */
 @keyframes ready-go { 50% { box-shadow: 0 0 0 6px rgba(255, 170, 0, .45); } }
 @media (prefers-reduced-motion: reduce) { .btn.ready-go { animation: none; box-shadow: 0 0 0 3px rgba(255, 170, 0, .6); } }

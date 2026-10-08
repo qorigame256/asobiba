@@ -15,6 +15,8 @@ const TYPES = {
   '.png': 'image/png',
   '.ico': 'image/x-icon',
   '.wav': 'audio/wav',
+  '.webmanifest': 'application/manifest+json',
+  '.webp': 'image/webp',
 };
 
 http.createServer((req, res) => {

@@ -1299,6 +1299,27 @@ for (let k = 0; k < 300; k++) {
   assert.ok(t.nlock === undefined && dplay(t, 2, ['d8']), 'なしなら掛からない');
   assert.equal(DEF.numLock, false, '最初はなし');
 }
+// 階段革命（24回目の案）: 4枚以上の階段でも革命。3枚では起きない・「革命」なしなら起きない
+{
+  const RS = { ...NONE, revolution: true, stairs: true, stairRev: true };
+  s = dbase([['s3', 's4', 's5', 's6', 'c9'], ['h7', 'h8', 'h9', 'h10', 'c4'], ['d3', 'd4', 'd5', 'h3']], { rules: RS });
+  t = dplay(s, 0, ['s3', 's4', 's5', 's6']);
+  assert.deepEqual([t.rev, t.last.effects], [true, ['階段革命']], '4枚の階段で革命');
+  t = dplay(t, 1, ['h7', 'h8', 'h9', 'h10']);
+  assert.equal(t, null, '革命中は強い階段では返せない');
+  s = dbase([['s3', 's4', 's5', 'c9'], ['h7', 'h8', 'h9', 'h10', 'c4'], ['d3', 'h3']], { rules: RS });
+  assert.equal(dplay(s, 0, ['s3', 's4', 's5']).rev, false, '3枚の階段では起きない');
+  s = dbase([['s3', 's4', 's5', 'JK', 'c9'], ['c4'], ['h3']], { rules: RS });
+  assert.equal(dplay(s, 0, ['s3', 's4', 's5', 'JK']).rev, true, 'ジョーカー入りの4枚の階段でも起きる');
+  s = dbase([['s3', 's4', 's5', 's6', 'c9'], ['c4'], ['h3']], { rules: RS, rev: true });
+  t = dplay(s, 0, ['s3', 's4', 's5', 's6']);
+  assert.deepEqual([t.rev, t.last.effects], [false, ['階段革命返し']], '革命中なら革命返し');
+  s = dbase([['s3', 's4', 's5', 's6', 'c9'], ['c4'], ['h3']], { rules: { ...RS, revolution: false } });
+  assert.equal(dplay(s, 0, ['s3', 's4', 's5', 's6']).rev, false, '「革命」なしなら起きない');
+  s = dbase([['s3', 's4', 's5', 's6', 'c9'], ['c4'], ['h3']], { rules: { ...RS, stairRev: false } });
+  assert.equal(dplay(s, 0, ['s3', 's4', 's5', 's6']).rev, false, '階段革命なしなら起きない');
+  assert.equal(DEF.stairRev, false, '最初はなし');
+}
 console.log('daifugo games', dgames);
 // 何回か勝負（2026-10-08 の23回目の案）: 1つの対局の中で決めた回数だけ配り直し、順位の点（最下位 0点・1つ上がるごとに +1点）の合計で勝負
 {
@@ -1309,7 +1330,7 @@ console.log('daifugo games', dgames);
   assert.deepEqual({ ...D.init(4, 5, { rules: { ...DEF, match: 3 } }), match: undefined, rules: undefined }, { ...D.init(4, 5, { rules: DEF }), match: undefined, rules: undefined }, '1回目の配りは今までと同じ');
   // 1回のとき: 決まった手順（CPU の乱数を種から作る）で最後まで打った全部の局面の指紋が、何回か勝負を足す前と同じ（rules の match は除いて比べる）
   {
-    const keys = D.settings.map((x) => x.key).filter((key) => key !== 'match');
+    const keys = D.settings.map((x) => x.key).filter((key) => key !== 'match' && key !== 'stairRev'); // あとから足した設定は外す（なしのとき今までと同じかを見る）
     const h = createHash('sha256');
     const orig = Math.random;
     try {
@@ -5531,17 +5552,46 @@ console.log('kaisen OK');
     });
     assert.equal(hit.size, nd, '反転でも違いの数は同じ');
   }
+  // じわじわ変わる（24回目の案）: 変わり始める時刻は種から同じ・見えるまでは見つけられない・右の絵は始め左と同じ
+  {
+    const plan = MG.slowPlan(11, 0, 5, 60000);
+    assert.deepEqual(plan, MG.slowPlan(11, 0, 5, 60000), '変わり始める時刻は種から同じ');
+    assert.equal(new Set(plan).size, 5, '違いごとに時刻が違う');
+    for (const at of plan) assert.ok(at >= 2000 && MG.seenAt(plan, 0) < 60000 && at <= 2000 + 60000 * 0.55, '時刻は2秒から55%まで');
+    for (const lim of [45000, 60000, 90000]) for (const nd of [3, 5, 7]) {
+      const pl = MG.slowPlan(5, 1, nd, lim);
+      assert.ok(Math.max(...pl.map((_, i) => MG.seenAt(pl, i))) < lim - 10000, '最後の違いも見えてから10秒以上ある');
+    }
+    assert.deepEqual([MG.morphAt(plan, 0, plan[0] - 1), MG.morphAt(plan, 0, plan[0] + 5000), MG.morphAt(plan, 0, plan[0] + 99999)], [0, 0.5, 1], '変わり具合');
+    const scn = MG.makeScene(11, 0, 5);
+    const startSvg = MG.sideSvg(scn, 'right', false, true).replace(/<g class="mg-d" data-d="\d+">|<\/g>/g, '');
+    assert.equal(startSvg, MG.sideSvg(scn, 'left', false).replace(/<\/g>/g, ''), '右の絵は始め左と同じ');
+    scn.diffs.forEach((d) => {
+      assert.ok(MG.sideSvg(scn, 'left', false).includes(MG.morphSvg(scn, d, 0)), '変わる前は左の絵の部品');
+      assert.ok(MG.sideSvg(scn, 'right', false).includes(MG.morphSvg(scn, d, 1)), '変わり終えたら右の絵の部品');
+      assert.ok(MG.morphSvg(scn, d, 0.5).length > 0, '途中の絵');
+    });
+    const st = G.init(2, 11, { rules: { rounds: '3', diffs: '5', time: '60', slow: 'on' } });
+    const go = G.apply(st, { p: -1, t: 'go' });
+    const pl = MG.slowPlan(go.seed, 0, 5, 60000);
+    assert.equal(G.apply(go, { p: 0, t: 'find', r: 0, i: 0, ms: Math.floor(MG.seenAt(pl, 0)) - 1 }), null, 'まだ見えていない違いは見つけられない');
+    assert.ok(G.apply(go, { p: 0, t: 'find', r: 0, i: 0, ms: Math.ceil(MG.seenAt(pl, 0)) }), '見えたら見つけられる');
+    assert.ok(G.apply(G.apply(G.init(2, 11, { rules: { slow: 'off' } }), { p: -1, t: 'go' }), { p: 0, t: 'find', r: 0, i: 0, ms: 100 }), 'なしならいつでも');
+    assert.equal('slow' in G.init(2, 11, { rules: { slow: 'off' } }).rules, false, 'なしでは局面の形が今までと同じ');
+  }
   // CPU どうしで最後まで（反転あり・なし）。CPU は画面に出てからの時間で押すので、時計（performance.now）を進めて試す
   const realNow = performance.now.bind(performance);
   let fake = realNow();
   performance.now = () => fake;
   try {
     const avgFound = {};
-    for (const mirror of ['off', 'on']) {
+    for (const mode of ['off', 'on', 'slow']) {
+      const mirror = mode === 'on' ? 'on' : 'off';
+      const slow = mode === 'slow' ? 'on' : 'off';
       let found = 0;
       for (let k = 0; k < 6; k++) {
         const n = 2 + (k % 3);
-        let st = G.init(n, (mirror === 'on' ? 900 : 500) + k * 37, { rules: { rounds: '3', diffs: '5', time: '60', mirror } }); // 種を分ける（画面に出た時刻と CPU の予定は種ごとに覚えるため）
+        let st = G.init(n, ({ off: 500, on: 900, slow: 1300 })[mode] + k * 37, { rules: { rounds: '3', diffs: '5', time: '60', mirror, slow } }); // 種を分ける（画面に出た時刻と CPU の予定は種ごとに覚えるため）
         let refKey = null; let refAt = 0; let guard = 0;
         while (!G.result(st)) {
           let moved = false;
@@ -5558,9 +5608,9 @@ console.log('kaisen OK');
         }
         found += Object.keys(st.best).length;
       }
-      avgFound[mirror] = found / 6;
+      avgFound[mode] = found / 6;
     }
-    console.log('machigai CPU found per game (off/on)', avgFound.off.toFixed(1), avgFound.on.toFixed(1));
+    console.log('machigai CPU found per game (off/mirror/slow)', avgFound.off.toFixed(1), avgFound.on.toFixed(1), avgFound.slow.toFixed(1));
   } finally { performance.now = realNow; }
 }
 
