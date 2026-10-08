@@ -528,11 +528,15 @@ function perft(board, hands, side, d) {
   const mk = `${mb.join(',')}|${mini.hands[0].join('')}|${mini.hands[1].join('')}|0`;
   const mw = shogi.apply({ ...mini, board: mb, keys: [mk] }, { f: 5, t: 0, pr: false });
   check('トライ: 5五将棋で先手の玉が 5一 に入ったら勝ち', mw?.result?.winner === 0);
-  // CPU（つよい・ふつう）はトライできるならする
+  // CPU（つよい・ふつう）はトライできるならする。ふつうは 8% の見込みで適当に打つ（わざと弱める）ので、その分は乱数を固定して外す
+  // （固定しないと、この確認が 1割ほどの見込みで運で落ちた）
+  const realRandom = Math.random;
+  Math.random = () => 0.5;
   const cpuTry = ['strong', 'normal'].every((cpu) => {
     const m = shogi.cpu({ ...base, trial: true }, 0, { cpu });
     return m && m.f === sq(1, 4) && m.t === sq(0, 4);
   });
+  Math.random = realRandom;
   check('トライ: CPU（つよい・ふつう）は入れるならトライする', cpuTry);
   // CPU どうしで最後まで（当て直すと同じ局面）
   for (const [label, rules] of [['本将棋', {}], ['5五将棋', { size: 'mini' }]]) {
