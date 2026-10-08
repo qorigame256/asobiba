@@ -644,7 +644,7 @@ export default {
     for (let k = me === null ? 0 : 1; k < s.n; k++) {
       const p = ((me ?? 0) + k) % s.n;
       const chip = document.createElement('div');
-      chip.className = 'cc-opp' + (this.canAct(s, p) ? ' turn' : '') + (s.ranking?.[0] === p ? ' won' : '');
+      chip.className = 'cc-opp' + (s.phase !== 'gap' && this.canAct(s, p) ? ' turn' : '') + (s.ranking?.[0] === p ? ' won' : '');
       const name = document.createElement('div');
       name.className = 'cc-opp-name';
       name.textContent = o.names[p];
