@@ -3528,6 +3528,20 @@ assert.notEqual(GM.cpu(s, 0, { cpu: 'strong' }), 3, 'ぴったり五目の CPU �
   h = { ...HT.init(2, 5, { rules: { rounds: 5 } }), cards: ['s1', 'h2'], chips: [10, 1] };
   t = HT.apply(HT.apply(h, { p: 0, t: 'bet', r: 1 }), { p: 1, t: 'bet', r: 1 });
   assert.deepEqual([t.over, t.ranking], [true, [0, 1]], '持ち点が0になったら脱落し、1人残れば終わり');
+  assert.deepEqual(HT.result(t), { winner: 0, ranking: [0, 1], places: [1, 2] }, '1人残れば、その人の優勝');
+  // 最後に持ち点が同じなら同点優勝（2026-10-10 本人の決定。それまでは席順で決めていた）
+  t = HT.init(3, 7, { rules: { rounds: 5 } });
+  for (let r = 1; r <= 5; r++) {
+    for (const p of [0, 1, 2].map((k) => (t.dealer + k) % 3)) t = HT.apply(t, { p, t: 'fold', r });
+    if (r < 5) t = HT.apply(t, { p: 0, t: 'next', r });
+  }
+  assert.ok(t.over && t.chips[0] === t.chips[1] && t.chips[1] === t.chips[2], '全員が毎回降りると全員同じ点');
+  assert.deepEqual(HT.result(t), { winners: [0, 1, 2], ranking: [0, 1, 2], places: [1, 1, 1] }, '同じ点なら同点優勝');
+  const tie = { ...t, chips: [12, 12, 9] };
+  assert.deepEqual([HT.result(tie).winners, HT.result(tie).places], [[0, 1], [1, 1, 3]], '上の2人が同点・3人目は3位');
+  const pn = (p) => `P${p}`;
+  assert.equal(HT.resultText(HT.result(tie), 1, pn), 'P0・P1が同点で優勝！🎉');
+  assert.equal(HT.resultText(HT.result(tie), 2, pn), 'あなたは3位');
   // CPU どうしで最後まで（反則を出さない・持ち点の合計は変わらない）
   for (let g = 0; g < 100; g++) {
     const n = 2 + (g % 7);

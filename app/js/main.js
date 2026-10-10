@@ -673,8 +673,9 @@ function rulesOf(gameId, rules) {
 // エアホッケーのマレットの大きさ（mallet。23回目の案。ゴールの広さと同じハンデなので）も抽選しない。
 // 将棋の王手の知らせ（check。19回目の案。初めての人向けの手助けなので、いつも成ると同じ）も抽選しない。
 // 将棋のトライ（try）・神経衰弱の色もそろえる（color）・お絵描き当てのインクの量（ink）は遊び方なので抽選する。
+// マンカラの最初の石の数（stones。長さ）・間違い探しの違いの数（diffs。難しさ）も抽選しない（2026-10-10 の Codex の点検で見つかった。本人承認）。
 // マルバツ・将棋の size は盤の大きさでなく遊び方（スーパー・消える・5五将棋）なので抽選する。
-const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check', 'mallet']);
+const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check', 'mallet', 'stones', 'diffs']);
 const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
 
 // 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、エアホッケーは 2〜3。ほかは2）
@@ -2402,8 +2403,8 @@ function onMessage(msg) {
     onCpuSay(msg);
     return;
   }
-  if (msg.type === 'react') { // リアクション。描き直さない
-    showReaction(msg.from, msg.w);
+  if (msg.type === 'react') { // リアクション。描き直さない。対局の画面でだけ出す（待合室へ戻った直後に遅れて届いた分は出さない）
+    if (S.order) showReaction(msg.from, msg.w);
     if (!wasAlive) render();
     return;
   }

@@ -644,5 +644,19 @@ function perft(board, hands, side, d) {
   check('王手の知らせ: 3人でも王手の手が分かり、なしでも局面は同じ', checks3 > 0 && same3, `王手 ${checks3}回`);
 }
 
+// 動かす手に d（打つ駒）を付けて送られても、持っていない駒を打たせない（2026-10-10 の Codex の点検で見つかった）
+{
+  const cases = [
+    ['本将棋', shogi.init(), (s) => legalMoves(s.board, s.hands, s.turn)],
+    ['3人将棋', shogi.init({ rules: { players: 3 } }), (s) => _test3.legalMoves(s.board, s.hands, s.turn)],
+    ['3×4', shogi.init({ rules: { size: 'zoo' } }), (s) => _test34.moves(s.board, s.hands, s.turn)],
+  ];
+  for (const [name, s, list] of cases) {
+    const mv = list(s).find((x) => !x.d);
+    check(`${name}: 動かす手は通る`, !!shogi.apply(s, { f: mv.f, t: mv.t, pr: mv.pr }));
+    check(`${name}: 動かす手に d を付けた手は反則`, shogi.apply(s, { f: mv.f, t: mv.t, pr: mv.pr, d: 2 }) === null);
+  }
+}
+
 console.log(failed ? `\n${failed} 件の失敗` : '\nすべて OK');
 process.exit(failed ? 1 : 0);

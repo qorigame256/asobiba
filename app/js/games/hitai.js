@@ -16,6 +16,8 @@ const power = (c) => (rankOf(c) === 1 ? 14 : rankOf(c)); // A が一番強い
 
 const clone = (s) => ({ ...s, chips: s.chips.slice(), outOrder: s.outOrder.slice(), cards: s.cards.slice(), act: s.act.slice(), paid: s.paid.slice(), got: s.got.slice() });
 const alive = (s) => Array.from({ length: s.n }, (_, p) => p).filter((p) => !s.outOrder.includes(p));
+// 終わったときの順位（1から）。残った人は持ち点が同じなら同じ順位（同点優勝。2026-10-10 本人の決定）、脱落した人は後に脱落した人ほど上
+const placeOf = (s, p) => (s.outOrder.includes(p) ? s.ranking.indexOf(p) + 1 : 1 + alive(s).filter((q) => s.chips[q] > s.chips[p]).length);
 
 // 次の回を始める（親を回し、参加料を集めて配る）
 function startRound(s) {
@@ -59,7 +61,7 @@ function resolve(s) {
   const live = alive(s);
   if (live.length <= 1 || s.round >= s.rules.rounds) {
     s.over = true;
-    // 持ち点の多い順（同じなら席順）。脱落した人は後に脱落した人ほど上
+    // 持ち点の多い順（同じなら席順に並べるが、順位は同じ。placeOf）。脱落した人は後に脱落した人ほど上
     const ranked = live.slice().sort((a, b) => s.chips[b] - s.chips[a] || a - b);
     s.ranking = [...ranked, ...s.outOrder.slice().reverse()];
   }
@@ -114,7 +116,12 @@ export default {
     if (s.phase === 'end') return alive(s).includes(p);
     return s.toAct === p;
   },
-  result(s) { return s.over ? { winner: s.ranking[0], ranking: s.ranking } : null; },
+  result(s) {
+    if (!s.over) return null;
+    const places = s.ranking.map((p) => placeOf(s, p));
+    const top = s.ranking.filter((p, i) => places[i] === 1);
+    return top.length > 1 ? { winners: top, ranking: s.ranking, places } : { winner: top[0], ranking: s.ranking, places };
+  },
   startSound: 'shuffle',
   sound(a, b, m) {
     if (m.t === 'next') return 'shuffle';
@@ -124,11 +131,10 @@ export default {
   cpuDelay(s) { return s.phase === 'end' ? 3200 : 700; }, // 札を見せる間は長めに
 
   resultText(res, me, pn) {
-    if (me >= 0) {
-      const i = res.ranking.indexOf(me);
-      return i === 0 ? 'あなたの優勝！🎉' : `あなたは${i + 1}位`;
-    }
-    return `${pn(res.winner)}の優勝！`;
+    const top = res.winners ?? [res.winner];
+    if (me >= 0 && !top.includes(me)) return `あなたは${res.places[res.ranking.indexOf(me)]}位`;
+    if (top.length > 1) return `${top.map(pn).join('・')}が同点で優勝！${top.includes(me) ? '🎉' : ''}`;
+    return me >= 0 ? 'あなたの優勝！🎉' : `${pn(top[0])}の優勝！`;
   },
   phaseText(s) { return s.phase === 'end' ? `第${s.round}回の勝負がつきました` : ''; },
 
@@ -185,7 +191,7 @@ export default {
     for (let k = me === null ? 0 : 1; k < s.n; k++) {
       const p = ((me ?? 0) + k) % s.n;
       const chip = document.createElement('div');
-      chip.className = 'cc-opp' + (this.turn(s) === p ? ' turn' : '') + (s.ranking?.[0] === p ? ' won' : '');
+      chip.className = 'cc-opp' + (this.turn(s) === p ? ' turn' : '') + (s.ranking && placeOf(s, p) === 1 ? ' won' : '');
       const name = document.createElement('div');
       name.className = 'cc-opp-name';
       name.textContent = (s.dealer === p ? 'Ⓓ ' : '') + o.names[p];
@@ -235,6 +241,7 @@ export default {
       list.className = 'df-ranking';
       for (const p of s.ranking) {
         const li = document.createElement('li');
+        li.value = placeOf(s, p); // 同点は同じ番号
         li.textContent = `${nameP(p)}（持ち点 ${s.chips[p]}）`;
         list.append(li);
       }

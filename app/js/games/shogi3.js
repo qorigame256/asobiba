@@ -189,7 +189,8 @@ function make(board, hands, side, m) {
   return { b, h, captured, killed };
 }
 
-const sameMove = (a, b) => a.t === b.t && (a.d ? a.d === b.d : a.f === b.f && !!a.pr === !!b.pr);
+// 打つ手と動かす手は取り違えない（動かす手に d を付けて送られても、持っていない駒を打たせない）
+const sameMove = (a, b) => a.t === b.t && !!a.d === !!b.d && (a.d ? a.d === b.d : a.f === b.f && !!a.pr === !!b.pr);
 const posKey = (board, hands, turn) => `${board.join(',')}|${hands.map((x) => x.join('')).join('|')}|${turn}`;
 const nextAlive = (turn, alive) => {
   for (let k = 1; k <= 3; k++) if (alive[(turn + k) % 3]) return (turn + k) % 3;
