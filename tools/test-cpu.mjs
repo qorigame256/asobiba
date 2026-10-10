@@ -71,10 +71,12 @@ s = TV.init();
 for (const m of [0, 3, 1, 4]) s = TV.apply(s, m); // ○ が 0・1、× が 3・4。○ の番
 for (let k = 0; k < 10; k++) assert.equal(TV.cpu(s, 0, lv('strong')), 2, '消えるマルバツ: 勝てる手があれば打つ');
 
-// 強い方が勝ち越す
-for (const [g, n] of [[C, 20], [R, 12], [RS, 12], [RC, 12], [TS, 12], [TV, 20], [CP, 12], [TG, 20]]) {
-  const sw = tally(g, 'strong', 'weak', n);
-  const nw = tally(g, 'normal', 'weak', n);
+// 強い方が勝ち越す。対局数は [つよい-よわい, ふつう-よわい]。
+// 対局数の決め方（このファイルの勝ち負けの確認すべてで同じ）: 1局ごとの勝ち負けの割合を数百〜6000局測り、
+// 運で落ちる率が確認1つにつき0.1%前後になるようにした（2026-10-11。全体で1〜2%）。CPU の強さを変えたら測り直す
+for (const [g, sn, nn] of [[C, 20, 26], [R, 12, 20], [RS, 16, 24], [RC, 12, 20], [TS, 12, 12], [TV, 20, 20], [CP, 12, 16], [TG, 20, 20]]) {
+  const sw = tally(g, 'strong', 'weak', sn);
+  const nw = tally(g, 'normal', 'weak', nn);
   results[g.id] = { strongVsWeak: sw, normalVsWeak: nw };
   assert.ok(sw.win > sw.lose * 2, `${g.id}: つよいが よわい に大きく勝ち越す ${JSON.stringify(sw)}`);
   assert.ok(nw.win > nw.lose, `${g.id}: ふつうが よわい に勝ち越す ${JSON.stringify(nw)}`);
@@ -170,8 +172,8 @@ for (const [g, n] of [[C, 20], [R, 12], [RS, 12], [RC, 12], [TS, 12], [TV, 20], 
   w = at({ 11: 0, 20: 0, 21: 1, 27: 0, 28: 2, 29: 1, 35: 2, 36: 1, 37: 1, 42: 2, 44: 2, 45: 0, 49: 2 });
   for (let k = 0; k < 20; k++) assert.notEqual(R.cpu(w, 0, lv('strong')), 43, '3人リバーシ: 次の人に隅を渡さない');
   // 角でもう1手では、つよいの勝ちが 3人 7割ほど・4人 5割強（隅の値打ちが上がるので差が広がる）
-  for (const [n, corner] of [[3, false], [4, false], [3, true], [4, true]]) {
-    const G = 150;
+  // 4人（角でもう1手なし）は つよいの勝ちが 42% で基準（37.5%）との差が小さいので多く打つ（1局 4ミリ秒ほど）
+  for (const [n, corner, G] of [[3, false, 240], [4, false, 1200], [3, true, 150], [4, true, 150]]) {
     const id = 'reversi-' + n + (corner ? '-corner' : '');
     let strongWins = 0;
     for (let g = 0; g < G; g++) {
@@ -226,10 +228,13 @@ for (const [g, n] of [[C, 20], [R, 12], [RS, 12], [RC, 12], [TS, 12], [TV, 20], 
   for (const m of [0, 4]) y = D.apply(y, m); // 左上の四角が2辺。20・21を引くと3辺目になる
   for (let k = 0; k < 20; k++) assert.ok(![20, 21].includes(D.cpu(y, 0, lv('strong'))), '点と線: 3辺目を引かない');
 
-  for (const [g, rules, n, games, id] of [[G, {}, 2, 80, 'gomoku'], [D, {}, 2, 100, 'dots'], [D, { players: 3 }, 3, 90, 'dots-3'], [D, { players: 4 }, 4, 80, 'dots-4'], [GAMES.mancala, {}, 2, 60, 'mancala'], [GAMES.mancala, { players: 3 }, 3, 60, 'mancala-3'], [GAMES.kaisen, {}, 2, 300, 'kaisen'], [GAMES.kaisen, { size: 8 }, 2, 300, 'kaisen-8'], [GAMES.kaisen, { apart: 'on' }, 2, 300, 'kaisen-apart'], [GAMES.kaisen, { size: 8, apart: 'on' }, 2, 300, 'kaisen-8-apart'], [GAMES.kaisen, { salvo: 'on' }, 2, 300, 'kaisen-salvo'], [GAMES.kaisen, { size: 8, salvo: 'on' }, 2, 300, 'kaisen-8-salvo'],
-    [G, { exact: true }, 2, 80, 'gomoku-exact'], [G, { capture: true }, 2, 80, 'gomoku-capture'], [G, { blocks: true }, 2, 80, 'gomoku-blocks'], [G, { blocks: true, size: 13 }, 2, 80, 'gomoku-blocks-13'], [D, { swap: true }, 2, 100, 'dots-swap'], [D, { gold: true }, 2, 100, 'dots-gold'], [GAMES.mancala, { nocap: true }, 2, 60, 'mancala-nocap'], [GAMES.mancala, { pits: 4 }, 2, 60, 'mancala-4'], [GAMES.mancala, { pits: 5 }, 2, 60, 'mancala-5'], [GAMES.hasami, {}, 2, 30, 'hasami'], [GAMES.hasami, { size: 7 }, 2, 30, 'hasami-7']]) {
+  // 対局数は2つの組み合わせで同じ数か、[ふつう-よわい, つよい-ふつう（3人以上は つよい-よわい）]。決め方は上の「強い方が勝ち越す」と同じ。
+  // 差の小さいもの: 海戦の ふつう-よわい（勝ち 56〜57%）・五目並べの つよい-ふつう（引き分けが3〜5割）・はさみ取りの ふつう-よわい（勝ち 57%）・入れ替えの点と線の つよい-ふつう（勝ち 36% 負け 26%）
+  for (const [g, rules, n, counts, id] of [[G, {}, 2, [80, 500], 'gomoku'], [D, {}, 2, 100, 'dots'], [D, { players: 3 }, 3, 90, 'dots-3'], [D, { players: 4 }, 4, 80, 'dots-4'], [GAMES.mancala, {}, 2, 60, 'mancala'], [GAMES.mancala, { players: 3 }, 3, 60, 'mancala-3'], [GAMES.kaisen, {}, 2, [2400, 300], 'kaisen'], [GAMES.kaisen, { size: 8 }, 2, [1000, 300], 'kaisen-8'], [GAMES.kaisen, { apart: 'on' }, 2, [1000, 300], 'kaisen-apart'], [GAMES.kaisen, { size: 8, apart: 'on' }, 2, 300, 'kaisen-8-apart'], [GAMES.kaisen, { salvo: 'on' }, 2, 300, 'kaisen-salvo'], [GAMES.kaisen, { size: 8, salvo: 'on' }, 2, 300, 'kaisen-8-salvo'],
+    [G, { exact: true }, 2, [80, 260], 'gomoku-exact'], [G, { capture: true }, 2, [960, 100], 'gomoku-capture'], [G, { blocks: true }, 2, [80, 200], 'gomoku-blocks'], [G, { blocks: true, size: 13 }, 2, [80, 320], 'gomoku-blocks-13'], [D, { swap: true }, 2, [100, 1900], 'dots-swap'], [D, { gold: true }, 2, 100, 'dots-gold'], [GAMES.mancala, { nocap: true }, 2, 60, 'mancala-nocap'], [GAMES.mancala, { pits: 4 }, 2, 60, 'mancala-4'], [GAMES.mancala, { pits: 5 }, 2, 60, 'mancala-5'], [GAMES.hasami, {}, 2, 30, 'hasami'], [GAMES.hasami, { size: 7 }, 2, 30, 'hasami-7']]) {
     // 3人以上の点と線は、つよいとふつうの差が小さい（適当に引く1割だけ）ので、よわいとの差だけを見る
-    for (const [a, b] of n === 2 ? [['normal', 'weak'], ['strong', 'normal']] : [['normal', 'weak'], ['strong', 'weak']]) {
+    for (const [i, [a, b]] of (n === 2 ? [['normal', 'weak'], ['strong', 'normal']] : [['normal', 'weak'], ['strong', 'weak']]).entries()) {
+      const games = Array.isArray(counts) ? counts[i] : counts;
       let aw = 0;
       let bw = 0;
       for (let k = 0; k < games; k++) {
