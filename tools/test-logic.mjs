@@ -1972,6 +1972,70 @@ for (let k = 0; k < 200; k++) {
 }
 console.log('yubisuma games 200, avg rounds', (ysRounds / 200).toFixed(1));
 
+// ---------- ためてビーム ----------
+const TB = GAMES.tamebeam;
+// 1回分の技をそろえて開く。acts[p] = [技, 相手]
+const tbRound = (st, acts) => {
+  for (const [p, [a, to]] of acts.entries()) if (acts[p]) st = TB.apply(st, { p, t: 'act', r: st.round, a, ...(to !== undefined ? { to } : {}) });
+  return st;
+};
+s = TB.init(2, 0, { rules: {} });
+assert.equal(TB.apply(s, { p: 0, t: 'act', r: 1, a: 'beam', to: 1 }), null, 'ためが無いとビームは撃てない');
+assert.equal(TB.apply(s, { p: 0, t: 'act', r: 1, a: 'charge', to: 1 }), null, 'ためは相手を選ばない');
+t = TB.apply(s, { p: 0, t: 'act', r: 1, a: 'charge' });
+assert.equal(TB.apply(t, { p: 0, t: 'act', r: 1, a: 'guard' }), null, '同じ回に2回は選べない');
+t = tbRound(s, [['charge'], ['charge']]);
+assert.deepEqual(t.charge, [1, 1], 'ためで1増える');
+assert.equal(TB.apply(t, { p: 0, t: 'act', r: 2, a: 'beam', to: 0 }), null, '自分は撃てない');
+assert.equal(TB.apply(t, { p: 0, t: 'act', r: 2, a: 'big', to: 1 }), null, 'ため3が無いと大ビームは撃てない');
+let u = tbRound(t, [['beam', 1], ['guard']]);
+assert.equal(TB.result(u), null, 'ビームはガードで防げる');
+assert.deepEqual(u.charge, [0, 1], 'ビームでため1を使う');
+u = tbRound(t, [['beam', 1], ['beam', 0]]);
+assert.equal(TB.result(u), null, 'ビームどうしは相殺');
+assert.equal(u.last.ev[0].kind, 'cancel');
+u = tbRound(t, [['beam', 1], ['charge']]);
+assert.equal(TB.result(u).winner, 0, 'ためている人に当たったら負け');
+s = { ...TB.init(2, 0, { rules: {} }), charge: [3, 1] };
+u = tbRound(s, [['big', 1], ['guard']]);
+assert.equal(TB.result(u).winner, 0, '大ビームはガードを破る');
+u = tbRound(s, [['big', 1], ['beam', 0]]);
+assert.equal(TB.result(u).winner, 0, '大ビームはビームに勝つ');
+assert.deepEqual(u.charge, [0, 0]);
+s = { ...TB.init(2, 0, { rules: {} }), charge: [3, 3] };
+u = tbRound(s, [['big', 1], ['big', 0]]);
+assert.equal(TB.result(u), null, '大ビームどうしは相殺');
+// 3人: 撃たれた人がほかの人を撃っていたら当たる・全員同時に抜けたら引き分け
+s = { ...TB.init(3, 0, { rules: {} }), charge: [1, 1, 1] };
+u = tbRound(s, [['beam', 1], ['beam', 2], ['guard']]);
+assert.deepEqual(u.life, [1, 0, 1], 'ほかの人を撃っていた人には当たる');
+assert.equal(TB.result(u), null, '2人残れば続く');
+assert.equal(TB.apply(u, { p: 0, t: 'act', r: u.round, a: 'charge' }) !== null, true);
+assert.equal(TB.canAct(u, 1), false, '抜けた人は選ばない');
+assert.equal(TB.apply(u, { p: 0, t: 'act', r: u.round, a: 'beam', to: 1 }), null, '抜けた人は撃てない');
+u = tbRound(s, [['beam', 1], ['beam', 2], ['beam', 0]]);
+assert.equal(TB.result(u).draw, true, '全員同時に抜けたら引き分け');
+// ライフ3: 何人に撃たれても1回に1つだけ減る
+s = { ...TB.init(3, 0, { rules: { lives: 3 } }), charge: [1, 1, 0] };
+u = tbRound(s, [['beam', 2], ['beam', 2], ['charge']]);
+assert.deepEqual(u.life, [3, 3, 2], 'ライフ3なら1回で抜けない・1回に1つだけ減る');
+// CPU どうしで最後まで
+let tbRounds = 0;
+for (let k = 0; k < 300; k++) {
+  const n = 2 + (k % 5);
+  let st = TB.init(n, 0, { rules: { lives: k % 3 ? 1 : 3 } });
+  while (!TB.result(st)) {
+    const ps = Array.from({ length: n }, (_, p) => p).filter((p) => TB.canAct(st, p));
+    const p = ps[Math.floor(Math.random() * ps.length)];
+    st = TB.apply(st, { ...TB.cpu(st, p), p });
+    assert.ok(st, 'ためてビームの CPU が反則の手を出した');
+  }
+  assert.equal(TB.result(st).ranking.length, n, '順位が全員分');
+  assert.ok(st.round <= 101, '100回で終わる');
+  tbRounds += st.round;
+}
+console.log('tamebeam games 300, avg rounds', (tbRounds / 300).toFixed(1));
+
 // ---------- 神経衰弱 ----------
 const MM = GAMES.memory;
 assert.equal(MM.init(2, 5, { rules: {} }).cards.length, 48, '最初は48枚');

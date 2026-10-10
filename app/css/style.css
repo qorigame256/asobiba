@@ -1622,3 +1622,26 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .invite-room { font-weight: 700; margin: -4px 0 8px; overflow-wrap: anywhere; }
 .howto-rules { margin: 8px 0 2px; padding-top: 6px; border-top: 1px dashed var(--line); font-size: .85rem; }
 .howto-rules span { color: var(--muted); }
+
+/* ---------- ためてビーム ---------- */
+[data-game="tamebeam"] .board { width: min(100%, 600px); }
+.tb { display: flex; flex-direction: column; gap: 12px; }
+.tb-last { background: #eef3f8; border-radius: var(--radius); padding: 8px 12px; text-align: center; font-size: .88rem; font-weight: 700; line-height: 1.5; }
+.tb-last.hit { background: #ffe1dc; }
+.tb-last-head { font-size: .78rem; color: var(--muted); }
+.tb-last.pop, .tb-act.pop { animation: pop .3s ease-out; }
+.tb-players { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+.tb-player { background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 8px; text-align: center; }
+.tb-player.mine { border-width: 2.5px; }
+.tb-player.out { opacity: .55; }
+.tb-player.shake { animation: tb-shake .4s ease-out; border-color: #e04b3c; }
+@keyframes tb-shake { 0%, 100% { transform: none; } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+@media (prefers-reduced-motion: reduce) { .tb-player.shake { animation: none; } }
+.tb-name { font-weight: 700; font-size: .88rem; }
+.tb-act { font-size: .95rem; font-weight: 700; min-height: 1.6rem; margin: 4px 0; }
+.tb-stat { font-size: .82rem; color: var(--muted); font-weight: 700; }
+.tb-pick { background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 10px 12px; }
+.tb-choices { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 8px; }
+.board button.tb-choice { min-height: 56px; border-radius: 12px; background: #fff; border: 1.5px solid var(--line); font-size: 1.05rem; font-weight: 800; cursor: pointer; touch-action: manipulation; }
+.board button.tb-choice small { display: block; font-size: .72rem; font-weight: 700; color: var(--muted); }
+.board button.tb-choice:disabled { opacity: .4; cursor: default; }

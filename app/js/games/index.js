@@ -55,6 +55,7 @@ import speed from './speed.js';
 import hitblow from './hitblow.js';
 import sensou from './sensou.js';
 import yubisuma from './yubisuma.js';
+import tamebeam from './tamebeam.js';
 import memory from './memory.js';
 import nim from './nim.js';
 import flags from './flags.js';
@@ -90,10 +91,10 @@ import { HOWTO } from './howto.js';
 // 準備中のゲームを一覧に出すとき: soon('id', '名前', '絵文字')
 export const soon = (id, name, icon) => ({ id, name, icon, desc: 'じゅんび中', ready: false });
 
-export const GAME_ORDER = ['tictactoe', 'connect4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'colors', 'daifugo', 'poker', 'speed', 'babanuki', 'doubt', 'sevens', 'blackjack', 'hitai', 'hitblow', 'sensou', 'yubisuma', 'memory', 'yacht', 'seri', 'nim', 'flags', 'kanji', 'targets', 'pittari', 'kioku', 'typing', 'danmaku', 'tamaire', 'machigai', 'bombs', 'umigame', 'wordwolf', 'oekaki', 'hockey', 'hasami', 'shogi', 'mahjong'];
+export const GAME_ORDER = ['tictactoe', 'connect4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'colors', 'daifugo', 'poker', 'speed', 'babanuki', 'doubt', 'sevens', 'blackjack', 'hitai', 'hitblow', 'sensou', 'yubisuma', 'tamebeam', 'memory', 'yacht', 'seri', 'nim', 'flags', 'kanji', 'targets', 'pittari', 'kioku', 'typing', 'danmaku', 'tamaire', 'machigai', 'bombs', 'umigame', 'wordwolf', 'oekaki', 'hockey', 'hasami', 'shogi', 'mahjong'];
 export const GAMES = {
   tictactoe, connect4, reversi, colors, daifugo, poker, speed, hitblow, sensou, yubisuma, memory, nim, flags, kanji, targets, umigame, shogi, mahjong, hockey,
-  gomoku, dots, babanuki, doubt, yacht, wordwolf, sevens, mancala, oekaki, seri, blackjack, kaisen, pittari, typing, danmaku, tamaire, machigai, bombs, hasami, hitai, kioku,
+  gomoku, dots, babanuki, doubt, yacht, wordwolf, sevens, mancala, oekaki, seri, blackjack, kaisen, pittari, typing, danmaku, tamaire, machigai, bombs, hasami, hitai, kioku, tamebeam,
 };
 // 遊び方（howto.js）。対局画面の「？遊び方」で出す（main.js の renderHowto）
 for (const [id, lines] of Object.entries(HOWTO)) if (GAMES[id]) GAMES[id].howto = lines;
