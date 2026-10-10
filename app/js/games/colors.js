@@ -623,7 +623,7 @@ export default {
     if (!myTurn || picking?.step !== s.step) picking = null;
     if (!myTurn) called = false;
     // 出す手。宣言（詳細設定）を押してあれば call を付ける
-    const play = (m) => o.onMove(called && s.rules?.call ? { ...m, call: true } : m);
+    const play = (m) => { const mm = called && s.rules?.call ? { ...m, call: true } : m; called = false; o.onMove(mm); }; // 出したら宣言は消す（スキップで続けて番が来ても持ち越さない）
 
     root.innerHTML = '';
     root.className = 'board cc';

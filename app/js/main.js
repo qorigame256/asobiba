@@ -674,8 +674,11 @@ function rulesOf(gameId, rules) {
 // 将棋の王手の知らせ（check。19回目の案。初めての人向けの手助けなので、いつも成ると同じ）も抽選しない。
 // 将棋のトライ（try）・神経衰弱の色もそろえる（color）・お絵描き当てのインクの量（ink）は遊び方なので抽選する。
 // マンカラの最初の石の数（stones。長さ）・間違い探しの違いの数（diffs。難しさ）も抽選しない（2026-10-10 の Codex の点検で見つかった。本人承認）。
+// タイピング早打ちのお題の種類（kind。長さ）も抽選しない（2026-10-10 の Codex の点検。本人承認）。
+// 例外: ぴったりストップの時計の見える時間（peek）・神経衰弱の札が見える時間（show）は、時間でもむずかしさのルールとして抽選する（各 rules で決めた）。
+// 弾幕回避の残機・ウミガメの質問の数・2色爆弾と記憶リレーのライフも抽選する（2026-10-10 本人承認）。
 // マルバツ・将棋の size は盤の大きさでなく遊び方（スーパー・消える・5五将棋）なので抽選する。
-const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check', 'mallet', 'stones', 'diffs']);
+const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check', 'mallet', 'stones', 'diffs', 'kind']);
 const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
 
 // 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、エアホッケーは 2〜3。ほかは2）

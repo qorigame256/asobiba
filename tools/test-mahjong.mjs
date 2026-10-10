@@ -278,6 +278,17 @@ if (!TESTDATA || !fs.existsSync(TESTDATA)) {
     s.h.furitenTemp[1] = false;
     s.h.furitenRiichi[1] = true;
     check('リーチ後に見送ったあともフリテン', T.waitView(s, 1).furiten === true);
+    // ロンするか選んでいる間（見送る前）は、openClaim が先に立てた furitenTemp があってもフリテンと出さない（2026-10-10 の Codex の点検）
+    s.h.furitenRiichi[1] = false;
+    s.h.furitenTemp[1] = true;
+    s.h.phase = 'claim';
+    s.h.claim = { from: 0, id: 4 * 4, src: 'discard', options: { 1: ['ron'] }, responses: {} };
+    check('ロンを選べる間はフリテンと出さない', T.waitView(s, 1).furiten === false);
+    s.h.claim.options = { 1: ['pon'] };
+    check('ロンを選べない（役なしなど）ならフリテン', T.waitView(s, 1).furiten === true);
+    s.h.phase = 'play';
+    s.h.claim = null;
+    s.h.furitenTemp[1] = false;
     s.h.furitenRiichi[1] = false;
     // 14枚（自分の番で切る前）: 選んでいなければ出さない。選んだ牌を切ったときの待ちを出す
     check('14枚で牌を選ぶ前は出さない', T.waitView(s, 0).kinds.length === 0);

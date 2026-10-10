@@ -32,6 +32,13 @@ const isWolf = (s, p) => s.wolves.includes(p);
 const wolfN = (s) => (s.peace ? s.wolfCount : s.wolves.length);
 
 export default {
+  // 自分のお題の下に出す説明。似た言葉では、ウルフかどうかで文を変えない（変えると自分の役が分かる。2026-10-10 の Codex の点検で見つかった）
+  tipText(s, me) {
+    const many = wolfN(s) > 1 ? '2人' : '1人';
+    return (!s.blank ? `みんなと同じお題か、${many}だけ違うお題（ウルフ）かは分かりません`
+      : isWolf(s, me) ? 'あなたがウルフです。みんなの話からお題を探り、話を合わせて隠れましょう' : `お題が書かれていない人（ウルフ）が${many}まぎれています`)
+      + (s.peace && !(s.blank && isWolf(s, me)) ? '（ウルフがいない回もあります）' : '');
+  },
   id: 'wordwolf',
   name: 'ワードウルフ',
   icon: '🐺',
@@ -206,10 +213,7 @@ export default {
     if (me !== null && s.phase !== 'end') {
       const card = document.createElement('div');
       card.className = 'ww-card';
-      const many = wolfN(s) > 1 ? '2人' : '1人';
-      const tip = (!s.blank ? `みんなと同じお題か、${many}だけ違うお題（ウルフ）かは分かりません`
-        : isWolf(s, me) ? 'あなたがウルフです。みんなの話からお題を探り、話を合わせて隠れましょう' : `お題が書かれていない人（ウルフ）が${many}まぎれています`)
-        + (s.peace && !isWolf(s, me) ? '（ウルフがいない回もあります）' : '');
+      const tip = this.tipText(s, me);
       card.innerHTML = `<div class="um-label">あなたのお題</div><div class="ww-word">${esc(this.wordOf(s, me))}</div><small>${tip}</small>`;
       root.append(card);
     }

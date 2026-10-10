@@ -5712,4 +5712,64 @@ for (const id of GAME_ORDER) {
   assert.ok(Array.isArray(h) && h.length >= 1 && h.length <= 4 && h.every((x) => typeof x === 'string' && x), `${id} の遊び方（1〜4行）`);
 }
 
+// 2026-10-10 の Codex の点検（bd1687a..7032e05）で見つかったもの
+{
+  // ワードウルフ: ウルフがいない回ありでは、似た言葉ならウルフにも村人にも同じ説明を出す（出し分けると役が分かる）
+  const WW = GAMES.wordwolf;
+  let found = 0;
+  for (let seed = 0; seed < 40; seed++) {
+    const s = WW.init(5, seed, { rules: { peace: true } });
+    if (!s.wolves.length) continue;
+    found++;
+    const tips = new Set(Array.from({ length: 5 }, (_, p) => WW.tipText(s, p)));
+    assert.equal(tips.size, 1, 'ワードウルフ: 似た言葉ではウルフと村人の説明が同じ');
+    assert.ok([...tips][0].includes('ウルフがいない回もあります'), 'ウルフがいない回もあると全員に出す');
+    const b = WW.init(5, seed, { rules: { peace: true, wolfWord: 'blank' } });
+    if (b.wolves.length) assert.ok(WW.tipText(b, b.wolves[0]).startsWith('あなたがウルフです'), 'お題なしのウルフは自分がウルフだと分かる');
+  }
+  assert.ok(found > 10, 'ウルフがいる回を試せた');
+
+  // 海戦: ソナーとサルボを一緒に使うとき、CPU はまだ撃っていないマスの当たり外れを見ない
+  // 先手のソナーの結果「4 と 9 のうち船は1マス」（4 は船・9 は海）。どちらを先に選んでも、残りの1マスもソナーの中から選ぶ
+  const KS = GAMES.kaisen;
+  const fleet5 = [[0, 0, false], [2, 0, false], [4, 0, false], [6, 0, false], [8, 0, true]];
+  let st = KS.init({ rules: { sonar: 'on', salvo: 'on' } });
+  st = KS.apply(KS.apply(st, { t: 'place', ships: fleet5 }), { t: 'place', ships: fleet5 });
+  st = { ...st, sonar: [{ c: 0, cells: [4, 9], n: 1 }, null] };
+  for (let i = 0; i < 40; i++) {
+    const m = KS.cpu(st, 0, { cpu: 'normal' });
+    assert.ok(m?.t === 'salvo' && m.cells.includes(4) && m.cells.includes(9), '海戦: サルボの CPU はソナーの中を撃ち切る ' + JSON.stringify(m));
+  }
+
+  // 弾幕回避: 部屋を出た人が2回当たっていた席（残機3）を CPU が引き継いだら、次に当たった1回で脱落する
+  // 同じ種・同じ乱数で、残機1の新しい席の CPU が最初に当たる時刻と比べる
+  const D = GAMES.danmaku;
+  const realNow = performance.now;
+  const realRandom = Math.random;
+  let clock = 5e9;
+  performance.now = () => clock;
+  try {
+    const firstHit = (p, rules, hits) => {
+      let a = 12345;
+      Math.random = () => ((a = (a * 1103515245 + 12345) % 2147483648) / 2147483648);
+      clock = 5e9;
+      let s = D.apply(D.init(2, 77, { rules: { level: 'hard', time: '120', ...rules } }), { p: -1, t: 'go' });
+      s = { ...s, hits: s.hits.map((v, q) => (q === p ? hits : v)) };
+      for (let t = 0; t < 1300; t++) {
+        clock += 100;
+        const m = D.cpu(s, p);
+        if (m) return m;
+      }
+      return null;
+    };
+    const one = firstHit(0, { lives: 1 }, 0);
+    const taken = firstHit(1, { lives: 3 }, 2);
+    assert.ok(one?.t === 'hit', '弾幕回避: CPU が当たる場面を作れた ' + JSON.stringify(one));
+    assert.deepEqual(taken, { t: 'hit', ms: one.ms, k: 2 }, '弾幕回避: 引き継いだ CPU は最初の当たりをすぐ送る（残機を数え直さない）');
+  } finally {
+    performance.now = realNow;
+    Math.random = realRandom;
+  }
+}
+
 console.log('ALL OK');

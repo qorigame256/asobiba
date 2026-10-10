@@ -507,9 +507,9 @@ export default {
     const now = Math.min(since(goKey(s)) / 1000, durOf(s));
     let c = sims.get(key);
     if (!c) {
-      // slowAt: スローを使った実の秒（部屋を出た人がもう使っていたら、それを引き継ぐ）
+      // slowAt: スローを使った実の秒（部屋を出た人がもう使っていたら、それを引き継ぐ）。hitAt も、部屋を出た人がもう当たった回数ぶんを埋めておく（送るのはその先だけ）
       const used = slowOn(s) && s.slow[p] !== null ? s.slow[p] / 1000 : null;
-      c = { x: 0.2 + Math.random() * 0.6, y: H - 0.15, vx: 0, vy: 0, timer: 0, sec: now, dead: null, hitAt: [], safe: 0, slowAt: used, view: tracker(bulletsOf(s)) };
+      c = { x: 0.2 + Math.random() * 0.6, y: H - 0.15, vx: 0, vy: 0, timer: 0, sec: now, dead: null, hitAt: Array(s.hits[p]).fill(0), safe: 0, slowAt: used, view: tracker(bulletsOf(s)) };
       sims.set(key, c);
       if (sims.size > 40) sims.delete(sims.keys().next().value);
     }

@@ -188,7 +188,9 @@ function waitView(s, p, sel = null) {
   const h = s.h;
   if (h.hands[p].length % 3 === 1 || h.riichi[p]) {
     const kinds = h.waits[p].slice();
-    return { kinds, furiten: kinds.length > 0 && furiten(s, p), after: false };
+    // ロンするか選んでいる間は、見送る前なのでフリテンと出さない（openClaim が先に furitenTemp を立てている）
+    const canRon = h.phase === 'claim' && !!h.claim?.options?.[p]?.includes('ron');
+    return { kinds, furiten: kinds.length > 0 && !canRon && furiten(s, p), after: false };
   }
   if (sel === null || !h.hands[p].includes(sel)) return { kinds: [], furiten: false, after: false };
   const t = { ...s, h: { ...h, hands: h.hands.slice() } };

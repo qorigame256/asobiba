@@ -204,7 +204,7 @@ function kaisenCpu(s, p, rules, pending = null) {
   const sn = s.sonar?.[p];
   if (sn) {
     const zone = sn.cells.filter((i) => !shot[i]);
-    const rest = sn.n - sn.cells.filter((i) => shot[i] && opp[i] >= 0).length;
+    const rest = sn.n - sn.cells.filter((i) => s.shots[p][i] && opp[i] >= 0).length; // 実際に撃ったマスだけ（pending の当たり外れは見ない）
     if (rest > 0 && zone.length) untried = zone;
     else if (zone.length && zone.length < untried.length) untried = untried.filter((i) => !zone.includes(i));
   }
@@ -495,7 +495,7 @@ function sea(s, owner, { title, showShips, onShoot = null, small = false, aiming
 function renderPlace(root, s, o) {
   const N = sizeOf(s);
   const SHIPS = fleetOf(N);
-  const key = `${N}:${s.count}:${s.turn}`; // 一辺も入れる（海の広さを変えた次の対局で、前の途中の並べ方を使わないように）
+  const key = `${N}:${s.count}:${s.turn}:${!!s.apart}`; // 一辺と「船をくっつけない」も入れる（変えた次の対局で、前の並べ方を使わないように）
   if (plc.key !== key) plc = { key, ships: SHIPS.map(() => null), sel: 0, vert: false };
   const draw = () => game.render(root, s, o);
   const all = () => (plc.ships.every(Boolean) ? plc.ships : null);
