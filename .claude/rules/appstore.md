@@ -23,6 +23,9 @@ paths:
 - 手元で見る: `node tools/build-native.mjs` → `.claude/launch.json` の `native-www`（http://localhost:8090/）。
   アプリ版として見るには、存在しない住所（/app-check など）を開き、`index.html` の頭に `<base href="http://localhost:8090/">` と `window.Capacitor={isNativePlatform:()=>true}` を足したものを `document.write` する。
   iframe の srcdoc で真似ると住所が about:srcdoc になり、部屋を作るところで `history.replaceState` が止まる（本物のアプリでは起きない）。
+- **Mac で組み立てて iPhone に入れる手順は `docs/Mac作業手順.md`**（Mac の Claude もこれを読んで進める）。2026-10-17 の本人の決定（Claude が問いを出した）:
+  Mac へは GitHub から `git clone` で持っていく（Claude の推奨どおり。zip は使わない）。**Mac の Claude はその場で何を直してもよい**（Claude は Windows を正にした一方通行を推したが、本人が選んだ）。
+  直した分はその日のうちにパッチの束で Windows へ戻し、Windows の Claude が中身を確かめてから取り込んで GitHub へ送る（Mac からは送らない。戻し方は Claude の判断）。
 - `npm audit` は `@capacitor/cli` の中の uuid を指摘する（組み立ての道具の中だけで、アプリには入らない。直すと版が下がるので触っていない）。
 
 ## Apple・Google の決まりで効くもの（2026-10-17 に調べた。審査ガイドラインは 2026-06-08 版）
@@ -41,4 +44,4 @@ paths:
 ## まだ作っていないもの（順番は未定）
 
 広告（AdMob・ATT）・「広告を消す」の課金・汚い言葉のふるいと通報と連絡先・コネクトフォーの改名・プライバシーポリシーのページ・アプリならではの良さ（4.2）・アイコンと起動画面・
-Mac で組み立てて iPhone に入れる手順書（スキル mac-device-check の §2 を骨組みにする。Mac に Node.js が要る）・商標の確認（ワードウルフ・ヨット・みんなの対戦）。
+商標の確認（ワードウルフ・ヨット・みんなの対戦）。
