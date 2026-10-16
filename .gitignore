@@ -2,3 +2,7 @@
 # 公開しない手元だけの書き置き（元のアプリの名前・場所など）
 CLAUDE.local.md
 tools/local-paths.json
+
+# App Store 版（native/）: 道具と組み立てた中身は作り直せるので入れない
+native/node_modules/
+native/www/

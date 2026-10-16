@@ -17,7 +17,7 @@
 // (gameId, round) が同じなら order と seed も同じ。order や seed を変えるときは必ず round を進める。
 // rules = ゲームごとの詳細設定（待合室でホストだけが変えられる）。prev = 前の対局の順位（大富豪のカード交換など）。
 //   carry = 次の対局へ持ち越す前の結果（人の id → 順位）。ホストが対局を始めるときに prev へ並べ替える。
-// 部屋を作る・同じ画面で遊ぶのは持ち主の端末だけ（owner.js）。ほかの人は招待された部屋に入るだけ。
+// 部屋を作る・同じ画面で遊ぶのは持ち主の端末だけ（owner.js）。ほかの人は招待された部屋に入るだけ。App Store 版はだれでも作れる（canHost）。
 // banned = ホストが退出させた人の id。あいさつが来ても入れず、もう一度「退出」を送る。
 // streak = 連勝（2026-10-06 本人の決定）。{ key: ゲームと顔ぶれ, counted: 数え終えた対局, wins: 人の id → 連勝の数 }。ホストだけが数えて全員へ送る。
 // tally = 部屋の成績表（2026-10-06 本人の決定）。{ games: 決着した対局の数, wins: 人の id → 勝った回数, preds: 人の id → 勝敗予想が当たった回数（10回目に足した。無いこともある）,
@@ -33,6 +33,7 @@ import { GAMES, GAME_ORDER } from './games/index.js';
 import { connectRoom } from './net.js';
 import { esc } from './games/util.js';
 import { isOwner, unlockOwner, forgetOwner } from './owner.js';
+import { IS_APP, WEB_URL } from './platform.js';
 import { play, endSound, isMuted, setMuted, isVoice, speak } from './sound.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 見間違えやすい I O 0 1 を除く
@@ -942,8 +943,11 @@ function gameOrder() {
   return [...GAME_ORDER.filter((id) => favs.includes(id)), ...GAME_ORDER.filter((id) => !favs.includes(id))];
 }
 
+// 部屋を作る・同じ画面で遊ぶことができる端末か。App Store 版は合言葉なしでだれでも（2026-10-17 本人の決定。外さないと審査の人が試せない）
+const canHost = () => IS_APP || isOwner();
+
 function renderHome() {
-  const owner = isOwner();
+  const owner = canHost();
   el('home-lead').textContent = owner
     ? '部屋を作って、友だちに招待リンクを送れば対戦できます。'
     : '招待された部屋コードを入れて参加してください。部屋を作れるのは、このサイトの持ち主だけです。';
@@ -1001,6 +1005,7 @@ function renderHome() {
 function renderOwnerBox(owner) {
   const box = el('owner-box');
   box.innerHTML = '';
+  if (IS_APP) return; // アプリ版には合言葉が無い
   if (owner) {
     const p = document.createElement('p');
     p.className = 'owner-note';
@@ -2130,14 +2135,14 @@ function rematch() {
 }
 
 function startLocal(gameId) {
-  if (!isOwner()) return;
+  if (!canHost()) return;
   S = { mode: 'local', gameId, round: 1, first: 0, seed: randomSeed(), order: null, cpus: 0, moves: [], members: [], names: {}, rules: {}, prev: null, carry: null, pick: null };
   enterPlay();
 }
 
 // 毎フレーム動くゲームを同じ画面で（mode = 'cpu' | 'two'）
 function startLive(gameId, mode) {
-  if (!isOwner()) return;
+  if (!canHost()) return;
   S = { mode: 'local', live: mode, gameId, round: 1, first: 0, seed: 0, order: null, cpus: 0, moves: [], members: [], names: {}, rules: {}, prev: null, carry: null, pick: null };
   enterPlay();
 }
@@ -2172,7 +2177,7 @@ function stopLive() {
 }
 
 function createRoom(gameId) {
-  if (!isOwner()) return;
+  if (!canHost()) return;
   const myId = newId();
   S = {
     mode: 'online', code: randomString(CODE_LEN, CODE_CHARS), myId, isHost: true,
@@ -2299,7 +2304,7 @@ function qrSvg(qrcode, text) {
 }
 
 function inviteUrl() {
-  const url = new URL(location.href);
+  const url = new URL(IS_APP ? WEB_URL : location.href);
   url.search = '?room=' + S.code;
   url.hash = '';
   return url.href;

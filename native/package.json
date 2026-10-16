@@ -1,0 +1,19 @@
+{
+  "name": "asobiba-native",
+  "private": true,
+  "version": "0.0.0",
+  "description": "App Store 版の殻（Capacitor）。中身は ../app/ を tools/build-native.mjs で www/ へ写して使う",
+  "scripts": {
+    "build": "node ../tools/build-native.mjs",
+    "sync": "node ../tools/build-native.mjs && cap sync ios"
+  },
+  "dependencies": {
+    "@capacitor/core": "8.5.2",
+    "@capacitor/ios": "8.5.2",
+    "mqtt": "5.10.1",
+    "qrcode-generator": "1.4.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.2"
+  }
+}

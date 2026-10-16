@@ -1,10 +1,11 @@
 // 手元の確認用の簡易サーバー。公開するフォルダ app/ を http://localhost:8080/ で見せる。
 // 使い方: node tools/serve.js   （ポートを変えるなら node tools/serve.js 3000）
+// App Store 版の組み立てた中身を見るなら node tools/serve.js 8090 native/www （先に node tools/build-native.mjs）
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = path.resolve(__dirname, '..', 'app');
+const ROOT = path.resolve(__dirname, '..', process.argv[3] || 'app');
 const PORT = Number(process.argv[2]) || Number(process.env.PORT) || 8080; // PORT は起動設定 game-auto が空いている番号を渡す
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
