@@ -245,7 +245,7 @@ function wideCpu(s, rules) {
 
 export default {
   id: 'connect4',
-  name: 'コネクトフォー',
+  name: '四目並べ',
   icon: '🔴',
   desc: '上からコマを落として、4つ並べたら勝ち。オンラインでは自分のコマを下から抜けるポップアウトや、3〜4人で広い盤も選べる',
   ready: true,
