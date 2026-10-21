@@ -34,6 +34,7 @@ import { connectRoom } from './net.js';
 import { esc } from './games/util.js';
 import { isOwner, unlockOwner, forgetOwner } from './owner.js';
 import { IS_APP, WEB_URL } from './platform.js';
+import { isBad, mask, BAD_TEXT_NOTE } from './filter.js';
 import { play, endSound, isMuted, setMuted, isVoice, speak } from './sound.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 見間違えやすい I O 0 1 を除く
@@ -61,12 +62,12 @@ const isPrefix = (a, b) => a.length <= b.length && a.every((m, i) => sameMove(m,
 const cleanName = (t) => String(t ?? '').replace(/\s+/g, ' ').trim().slice(0, 10);
 
 function myName() {
-  try { return cleanName(localStorage.getItem(NAME_KEY)); } catch { return ''; }
+  try { const n = cleanName(localStorage.getItem(NAME_KEY)); return isBad(n) ? '' : n; } catch { return ''; } // 前に覚えた名前が一覧に当たるときも使わない
 }
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName', 'cpuAuto', 'rps'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName', 'cpuAuto', 'rps', 'hidden'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -106,8 +107,9 @@ function cpuName(id) {
 function nameOf(id) {
   if (!id) return '（空席）';
   if (isCpu(id)) return cpuName(id);
+  if (S.hidden?.includes(id)) return HIDDEN_NAME; // 「この人を隠す」を押した人
   const mark = S.marks?.[id];
-  return (MARKS.includes(mark) && mark ? mark + ' ' : '') + (S.names?.[id] || 'ゲスト') + (S.beg?.includes(id) ? ' 🔰' : '');
+  return (MARKS.includes(mark) && mark ? mark + ' ' : '') + (S.names?.[id] ? mask(S.names[id]) : 'ゲスト') + (S.beg?.includes(id) ? ' 🔰' : '');
 }
 
 /* ---------- 自分のマーク（2026-10-07 本人の決定）: ホーム画面で名前の前に付ける絵文字を選び、部屋のみんなにも見せる ---------- */
@@ -415,6 +417,7 @@ function roomNamePanel() {
   input.placeholder = '例: 〇〇家の対戦部屋';
   input.value = S.roomName ?? '';
   input.onchange = () => {
+    if (isBad(cleanRoomName(input.value))) { toast(BAD_TEXT_NOTE); input.value = S.roomName ?? ''; return; }
     S.roomName = cleanRoomName(input.value);
     saveRoom();
     sendState();
@@ -876,7 +879,7 @@ const REACT_GAP_MS = 1200; // 1人がこれより短い間に送った分は出�
 const reactAt = {}; // 人の id → 最後に出した時刻
 
 function showReaction(id, w) {
-  if (!Number.isInteger(w) || !REACTIONS[w]) return;
+  if (!Number.isInteger(w) || !REACTIONS[w] || S?.hidden?.includes(id)) return;
   const now = Date.now();
   if (now - (reactAt[id] ?? 0) < REACT_GAP_MS) return;
   reactAt[id] = now;
@@ -1359,6 +1362,7 @@ function renderPage() {
       cpu: S.order.map(cpuControlled),
       sub: S.order.map((id) => !isCpu(id) && cpuControlled(id)), // 部屋を出た人の席を CPU が代わりに打っている
       away: S.order.map((id) => !isCpu(id) && S.members.includes(id) && !alive(id)),
+      hidden: S.order.map((id) => !!S.hidden?.includes(id)), // 「この人を隠す」を押した人の席（その人の言葉と絵を出さない）
       // 見た目だけの中身（ほかの人の位置など）を送りっぱなしにする。届いた側ではゲームの onStream が受け取る
       stream: (d) => { if (S.mode === 'online') send({ type: 'stream', gameId: S.gameId, round: S.round, d }, 0); },
     });
@@ -1909,7 +1913,7 @@ function rulesPanel(game) {
 
 // ホストだけに出す「部屋の人」。知らない人が入ってきたら退出させられる
 function appendMemberPanel() {
-  if (S.mode !== 'online' || !S.isHost) return;
+  if (S.mode !== 'online') return;
   const others = S.members.filter((id) => id !== S.myId);
   if (!others.length) return;
   const det = document.createElement('details');
@@ -1923,11 +1927,27 @@ function appendMemberPanel() {
     const row = document.createElement('div');
     row.className = 'member-row';
     const name = document.createElement('span');
-    name.textContent = nameOf(id);
-    row.append(name, makeButton('退出させる', () => kick(id), 'ghost small'));
+    const hidden = !!S.hidden?.includes(id);
+    name.textContent = hidden ? `${S.names?.[id] ? mask(S.names[id]) : 'ゲスト'}（隠しています）` : nameOf(id);
+    const acts = document.createElement('span');
+    acts.className = 'member-acts';
+    acts.append(makeButton(hidden ? '隠すのをやめる' : 'この人を隠す', () => toggleHidden(id), 'ghost small'), makeButton('通報', () => openAbout(id), 'ghost small'));
+    if (S.isHost) acts.append(makeButton('退出させる', () => kick(id), 'ghost small'));
+    row.append(name, acts);
     det.append(row);
   }
   ctl().append(det);
+}
+
+// 「この人を隠す」（2026-10-21 本人の決定。App Store の審査 1.2 の締め出し）: 自分の画面だけ、その人の名前を伏せ、言葉・絵・リアクションを出さない。
+// Claude の判断: 部屋ごとに覚える（S.hidden。人の id は部屋に入るたびに変わるので、部屋をまたいでは覚えられない）。ほかの人には送らない。
+const HIDDEN_NAME = '🙈 隠した人';
+function toggleHidden(id) {
+  const was = !!S.hidden?.includes(id);
+  S.hidden = was ? S.hidden.filter((x) => x !== id) : [...(S.hidden ?? []), id];
+  saveRoom();
+  toast(was ? '隠すのをやめました' : 'この人の名前・言葉・絵を、あなたの画面だけで隠しました');
+  render();
 }
 
 function kick(id) {
@@ -2006,7 +2026,13 @@ function pushMove(move) {
   render();
 }
 
+// 汚い言葉のふるい（2026-10-21 本人の決定）: 人が自由に打った言葉は送る前に確かめる。ゲームの id → [手の中の欄, 一覧の種類]。
+// 受け取った側では、各ゲームが filter.js の shown で当たった所を隠す（ゲームを足したら両方に足す）。
+const FREE_TEXT = { umigame: [['text', 'sentence'], ['q', 'sentence'], ['a', 'sentence']], oekaki: [['text', 'short']], wordwolf: [['text', 'short']] };
+const badText = (move) => (FREE_TEXT[S.gameId] ?? []).some(([k, kind]) => typeof move?.[k] === 'string' && isBad(move[k], kind));
+
 function onBoardMove(move) {
+  if (badText(move)) { toast(BAD_TEXT_NOTE); return; }
   const game = GAMES[S.gameId];
   const st = replay(S);
   if (!st || !canMove(game, st, game.result(st))) return;
@@ -2326,6 +2352,57 @@ async function shareInvite() {
 
 function closeInvite() { document.querySelector('.invite-pop')?.remove(); }
 
+/* ---------- お問い合わせ・通報・ライセンス（2026-10-21 本人の決定。App Store の審査 1.2 の連絡先と通報） ---------- */
+// 窓口はこのアプリ用の Google フォーム（本人が作る。作ったら CONTACT_URL に入れる）。メールアドレスは出さない。
+// 通報（部屋の人の一覧の「通報」）は、部屋コードと相手の名前を写せる形で出してからフォームを開く（相手の名前をフォームの住所に入れて送らない）。
+const CONTACT_URL = '';
+const LICENSES = [
+  ['mqtt.js（通信）', 'Copyright (c) 2015-2016 MQTT.js contributors'],
+  ['qrcode-generator（招待の QR コード）', 'Copyright (c) 2009 Kazuhiko Arase'],
+  ['inappropriate-words-ja（言葉のふるいの一覧のもと）', 'Copyright (c) 2020 K Hashimoto'],
+];
+const MIT_TEXT = `Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.`;
+
+function openAbout(reportId = null) {
+  closeInvite();
+  const report = reportId !== null && S?.mode === 'online';
+  const who = report ? (S.names?.[reportId] ? mask(S.names[reportId]) : 'ゲスト') : '';
+  const pop = document.createElement('div');
+  pop.className = 'invite-pop about-pop';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-modal', 'true');
+  pop.setAttribute('aria-label', report ? '通報する' : 'お問い合わせ・通報');
+  const form = CONTACT_URL
+    ? `<a class="btn primary about-form" href="${esc(CONTACT_URL)}" target="_blank" rel="noopener">フォームを開く</a>`
+    : '<p class="invite-note">（窓口のフォームを準備しています）</p>';
+  pop.innerHTML = `<div class="invite-box about-box">
+    <div class="invite-title">${report ? '通報する' : 'お問い合わせ・通報'}</div>
+    ${report
+    ? `<p class="invite-note">いやな名前・言葉・絵があったら、フォームで知らせてください。フォームには、下の部屋コードと名前を書いてください。</p>
+      <div class="invite-code">部屋コード <strong>${esc(S.code)}</strong></div>
+      <div class="invite-code about-who">名前 <strong>${esc(who)}</strong></div>
+      <p class="invite-note">すぐに見えなくしたいときは、部屋の人の一覧の「この人を隠す」を押してください（あなたの画面だけで隠れます）。</p>`
+    : '<p class="invite-note">不具合・ご意見と、いやな名前・言葉・絵の通報は、下のフォームで受け付けています。部屋の中からは、部屋の人の一覧の「通報」でも送れます。</p>'}
+    ${form}
+    ${report ? '' : `<details class="about-license"><summary>ライセンス</summary>${LICENSES.map(([n, c]) => `<p><b>${esc(n)}</b><br>MIT License<br>${esc(c)}</p>`).join('')}<pre>${esc(MIT_TEXT)}</pre></details>`}
+  </div>`;
+  const row = document.createElement('div');
+  row.className = 'invite-actions';
+  if (report) row.append(makeButton('部屋コードと名前を写す', async () => {
+    try { await navigator.clipboard.writeText(`部屋コード: ${S.code} / 名前: ${who}`); toast('写しました。フォームに貼り付けてください'); } catch { toast('写せませんでした。手で書き写してください'); }
+  }, 'secondary'));
+  row.append(makeButton('閉じる', closeInvite, 'secondary'));
+  pop.querySelector('.about-box').append(row);
+  pop.addEventListener('click', (e) => { if (e.target === pop) closeInvite(); });
+  pop.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeInvite(); });
+  document.body.append(pop);
+  row.querySelector('button')?.focus();
+}
+
 function invite() {
   closeInvite();
   const href = inviteUrl();
@@ -2528,7 +2605,7 @@ function adoptState(msg) {
   S.tally = msg.tally && Number.isInteger(msg.tally.games) && msg.tally.wins && typeof msg.tally.wins === 'object' ? msg.tally : null;
   S.stay = msg.stay === true;
   S.cpuAuto = msg.cpuAuto === true;
-  S.roomName = cleanRoomName(msg.roomName);
+  S.roomName = mask(cleanRoomName(msg.roomName));
   S.marks = msg.marks && typeof msg.marks === 'object' ? Object.fromEntries(Object.entries(msg.marks).filter(([id, m]) => typeof id === 'string' && MARKS.includes(m) && m)) : {};
   const tm = msg.timer;
   S.timer = tm && typeof tm.key === 'string' && Number.isFinite(tm.start) && (tm.end === null || Number.isFinite(tm.end)) ? { key: tm.key, start: tm.start, end: tm.end } : null;
@@ -2746,8 +2823,12 @@ renderHome();
 const nameInput = el('my-name');
 nameInput.value = myName();
 nameInput.addEventListener('input', () => {
-  try { localStorage.setItem(NAME_KEY, cleanName(nameInput.value)); } catch { /* 無視 */ }
+  const bad = isBad(cleanName(nameInput.value)); // 一覧に当たる間は覚えない（打っている途中で当たることもあるので、知らせるのは欄を離れたとき）
+  nameInput.classList.toggle('bad', bad);
+  if (!bad) try { localStorage.setItem(NAME_KEY, cleanName(nameInput.value)); } catch { /* 無視 */ }
 });
+nameInput.addEventListener('change', () => { if (isBad(cleanName(nameInput.value))) toast(BAD_TEXT_NOTE); });
+el('btn-about').onclick = () => openAbout();
 // 自分のマークを選ぶボタン（ホーム画面）
 function renderMarkPick() {
   const box = el('mark-pick');

@@ -24,6 +24,7 @@ const NONE = -1; // 投票の「ウルフはいない」
 import { mulberry32, esc } from './util.js';
 import { kana, timeBar, since } from './party.js';
 import { PAIRS } from './wordwolf-data.js';
+import { shown } from '../filter.js';
 
 const MAX_TEXT = 30;
 const clone = (s) => ({ ...s, votes: { ...s.votes }, history: s.history.slice() });
@@ -267,7 +268,7 @@ export default {
           note('ウルフがみんなのお題を当てれば、ウルフの逆転勝ちです');
         }
       } else {
-        note(`ウルフの答え: 「<b>${esc(s.guess)}</b>」（みんなのお題は「${esc(s.words[0])}」）`);
+        note(`ウルフの答え: 「<b>${esc(shown(s.guess, o.hidden?.[s.accused]))}</b>」（みんなのお題は「${esc(s.words[0])}」）`);
         if (me !== null && !isWolf(s, me)) {
           note('意味が同じなら「正解」にしてください（先に押した人の判定になります）');
           row(button('ちがう', 'secondary', () => o.onMove({ t: 'judge', ok: false })), button('正解', 'primary', () => o.onMove({ t: 'judge', ok: true })));
@@ -284,7 +285,7 @@ export default {
       else if (s.accused === null) note(s.history.length ? (s.wolves.length ? '票が並んで決まらず、ウルフが逃げ切りました' : '票が並んで決まりませんでした') : '');
       else if (!isWolf(s, s.accused)) note(`いちばん票が多かったのは ${b(s.accused)}… ウルフではありませんでした`);
       else if (s.guess === null) note(`${b(s.accused)}がウルフでした！ みんなのお題は当てられませんでした`);
-      else note(`ウルフの答え「${esc(s.guess)}」は${s.winSide === 'wolf' ? '<span class="pt-ok">正解</span>。逆転です！' : '<span class="pt-ng">はずれ</span>でした'}`);
+      else note(`ウルフの答え「${esc(shown(s.guess, o.hidden?.[s.accused]))}」は${s.winSide === 'wolf' ? '<span class="pt-ok">正解</span>。逆転です！' : '<span class="pt-ng">はずれ</span>でした'}`);
       for (const h of s.history) {
         const counts = {};
         for (const to of Object.values(h.votes)) counts[to] = (counts[to] ?? 0) + 1;

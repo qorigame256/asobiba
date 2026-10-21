@@ -27,6 +27,7 @@
 import { mulberry32, shuffle, esc } from './util.js';
 import { kana, scoreChips, leaders, ranks, winnersText, timeBar, since } from './party.js';
 import { TOPICS } from './oekaki-data.js';
+import { shown } from '../filter.js';
 
 export const COLORS = ['#2d2a26', '#e04b3c', '#2f6fb3', '#3a9d55', '#e8a913', '#8a5a35', '#ffffff'];
 const COLOR_NAMES = ['黒', '赤', '青', '緑', '黄', '茶', '消しゴム'];
@@ -330,7 +331,7 @@ export default {
       }
     }
 
-    paint(s);
+    paint(s, !!o.hidden?.[s.turn]); // 「この人を隠す」を押した人の絵は描かない
     // インクの量（詳細設定）: 残りを帯で見せる（当てる人にも見える）
     ui.ink.hidden = res || s.ink === undefined || s.phase !== 'draw';
     if (!ui.ink.hidden) {
@@ -349,7 +350,7 @@ export default {
     for (const c of s.chat.slice(-30)) {
       const line = document.createElement('div');
       line.className = c.ok ? 'ok' : '';
-      line.innerHTML = c.ok ? `🎉 <b>${esc(nameP(c.p))}</b>が正解！` : `<b>${esc(nameP(c.p))}</b>: ${esc(c.text)}`;
+      line.innerHTML = c.ok ? `🎉 <b>${esc(nameP(c.p))}</b>が正解！` : `<b>${esc(nameP(c.p))}</b>: ${esc(shown(c.text, o.hidden?.[c.p]))}`;
       log.append(line);
     }
     if (!s.chat.length && !res) log.innerHTML = '<div class="um-muted">ここに答えが出ます</div>';
@@ -550,14 +551,17 @@ function strokeTo(ctx, pts, c, w) {
 }
 
 // 局面の線を描く。消した・戻したとき（ver が変わったとき）だけ全部描き直し、ふだんは新しい線だけ足す
-function paint(s) {
+// hide = 描いている人を「この人を隠す」で隠している（白いままにする。隠すのをやめたら全部描き直す）
+function paint(s, hide = false) {
   const ctx = ui.ctx;
-  if (ui.ver !== s.ver || ui.drawn > s.strokes.length) {
+  if (ui.ver !== s.ver || ui.drawn > s.strokes.length || ui.hid !== hide) {
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, ui.canvas.width, ui.canvas.height);
     ui.drawn = 0;
     ui.ver = s.ver;
+    ui.hid = hide;
   }
+  if (hide) { ui.drawn = s.strokes.length; return; }
   for (const st of s.strokes.slice(ui.drawn)) strokeTo(ctx, decode(st.d), st.c, st.w);
   ui.drawn = s.strokes.length;
 }

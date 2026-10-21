@@ -7,6 +7,7 @@
 //     / { p, t: 'reply', r: 'yes' | 'no' | 'na' | 'part'（部分的にはい。詳細設定があるときだけ） } / { p, t: 'judge', ok } / { p, t: 'reveal' }
 
 import { esc } from './util.js';
+import { shown } from '../filter.js';
 import { PUZZLES } from './umigame-data.js';
 
 // 詳細設定「質問の数」（2026-10-06 本人の決定。最初は「決めない」＝今までどおり）: 20回・30回にすると、全員で合わせてその回数まで質問できる
@@ -219,14 +220,14 @@ export default {
     if (s.puzzle) {
       const card = document.createElement('div');
       card.className = 'um-card';
-      card.innerHTML = `<div class="um-label">問題</div><p class="um-q">${esc(s.puzzle.q)}</p>`;
+      card.innerHTML = `<div class="um-label">問題</div><p class="um-q">${esc(shown(s.puzzle.q, o.hidden?.[s.setter], 'sentence'))}</p>`;
       top.append(card);
       if (isSetter || s.phase === 'end') {
         const ans = document.createElement('details');
         ans.className = 'um-answer';
         ans.open = s.phase === 'end' || !!ui.answerOpen;
         ans.ontoggle = () => { ui.answerOpen = ans.open; };
-        ans.innerHTML = `<summary>${s.phase === 'end' ? '真相' : '答え（あなただけに見えます）'}</summary><p>${esc(s.puzzle.a)}</p>`;
+        ans.innerHTML = `<summary>${s.phase === 'end' ? '真相' : '答え（あなただけに見えます）'}</summary><p>${esc(shown(s.puzzle.a, o.hidden?.[s.setter], 'sentence'))}</p>`;
         top.append(ans);
       }
     }
@@ -238,8 +239,8 @@ export default {
         const li = document.createElement('li');
         const who = `<b>${esc(nameP(e.p))}</b>`;
         if (e.kind === 'pass') li.innerHTML = `${who}: <span class="um-muted">パス</span>`;
-        else if (e.kind === 'ask') li.innerHTML = `${who}: ${esc(e.text)} <span class="um-r ${e.r}">${REPLY[e.r]}</span>`;
-        else li.innerHTML = `${who}（解答）: ${esc(e.text)} <span class="um-r ${e.ok ? 'yes' : 'no'}">${e.ok ? '正解！' : 'ちがいます'}</span>`;
+        else if (e.kind === 'ask') li.innerHTML = `${who}: ${esc(shown(e.text, o.hidden?.[e.p], 'sentence'))} <span class="um-r ${e.r}">${REPLY[e.r]}</span>`;
+        else li.innerHTML = `${who}（解答）: ${esc(shown(e.text, o.hidden?.[e.p], 'sentence'))} <span class="um-r ${e.ok ? 'yes' : 'no'}">${e.ok ? '正解！' : 'ちがいます'}</span>`;
         list.append(li);
       }
       top.append(list);
@@ -255,7 +256,7 @@ export default {
     if (s.pending) {
       const p = document.createElement('p');
       p.className = 'um-pending';
-      p.innerHTML = `<b>${esc(nameP(s.pending.p))}</b>${s.pending.kind === 'guess' ? 'の解答' : 'の質問'}: ${esc(s.pending.text)}`;
+      p.innerHTML = `<b>${esc(nameP(s.pending.p))}</b>${s.pending.kind === 'guess' ? 'の解答' : 'の質問'}: ${esc(shown(s.pending.text, o.hidden?.[s.pending.p], 'sentence'))}`;
       top.append(p);
     }
     ui.top.replaceWith(top);
