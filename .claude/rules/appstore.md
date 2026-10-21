@@ -26,6 +26,13 @@ paths:
 - **Mac で組み立てて iPhone に入れる手順は `docs/Mac作業手順.md`**（Mac の Claude もこれを読んで進める）。2026-10-17 の本人の決定（Claude が問いを出した）:
   Mac へは GitHub から `git clone` で持っていく（Claude の推奨どおり。zip は使わない）。**Mac の Claude はその場で何を直してもよい**（Claude は Windows を正にした一方通行を推したが、本人が選んだ）。
   直した分はその日のうちにパッチの束で Windows へ戻し、Windows の Claude が中身を確かめてから取り込んで GitHub へ送る（Mac からは送らない。戻し方は Claude の判断）。
+- **広告と追跡の作り（2026-10-22。本人の決定は CLAUDE.md の「App Store 版」の 3）**: 部品は `@capacitor-community/admob` 8.2.1（MIT。Google Mobile Ads SDK 13.11.0 を中に持つ。版は Capacitor と同じく固定）。
+  中身は `app/js/ads.js` の1か所（帯の出し入れ・数える・全画面広告・追跡の許可）。`main.js` は画面が替わるときに `setBanner`、結果の画面で `countFinished`、結果のボタンで `afterAd` を呼ぶだけ。
+  部品は `window.Capacitor.registerPlugin('AdMob')` で呼ぶ。殻の用意する `window.Capacitor` には `registerPlugin` が無いので、`build-native.mjs` が `@capacitor/core` の `capacitor.js` を `vendor/` に写して `main.js` より先に読ませる。
+  広告の番号は `ads.js` の `AD_UNITS` と `Info.plist` の `GADApplicationIdentifier`（いまは Google の試験用。本物の番号は本人の AdMob 登録のあと）。`Info.plist` の `SKAdNetworkItems` は Google の一覧（2026-10-22 に50件を写した。Google が足したら写し直す）。
+  帯は殻の本物の画面に描かれウェブの画面を押し下げないので、知らされた高さを `--ad-h` に入れて `main` の下の余白とお知らせ（toast）の位置に足す（**画面の下に貼り付くものを足したら `--ad-h` も足す**）。
+  部品は帯を隠すと高さ0、戻すと高さを知らせ、読み込みに失敗すると帯を消す（戻すときに断られたら作り直す）。同意の画面（UMP）は、配信が日本だけなので AdMob に文面を作っていないが、配る国を増やしたときのために起動のときに聞いている。
+  ブラウザで確かめるときは、上の「アプリ版として見る」の `<base>` のあとに、`window.webkit.messageHandlers.bridge` と `window.Capacitor` の `PluginHeaders`・`nativePromise`・`nativeCallback` を真似た偽物を置く（本物の `capacitor.js` がそれを通して呼ぶので、つなぎ方まで確かめられる）。
 - `npm audit` は `@capacitor/cli` の中の uuid を指摘する（組み立ての道具の中だけで、アプリには入らない。直すと版が下がるので触っていない）。
 
 ## Apple・Google の決まりで効くもの（2026-10-17 に調べた。審査ガイドラインは 2026-06-08 版）
@@ -56,5 +63,5 @@ paths:
 
 （汚い言葉のふるい・通報・連絡先は 2026-10-21 に作った。作りは CLAUDE.md の「汚い言葉のふるいの作り」と room.md。窓口の Google フォームは本人が作り、できたら `main.js` の `CONTACT_URL` に入れる）
 2. ~~プライバシーポリシーのページ（5.1.1）~~ 2026-10-21 に作った（`app/privacy.html`。決定は CLAUDE.md の「App Store 版」の 11）。審査に出す前に、第1条の【要決定：氏名】を本名にし、App Store Connect のプライバシーの欄（どの情報を集めるかの申告）をこのページと食い違わないように書く
-3. 広告と追跡（テスト用の広告の番号で作る。本物の番号は本人の AdMob 登録のあと）
+3. ~~広告と追跡~~ 2026-10-22 に試験用の広告の番号で作った（上の「広告と追跡の作り」）。本物の番号は本人の AdMob 登録のあとに `ads.js` の `AD_UNITS` と `Info.plist` へ入れる
 4. 「広告を消す」の課金（値段は保留） 5. アプリならではの良さ（4.2） 6. アイコンと起動画面。

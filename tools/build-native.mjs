@@ -47,6 +47,22 @@ for (const [file, from, to, body, license] of VENDOR) {
   }
 }
 
+// Capacitor の道具（registerPlugin。広告の部品を呼ぶのに使う。app/js/ads.js）を main.js より先に読む。
+// 殻が先に用意する window.Capacitor には registerPlugin が無く、組み立ての道具（バンドラー）を使わないアプリはこのファイルで足す。
+{
+  const target = path.join(out, 'index.html');
+  const from = '<script type="module" src="js/main.js"></script>';
+  const text = fs.readFileSync(target, 'utf8');
+  const count = text.split(from).length - 1;
+  if (count !== 1) fail(`index.html の中の ${from} が ${count} か所（1か所のはず）`);
+  fs.writeFileSync(target, text.replace(from, '<script src="vendor/capacitor.js"></script>\n  ' + from));
+  for (const [p, name] of [['@capacitor/core/dist/capacitor.js', 'capacitor.js'], ['@capacitor/core/LICENSE', 'capacitor-LICENSE.txt']]) {
+    const f = path.join(mods, p);
+    if (!fs.existsSync(f)) fail(`${p} がありません（native/ で npm install を走らせたか）`);
+    fs.copyFileSync(f, path.join(vendorDir, name));
+  }
+}
+
 // 外から読む所が残っていないか（説明の中の住所は除くため、src= と '...' の形だけ見る）
 const left = [];
 (function walk(dir) {
@@ -61,4 +77,4 @@ const left = [];
 })(out);
 if (left.length) fail('まだ外から読んでいる所があります: ' + left.join(', '));
 
-console.log('native/www/ を作りました（外から読む道具 ' + VENDOR.length + ' 個を同梱に替えた）');
+console.log('native/www/ を作りました（外から読む道具 ' + VENDOR.length + ' 個を同梱に替え、Capacitor の道具を足した）');

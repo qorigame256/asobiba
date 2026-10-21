@@ -8,6 +8,7 @@
     "sync": "node ../tools/build-native.mjs && cap sync ios"
   },
   "dependencies": {
+    "@capacitor-community/admob": "8.2.1",
     "@capacitor/core": "8.5.2",
     "@capacitor/ios": "8.5.2",
     "mqtt": "5.10.1",

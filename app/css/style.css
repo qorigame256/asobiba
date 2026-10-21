@@ -30,7 +30,8 @@ body {
 main {
   max-width: 760px;
   margin: 0 auto;
-  padding: 16px 16px calc(32px + env(safe-area-inset-bottom));
+  /* --ad-h は App Store 版の帯広告の高さ（ads.js が入れる。ウェブ版は 0） */
+  padding: 16px 16px calc(32px + var(--ad-h, 0px) + env(safe-area-inset-bottom));
 }
 
 h1 { font-size: 1.6rem; margin: 8px 0 4px; }
@@ -1014,7 +1015,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(24px + env(safe-area-inset-bottom));
+  bottom: calc(24px + var(--ad-h, 0px) + env(safe-area-inset-bottom));
   transform: translate(-50%, 20px);
   background: var(--ink);
   color: #fff;

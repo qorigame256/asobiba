@@ -36,6 +36,7 @@ import { isOwner, unlockOwner, forgetOwner } from './owner.js';
 import { IS_APP, WEB_URL } from './platform.js';
 import { isBad, mask, BAD_TEXT_NOTE } from './filter.js';
 import { play, endSound, isMuted, setMuted, isVoice, speak } from './sound.js';
+import { initAds, setAdsMuted, setBanner, countFinished, beforeLeaveResult } from './ads.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 見間違えやすい I O 0 1 を除く
 const CODE_LEN = 5;
@@ -775,6 +776,8 @@ function showScreen(name) {
   window.scrollTo(0, 0);
   keepAwake(name === 'play');
   if (name !== 'play') renderNetBanner();
+  resultUp = false;
+  if (name === 'home') setBanner(true); // 対局の画面（待合室を含む）は render が決める
 }
 
 /* ---------- 画面を暗くしない（2026-10-07 の18回目の案）: 対局の画面（待合室も）にいる間は、スマホの画面が勝手に消えないようにする ---------- */
@@ -1302,6 +1305,8 @@ function setTurnTitle(on) {
 const myTurnNow = (game, st, res) => S.mode === 'online' && !game.realtime && canMove(game, st, res) && (!game.multi || game.turn(st) === myPlayer());
 
 function renderPage() {
+  resultUp = false;
+  setBanner(false); // 待合室だけ下で出し直す（出し入れは ads.js がまとめるので、続けて呼んでもちらつかない）
   const focused = document.activeElement;
   const keepControls = focused?.tagName === 'SELECT' && el('controls').contains(focused);
   controlsEl = keepControls ? document.createElement('div') : el('controls');
@@ -1327,6 +1332,7 @@ function renderPage() {
   if (!waiting && S.mode === 'online' && !S.order) {
     if (game.multi) renderLobby(game); else renderBoardLobby(game);
     appendMemberPanel();
+    setBanner(true);
     return;
   }
   const st = waiting ? null : replay(S);
@@ -1345,6 +1351,8 @@ function renderPage() {
   greetStart(res);
   if (res) countResult(res);
   if (res) countLocal(game, res);
+  if (res) countFinished(`${S.code ?? 'local'}:${resultKey()}`);
+  resultUp = !!res;
   status.innerHTML = statusHtml(game, st, res);
   if (res && !game.multi && renderReview(game, st)) return; // ふりかえりで途中の局面を見ている
 
@@ -1377,8 +1385,8 @@ function renderPage() {
 
   if (res) {
     if (!game.multi) appendReview(game);
-    controls.append(makeButton('もう一回', rematch));
-    if (S.mode === 'online' && S.isHost) controls.append(makeButton('メンバーを変える', () => newRound(S.gameId, { lobby: true }), 'secondary'));
+    controls.append(makeButton('もう一回', () => afterAd(rematch)));
+    if (S.mode === 'online' && S.isHost) controls.append(makeButton('メンバーを変える', () => afterAd(() => newRound(S.gameId, { lobby: true })), 'secondary'));
   } else if (S.mode === 'local' && S.moves.length) {
     controls.append(
       makeButton('1手戻す', () => { S.moves.pop(); render(); }, 'secondary'),
@@ -1394,6 +1402,18 @@ function renderPage() {
   appendMemberPanel();
   scheduleCpu(game, st, res);
   scheduleReferee(game, st, res);
+}
+
+/* ---------- 全画面広告（App Store 版だけ。2026-10-22 本人の決定）: 結果の画面のボタンを押したとき、押した動きの前に出す ---------- */
+// 出すかどうか（3局ごと・3分あける）と、帯広告の出し入れは ads.js が決める。ウェブ版ではすぐ押した動きに進む。
+// 広告を見ている間にほかの人が次の対局を始めていたら、押した動きはしない（もう一回を2回進めないように）。
+// エアホッケーは結果が main.js を通らないので数えない・出さない。
+let resultUp = false; // いま結果の画面を出している
+const resultKey = () => (S ? `${S.gameId}:${S.round}:${S.seed}` : null);
+async function afterAd(action) {
+  const key = resultKey();
+  if (!(await beforeLeaveResult())) return;
+  if (S && resultKey() === key) action();
 }
 
 /* ---------- 盤の向きを変える（2026-10-07。20回目の案。Claude の案から本人が推奨どおり選んだ） ---------- */
@@ -2361,6 +2381,11 @@ const LICENSES = [
   ['mqtt.js（通信）', 'Copyright (c) 2015-2016 MQTT.js contributors'],
   ['qrcode-generator（招待の QR コード）', 'Copyright (c) 2009 Kazuhiko Arase'],
   ['inappropriate-words-ja（言葉のふるいの一覧のもと）', 'Copyright (c) 2020 K Hashimoto'],
+  // アプリ版の殻と広告の部品（native/package.json）。ウェブ版には入っていないので出さない
+  ...(IS_APP ? [
+    ['Capacitor（アプリの殻）', 'Copyright (c) 2017-present Drifty Co.'],
+    ['@capacitor-community/admob（広告）', 'Copyright (c) 2021 Capacitor Community'],
+  ] : []),
 ];
 const MIT_TEXT = `Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
@@ -2855,7 +2880,11 @@ el('join-form').addEventListener('submit', (e) => {
   e.preventDefault();
   joinRoom(el('join-code').value);
 });
-el('btn-leave').onclick = () => leave();
+el('btn-leave').onclick = async () => {
+  if (!resultUp) { leave(); return; }
+  if (S?.mode === 'online' && !confirm('部屋を出ますか？')) return; // 広告を見たあとで「やめる」にならないよう、先に聞く
+  if (await beforeLeaveResult()) leave(false); // 出ると答えたので、広告の間に次の対局が始まっていても出る
+};
 el('btn-invite').onclick = invite;
 el('btn-howto').onclick = () => {
   const box = el('howto');
@@ -2870,6 +2899,7 @@ function showSoundBtn() {
 }
 soundBtn.onclick = () => {
   setMuted(!isMuted());
+  setAdsMuted(isMuted());
   showSoundBtn();
   if (!isMuted()) play('pop');
 };
@@ -2888,6 +2918,8 @@ begBtn.onclick = () => {
 };
 document.body.classList.toggle('beginner', beginner);
 showBeginnerBtn();
+
+initAds({ muted: isMuted() });
 
 const roomParam = new URL(location.href).searchParams.get('room');
 if (!(roomParam && joinRoom(roomParam))) {
