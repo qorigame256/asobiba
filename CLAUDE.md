@@ -197,6 +197,10 @@
      **書類・コード・自動確認の中では今も「コネクトフォー」（id は `connect4`）と呼んでいる**。画面に出る名前だけ `connect4.js` の `name` で変えた（書き換える所が多いため。Claude の判断）。
   9. アプリにする道具は **Capacitor**（ウェブの中身をそのまま iPhone アプリの殻に入れる定番の道具）。
   10. 置き場所は**このリポジトリの `native/`**。ゲームの中身は `app/` の1か所のままで、アプリ版との違いは `app/js/platform.js` の切り替えで持つ。
+  11. **プライバシーポリシー**（2026-10-21。Claude の推奨を7つとも承認）: `app/privacy.html` の1枚をウェブ版とアプリ版で共通にし、アプリ版だけの所（広告・課金）に印を付ける。ホームの下の段と「お問い合わせ・通報・ライセンス」の小窓から開く。
+     運営者はクイズアプリと同じ形（氏名は審査に出す直前に入れる。公開のページなので、入れた時点で GitHub にも載る）。開示などの請求の窓口はクイズアプリと同じメールアドレス。
+     独自の利用規約は作らず Apple の標準の規約を使う。最初に開いたときの同意の画面は作らない。13歳未満は対象にしない。
+     **送る情報・端末に残す情報・外部のサービスを足したり変えたりしたら、`app/privacy.html` も直して末尾の最終更新日を進める。**
 
 ## Claude が決めた作り（本人に説明済み・変えるなら本人に確認）
 
@@ -263,6 +267,7 @@
 - `app/js/net.js` … 通信（MQTT）。自分が送ったものも中継サーバーから戻ってくるので、ふつうの受け取りに回さない（通信の遅れを測る `onSelf` にだけ渡す）。
 - `app/js/owner.js` … 持ち主の端末かどうか（合言葉の確認）。
 - `app/js/platform.js` … App Store 版かどうかの切り替え（`IS_APP`）。
+- `app/privacy.html` … プライバシーポリシー（ウェブ版・アプリ版で共通。https://qorigame256.github.io/asobiba/privacy.html を App Store Connect にも登録する）。
 - `app/js/filter.js` … 汚い言葉のふるい。一覧は `app/js/ngwords.js`（`tools/make-ngwords.mjs` が別のアプリの一覧から作る。手で直さない。元の場所は Git に入れない `tools/local-paths.json` の `ngwordsDir`）。
 - `native/` … App Store 版の殻（Capacitor。`native/ios/` が Xcode のプロジェクト）。`tools/build-native.mjs` が `app/` を `native/www/` へ写して組み立てる（作りは `.claude/rules/appstore.md`）。
 - `app/js/sound.js` … 効果音を鳴らす（オン・オフ、勝ち負けの音の選び方）。音のファイルは `app/sounds/<名前>.wav`。

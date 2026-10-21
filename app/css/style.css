@@ -1332,7 +1332,8 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .member-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); color: var(--ink); flex-wrap: wrap; }
 .member-acts { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
 /* お問い合わせ・通報・ライセンス（2026-10-21） */
-.home-foot { margin-top: 18px; text-align: center; }
+.home-foot { margin-top: 18px; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.home-foot a { text-decoration: none; }
 .about-form { display: inline-block; margin: 8px 0; text-decoration: none; }
 .about-who strong { letter-spacing: 0; font-size: 1rem; overflow-wrap: anywhere; }
 .about-license { margin-top: 10px; text-align: left; font-size: .8rem; color: var(--muted); }

@@ -2355,6 +2355,7 @@ function closeInvite() { document.querySelector('.invite-pop')?.remove(); }
 /* ---------- お問い合わせ・通報・ライセンス（2026-10-21 本人の決定。App Store の審査 1.2 の連絡先と通報） ---------- */
 // 窓口はこのアプリ用の Google フォーム（本人が作る。作ったら CONTACT_URL に入れる）。メールアドレスは出さない。
 // 通報（部屋の人の一覧の「通報」）は、部屋コードと相手の名前を写せる形で出してからフォームを開く（相手の名前をフォームの住所に入れて送らない）。
+// フォームに Google へのログインが要る項目（ファイルを付けるなど）を作ったら、app/privacy.html の第2条も直す（いまは「ご記入いただいた内容だけ」と書いている）。
 const CONTACT_URL = '';
 const LICENSES = [
   ['mqtt.js（通信）', 'Copyright (c) 2015-2016 MQTT.js contributors'],
@@ -2388,6 +2389,7 @@ function openAbout(reportId = null) {
       <p class="invite-note">すぐに見えなくしたいときは、部屋の人の一覧の「この人を隠す」を押してください（あなたの画面だけで隠れます）。</p>`
     : '<p class="invite-note">不具合・ご意見と、いやな名前・言葉・絵の通報は、下のフォームで受け付けています。部屋の中からは、部屋の人の一覧の「通報」でも送れます。</p>'}
     ${form}
+    ${report ? '' : '<p class="invite-note"><a href="privacy.html">プライバシーポリシー</a></p>'}
     ${report ? '' : `<details class="about-license"><summary>ライセンス</summary>${LICENSES.map(([n, c]) => `<p><b>${esc(n)}</b><br>MIT License<br>${esc(c)}</p>`).join('')}<pre>${esc(MIT_TEXT)}</pre></details>`}
   </div>`;
   const row = document.createElement('div');
