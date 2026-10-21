@@ -110,7 +110,7 @@ npx cap sync ios
 
 ### 3.2 切り分け: 署名なしでコンパイルだけ通す
 
-iPhone も Apple ID も使わずに「道具の側の問題」か「このアプリの側の問題」かを分ける段（スキル mac-device-check の §2.2）。初回は部品（capacitor-swift-pm 8.5.2 と、広告の部品が使う Google Mobile Ads SDK 13.11.0・User Messaging Platform）を GitHub から取ってくるのでネットが要り、数分かかる。
+iPhone も Apple ID も使わずに「道具の側の問題」か「このアプリの側の問題」かを分ける段（スキル mac-device-check の §2.2）。初回は部品（capacitor-swift-pm 8.5.2 と、広告の部品が使う Google Mobile Ads SDK 13.11.0・User Messaging Platform、課金の部品 @capgo/native-purchases 8.8.2）を GitHub から取ってくるのでネットが要り、数分かかる。
 
 ```bash
 cd ~/asobiba/native/ios/App
@@ -174,6 +174,15 @@ open ~/asobiba/native/ios/App/App.xcodeproj
 | 11 | 全画面広告 | マルバツの「この画面で2人で」で3局打ち、3局目の結果で「もう一回」を押す | 画面いっぱいの試験用の広告が出る（1局目・2局目のあとは出ない）。広告を閉じると新しい対局が始まる。続けて3局打っても、前の広告から3分たつまでは出ない |
 | 12 | 広告の音 | 上の 🔊 を 🔇 にしてから 11 をもう一度（3分あけてから） | 動画の広告でも音が出ない（静止画の広告だったら「見ていない」でよい） |
 | 8 | 画面を暗くしない | iPhone の 設定 > 画面表示と明るさ > 自動ロック を **30秒** にする（終わったら元に戻す）。低電力モードは切る。部屋を作って待合室のまま触らず1分待つ。比べるためにホーム画面でも1分待つ | 待合室では画面が消えない。ホーム画面では30秒で暗くなる |
+| 13 | 広告を消す（値段） | 下の「課金を試す準備」をしてから Xcode の ▶ で入れ直す。ホームの一番下の「広告を消す」を押す | 小窓に「広告を消す（¥300）」のように値段の付いたボタンが出る（準備をしていないと「いまは買えません」） |
+| 14 | 広告を消す（買う） | 13 のボタンを押し、出てきた iPhone の買う画面で買う | 「広告を消しました」と出て、ホームの帯広告がすぐ消える。ボタンが「広告なし（購入済み）」になる。待合室でも帯が出ず、3局打って「もう一回」でも全画面広告が出ない |
+| 15 | 開き直し・復元 | アプリを上へはらって閉じてから開く。次に Xcode の メニュー Debug > StoreKit > Manage Transactions で買い物を消し（Delete）、アプリの「広告を消す」→「購入を復元」 | 開き直しても広告が出ず、追跡の許可の画面も出ない。買い物を消したあとの復元では「記録が見つかりませんでした」と出る（消した買い物は戻らないのが正しい） |
+
+**課金を試す準備**（Mac の Claude か本人。有料の Apple Developer Program に入る前は、App Store Connect に商品を登録できないので、Xcode の中だけの試験の店を使う。**無料の Apple ID でこの試験ができるかは未確認**）:
+Xcode のメニュー File > New > File from Template… →「StoreKit Configuration File」→ 名前 `NoAds.storekit`、置き場所は `native/ios/App/`、「Sync this file with an app in App Store Connect」は**外す**。
+開いた画面の左下の ＋ →「Add Non-Consumable In-App Purchase」→ Reference Name `広告を消す`・Product ID `io.github.qorigame256.asobiba.removeads`（`app/js/ads.js` の `NO_ADS_ID` と同じ）・Price `300`。
+最後に Xcode の上の「App」（スキーム）> Edit Scheme… > Run > Options > StoreKit Configuration で `NoAds.storekit` を選ぶ。
+`NoAds.storekit` とスキームの変更は**記録に入れない**（試験用。値段は本物ではない）。
 
 うまく動かなかったときに中を覗く道具（任意。画面の名前は版で違うことがある）: iPhone の 設定 > アプリ > Safari > 詳細 > Web インスペクタ をオン、
 Mac の Safari の 設定 > 詳細 >「Web デベロッパ用の機能を表示」をオン → Safari のメニュー「開発」> iPhone の名前 > アプリの画面。

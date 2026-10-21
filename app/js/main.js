@@ -36,7 +36,7 @@ import { isOwner, unlockOwner, forgetOwner } from './owner.js';
 import { IS_APP, WEB_URL } from './platform.js';
 import { isBad, mask, BAD_TEXT_NOTE } from './filter.js';
 import { play, endSound, isMuted, setMuted, isVoice, speak } from './sound.js';
-import { initAds, setAdsMuted, setBanner, countFinished, beforeLeaveResult } from './ads.js';
+import { initAds, setAdsMuted, setBanner, countFinished, beforeLeaveResult, canBuyNoAds, hasNoAds, onNoAdsChange, noAdsPrice, buyNoAds, restoreNoAds } from './ads.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 見間違えやすい I O 0 1 を除く
 const CODE_LEN = 5;
@@ -2385,6 +2385,8 @@ const LICENSES = [
   ...(IS_APP ? [
     ['Capacitor（アプリの殻）', 'Copyright (c) 2017-present Drifty Co.'],
     ['@capacitor-community/admob（広告）', 'Copyright (c) 2021 Capacitor Community'],
+    // MPL-2.0 は、使った部品のソースの置き場所を知らせることが条件（ファイル単位のライセンス。部品には手を入れていない）
+    ['@capgo/native-purchases（広告を消す）', 'Martin Donadieu（Capgo）', 'Mozilla Public License 2.0（https://mozilla.org/MPL/2.0/）。ソース: https://github.com/Cap-go/capacitor-native-purchases'],
   ] : []),
 ];
 const MIT_TEXT = `Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
@@ -2415,7 +2417,7 @@ function openAbout(reportId = null) {
     : '<p class="invite-note">不具合・ご意見と、いやな名前・言葉・絵の通報は、下のフォームで受け付けています。部屋の中からは、部屋の人の一覧の「通報」でも送れます。</p>'}
     ${form}
     ${report ? '' : '<p class="invite-note"><a href="privacy.html">プライバシーポリシー</a></p>'}
-    ${report ? '' : `<details class="about-license"><summary>ライセンス</summary>${LICENSES.map(([n, c]) => `<p><b>${esc(n)}</b><br>MIT License<br>${esc(c)}</p>`).join('')}<pre>${esc(MIT_TEXT)}</pre></details>`}
+    ${report ? '' : `<details class="about-license"><summary>ライセンス</summary>${LICENSES.map(([n, c, lic]) => `<p><b>${esc(n)}</b><br>${esc(lic ?? 'MIT License')}<br>${esc(c)}</p>`).join('')}<pre>${esc(MIT_TEXT)}</pre></details>`}
   </div>`;
   const row = document.createElement('div');
   row.className = 'invite-actions';
@@ -2428,6 +2430,69 @@ function openAbout(reportId = null) {
   pop.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeInvite(); });
   document.body.append(pop);
   row.querySelector('button')?.focus();
+}
+
+/* ---------- 広告を消す（App Store 版だけ。2026-10-22 本人の決定。買う・復元は ads.js） ---------- */
+// ホームの下の段のボタンから開く小窓。値段・「買う」・「購入を復元」（Apple の決まりで必須）を出す。対局の画面には出さない（本人の選択）。
+const noAdsBtn = el('btn-noads');
+function showNoAdsBtn() {
+  noAdsBtn.hidden = !canBuyNoAds();
+  noAdsBtn.textContent = hasNoAds() ? '広告なし（購入済み）' : '広告を消す';
+}
+onNoAdsChange(showNoAdsBtn);
+
+function openNoAds() {
+  closeInvite();
+  const pop = document.createElement('div');
+  pop.className = 'invite-pop noads-pop';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-modal', 'true');
+  pop.setAttribute('aria-label', '広告を消す');
+  const box = document.createElement('div');
+  box.className = 'invite-box';
+  pop.append(box);
+  let busy = false;
+  const draw = (price) => {
+    const owned = hasNoAds();
+    box.innerHTML = `<div class="invite-title">広告を消す</div>
+      <p class="invite-note">${owned
+    ? '購入済みです。ホーム画面・待合室の帯の広告と、対局のあとの全画面の広告は出ません。'
+    : '1回の買い切りで、ホーム画面・待合室の帯の広告と、対局のあとの全画面の広告が出なくなります。ゲームの勝ち負けには関わりません。'}</p>`;
+    if (!owned) {
+      const buy = makeButton(price === undefined ? '値段を確かめています…' : price ? `広告を消す（${price}）` : 'いまは買えません', async () => {
+        if (busy) return;
+        busy = true;
+        buy.disabled = true;
+        const r = await buyNoAds();
+        busy = false;
+        if (r === 'bought') { toast('広告を消しました。ありがとうございます'); draw(price); return; }
+        buy.disabled = false;
+        if (r === 'pending') toast('承認を待っています。承認されると広告が消えます');
+        else if (r === 'error') toast('買えませんでした。時間をおいてもう一度お試しください');
+      }, 'primary noads-buy');
+      buy.disabled = !price;
+      box.append(buy);
+      if (price === null) box.insertAdjacentHTML('beforeend', '<p class="invite-note">App Store につながらないか、準備中です。時間をおいてもう一度開いてください。</p>');
+    }
+    const row = document.createElement('div');
+    row.className = 'invite-actions';
+    if (!owned) row.append(makeButton('購入を復元', async () => {
+      if (busy) return;
+      busy = true;
+      const ok = await restoreNoAds();
+      busy = false;
+      toast(ok ? '購入を復元しました。広告は出ません' : 'この Apple ID で「広告を消す」を買った記録が見つかりませんでした');
+      if (ok) draw(price);
+    }, 'secondary'));
+    row.append(makeButton('閉じる', closeInvite, 'secondary'));
+    box.append(row);
+  };
+  draw(undefined);
+  pop.addEventListener('click', (e) => { if (e.target === pop) closeInvite(); });
+  pop.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeInvite(); });
+  document.body.append(pop);
+  box.querySelector('.invite-actions button')?.focus();
+  if (!hasNoAds()) noAdsPrice().then((p) => { if (pop.isConnected) draw(p); });
 }
 
 function invite() {
@@ -2856,6 +2921,7 @@ nameInput.addEventListener('input', () => {
 });
 nameInput.addEventListener('change', () => { if (isBad(cleanName(nameInput.value))) toast(BAD_TEXT_NOTE); });
 el('btn-about').onclick = () => openAbout();
+noAdsBtn.onclick = openNoAds;
 // 自分のマークを選ぶボタン（ホーム画面）
 function renderMarkPick() {
   const box = el('mark-pick');
@@ -2920,6 +2986,7 @@ document.body.classList.toggle('beginner', beginner);
 showBeginnerBtn();
 
 initAds({ muted: isMuted() });
+showNoAdsBtn(); // 課金の部品があるかは initAds の始めで分かる（買ってあるかは分かりしだい onNoAdsChange で直す）
 
 const roomParam = new URL(location.href).searchParams.get('room');
 if (!(roomParam && joinRoom(roomParam))) {

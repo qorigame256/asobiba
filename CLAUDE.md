@@ -270,7 +270,7 @@
 - `app/js/net.js` … 通信（MQTT）。自分が送ったものも中継サーバーから戻ってくるので、ふつうの受け取りに回さない（通信の遅れを測る `onSelf` にだけ渡す）。
 - `app/js/owner.js` … 持ち主の端末かどうか（合言葉の確認）。
 - `app/js/platform.js` … App Store 版かどうかの切り替え（`IS_APP`）。
-- `app/js/ads.js` … App Store 版の広告と追跡の許可（ウェブ版では何もしない。作りは `.claude/rules/appstore.md`）。
+- `app/js/ads.js` … App Store 版の広告と追跡の許可と「広告を消す」の課金（ウェブ版では何もしない。作りは `.claude/rules/appstore.md`）。
 - `app/privacy.html` … プライバシーポリシー（ウェブ版・アプリ版で共通。https://qorigame256.github.io/asobiba/privacy.html を App Store Connect にも登録する）。
 - `app/js/filter.js` … 汚い言葉のふるい。一覧は `app/js/ngwords.js`（`tools/make-ngwords.mjs` が別のアプリの一覧から作る。手で直さない。元の場所は Git に入れない `tools/local-paths.json` の `ngwordsDir`）。
 - `native/` … App Store 版の殻（Capacitor。`native/ios/` が Xcode のプロジェクト）。`tools/build-native.mjs` が `app/` を `native/www/` へ写して組み立てる（作りは `.claude/rules/appstore.md`）。

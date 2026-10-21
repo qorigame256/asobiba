@@ -1335,6 +1335,7 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 /* お問い合わせ・通報・ライセンス（2026-10-21） */
 .home-foot { margin-top: 18px; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .home-foot a { text-decoration: none; }
+.noads-buy { width: 100%; margin-top: 6px; }
 .about-form { display: inline-block; margin: 8px 0; text-decoration: none; }
 .about-who strong { letter-spacing: 0; font-size: 1rem; overflow-wrap: anywhere; }
 .about-license { margin-top: 10px; text-align: left; font-size: .8rem; color: var(--muted); }

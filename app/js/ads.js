@@ -6,6 +6,9 @@
 //   「もう一回」「メンバーを変える」「← ホーム」を押したときに出し、閉じてから押した動きを進める（beforeLeaveResult）。
 // - 追跡の許可（ATT）: 初めて開いたときに iPhone の画面だけを出す（先に説明を出さない。本人の選択）。2回目からは iPhone が聞かない。
 // 数えた回数・時刻は覚えない（アプリを閉じると0から。端末に残す情報を増やさないため。Claude の判断）。
+// 「広告を消す」（買い切り1つ。2026-10-22 本人の決定）: 買った人には帯も全画面も出さない。課金の部品は @capgo/native-purchases（Apple と直接やり取りし、
+// 外のサーバーを通らない）。買ったかどうかは起動のたびに iPhone に聞き（Apple の記録。返金されたものは入らない）、端末には覚えない。
+// 起動のときに買ってあれば、広告の仕組みも追跡の許可の画面も動かさない（広告を出さないので聞く理由が無い）。
 
 import { IS_APP } from './platform.js';
 
@@ -15,11 +18,18 @@ export const AD_UNITS = {
   banner: 'ca-app-pub-3940256099942544/2435281174', // 試験用（帯・幅に合わせる形）
   interstitial: 'ca-app-pub-3940256099942544/4411468910', // 試験用（全画面）
 };
+// 「広告を消す」の商品の番号（App Store Connect に「非消耗型」で同じ番号を登録する。Claude の判断。登録したら変えられない）
+export const NO_ADS_ID = 'io.github.qorigame256.asobiba.removeads';
 const AD_EVERY = 3;
 const AD_GAP_MS = 3 * 60 * 1000;
 const SHOW_WAIT_MS = 120 * 1000; // 全画面広告が閉じた知らせが来なくても、この時間がたったら先へ進める（止まったままにしない）
 
 let admob = null; // 部品（使えないときは null のまま。ウェブ版・部品の無い殻）
+let shop = null; // 課金の部品（使えないときは null）
+let noAds = false; // 「広告を消す」を買ってある
+let started = false; // 広告の仕組みを動かし始めた（買ってある人には動かさない）
+let muted0 = false;
+const noAdsWatchers = new Set();
 let ready = false; // 広告を頼んでよい
 let wantBanner = false;
 let bannerOn = false; // 帯広告を出している（隠しているときは false）
@@ -35,6 +45,41 @@ const setInset = (px) => document.documentElement.style.setProperty('--ad-h', px
 // 起動のときに1回。帯広告を出したい状態なら、用意ができしだい出す
 export async function initAds({ muted }) {
   if (!IS_APP) return;
+  muted0 = !!muted;
+  const cap = window.Capacitor;
+  shop = cap?.isPluginAvailable?.('NativePurchases') ? cap.registerPlugin?.('NativePurchases') ?? null : null;
+  if (shop) {
+    // 家族の承認（承認を待つ買い物）が通ったとき・返金されたときに iPhone から届く
+    try { await shop.addListener('transactionUpdated', () => { checkNoAds(); }); } catch { /* 届かなくても起動のたびに確かめる */ }
+    await checkNoAds();
+  }
+  if (!noAds) await startAds();
+}
+
+// 「広告を消す」を買ってあるか、iPhone に聞き直す（いまも使える買い物だけ。返金されたものは入らない）
+async function checkNoAds() {
+  if (!shop) return noAds;
+  try {
+    const { purchases = [] } = await shop.getPurchases({ productType: 'inapp', onlyCurrentEntitlements: true });
+    setNoAds(purchases.some((p) => p.productIdentifier === NO_ADS_ID && !p.revocationDate));
+  } catch (e) {
+    console.warn('買ったかどうかを確かめられませんでした', e); // そのときは前のまま
+  }
+  return noAds;
+}
+
+function setNoAds(on) {
+  if (noAds === !!on) return;
+  noAds = !!on;
+  if (noAds) syncBanner(); // 帯を隠す（全画面は beforeLeaveResult が出さない）
+  else if (!started) startAds(); // 返金で戻ったとき
+  else syncBanner();
+  noAdsWatchers.forEach((fn) => fn(noAds));
+}
+
+async function startAds() {
+  if (started) return;
+  started = true;
   admob = window.Capacitor?.registerPlugin?.('AdMob') ?? null;
   if (!admob || !window.Capacitor?.isPluginAvailable?.('AdMob')) { admob = null; return; }
   try {
@@ -55,7 +100,7 @@ export async function initAds({ muted }) {
       if (t?.status === 'notDetermined') await admob.requestTrackingAuthorization();
     } catch { /* 聞けなくても広告は出せる */ }
     await admob.initialize();
-    await admob.setApplicationMuted({ muted: !!muted });
+    await admob.setApplicationMuted({ muted: muted0 });
     ready = true;
     prepare();
     syncBanner();
@@ -66,6 +111,7 @@ export async function initAds({ muted }) {
 
 // 🔇 のときは広告の音も消す
 export function setAdsMuted(muted) {
+  muted0 = !!muted;
   if (ready) admob.setApplicationMuted({ muted: !!muted }).catch(() => {});
 }
 
@@ -79,9 +125,10 @@ let syncing = Promise.resolve();
 function syncBanner() {
   if (!ready) return;
   syncing = syncing.then(async () => {
-    if (wantBanner === bannerOn) return;
+    const want = wantBanner && !noAds;
+    if (want === bannerOn) return;
     try {
-      if (wantBanner) {
+      if (want) {
         bannerOn = true;
         let shown = false;
         if (bannerMade) shown = await admob.resumeBanner().then(() => true, () => false); // 帯が無くなっていると断られる
@@ -98,7 +145,7 @@ function syncBanner() {
 }
 
 function prepare() {
-  if (!ready || loaded || loading) return;
+  if (!ready || noAds || loaded || loading) return;
   loading = true;
   admob.prepareInterstitial({ adId: AD_UNITS.interstitial }).catch(() => { loading = false; });
 }
@@ -115,7 +162,7 @@ let showing = false;
 // 出している間にもう一度押されたら、その押した分は捨てる（false を返す）。
 export async function beforeLeaveResult() {
   if (showing) return false;
-  if (!ready || !loaded || counted < AD_EVERY || performance.now() - lastShown < AD_GAP_MS) {
+  if (!ready || noAds || !loaded || counted < AD_EVERY || performance.now() - lastShown < AD_GAP_MS) {
     prepare();
     return true;
   }
@@ -133,4 +180,46 @@ export async function beforeLeaveResult() {
     prepare();
   }
   return true;
+}
+
+/* ---------- 「広告を消す」（買い切り） ---------- */
+
+// 課金の部品が使えるか（アプリ版で、殻に部品が入っているとき）
+export const canBuyNoAds = () => !!shop;
+export const hasNoAds = () => noAds;
+// 買った・返金されたときに呼ぶ（ボタンの文字を替えるため）
+export function onNoAdsChange(fn) { noAdsWatchers.add(fn); }
+
+// 値段（iPhone の国の通貨で、Apple が決めた書き方。"¥300" など）。商品が見つからないときは null
+export async function noAdsPrice() {
+  if (!shop) return null;
+  try {
+    const { product } = await shop.getProduct({ productIdentifier: NO_ADS_ID, productType: 'inapp' });
+    return product?.priceString || null;
+  } catch {
+    return null;
+  }
+}
+
+// 買う。'bought'（買えた）・'cancelled'（やめた）・'pending'（家族の承認待ちなど）・'error' を返す
+export async function buyNoAds() {
+  if (!shop) return 'error';
+  try {
+    const t = await shop.purchaseProduct({ productIdentifier: NO_ADS_ID, productType: 'inapp', quantity: 1 });
+    if (t?.productIdentifier === NO_ADS_ID) setNoAds(true);
+    return (await checkNoAds()) ? 'bought' : 'error';
+  } catch (e) {
+    const m = String(e?.message ?? e);
+    if (/cancel/i.test(m)) return 'cancelled';
+    if (/pending/i.test(m)) return 'pending';
+    console.warn('買えませんでした', e);
+    return 'error';
+  }
+}
+
+// 購入を復元（機種を替えたときなど。Apple ID のパスワードを聞かれることがある）。買ってあったら true
+export async function restoreNoAds() {
+  if (!shop) return false;
+  try { await shop.restorePurchases(); } catch (e) { console.warn('復元できませんでした', e); }
+  return checkNoAds();
 }
