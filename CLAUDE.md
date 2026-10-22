@@ -243,7 +243,7 @@
 
 - `app/index.html` … 画面（ホーム・対局）。mqtt.js を unpkg から版を固定して読む。
 - `app/css/style.css` … 見た目すべて。
-- `app/manifest.webmanifest`・`app/img/icon-*.png` … ホーム画面に追加したときの名前とアイコン（アイコンは `tools/make-icons.py` で作り直せる）。
+- `app/manifest.webmanifest`・`app/img/icon-*.png` … ホーム画面に追加したときの名前とアイコン（アイコンは `tools/make-icons.py` で作り直せる。App Store 版のアイコンと起動画面も同じ台本が作る）。
 - `app/js/main.js` … 画面切り替え・部屋・同期。同期の考え方は先頭のコメント。
 - `app/js/net.js` … 通信（MQTT）。自分が送ったものも中継サーバーから戻ってくるので、ふつうの受け取りに回さない（通信の遅れを測る `onSelf` にだけ渡す）。
 - `app/js/owner.js` … 持ち主の端末かどうか（合言葉の確認）。

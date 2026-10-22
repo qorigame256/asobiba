@@ -35,7 +35,25 @@ def icon(size):
         d.line([x + cell - pad, y + pad, x + pad, y + cell - pad], fill=X_COL, width=pw)
     return im.resize((size, size), Image.LANCZOS)
 
-out = os.path.join(os.path.dirname(__file__), '..', 'app', 'img')
+root = os.path.join(os.path.dirname(__file__), '..')
+out = os.path.join(root, 'app', 'img')
 for size, name in ((180, 'icon-180.png'), (192, 'icon-192.png'), (512, 'icon-512.png')):
     icon(size).save(os.path.join(out, name), optimize=True)
+    print(name)
+
+# App Store 版（2026-10-22）。アイコンは同じ絵の 1024 四方（Apple は透明を許さないので RGB のまま。角は iPhone が丸める）。
+# 起動画面は、ホーム画面と同じクリーム色の地の真ん中に、角を丸めたアイコンを置く（字は入れない。Apple の勧め）。
+# 2732 四方の絵を LaunchScreen.storyboard が画面いっぱいに広げて端を切るので、縦長の iPhone で見えるのは真ん中の幅およそ 1260 だけ。
+# アイコンは幅 560（iPhone でおよそ画面の幅の4割）にした。地の色は storyboard の背景の色とそろえる。
+assets = os.path.join(root, 'native', 'ios', 'App', 'App', 'Assets.xcassets')
+icon(1024).save(os.path.join(assets, 'AppIcon.appiconset', 'AppIcon-512@2x.png'), optimize=True)
+print('AppIcon-512@2x.png')
+SPLASH, MARK = 2732, 560
+splash = Image.new('RGB', (SPLASH, SPLASH), BOARD)
+mask = Image.new('L', (MARK * SS, MARK * SS), 0)
+ImageDraw.Draw(mask).rounded_rectangle([0, 0, MARK * SS - 1, MARK * SS - 1], radius=MARK * SS * 0.225, fill=255)
+mask = mask.resize((MARK, MARK), Image.LANCZOS)
+splash.paste(icon(MARK), ((SPLASH - MARK) // 2, (SPLASH - MARK) // 2), mask)
+for name in ('splash-2732x2732.png', 'splash-2732x2732-1.png', 'splash-2732x2732-2.png'):
+    splash.save(os.path.join(assets, 'Splash.imageset', name), optimize=True)
     print(name)
