@@ -2781,6 +2781,52 @@ assert.ok(FL.result(s), '15問で終わる');
     Object.defineProperty(performance, 'now', { value: realNow, configurable: true, writable: true });
   }
 }
+// まちがえたら脱落（詳細設定 out）
+{
+  assert.equal(FL.init(3, 5, { rules: {} }).out, undefined, 'なしでは脱落の欄を作らない');
+  assert.deepEqual(FL.init(3, 5, { rules: { out: 'on' } }).cmds, FL.init(3, 5, { rules: {} }).cmds, 'ありでもお題は同じ');
+  // 動かすのが正解の問題を探す（動かさない答えがまちがいになるように）
+  const moveQ = (st) => !(st.cmds[st.q].pose.r === (st.q ? st.cmds[st.q - 1].pose.r : 0) && st.cmds[st.q].pose.w === (st.q ? st.cmds[st.q - 1].pose.w : 0));
+  let st = ref(FL, FL.init(3, 5, { rules: { out: 'on' } }), 'next');
+  while (!moveQ(st)) st = ref(FL, ref(FL, st, 'close'), 'next');
+  const q1 = st.q;
+  const right = st.cmds[q1].pose;
+  st = FL.apply(st, { p: 0, t: 'pose', q: q1, ...right, ms: 500, n: 1 });
+  st = FL.apply(st, { p: 1, t: 'pose', q: q1, ...right, ms: 700, n: 1 });
+  st = ref(FL, st, 'close'); // 3人目（p = 2）は動かさなかったのでまちがい
+  assert.deepEqual(st.out, [null, null, q1], 'まちがえた人だけ脱落');
+  assert.equal(FL.canAct(ref(FL, st, 'next'), 2), false, '脱落した人は動かせない');
+  st = ref(FL, st, 'next');
+  assert.equal(FL.apply(st, { p: 2, t: 'pose', q: st.q, r: 1, w: 1, ms: 300, n: 1 }), null, '脱落した人の手は弾く');
+  // 残った全員がまちがえたら、だれも脱落しない
+  while (!moveQ(st)) st = ref(FL, ref(FL, st, 'close'), 'next');
+  st = ref(FL, st, 'close');
+  assert.deepEqual(st.out, [null, null, q1], '全員まちがえた問題では脱落しない');
+  assert.equal(st.last[2].pt, 0, '脱落した人に点は付かない');
+  // 1人だけまちがえずに残ったら、次へ進むときに終わる
+  st = ref(FL, st, 'next');
+  while (!moveQ(st)) st = ref(FL, ref(FL, st, 'close'), 'next');
+  st = FL.apply(st, { p: 1, t: 'pose', q: st.q, ...st.cmds[st.q].pose, ms: 400, n: 1 });
+  st = ref(FL, ref(FL, st, 'close'), 'next');
+  assert.ok(st.q < 14, '15問より前に終わる');
+  assert.deepEqual(FL.result(st)?.winners, [1], '最後に残った人の勝ち');
+  assert.deepEqual(FL.result({ ...st, scores: [99, 1, 50] }).winners, [1], '脱落した人の方が点が多くても、残った人の勝ち');
+  // 15問のあとに何人か残ったら、残った人の中で点の多い人の勝ち
+  let g = FL.init(3, 8, { rules: { out: 'on' } });
+  g = ref(FL, g, 'next');
+  while (!moveQ(g)) g = ref(FL, ref(FL, g, 'close'), 'next');
+  g = FL.apply(g, { p: 0, t: 'pose', q: g.q, ...g.cmds[g.q].pose, ms: 100, n: 1 });
+  g = FL.apply(g, { p: 1, t: 'pose', q: g.q, ...g.cmds[g.q].pose, ms: 200, n: 1 });
+  g = ref(FL, g, 'close'); // 0 が1位、2 が脱落
+  while (g.phase !== 'end') {
+    g = ref(FL, g, 'next');
+    if (g.phase === 'end') break;
+    for (const p of [0, 1]) g = FL.apply(g, { p, t: 'pose', q: g.q, ...g.cmds[g.q].pose, ms: 500, n: 1 }) ?? g; // 同着（動かさない問題は手が null）
+    g = ref(FL, g, 'close');
+  }
+  assert.equal(g.q, 14, '2人残っていれば15問まで続く');
+  assert.ok(g.scores[2] === 0 && FL.result(g).winners.length === 1 && FL.result(g).winners[0] === 0, '残った2人の中で点の多い人の勝ち');
+}
 
 // ---------- 難読漢字 ----------
 const KJ = GAMES.kanji;
@@ -3337,6 +3383,31 @@ assert.equal(UM.apply(UM.init(2, 3, {}), { p: 1, t: 'reveal' }), null, '出題�
   for (let k = 0; k < 20; k++) u = go(u, [{ p: 1, t: 'ask', text: 'q' + k }, { p: 0, t: 'reply', r: 'na' }]);
   assert.equal(UM.result(go(u, [{ p: 1, t: 'pass' }])).winner, 0, '2人なら最後の解答は1回');
   assert.equal(UM.init(3, 1, { rules: { limit: 7 } }).limit, 0, '選択肢にない数は決めない扱い');
+}
+// ウミガメの制限時間（詳細設定 time）: 時間切れで最後の解答。返事待ちなら返事のあとで。なしでは今までと同じ局面
+{
+  const go = (st, ms) => ms.reduce((x, m) => { const y = UM.apply(x, m); assert.ok(y, JSON.stringify(m)); return y; }, st);
+  assert.deepEqual(UM.init(3, 1, { rules: { time: 0 } }), UM.init(3, 1, {}), 'なしでは今までと同じ局面');
+  assert.equal(UM.init(3, 1, { rules: { time: 77 } }).time, undefined, '選択肢にない時間は決めない扱い');
+  let u = UM.init(3, 1, { rules: { time: 300 } });
+  assert.equal(UM.referee(u), null, '問題を選ぶ間は計らない');
+  assert.equal(UM.apply(u, { p: -1, t: 'timeup' }), null, '問題を選ぶ前の時間切れは受け付けない');
+  u = go(u, [{ p: 0, t: 'pick', idx: 0 }]);
+  assert.deepEqual(UM.referee(u), { key: 'time', ms: 300000, move: { t: 'timeup' } }, '問題が出たら5分を計る');
+  assert.equal(UM.referee(UM.apply(UM.init(3, 1, {}), { p: 0, t: 'pick', idx: 0 })), null, 'なしでは計らない');
+  // 質問の返事待ちで時間切れ → 返事のあとで最後の解答
+  const waiting = go(u, [{ p: 1, t: 'ask', text: 'しつもん' }, { p: -1, t: 'timeup' }]);
+  assert.deepEqual([waiting.phase, waiting.final, UM.referee(waiting)], ['reply', null, null], '返事待ちのうちはまだ最後の解答に入らない');
+  assert.equal(UM.apply(waiting, { p: -1, t: 'timeup' }), null, '時間切れは1回だけ');
+  const after = go(waiting, [{ p: 0, t: 'reply', r: 'no' }]);
+  assert.equal(after.final, 2, '返事のあとで回答者2人が最後の解答');
+  assert.equal(UM.apply(after, { p: after.turn, t: 'ask', text: 'もう1つ' }), null, '時間切れのあとは質問できない');
+  assert.deepEqual(UM.result(go(after, [{ p: after.turn, t: 'pass' }, { p: 1, t: 'pass' }])), { winner: 0, setterWon: true }, 'だれも当てなければ出題者の勝ち');
+  // 解答の判定待ちで時間切れ → 外れたら、そのあとで最後の解答
+  const guessing = go(u, [{ p: 1, t: 'guess', text: 'こたえ' }, { p: -1, t: 'timeup' }]);
+  assert.equal(go(guessing, [{ p: 0, t: 'judge', ok: false }]).final, 2, '外れの判定のあとで最後の解答');
+  // 質問の番で時間切れ → すぐ最後の解答
+  assert.equal(go(u, [{ p: -1, t: 'timeup' }]).final, 2, '質問の番ならすぐ最後の解答');
 }
 console.log('party games OK');
 

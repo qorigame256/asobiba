@@ -7,6 +7,7 @@
 //     / { p, t: 'reply', r: 'yes' | 'no' | 'na' | 'part'（部分的にはい。詳細設定があるときだけ） } / { p, t: 'judge', ok } / { p, t: 'reveal' }
 
 import { esc } from './util.js';
+import { since } from './party.js';
 import { shown } from '../filter.js';
 import { PUZZLES } from './umigame-data.js';
 
@@ -14,6 +15,11 @@ import { PUZZLES } from './umigame-data.js';
 //   （数えるのは出題者が答えた質問だけ。解答・パスは数えない）。使い切ったら、回答者が1人1回ずつ順に最後の解答（パスも可）をして、
 //   だれも当てられなければ出題者の勝ち（Claude の判断。案では「使い切ったら出題者の勝ち」だったが、最後の質問をした人以外が解答できないまま終わらないように）。
 const LIMITS = [[0, '決めない'], [20, '20回'], [30, '30回']];
+// 詳細設定「制限時間」（2026-10-22。27回目の案）: 5分・10分にすると、問題が決まってからその時間がたったら、質問を使い切ったときと同じく
+//   回答者が1人1回ずつ最後の解答をして、だれも当てられなければ出題者の勝ち（Claude の判断。質問の数と同じ終わり方にそろえた）。
+//   時間はホストの端末で計り、{ p: -1, t: 'timeup' } を足す（main.js の scheduleReferee）。返事待ちの質問・解答があれば、それを片付けてから最後の解答に入る。
+//   ホストが再読み込みすると、その時から計り直しになる。画面の残り時間は各端末で問題が出た時から数える（少しずれる）。質問の数と一緒に使え、先に来た方で最後の解答に入る。
+const TIMES = [[0, '決めない'], [300, '5分'], [600, '10分']];
 const MAX_TEXT = 120;
 const MAX_PUZZLE = 300;
 export const REPLY = { yes: 'はい', no: 'いいえ', na: '関係ありません', part: '部分的にはい' };
@@ -29,6 +35,12 @@ function nextAsker(s, from) {
 }
 
 const clone = (s) => ({ ...s, log: s.log.slice() });
+const timeKey = (s) => `umigame:${s.seed}:time`;
+
+// 質問を使い切ったか時間切れなら、最後の解答に入る（回答者が1人1回ずつ）
+function startFinal(s) {
+  if (s.final === null && ((s.limit && s.asked >= s.limit) || s.timeUp)) s.final = s.n - 1;
+}
 
 // 最後の解答の番を1つ使う。全員使い終わったら出題者の勝ちで終わり（終わったら true）
 function finalStep(s) {
@@ -80,6 +92,7 @@ export default {
   settings: [
     { key: 'partial', label: '部分的にはい', desc: '出題者の答えに「部分的にはい」（質問の一部は合っている）を足す。話が進みやすくなる', def: false },
     { key: 'limit', label: '質問の数', desc: '全員で合わせて何回まで質問できるか。使い切ったら1人1回ずつ最後の解答をして、だれも当てられなければ出題者の勝ち', def: 0, choices: LIMITS },
+    { key: 'time', label: '制限時間', desc: '問題が出てからこの時間がたったら、1人1回ずつ最後の解答をして、だれも当てられなければ出題者の勝ち', def: 0, choices: TIMES },
   ],
 
   init(n, seed, { prev = null, rules = {} } = {}) {
@@ -90,7 +103,14 @@ export default {
     // limit = 質問できる回数（0 は決めない）・asked = 答えた質問の数・final = 最後の解答の残りの番の数（使い切るまでは null）
     const s = { n, seed, counts, setter, limit, asked: 0, final: null, phase: 'pick', puzzle: null, turn: nextAsker({ n, setter }, setter), pending: null, log: [], winner: null, step: 0 };
     if (rules.partial) s.partial = true; // なしのときは局面に何も足さない（今までと同じ形）
+    if (TIMES.some(([v]) => v && v === rules.time)) { s.time = rules.time; s.timeUp = false; } // 制限時間（決めないなら足さない）
     return s;
+  },
+
+  // 制限時間: 問題が決まってから time 秒で時間切れ（最後の解答に入ったあとは計らない）
+  referee(s) {
+    if (!s.time || s.timeUp || s.final !== null || s.phase === 'pick' || s.phase === 'end') return null;
+    return { key: 'time', ms: s.time * 1000, move: { t: 'timeup' } };
   },
 
   turn(s) {
@@ -113,6 +133,14 @@ export default {
   carry(s, p) { return s.counts[p] + (p === s.setter ? 1 : 0); },
 
   apply(s0, m) {
+    if (m?.p === -1) {
+      if (m.t !== 'timeup' || !s0.time || s0.timeUp || s0.final !== null || s0.phase === 'pick' || s0.phase === 'end') return null;
+      const s = clone(s0);
+      s.step += 1;
+      s.timeUp = true;
+      if (s.phase === 'ask') startFinal(s); // 返事待ちなら、返事のあとで最後の解答に入る
+      return s;
+    }
     if (!m || !this.canAct(s0, m.p)) return null;
     const isSetter = m.p === s0.setter;
     const s = clone(s0);
@@ -148,7 +176,7 @@ export default {
         s.phase = 'ask';
         s.turn = nextAsker(s, s.turn);
         s.asked += 1;
-        if (s.limit && s.asked >= s.limit) s.final = s.n - 1; // 使い切った: 回答者が1人1回ずつ最後の解答
+        startFinal(s); // 使い切った・時間切れ: 回答者が1人1回ずつ最後の解答
         return s;
       case 'judge':
         if (!isSetter || s.phase !== 'reply' || s.pending.kind !== 'guess' || typeof m.ok !== 'boolean') return null;
@@ -157,6 +185,7 @@ export default {
         if (m.ok) { s.phase = 'end'; s.winner = s.log[s.log.length - 1].p; return s; }
         s.phase = 'ask';
         if (finalStep(s)) return s;
+        startFinal(s); // 解答を待っている間に時間切れになっていた
         s.turn = nextAsker(s, s.turn);
         return s;
       case 'reveal':
@@ -245,12 +274,23 @@ export default {
       }
       top.append(list);
     }
-    if (s.limit && s.phase !== 'pick') {
+    clearInterval(ui.tick);
+    if ((s.limit || s.time) && s.phase !== 'pick') {
       const left = document.createElement('p');
       left.className = 'um-left';
-      left.textContent = s.final !== null
-        ? (s.phase === 'end' ? '質問を使い切りました' : `質問を使い切りました。最後の解答（あと${s.final}人）`)
-        : `残りの質問 ${s.limit - s.asked}回（全員で）`;
+      const why = s.timeUp ? '時間切れです' : '質問を使い切りました';
+      const mmss = () => {
+        const sec = Math.max(0, s.time - Math.floor(since(timeKey(s)) / 1000));
+        return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+      };
+      const text = () => {
+        if (s.final !== null) return s.phase === 'end' ? why : `${why}。最後の解答（あと${s.final}人）`;
+        if (s.timeUp) return s.phase === 'end' ? why : '時間切れです。この返事のあと、最後の解答に入ります';
+        return [s.limit ? `残りの質問 ${s.limit - s.asked}回（全員で）` : '', s.time && s.phase !== 'end' ? `残り時間 ${mmss()}` : ''].filter(Boolean).join('・');
+      };
+      left.textContent = text();
+      // 残り時間は1秒ごとに書き換える（描き直しが来なくても）
+      if (s.time && !s.timeUp && s.final === null && s.phase !== 'end') ui.tick = setInterval(() => { if (root.contains(left)) left.textContent = text(); else clearInterval(ui.tick); }, 1000);
       top.append(left);
     }
     if (s.pending) {

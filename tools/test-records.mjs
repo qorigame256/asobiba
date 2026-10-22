@@ -56,6 +56,16 @@ noteGame('g', { won: true, withHuman: false, best: null, beat: ['ピコ'], hard:
 r = readRecords();
 assert.deepEqual(r.cpus, { 'ピコ': { n: 3, hard: true }, 'ビット': { n: 1, hard: false } }, '同じ対局で同じ名前は1回・⭐は消えない');
 
+// ゲームごとの成績（27回目の案）: ゲームの id ごとに遊んだ数と勝った数。同じ対局は数えない。gameId が無ければ数えない
+assert.deepEqual(r.games, {}, 'gameId を渡していない対局は数えない');
+noteGame('h', { won: true, withHuman: false, best: null, gameId: 'flags' });
+noteGame('h', { won: true, withHuman: false, best: null, gameId: 'flags' });
+noteGame('i', { won: false, withHuman: true, best: null, gameId: 'flags' });
+noteGame('j', { won: false, withHuman: false, best: null, gameId: 'reversi' });
+assert.deepEqual(readRecords().games, { flags: { p: 2, w: 1 }, reversi: { p: 1, w: 0 } }, 'ゲームごとに遊んだ数・勝った数');
+localStorage.setItem('bg-records', JSON.stringify({ ...JSON.parse(localStorage.getItem('bg-records')), games: { a: { p: 2, w: 9 }, b: { p: 0, w: 0 }, c: { p: 'x' }, d: null } }));
+assert.deepEqual(readRecords().games, { a: { p: 2, w: 2 } }, 'おかしな値は捨て、勝ちは遊んだ数を超えない');
+
 // ④ 弾幕回避: 当たった人はその時刻、最後の1人は last の手の時刻、時間切れまで残った人は時間いっぱい
 const st = { rules: { time: '90' }, dead: [12000, null, null] };
 assert.equal(dm.record.of(st, 0, []), 12000);

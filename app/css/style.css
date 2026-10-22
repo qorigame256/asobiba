@@ -1753,3 +1753,5 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .skin-sw i { position: absolute; right: 8px; top: 50%; width: 18px; height: 18px; margin-top: -9px; border-radius: 50%; }
 .skin-name { font-weight: 700; font-size: .9rem; }
 .skin-need { font-size: .72rem; color: var(--muted); text-align: center; line-height: 1.3; }
+.rank-per { margin-top: 10px; } /* ランキングの「ゲームごとの成績」（27回目の案） */
+.rank-per summary { cursor: pointer; font-weight: 700; font-size: .92rem; }

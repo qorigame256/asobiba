@@ -8,6 +8,8 @@
 // 番号は LB_PREFIX ＋ ゲーム ＋ gc の設定（App Store Connect に同じ番号で、「いちばん大きい数字を残す」形で登録する。本人の作業。登録したら変えられない）。
 // - CPU 図鑑（cpus。2026-10-22 本人の決定）: オンラインで対局者として勝った対局にいた CPU（いっしょに勝った CPU は除く）の名前 → { n: 倒した回数, hard: 強さ「つよい」で倒したことがあるか }。
 //   部屋を出た人の代わりに打った CPU は入らない（席は人のまま）。名前は main.js の CPU_NAMES
+// - ゲームごとの成績（games。2026-10-22 の27回目の案）: ゲームの id → { p: 遊んだ対局（played と同じ数え方）, w: 勝った対局（オンラインで自分が勝ったもの。CPU だけが相手でも数える） }。
+//   ランキングの画面に出すだけ（Game Center には送らない）。同じ画面の対局は、どの席が自分か分からないので p にだけ数える
 // エアホッケーは結果が main.js を通らないので数えない。
 
 import { reportScores, onGcSignedIn } from './native.js';
@@ -27,8 +29,15 @@ function load() {
   if (a?.cpus && typeof a.cpus === 'object') {
     for (const [k, v] of Object.entries(a.cpus)) if (typeof k === 'string' && Number.isInteger(v?.n) && v.n > 0) cpus[k] = { n: v.n, hard: v.hard === true };
   }
+  const games = {};
+  if (a?.games && typeof a.games === 'object') {
+    for (const [k, v] of Object.entries(a.games)) {
+      if (typeof k === 'string' && Number.isInteger(v?.p) && v.p > 0) games[k] = { p: v.p, w: Number.isInteger(v.w) && v.w >= 0 ? Math.min(v.w, v.p) : 0 };
+    }
+  }
   return {
     cpus,
+    games,
     played: Number.isInteger(a?.played) ? a.played : 0,
     hwins: Number.isInteger(a?.hwins) ? a.hwins : 0,
     best,
@@ -101,12 +110,16 @@ export function onRecords(fn) { watchers.add(fn); }
 
 // 対局者として決着を見た。key は対局ごとに1つ（同じ対局を2回数えない）。
 // won: 自分が勝った・withHuman: 自分のほかに人がいた（オンライン）・best: { game, rules, value }（自己ベストを取るゲームの、自分の席の数字）
-// beat: 倒した CPU の名前の一覧・hard: 強さ「つよい」の対局か（CPU 図鑑）
+// beat: 倒した CPU の名前の一覧・hard: 強さ「つよい」の対局か（CPU 図鑑）・gameId: ゲームの id（ゲームごとの成績）
 // 新しい自己ベストなら isNew、初めて倒した CPU の名前を fresh で返す
-export function noteGame(key, { won, withHuman, best, beat = [], hard = false }) {
+export function noteGame(key, { won, withHuman, best, beat = [], hard = false, gameId = null }) {
   const before = load();
   if (before.seen.includes(key)) return { isNew: false, fresh: [] };
-  const a = { ...before, best: { ...before.best }, cpus: { ...before.cpus }, seen: [...before.seen, key].slice(-20) };
+  const a = { ...before, best: { ...before.best }, cpus: { ...before.cpus }, games: { ...before.games }, seen: [...before.seen, key].slice(-20) };
+  if (typeof gameId === 'string') {
+    const g = a.games[gameId];
+    a.games[gameId] = { p: (g?.p ?? 0) + 1, w: (g?.w ?? 0) + (won ? 1 : 0) };
+  }
   const fresh = [];
   for (const name of new Set(beat)) {
     const c = a.cpus[name];

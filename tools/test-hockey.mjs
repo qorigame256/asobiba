@@ -5,7 +5,7 @@
 // じゃまブロックでも、パックがブロックを抜けない・マレットが入らない・決着が付く・強さの順が崩れない・なしなら前と同じ、を確かめる。
 // マレットの大きさ（小さい・大きい）でも、範囲と当たりが半径に合う・決着が付く・強さの順が崩れない・ふつうなら前と同じ、を確かめる。
 import HOCKEY, {
-  stepPuck, cpuTarget, clampMallet, CPU_LEVELS, stepHex, clampHex, cpuHex, zoneHex, addGoal, overOf, HEX_A, HEX_R, GOAL3, bouncePucks, scoreOf,
+  stepPuck, cpuTarget, clampMallet, CPU_LEVELS, stepHex, clampHex, cpuHex, zoneHex, addGoal, overOf, overTime, HEX_A, HEX_R, GOAL3, bouncePucks, scoreOf,
   GOAL_SIZES, table, moveMallet, BLOCK2, BLOCK3, blockDist, MALLET_SIZES,
 } from '../app/js/games/hockey.js';
 import { mulberry32 } from '../app/js/games/util.js';
@@ -240,6 +240,10 @@ function match3(lvs, seed, target = 7, goal = GOAL3) {
   // 点数と順位
   check('3人: 失点の少ない順に順位（同点は同じ順位）', JSON.stringify(overOf(3, [7, 2, 2], 7)?.rank) === '[3,1,1]' && overOf(3, [6, 2, 2], 7) === null);
   check('2人: 取った点で数える（入れられた側の相手に1点）', JSON.stringify(addGoal(2, [0, 0], 1)) === '[1,0]' && JSON.stringify(overOf(2, [7, 3], 7)?.rank) === '[1,2]');
+  // 制限時間が来たあと（同点なら次の1点まで続ける）
+  check('時間切れ: 2人は点の多い方の勝ち・同点なら続ける', JSON.stringify(overTime(2, [2, 3])?.rank) === '[2,1]' && overTime(2, [2, 2]) === null && overTime(2, [0, 0]) === null);
+  check('時間切れ: 3人は失点のいちばん少ない人が1人なら終わり', JSON.stringify(overTime(3, [3, 1, 2])?.rank) === '[3,1,2]' && JSON.stringify(overTime(3, [4, 1, 1 + 3])?.rank) === '[2,1,2]'
+    && overTime(3, [3, 1, 1]) === null && overTime(3, [0, 0, 0]) === null);
 }
 
 // パック2つ

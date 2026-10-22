@@ -454,6 +454,16 @@ export function overOf(n, score, target) {
   if (!score.some((x) => x >= target)) return null;
   return { rank: score.map((x) => 1 + score.filter((y) => y < x).length) };
 }
+// 制限時間が来たあとの決着: 2人は点の多い方、3人は失点のいちばん少ない人が1人に決まっていれば終わり（同点なら次の1点まで続ける）
+export function overTime(n, score) {
+  if (n === 2) return score[0] === score[1] ? null : { rank: [score[0] > score[1] ? 1 : 2, score[1] > score[0] ? 1 : 2] };
+  const low = Math.min(...score);
+  if (score.filter((x) => x === low).length > 1) return null;
+  return { rank: score.map((x) => 1 + score.filter((y) => y < x).length) };
+}
+export const TIMES = [0, 60, 120, 180]; // 制限時間（秒。0 は決めない＝点数で終わる）
+const timeOf = (v) => (TIMES.includes(Number(v)) ? Number(v) : 0);
+const clockText = (sec) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 // 1位は勝ち・最下位は負け・あいだは引き分けの音（観戦・同じ画面の2人は勝ちの音）
 function overSound(rank, me) {
   if (me === null || me === undefined || me < 0) return 'win';
@@ -718,7 +728,7 @@ function mount(root, opts) {
   function resetState() {
     st = {
       score: Array(n).fill(0), lost: Array(n).fill(0), goalPuck: Array(n).fill(0), mallets: seats().map(T.home), pucks: startPucks(),
-      banner: '', bannerT: 0, pause: 0, over: null,
+      banner: '', bannerT: 0, pause: 0, over: null, played: 0, timeUp: false,
     };
     targets = seats().map((p) => ({ ...T.home(p) }));
     cpuTimer = Array(n).fill(0);
@@ -735,7 +745,7 @@ function mount(root, opts) {
   // 失点が増えたあと: 点数・決着・ゴールの表示（パック1つは少し止める。2つは止めずに続ける＝2026-10-06 本人の決定）
   function afterGoal() {
     st.score = scoreOf(n, st.lost);
-    st.over = overOf(n, st.score, target);
+    st.over = limit ? (st.timeUp ? overTime(n, st.score) : null) : overOf(n, st.score, target);
     if (st.over) {
       playing = false;
       finish();
@@ -761,6 +771,7 @@ function mount(root, opts) {
   }
   const pointers = new Map(); // 指（ポインター）→ どのマレットか
   let target = online ? Number(opts.rules?.points) || 7 : 7;
+  let limit = online ? timeOf(opts.rules?.time) : 0; // 制限時間（秒。0 なら点数で終わる）
   let level = online ? CPU_LEVELS[opts.rules?.level] ?? CPU_LEVELS.weak : CPU_LEVELS.weak;
   let playing = false;
 
@@ -811,7 +822,7 @@ function mount(root, opts) {
     if (opts.mode === 'cpu') return p === 0 ? 'あなた' : n === 2 ? 'CPU' : `CPU${p}`;
     return PLAYERS[p];
   };
-  const goalText = () => (n === 2 ? `${target}点先取` : `${target}点取られたら終わり`) + (pucks === 2 ? '・パック2つ' : '')
+  const goalText = () => (limit ? `${clockText(limit)}で${n === 2 ? '点の多い方' : '失点の少ない人'}の勝ち` : n === 2 ? `${target}点先取` : `${target}点取られたら終わり`) + (pucks === 2 ? '・パック2つ' : '')
     + (goalKey !== 'normal' ? `・ゴール${GOAL_SIZES[goalKey].name}` : '') + (blockOn ? '・じゃまブロック' : '')
     + (malletKey !== 'normal' ? `・マレット${MALLET_SIZES[malletKey].name}` : '');
   // 決着したときの盤の上の文（画面に描くので色の名前を使う）
@@ -830,6 +841,35 @@ function mount(root, opts) {
     play(overSound(st.over.rank, perspective()));
     showOver();
   }
+
+  // 制限時間（2026-10-22。27回目の案）: 打ち合っている時間（ゴールのあとの止まっている間は数えない）を st.played に足し、
+  // limit 秒になったら時間切れ。同点なら止めずに続け、次の1点で決まる（3人は失点のいちばん少ない人が1人に決まるまで）。
+  // オンラインは各端末が自分で数え、最初に時間切れになった端末が知らせる（毎回の位置の知らせにも tu を付け、落ちても追いつく）
+  function tickClock(dt) {
+    if (!limit || st.over || st.timeUp || st.pause > 0) return;
+    const before = Math.ceil(limit - st.played);
+    st.played += dt;
+    if (st.played >= limit) {
+      if (online) opts.send({ k: 'timeup', ep: net.ep, c: driven() }, true);
+      setTimeUp();
+    } else if (Math.ceil(limit - st.played) !== before) showStatus(); // 残り時間の表示を1秒ごとに
+  }
+  function setTimeUp() {
+    if (!limit || st.timeUp || st.over) return;
+    st.timeUp = true;
+    st.played = limit;
+    st.score = scoreOf(n, st.lost);
+    st.over = overTime(n, st.score);
+    if (st.over) {
+      playing = false;
+      finish();
+    } else {
+      st.banner = '同点！次の1点で決着';
+      st.bannerT = 2.5;
+    }
+    showStatus();
+  }
+  const timeHtml = () => (!limit ? '' : st.timeUp ? '<small>（延長: 次の1点で決着）</small>' : ` <small>⏱ 残り ${clockText(Math.max(0, Math.ceil(limit - st.played)))}</small>`);
 
   /* ---------- 同じ画面（CPU・2人） ---------- */
 
@@ -860,6 +900,7 @@ function mount(root, opts) {
   }
 
   function localTick(dt) {
+    if (playing) tickClock(dt);
     tickBanner(dt);
     const bots = cpuSeats();
     runCpus(dt, bots);
@@ -894,7 +935,10 @@ function mount(root, opts) {
     const row1 = el('label', 'hk-row');
     const ptsLabel = el('span');
     row1.append(ptsLabel, pts);
-    box.append(row1);
+    const tm = selectEl(TIMES.map((t) => [t, t ? clockText(t) : '決めない（点数で終わる）']), timeOf(prefs.time));
+    const rowT = el('label', 'hk-row');
+    rowT.append(el('span', '', '制限時間'), tm);
+    box.append(rowT, row1);
     const pk = selectEl([[1, '1つ'], [2, '2つ']], prefs.pucks === 2 ? 2 : 1);
     const rowP = el('label', 'hk-row');
     rowP.append(el('span', '', 'パック'), pk);
@@ -928,6 +972,7 @@ function mount(root, opts) {
       malletKey = malletKeyOf(mk.value);
       T = table(n, goalKey, blockOn, malletKey);
       pucks = Number(pk.value) === 2 ? 2 : 1;
+      row1.style.display = timeOf(tm.value) > 0 ? 'none' : ''; // 時間で終わるときは「何点で」を使わない
       resetState();
       ptsLabel.textContent = n === 3 ? '何点取られたら終わり' : '何点先取';
       note.textContent = opts.mode !== 'cpu'
@@ -942,10 +987,12 @@ function mount(root, opts) {
     gk.onchange = showPlayers; // ゴールの幅もその場で盤に描いて見せる
     bk.onchange = showPlayers; // じゃまブロックも
     mk.onchange = showPlayers; // マレットの大きさも
+    tm.onchange = showPlayers;
     box.append(btn('始める', 'primary', () => {
       target = Number(pts.value);
+      limit = timeOf(tm.value);
       if (lv) level = CPU_LEVELS[lv.value];
-      savePrefs({ points: target, level: lv?.value ?? prefs.level, players: pl ? n : prefs.players, pucks, goal: goalKey, block: blockOn ? 'on' : 'off', mallet: malletKey });
+      savePrefs({ points: target, level: lv?.value ?? prefs.level, players: pl ? n : prefs.players, pucks, goal: goalKey, block: blockOn ? 'on' : 'off', mallet: malletKey, time: limit });
       startLocal();
     }));
     panel.append(box);
@@ -983,11 +1030,12 @@ function mount(root, opts) {
       const lag = net.rtt === null ? '測っています…' : `往復 ${Math.round(net.rtt)}ms（直近10回の最大 ${Math.round(net.rttMax)}ms）`;
       const quiet = net.quietShown ? `・<b>${n === 2 ? '相手' : 'ほかの人'}の応答がありません</b>` : '';
       const who = seats().map((p) => `<span style="color:${COLORS[p]}">${PLAYERS[p]}</span> ${seatName(p)}`).join(' ／ ');
+      if (!st.over && net.started) main += timeHtml();
       status.innerHTML = `<div class="status-main">${main}</div><div class="status-sub">${who}・${goalText()}<br>通信の遅れ: ${lag}${quiet}</div>`;
       return;
     }
     const sub = opts.mode === 'cpu' ? `CPU${n === 3 ? ' 2人' : ''}（${level.name}）と対戦・${goalText()}` : `この画面で2人で・${goalText()}`;
-    status.innerHTML = `<div class="status-main">${st.over ? st.banner : scoreHtml()}</div><div class="status-sub">${sub}</div>`;
+    status.innerHTML = `<div class="status-main">${st.over ? st.banner : scoreHtml() + (playing ? timeHtml() : '')}</div><div class="status-sub">${sub}</div>`;
   }
 
   /* ---------- オンライン（試作） ---------- */
@@ -1016,6 +1064,8 @@ function mount(root, opts) {
     st.goalPuck = Array(n).fill(0);
     st.score = Array(n).fill(0);
     st.over = null;
+    st.played = 0;
+    st.timeUp = false;
     st.pucks = startPucks();
     st.banner = '';
     st.bannerT = 0;
@@ -1078,12 +1128,14 @@ function mount(root, opts) {
     }
     if (d.k === 'restart' && d.ep > net.ep) onlineReset(d.ep);
     if (d.k === 'goal' && d.ep === net.ep) mergeLost(d.l, d.gi);
+    if (d.k === 'timeup' && d.ep === net.ep) setTimeUp();
     if (d.k === 's' && by.length) {
       if (Array.isArray(d.m)) for (const e of d.m) if (Array.isArray(e) && by.includes(e[0]) && !dv.includes(e[0])) targets[e[0]] = { x: e[1], y: e[2] };
       // ほかの端末が「もう一回」を始めていた（知らせが落ちた・こちらが途中で再読み込みした）
       if (d.ep > net.ep) onlineReset(d.ep);
       if (d.ep !== net.ep) return;
       mergeLost(d.l, d.gi);
+      if (d.tu) setTimeUp(); // 時間切れの知らせが落ちていた（失点を合わせてから決着を見る）
       const os = Array.isArray(d.o) ? d.o : [];
       for (const p of by) net.said[p] = os; // その端末がいま誰を持ち主だと思っているか
       if (!Array.isArray(d.p)) return;
@@ -1110,6 +1162,7 @@ function mount(root, opts) {
       if (quiet !== net.quietShown) { net.quietShown = quiet; showStatus(); }
     }
     checkStart();
+    if (net.started) tickClock(dt);
     tickBanner(dt);
     const bots = cpuSeats();
     runCpus(dt, bots);
@@ -1161,6 +1214,7 @@ function mount(root, opts) {
       return send ? [r4(q.x), r4(q.y), r4(q.vx), r4(q.vy)] : null;
     });
     if (ps.some(Boolean)) d.p = ps;
+    if (st.timeUp) d.tu = 1;
     opts.send(d, handoff);
   }
 
@@ -1221,7 +1275,8 @@ export default {
   liveCpu(rules) { return rules?.players === 3; },
   settings: [
     { key: 'players', label: '人数', desc: '3人は六角形の盤で、人が足りなければ CPU が入る', def: 2, choices: [[2, '2人'], [3, '3人']] },
-    { key: 'points', label: '何点で終わり', desc: '2人は先にこの点を取った方の勝ち。3人は誰かがこの数だけ入れられたら終わりで、失点の少ない人の勝ち', def: 7, choices: POINTS.map((p) => [p, `${p}点`]) },
+    { key: 'points', label: '何点で終わり', desc: '2人は先にこの点を取った方の勝ち。3人は誰かがこの数だけ入れられたら終わりで、失点の少ない人の勝ち（制限時間を決めたときは使わない）', def: 7, choices: POINTS.map((p) => [p, `${p}点`]) },
+    { key: 'time', label: '制限時間', desc: '決めると、点数でなく時間で終わる。時間が来たとき点の多い方（3人は失点の少ない人）の勝ち。同点なら次の1点で決まる', def: 0, choices: TIMES.map((t) => [t, t ? clockText(t) : '決めない']) },
     { key: 'goal', label: 'ゴールの広さ', desc: 'ひろいほど点が入りやすく、1試合が短くなる（全員のゴールが同じ広さ）', def: 'normal', choices: Object.entries(GOAL_SIZES).map(([k, v]) => [k, v.name]) },
     { key: 'block', label: 'じゃまブロック', desc: '盤の真ん中に、パックが跳ね返る動かないブロックを置く', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'mallet', label: 'マレットの大きさ', desc: '全員（CPU も）のマレットの大きさ。大きいほど守りやすく打ちやすい', def: 'normal', choices: Object.entries(MALLET_SIZES).map(([k, v]) => [k, v.name]) },

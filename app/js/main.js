@@ -1203,7 +1203,7 @@ function statusHtml(game, st, res) {
       else if (t === me) main = 'あなたの番です';
       else main = `${pn(t)}の番です…`;
     }
-    if (me === SPECTATOR) sub = '観戦中です（次の対局から参加できます）';
+    if (me === SPECTATOR) sub = vacantSeats().length && !res ? '観戦中です（部屋を出た人の席に、下のボタンで途中から入れます）' : '観戦中です（次の対局から参加できます）';
   } else {
     const n = roundOrder().length || 2;
     const name = (p) => `<b class="pl p${p}">${game.players[p]}</b>`;
@@ -1450,6 +1450,7 @@ function renderPage() {
     appendUndo(game);
   }
   if (!res && S.gameId === 'oekaki' && st.phase === 'show') appendShare(); // お絵描き当ての答えの場面（描き終わった絵が出ている）
+  appendSit(game, res);
   appendFlip(game);
   appendPredict(game, res);
   appendReactions();
@@ -1479,7 +1480,7 @@ function noteAchievements(game, res, st) {
   const me = myPlayer();
   if (S.mode === 'online') noteRoomSize(S.members.length);
   if (S.mode === 'local' || me >= 0) notePlayed(S.gameId);
-  if (res && S.mode === 'local') noteGame(`local:${resultKey()}`, { won: false, withHuman: false, best: null });
+  if (res && S.mode === 'local') noteGame(`local:${resultKey()}`, { won: false, withHuman: false, best: null, gameId: S.gameId });
   if (!res || S.mode !== 'online' || !(me >= 0)) return;
   const won = endSound(res, me) === 'win';
   const levels = cpuLevels(game);
@@ -1492,7 +1493,7 @@ function noteAchievements(game, res, st) {
   // CPU 図鑑: 勝った対局にいた CPU（いっしょに勝った CPU は除く）
   const wonSeats = new Set(winnersOf(res));
   const beat = won ? S.order.flatMap((id, p) => (isCpu(id) && !wonSeats.has(p) ? [cpuBaseName(id)] : [])).filter(Boolean) : [];
-  const { isNew, fresh } = noteGame(`${S.code}:${resultKey()}`, { won, withHuman, best, beat, hard });
+  const { isNew, fresh } = noteGame(`${S.code}:${resultKey()}`, { won, withHuman, best, beat, hard, gameId: S.gameId });
   if (isNew) lateToast(`🎉 自己ベスト更新！ ${game.name} ${game.record.fmt(value)}`);
   if (fresh.length) lateToast(`📖 CPU 図鑑に ${fresh.join('・')} が載った！（${Object.keys(readRecords().cpus).length}/${CPU_NAMES.length}）`);
 }
@@ -1509,6 +1510,42 @@ function lateToast(text) {
 function appendShare() {
   if (!canShare()) return;
   ctl().append(makeButton('📷 画像で保存・共有', async () => { if (!(await shareScreen())) toast('画像にできませんでした'); }, 'secondary'));
+}
+
+/* ---------- 途中から空いた席に入る（2026-10-22。27回目の案。Claude の案から本人が選んだ） ---------- */
+// 部屋を出た人の席を CPU が代わりに打っている間、観戦の人が「🪑 ○○ の代わりに入る」を押すと、その席を引き継いで続きを打てる。
+// Claude の判断: 入れるのは部屋を出た人の席だけ（もとから CPU の席・人のいる席には入れない）。決着の前だけ。エアホッケー（live）には出さない
+// （対局の途中で席の人を替える作りが無いため）。ゲストは type: 'sit'（ゲーム・回・席の番号）を送り、ホストが確かめて S.order のその席の id を入れ替え、
+// state で全員へ送る。**round は進めない**（手の一覧も局面もそのままで、席の人が替わるだけ。プレイヤー番号は変わらないので当て直しも同じ）。
+// 2人が同時に押したら、ホストに先に届いた方が入る。部屋を出た人が戻ってきても、席がもう埋まっていれば観戦になる。
+const vacantSeats = () => (S.mode === 'online' && S.order && !GAMES[S.gameId]?.live
+  ? S.order.flatMap((id, p) => (id && !isCpu(id) && !S.members.includes(id) ? [p] : [])) : []);
+function appendSit(game, res) {
+  if (res || myPlayer() !== SPECTATOR || S.full) return;
+  for (const p of vacantSeats()) {
+    const seat = game.multi ? '' : `（${game.players[p]}）`;
+    ctl().append(makeButton(`🪑 ${nameOf(S.order[p])}${seat}の代わりに入る`, () => askSit(p), 'secondary')); // 名前は textContent で入る
+  }
+}
+function askSit(p) {
+  if (S.isHost) { takeSeat(S.myId, p, S.gameId, S.round); return; }
+  send({ type: 'sit', gameId: S.gameId, round: S.round, p });
+  toast('席に入れるか聞いています…');
+}
+// ホストだけ: 席 p を id の人に替える（入れなければ何もしない）
+function takeSeat(id, p, gameId, round) {
+  if (!S.isHost || gameId !== S.gameId || round !== S.round || !Number.isInteger(p) || !S.members.includes(id) || S.order?.includes(id) || !vacantSeats().includes(p)) return false;
+  const st = replay(S);
+  if (!st || GAMES[S.gameId].result(st)) return false;
+  const was = S.order[p];
+  S.order = S.order.slice();
+  S.order[p] = id;
+  S.cpuKeys[p] = null; // CPU の予約は使わない（予約してあった分は、打つときに席が人に替わったのを見て止まる）
+  saveRoom();
+  sendState();
+  toast(`${id === S.myId ? 'あなた' : nameOf(id)}が ${nameOf(was)} の代わりに入りました`);
+  render();
+  return true;
 }
 
 /* ---------- 盤の向きを変える（2026-10-07。20回目の案。Claude の案から本人が推奨どおり選んだ） ---------- */
@@ -2175,6 +2212,7 @@ function scheduleCpu(game, st, res) {
     setTimeout(() => {
       if (S !== session || S.cpuKeys[p] !== key || (!game.realtime && S.moves.length !== len)) return;
       S.cpuKeys[p] = null;
+      if (!cpuControlled(S.order?.[p])) { render(); return; } // 予約のあとで、観戦の人がこの席に入った（途中から空いた席に入る）
       const now = replay(S);
       const m = now && !game.result(now) && canAct(now, p) ? game.cpu(now, p, rulesOf(S.gameId, S.rules)) : null; // null = いまは何もしない
       const move = game.multi && m ? { ...m, p } : m; // 盤のゲームの手には p を付けない（手が 0 のこともある）
@@ -2552,9 +2590,16 @@ function openRanking() {
       : '<li class="rank-none">まだ記録がありません</li>';
     rows.push(`<div class="rank-game"><div class="rank-game-name">${game.icon ?? ''} ${esc(game.name)}（${esc(game.record.label)}）</div><ul>${items}</ul></div>`);
   }
+  // ゲームごとの成績（27回目の案）: 遊んだ数の多い順。数は records.js が整えた整数だけ
+  const per = Object.entries(rec.games).filter(([id]) => GAMES[id]).sort((a, b) => b[1].p - a[1].p || b[1].w - a[1].w);
+  const perHtml = per.length
+    ? `<details class="rank-per"><summary>ゲームごとの成績（${per.length}種類）</summary><ul class="rank-ol">${per.map(([id, g]) => `<li><span>${GAMES[id].icon ?? ''} ${esc(GAMES[id].name)}</span><b>${g.p}局・${g.w}勝</b></li>`).join('')}</ul>
+      <p class="invite-note">勝ちはオンラインの対局だけ数えます（CPU だけが相手の対局も入ります）。エアホッケーは数えません。</p></details>`
+    : '';
   pop.innerHTML = `<div class="invite-box rank-box">
     <div class="invite-title">🏆 ランキング</div>
     <div class="rank-sum"><div><span>遊んだ対局</span><b>${rec.played}局</b></div><div><span>人がいた対局の勝ち</span><b>${rec.hwins}勝</b></div></div>
+    ${perHtml}
     <div class="rank-head">自己ベスト（この端末の記録・詳細設定ごと）</div>
     ${rows.join('')}
     <p class="invite-note">オンラインの対局で、自分が打った分だけ記録します。同じ画面の対局は「遊んだ対局」にだけ数えます。</p>
@@ -2884,6 +2929,9 @@ function onMessage(msg) {
     case 'full':
       S.full = true;
       break;
+    case 'sit': // 観戦の人が、部屋を出た人の席に入りたい（途中から空いた席に入る）
+      if (S.isHost && msg.from !== S.myId) takeSeat(msg.from, msg.p, msg.gameId, msg.round);
+      return;
     case 'kick':
       // ホストから（まだ部屋に入れてもらう前なら、届いたもの）だけ受け付ける
       if (!S.isHost && (!S.members.length || msg.from === S.members[0])) { onKicked(); return; }
@@ -2998,6 +3046,10 @@ function adoptState(msg) {
   } else if (sameRound && mu === (S.undo ?? 0) && S.moves.length > msg.moves.length && isPrefix(msg.moves, S.moves)) {
     sendMoves(); // こちらの方が進んでいる（ホストが取りこぼした）ので教える
   } else if (msg.order === null || replay(msg)) {
+    // 同じ対局のまま席の人が替わった（途中から空いた席に入る）ら一言
+    const took = sameRound && Array.isArray(S.order) && Array.isArray(msg.order) && msg.order.length === S.order.length
+      ? msg.order.findIndex((id, i) => id !== S.order[i] && typeof id === 'string' && !isCpu(id)) : -1;
+    if (took >= 0) toast(`${msg.order[took] === S.myId ? 'あなた' : nameOf(msg.order[took])}が ${nameOf(S.order[took])} の代わりに入りました`);
     S.gameId = msg.gameId;
     S.round = msg.round;
     S.first = msg.first;

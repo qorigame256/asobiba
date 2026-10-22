@@ -19,6 +19,11 @@
 //   「〜ないで・〜ない」はいつもどおり動かさない（readPose）。逆にするお題は cmds に rev: true を付け、pose を逆にした正しい形に作り直す
 //   （次の問題もその形から始まる）。お題の文は同じ乱数で作り、印は別の乱数で seed から選ぶので、なしのときはお題も cmds の形も前と同じ。
 //   ときどきの印のお題は、印を読む分 MARK_EXTRA（0.7秒）時間を足し、読み上げでは「あまのじゃく」と先に読む。
+//
+// 詳細設定「まちがえたら脱落」（out。2026-10-22）: ありにすると、答え合わせでまちがえた人（動かすお題で動かさなかった人も）はその場で脱落し、
+//   もう旗を動かせない。残った全員がまちがえた問題では、だれも脱落しない（全員いなくなって決着しないのを防ぐ）。
+//   残りが1人になったら、次へ進むときに終わる（その人の勝ち）。15問のあとに何人か残っていたら、残った人の中で点の多い人の勝ち。
+//   点の付け方は今までどおり（残った人どうしの差に使う）。脱落した問題の番号を s.out に覚える（なしのときは s.out を作らない）。
 
 import { mulberry32 } from './util.js';
 import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
@@ -141,7 +146,18 @@ const startPose = (s, q = s.q) => (q > 0 ? s.cmds[q - 1].pose : firstPose(hasYel
 // 形を言葉にする（「赤↑上・白↓下」）
 const poseText = (keys, pose) => keys.map((c) => `${FLAG[c]}${pose[c] ? '↑上' : '↓下'}`).join('・');
 
-const clone = (s) => ({ ...s, scores: s.scores.slice(), ans: s.ans.map((a) => (a ? { ...a } : null)) });
+const outMode = (s) => s.rules.out === 'on';
+const isOut = (s, p) => outMode(s) && s.out[p] !== null; // 脱落した人か
+const alive = (s) => Array.from({ length: s.n }, (_, p) => p).filter((p) => !isOut(s, p));
+// 勝った人: 脱落ありなら残った人の中で点の多い人
+function winnersOf(s) {
+  if (!outMode(s)) return leaders(s.scores);
+  const live = alive(s);
+  const top = Math.max(...live.map((p) => s.scores[p]));
+  return live.filter((p) => s.scores[p] === top);
+}
+
+const clone = (s) => ({ ...s, scores: s.scores.slice(), ans: s.ans.map((a) => (a ? { ...a } : null)), ...(s.out ? { out: s.out.slice() } : {}) });
 
 /* ---------- 画面（描き直しても旗の形と押した時刻を失わないように、問題ごとに覚えておく） ---------- */
 
@@ -181,6 +197,7 @@ export default {
     { key: 'voice', label: 'お題を読み上げる', desc: '各自の端末から声が出ます（iPhone は一度画面に触れてから）', def: false },
     { key: 'yellow', label: '黄色い旗', desc: '赤・白に黄色の旗が増え、お題にも「黄色上げて」などが入る（時間は0.5秒長め）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'contrary', label: 'あまのじゃく', desc: 'お題と逆の形にする（「赤上げて」なら赤を下げる）。ときどきは 👿 の付いたお題だけ', def: 'off', choices: [['off', 'なし'], ['all', 'いつも'], ['mix', 'ときどき']] },
+    { key: 'out', label: 'まちがえたら脱落', desc: 'まちがえた人はその場で脱落し、最後まで残った人の勝ち（残った全員がまちがえた問題では、だれも脱落しない）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -207,22 +224,23 @@ export default {
     return {
       n, seed, rules: { speed: 'normal', voice: false, yellow: 'off', contrary: 'off', ...rules }, cmds, q: -1, phase: 'ready',
       ans: Array(n).fill(null), scores: Array(n).fill(0), last: null, step: 0,
+      ...(rules.out === 'on' ? { out: Array(n).fill(null) } : {}),
     };
   },
 
   turn() { return null; },
-  canAct(s) { return s.phase === 'open'; },
-  result(s) { return s.phase === 'end' ? { winners: leaders(s.scores), scores: s.scores } : null; },
+  canAct(s, p) { return s.phase === 'open' && !(p >= 0 && isOut(s, p)); },
+  result(s) { return s.phase === 'end' ? { winners: winnersOf(s), scores: s.scores } : null; },
   // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
   // ほかの人が旗を動かした音は鳴らさない（にぎやかすぎるため）
   sound(a, b, m, me) {
-    if (m.p === -1) return m.t === 'next' ? 'question' : me >= 0 ? (b.last[me].ok ? 'correct' : 'wrong') : 'pop';
+    if (m.p === -1) return m.t === 'next' ? 'question' : me >= 0 && !b.last[me].gone ? (b.last[me].ok ? 'correct' : 'wrong') : 'pop';
     return m.p === me ? 'pop' : null;
   },
   resultText(res, me, pn) { return winnersText(res.winners, me, pn); },
   phaseText(s) {
     if (s.phase === 'ready') return 'まもなく始まります…';
-    if (s.phase === 'open') return `第${s.q + 1}問 / ${TOTAL}`;
+    if (s.phase === 'open') return `第${s.q + 1}問 / ${TOTAL}${outMode(s) ? `（残り${alive(s).length}人）` : ''}`;
     return `第${s.q + 1}問の答え合わせ`;
   },
 
@@ -239,7 +257,7 @@ export default {
       if (m.t === 'next' && (s0.phase === 'ready' || s0.phase === 'shown')) {
         const s = clone(s0);
         s.step += 1;
-        if (s.q + 1 >= TOTAL) { s.phase = 'end'; return s; }
+        if (s.q + 1 >= TOTAL || (outMode(s) && alive(s).length <= 1)) { s.phase = 'end'; return s; }
         s.q += 1;
         s.phase = 'open';
         s.ans = Array(s.n).fill(null);
@@ -252,24 +270,35 @@ export default {
         const want = s.cmds[s.q].pose;
         const from = startPose(s);
         // 答えていない人は旗を動かさなかった扱い（ms = 0）
-        const res = s.ans.map((a) => {
+        // 脱落した人（脱落ありのとき）は答えに数えず、点も付けない
+        const res = s.ans.map((a, p) => {
+          if (isOut(s, p)) return { gone: true };
           const pose = a ?? from;
           const ms = a && !samePose(a, from) ? a.ms : 0;
           return { ok: samePose(pose, want), ms };
         });
         const times = res.filter((r) => r.ok).map((r) => r.ms);
         s.last = res.map((r) => {
+          if (r.gone) return { ok: false, pt: 0, gone: true };
           if (!r.ok) return { ok: false, pt: 0 };
           const rank = 1 + times.filter((t) => t < r.ms).length;
           return { ok: true, ms: r.ms, rank, pt: (POINTS[rank - 1] ?? 1) * stageOf(s.q).mul };
         });
         s.last.forEach((r, p) => { s.scores[p] += r.pt; });
+        if (outMode(s)) {
+          // まちがえた人を脱落させる。残った全員がまちがえたら、だれも脱落しない（s.saved にその問題の番号）
+          const live = alive(s);
+          const miss = live.filter((p) => !s.last[p].ok);
+          if (miss.length < live.length) miss.forEach((p) => { s.out[p] = s.q; });
+          else s.saved = s.q;
+        }
         return s;
       }
       return null;
     }
     if (m.t !== 'pose' || s0.phase !== 'open' || m.q !== s0.q || !Number.isInteger(m.p) || m.p < 0 || m.p >= s0.n) return null;
     if (![0, 1].includes(m.r) || ![0, 1].includes(m.w) || !Number.isInteger(m.n)) return null;
+    if (isOut(s0, m.p)) return null; // 脱落した人は動かせない
     const yellow = hasYellow(s0);
     if (yellow ? ![0, 1].includes(m.y) : m.y !== undefined) return null; // 黄色はありのときだけ
     if (typeof m.ms !== 'number' || !(m.ms >= 0) || m.ms > limitOf(s0) + 500) return null;
@@ -336,11 +365,13 @@ export default {
 
     const shown = s.phase === 'shown' || s.phase === 'end';
     const extra = (p) => {
-      if (!shown || !s.last) return '';
+      // 前の問題までに脱落した人は「脱落」だけ（この問題で脱落した人は × のあとに添える）
+      const gone = isOut(s, p) && (!shown || s.out[p] < s.q) ? `<span class="pt-ng">脱落（第${s.out[p] + 1}問）</span>` : '';
+      if (gone || !shown || !s.last) return gone;
       const r = s.last[p];
-      return r.ok ? `<span class="pt-ok">○ ${r.rank}位 +${r.pt}</span>` : '<span class="pt-ng">×</span>';
+      return r.ok ? `<span class="pt-ok">○ ${r.rank}位 +${r.pt}</span>` : `<span class="pt-ng">×${isOut(s, p) ? ' 脱落' : ''}</span>`;
     };
-    const won = s.phase === 'end' ? leaders(s.scores) : [];
+    const won = s.phase === 'end' ? winnersOf(s) : [];
     root.append(scoreChips(o, s.scores, { won, extra }));
 
     const card = document.createElement('div');
@@ -348,7 +379,8 @@ export default {
     if (s.phase === 'ready') {
       card.innerHTML = `<div class="fl-q">よーい…</div><div class="fl-sub">${yellow ? '赤・白・黄色' : '赤と白'}の旗をお題どおりに動かしてください</div>`
         + (contrary === 'all' ? '<div class="fl-sub">👿 あまのじゃく: どのお題も逆に動かします（「赤上げて」なら赤を下げる。「〜ないで」は動かさない）</div>'
-          : contrary === 'mix' ? '<div class="fl-sub">👿 の印が付いたお題だけ逆に動かします（「赤上げて」なら赤を下げる。「〜ないで」は動かさない）</div>' : '');
+          : contrary === 'mix' ? '<div class="fl-sub">👿 の印が付いたお題だけ逆に動かします（「赤上げて」なら赤を下げる。「〜ないで」は動かさない）</div>' : '')
+        + (outMode(s) ? '<div class="fl-sub">💀 まちがえたら脱落: 最後まで残った人の勝ち</div>' : '');
       root.append(card);
       return;
     }
@@ -356,7 +388,8 @@ export default {
     const key = qKey(s);
     const limit = limitOf(s);
     const elapsed = since(key);
-    const open = s.phase === 'open' && o.canMove && me !== null && elapsed < limit;
+    const gone = me !== null && isOut(s, me) && (!shown || s.out[me] < s.q); // 自分が前の問題までに脱落している
+    const open = s.phase === 'open' && o.canMove && me !== null && !gone && elapsed < limit;
 
     if (local?.key !== key) local = { key, pose: { ...startPose(s) }, ms: 0, n: 0 };
     const marked = isMarked(s);
@@ -415,9 +448,12 @@ export default {
 
     const msg = document.createElement('p');
     msg.className = 'cc-log';
-    if (shown && me !== null && s.last) {
+    if (gone) {
+      msg.textContent = `第${s.out[me] + 1}問で脱落しました。残りの人を見守りましょう`;
+    } else if (shown && me !== null && s.last) {
       const r = s.last[me];
-      msg.textContent = r.ok ? `正解！ ${r.rank}位（${secText(r.ms)}）` : 'ざんねん、まちがい';
+      msg.textContent = r.ok ? `正解！ ${r.rank}位（${secText(r.ms)}）` : isOut(s, me) ? 'ざんねん、まちがい。ここで脱落です' : 'ざんねん、まちがい';
+      if (s.saved === s.q && !r.ok) msg.textContent = 'みんなまちがえたので、今回はだれも脱落しません';
     } else if (s.phase === 'open' && me !== null) {
       msg.textContent = open ? '旗をタップすると上げ下げできます' : 'そこまで！';
     }
