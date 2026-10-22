@@ -23,6 +23,8 @@ export const SKINS = [
   { id: 'budou', name: 'ぶどう', kind: 'unlock', need: { played: 10 }, sw: ['#f2eff9', '#7d58c8'] },
   { id: 'lemon', name: 'レモン', kind: 'unlock', need: { played: 30 }, sw: ['#fbf7e2', '#b7860f'] },
   { id: 'mono', name: 'モノクロ', kind: 'unlock', need: { hwins: 5 }, sw: ['#f1f1f1', '#333333'] },
+  // CPU 図鑑を16体そろえたごほうび（2026-10-22 本人の決定。色の値は Claude の判断）
+  { id: 'robo', name: 'ロボ', kind: 'unlock', need: { cpus: 16 }, sw: ['#e9edf2', '#4a6d8c'] },
   { id: 'kin', name: '金', kind: 'buy', sw: ['#fbf6e8', '#a87b1f'] },
   { id: 'yuyake', name: '夕焼け', kind: 'buy', sw: ['linear-gradient(170deg,#ffe3c9,#f6d3e4 55%,#ddd4f3)', '#e0603f'] },
   { id: 'hoshi', name: '星空', kind: 'buy', sw: ['linear-gradient(#141a3a,#2a2457)', '#f2c14e'] },
@@ -40,6 +42,10 @@ export const shownSkins = () => SKINS.filter((s) => s.kind !== 'buy' || (IS_APP 
 export function needText(s, rec = readRecords()) {
   if (s.need?.played) return { ok: rec.played >= s.need.played, text: `遊んだ対局 ${s.need.played}局（いま ${Math.min(rec.played, s.need.played)}局）` };
   if (s.need?.hwins) return { ok: rec.hwins >= s.need.hwins, text: `人がいた対局で ${s.need.hwins}勝（いま ${Math.min(rec.hwins, s.need.hwins)}勝）` };
+  if (s.need?.cpus) {
+    const got = Object.keys(rec.cpus ?? {}).length;
+    return { ok: got >= s.need.cpus, text: `CPU 図鑑を ${s.need.cpus}体そろえる（いま ${Math.min(got, s.need.cpus)}体）` };
+  }
   return { ok: true, text: '' };
 }
 

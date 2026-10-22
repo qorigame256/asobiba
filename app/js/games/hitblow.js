@@ -16,6 +16,9 @@
 //     各自は次の席の人（p+1、最後の人は 0）の答えを当てる。2人なら当て合い。CPU（部屋を出た人の代わりも）の答えは種から作った auto を使う。
 //     勝ち負けは mode のとおり（最初に自分の相手の数を当てた人の勝ち／同じ回なら同着）。
 //     画面には自分の答えだけ出し、決着したら全員の答えを見せる（全員の端末が知っている簡易の隠し方）。
+// 詳細設定「回数の上限」（tries。2026-10-22 本人の決定）: なし（最初）・1人6回・1人10回。全員が上限まで予想してだれも当てられなければ引き分け。
+//   順番に当てるでは最後の人の上限の回の予想のあと、同時に早当てでは上限の回の結果が出たあと。引き分けの局面は winners が空の配列。
+//   上限があるときだけ局面に tries を持つ（なしでは今までと全く同じ局面）。
 
 import { mulberry32, shuffle } from './util.js';
 
@@ -85,6 +88,7 @@ export default {
     { key: 'mode', label: '遊び方', desc: '順番に: 1人ずつ予想し、全員の予想が見える／同時に: 全員が一斉に予想する早当て', def: 'turn', choices: [['turn', '順番に当てる'], ['race', '同時に早当て']] },
     { key: 'digits', label: '桁数', desc: '当てる数字の長さ。長いほど難しい', def: 4, choices: [[3, '3桁'], [4, '4桁'], [5, '5桁']] },
     { key: 'dup', label: '同じ数字', desc: '使ってよい: 答えにも予想にも同じ数字が何回も出てくる（例 1123）。難しくなる', def: 'off', choices: [['off', '使わない'], ['on', '使ってよい']] },
+    { key: 'tries', label: '回数の上限', desc: '1人が予想できる回数。全員が使い切ってもだれも当てられなければ引き分け', def: 0, choices: [[0, 'なし'], [6, '1人6回'], [10, '1人10回']] },
     { key: 'secret', label: '答え', desc: '自分で決める: 始めに各自が答えの数を決め、次の席の人の数を当てる（2人なら当て合い）', def: 'same', choices: [['same', 'みんな同じ'], ['own', '自分で決める']] },
   ],
 
@@ -101,6 +105,7 @@ export default {
       n, digits, mode, dup, answer, round: 1, turn: 0, log: [],
       hist: Array.from({ length: n }, () => []), pending: Array(n).fill(null), winners: null, step: 0,
     };
+    if (rules.tries === 6 || rules.tries === 10) s.tries = rules.tries;
     if (rules.secret !== 'own') return s;
     // 自分で決める: 決めるまでは setting。auto は CPU（部屋を出た人の代わりも）が使う答え（全員の端末で同じになるよう種から作る）
     return { ...s, answer: null, secret: 'own', setting: true, secrets: Array(n).fill(null), auto: Array.from({ length: n }, make) };
@@ -114,6 +119,7 @@ export default {
   },
   result(s) {
     if (!s.winners) return null;
+    if (!s.winners.length) return { winner: null, draw: true, answer: s.answer, rounds: s.round, ...(own(s) ? { secrets: s.secrets } : {}) };
     return { winner: s.winners[0], winners: s.winners, answer: s.answer, rounds: s.round, ...(own(s) ? { secrets: s.secrets } : {}) };
   },
   // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
@@ -125,6 +131,7 @@ export default {
     const ans = res.secrets
       ? `答え: ${res.secrets.map((g, p) => `${pn(p)} <b>${g}</b>`).join('・')}（${res.rounds}回目）`
       : `答えは <b>${res.answer}</b>（${res.rounds}回目）`;
+    if (res.draw) return `回数を使い切って、だれも当てられず引き分け！<br>${ans.replace(/（\d+回目）/, '')}`;
     if (res.winners.includes(me)) {
       const others = res.winners.filter((p) => p !== me);
       return `あなたの勝ち！🎉${others.length ? `（${others.map(pn).join('・')}と同着）` : ''}<br>${ans}`;
@@ -164,6 +171,7 @@ export default {
       s.hist[m.p].push(x);
       s.log = [...s.log, { p: m.p, ...x }];
       if (m.g === ans) s.winners = [m.p];
+      else if (s.tries && s.hist.every((h) => h.length >= s.tries)) s.winners = []; // 全員が上限まで予想した → 引き分け
       else { s.round += 1; s.turn = (s.turn + 1) % s.n; }
       return s;
     }
@@ -172,6 +180,7 @@ export default {
       s.pending.forEach((g, p) => s.hist[p].push({ g, ...score(g, answerFor(s, p)) }));
       const winners = s.pending.map((g, p) => (g === answerFor(s, p) ? p : -1)).filter((p) => p >= 0);
       if (winners.length) s.winners = winners;
+      else if (s.tries && s.round >= s.tries) s.winners = []; // 上限の回でもだれも当てられなかった → 引き分け
       else {
         s.round += 1;
         s.pending = Array(s.n).fill(null);
@@ -254,6 +263,10 @@ export default {
     help.textContent = s.dup
       ? `${s.digits}桁・同じ数字も使える。ヒット(H)＝数字も場所も合っている／ブロー(B)＝数字は合っているが場所が違う（答えにある個数まで）`
       : `${s.digits}桁・同じ数字は使わない。ヒット(H)＝数字も場所も合っている／ブロー(B)＝数字は合っているが場所が違う`;
+    if (s.tries) {
+      const left = me === null ? null : s.tries - s.hist[me].length;
+      help.textContent += `。1人${s.tries}回まで${left === null ? '' : `（あなたはあと${left}回）`}`;
+    }
     root.append(help);
     if (own(s)) root.append(ownInfo(s, me, nameOf));
 

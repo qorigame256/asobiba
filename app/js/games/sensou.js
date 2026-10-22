@@ -3,6 +3,7 @@
 // タッチされた手は、タッチした手の本数だけ指が増える。ちょうど5本になった手は消える（0本）。
 //   5本を超えたら、超えた分の本数になる（例: 4本に3本でタッチ → 2本）。
 //   （本人の決定・2026-10-03。前は詳細設定で「5本以上で消える」と選べたが、この形に固定した）
+//   2026-10-22 本人の決定で、詳細設定「5本を超えた手」（over）に「消える」（dead）を戻した。最初は今までどおり「超えた分が残る」（wrap）。
 // 「分ける」（詳細設定でオン・オフ）: 自分の番に、両手の合計を変えずに左右へ配り直す。消えた手にも配れる。
 //   左右を入れ替えただけの形や、今と同じ形にはできない。1本の手は4本まで。分けて手を0本にはできない（自分で消すのは不可。Claude の判断）。
 // 両手とも消えた人は負けて抜ける。最後に残った1人の勝ち。順位は抜けた順の逆。
@@ -16,7 +17,7 @@ const HAND_NAME = ['左手', '右手'];
 const aliveP = (s, p) => s.hands[p][0] + s.hands[p][1] > 0;
 const clone = (s) => ({ ...s, hands: s.hands.map((h) => h.slice()), out: s.out.slice() });
 
-const hitValue = (v) => (v < 5 ? v : v - 5);
+const hitValue = (s, v) => (v < 5 ? v : s.rules.over === 'dead' ? 0 : v - 5);
 
 // p が選べる「分ける」の形
 function splitsOf(s, p) {
@@ -68,12 +69,13 @@ export default {
   minPlayers: 2,
   maxPlayers: 6,
   settings: [
+    { key: 'over', label: '5本を超えた手', desc: '地域でルールが違う所。ちょうど5本の手はどちらでも消える', def: 'wrap', choices: [['wrap', '超えた分が残る（4本に3本で2本）'], ['dead', '消える']] },
     { key: 'split', label: '分ける', desc: '自分の番に、両手の指の合計を変えずに左右へ配り直せる（消えた手にも配れる。分けて0本にはできない）', def: true },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     return {
-      n, rules: { split: true, ...rules }, hands: Array.from({ length: n }, () => [1, 1]),
+      n, rules: { split: true, ...rules, over: rules.over === 'dead' ? 'dead' : 'wrap' }, hands: Array.from({ length: n }, () => [1, 1]),
       turn: 0, out: [], count: 0, winner: null, draw: false, step: 0, last: null,
     };
   },
@@ -105,7 +107,7 @@ export default {
       if (![0, 1].includes(from) || ![0, 1].includes(hand) || !Number.isInteger(to) || to < 0 || to >= s.n || to === p) return null;
       if (!s.hands[p][from] || !s.hands[to][hand]) return null;
       const before = s.hands[to][hand];
-      s.hands[to][hand] = hitValue(before + s.hands[p][from]);
+      s.hands[to][hand] = hitValue(s, before + s.hands[p][from]);
       s.last = { p, t: 'atk', from, to, hand, before, after: s.hands[to][hand], add: s.hands[p][from] };
       if (!aliveP(s, to)) { s.out.push(to); s.last.out = true; }
     } else if (m.t === 'split') {
@@ -147,7 +149,7 @@ export default {
         let danger = false;
         for (let q = 0; q < t.n; q++) {
           if (q === p || !aliveP(t, q)) continue;
-          if (t.hands[q].some((x) => x && hitValue(v + x) === 0)) danger = true;
+          if (t.hands[q].some((x) => x && hitValue(t, v + x) === 0)) danger = true;
         }
         if (danger) sc -= 4;
       }

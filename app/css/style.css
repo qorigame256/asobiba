@@ -28,6 +28,7 @@
 :root[data-skin="sakura"] { --bg: #fbf0f3; --panel: #fffafb; --ink: #3a2a30; --muted: #8a6c76; --line: #efd6de; --accent: #d9577f; --chip: #3a2a30; }
 :root[data-skin="budou"] { --bg: #f2eff9; --panel: #fcfbff; --ink: #2b2638; --muted: #756d88; --line: #ddd6ec; --accent: #7d58c8; --chip: #2b2638; }
 :root[data-skin="lemon"] { --bg: #fbf7e2; --panel: #fffef6; --ink: #33301f; --muted: #7d775a; --line: #ece4bf; --accent: #b7860f; --chip: #33301f; }
+:root[data-skin="robo"] { --bg: #e9edf2; --panel: #fafbfd; --ink: #1e2530; --muted: #67717f; --line: #d2d9e2; --accent: #4a6d8c; --chip: #1e2530; }
 :root[data-skin="mono"] { --bg: #f1f1f1; --panel: #fff; --ink: #222; --muted: #707070; --line: #ddd; --accent: #333; --chip: #222; }
 :root[data-skin="kin"] { --bg: #fbf6e8; --panel: #fffdf6; --ink: #2e2615; --muted: #80714f; --line: #eadfc0; --accent: #a87b1f; --chip: #2e2615; }
 :root[data-skin="matcha"] { --bg: #e6eddc; --panel: #fbfdf7; --ink: #26301f; --muted: #6d7a5f; --line: #d3dec4; --accent: #5d7a32; --chip: #26301f; }
@@ -1735,6 +1736,15 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .rank-no { width: 3.2em; flex: none; color: var(--muted); }
 .rank-who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rank-mine { margin-top: 6px; font-size: .88rem; font-weight: 700; text-align: center; }
+.zukan-box { max-width: 460px; max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); overflow-y: auto; }
+.zukan-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
+.zukan-card { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 4px; border-radius: 10px; border: 1.5px dashed var(--line); background: var(--field); color: var(--muted); text-align: center; }
+.zukan-card.got { border-style: solid; border-color: var(--accent); color: var(--ink); }
+.zukan-card b { font-size: .86rem; word-break: keep-all; }
+.zukan-no { font-size: .68rem; color: var(--muted); }
+.zukan-face { font-size: 1.6rem; line-height: 1.2; }
+.zukan-card:not(.got) .zukan-face { opacity: .5; }
+.zukan-n { font-size: .72rem; color: var(--muted); }
 .skin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 8px; }
 .skin-btn { font: inherit; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 6px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--field); color: var(--ink); cursor: pointer; }
 .skin-btn.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }

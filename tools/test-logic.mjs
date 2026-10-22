@@ -1882,6 +1882,33 @@ console.log('hitblow games 100, avg rounds', (hbRounds / 100).toFixed(1));
   console.log('hitblow 5 digits: CPU slowest move', slow.toFixed(0), 'ms');
 }
 
+// ヒット＆ブローの「回数の上限」: なしなら局面は今までと同じ形。全員が上限まで外したら引き分け
+assert.equal('tries' in HB.init(2, 5, { rules: {} }), false, '上限なしの局面に tries を持たない');
+{
+  // 順番に当てる・2人・6回: 12回外したら引き分け。11回目まではまだ続く
+  let h = { ...HB.init(2, 5, { rules: { tries: 6 } }), answer: '0123' };
+  const wrong = ['4567', '4568', '4569', '4578', '4579', '4589'];
+  for (let i = 0; i < 12; i++) {
+    assert.equal(HB.result(h), null, `順番に: ${i}回目まではまだ決着しない`);
+    h = HB.apply(h, { p: h.turn, t: 'guess', g: wrong[Math.floor(i / 2)], r: h.round });
+    assert.ok(h);
+  }
+  assert.deepEqual([HB.result(h).draw, HB.result(h).winner], [true, null], '順番に: 全員が6回外したら引き分け');
+  assert.equal(HB.turn(h), null);
+  assert.match(HB.resultText(HB.result(h), 0, (p) => 'P' + p), /引き分け/);
+  // 同時に早当て・3人・6回: 6回目の結果で引き分け。6回目に当てた人がいればその人の勝ち
+  let r = { ...HB.init(3, 5, { rules: { mode: 'race', tries: 6 } }), answer: '0123' };
+  for (let k = 1; k <= 6; k++) for (let p = 0; p < 3; p++) r = HB.apply(r, { p, t: 'guess', g: wrong[k - 1], r: k });
+  assert.equal(HB.result(r).draw, true, '同時に: 6回目でだれも当てられなければ引き分け');
+  let w = { ...HB.init(3, 5, { rules: { mode: 'race', tries: 6 } }), answer: '0123' };
+  for (let k = 1; k <= 6; k++) for (let p = 0; p < 3; p++) w = HB.apply(w, { p, t: 'guess', g: k === 6 && p === 1 ? '0123' : wrong[k - 1], r: k });
+  assert.deepEqual(HB.result(w).winners, [1], '同時に: 最後の回に当てたら勝ち');
+  // 上限なしなら、何回外しても続く
+  let z = { ...HB.init(2, 5, { rules: {} }), answer: '0123' };
+  for (let i = 0; i < 12; i++) z = HB.apply(z, { p: z.turn, t: 'guess', g: wrong[Math.floor(i / 2)], r: z.round });
+  assert.equal(HB.result(z), null, '上限なしなら続く');
+}
+
 // ---------- 戦争（指の遊び） ----------
 const SS = GAMES.sensou;
 const ssBase = (hands, o = {}) => ({ ...SS.init(hands.length, 0, { rules: o.rules ?? {} }), hands, ...o });
@@ -1896,6 +1923,11 @@ s = ssBase([[4, 1], [2, 1]]);
 assert.deepEqual(SS.apply(s, { p: 0, t: 'atk', from: 0, to: 1, hand: 0 }).hands[1], [1, 1], '5を超えたら超えた分: 4＋2 → 1本');
 s = ssBase([[4, 1], [4, 1]]);
 assert.deepEqual(SS.apply(s, { p: 0, t: 'atk', from: 0, to: 1, hand: 0 }).hands[1], [3, 1], '5を超えたら超えた分: 4＋4 → 3本');
+// 詳細設定「5本を超えた手」が「消える」なら、超えても消える（ちょうど5も消える）
+s = ssBase([[4, 1], [2, 1]], { rules: { over: 'dead' } });
+assert.deepEqual(SS.apply(s, { p: 0, t: 'atk', from: 0, to: 1, hand: 0 }).hands[1], [0, 1], '「消える」: 4＋2 → 消える');
+s = ssBase([[3, 1], [2, 1]], { rules: { over: 'dead' } });
+assert.deepEqual(SS.apply(s, { p: 0, t: 'atk', from: 0, to: 1, hand: 0 }).hands[1], [0, 1], '「消える」: 3＋2 → 消える');
 s = ssBase([[1, 3], [1, 1]]);
 assert.equal(SS.apply(s, { p: 0, t: 'split', h: [3, 1] }), null, '入れ替えただけの形にはできない');
 assert.equal(SS.apply(s, { p: 0, t: 'split', h: [2, 3] }), null, '合計は変えられない');
@@ -1914,7 +1946,7 @@ assert.deepEqual(SS.result(t).ranking, [2, 0, 1], '順位は抜けた順の逆')
 let ssDraws = 0;
 for (let k = 0; k < 300; k++) {
   const n = 2 + (k % 5);
-  const rules = { split: k % 3 !== 0 };
+  const rules = { split: k % 3 !== 0, over: k % 2 ? 'dead' : 'wrap' };
   let st = SS.init(n, 0, { rules });
   while (!SS.result(st)) {
     const m = SS.cpu(st, st.turn);

@@ -41,11 +41,20 @@ let r = readRecords();
 assert.equal(r.played, 1);
 assert.equal(r.hwins, 0, 'CPU だけ相手の勝ちは数えない');
 assert.equal(r.best['yacht|short=off|bonusYacht=off|joker=off'].v, 200);
-assert.equal(noteGame('b', { won: true, withHuman: true, best: best(150) }), false, '小さい数字は自己ベストにしない');
-assert.equal(noteGame('c', { won: false, withHuman: true, best: best(250) }), true, '大きい数字は自己ベスト更新');
+assert.equal(noteGame('b', { won: true, withHuman: true, best: best(150) }).isNew, false, '小さい数字は自己ベストにしない');
+assert.equal(noteGame('c', { won: false, withHuman: true, best: best(250) }).isNew, true, '大きい数字は自己ベスト更新');
 noteGame('d', { won: false, withHuman: false, best: null });
 r = readRecords();
 assert.deepEqual([r.played, r.hwins, r.best['yacht|short=off|bonusYacht=off|joker=off'].v], [4, 1, 250]);
+
+// CPU 図鑑: 倒した回数を数え、初めての CPU だけ fresh に入る。⭐（hard）は一度付いたら消えない。同じ対局は数えない
+assert.deepEqual(r.cpus, {}, '最初は空');
+assert.deepEqual(noteGame('e', { won: true, withHuman: false, best: null, beat: ['ピコ', 'ビット'], hard: false }).fresh, ['ピコ', 'ビット']);
+assert.deepEqual(noteGame('e', { won: true, withHuman: false, best: null, beat: ['ピコ'], hard: true }).fresh, [], '同じ対局は数えない');
+assert.deepEqual(noteGame('f', { won: true, withHuman: false, best: null, beat: ['ピコ', 'ピコ'], hard: true }).fresh, [], '2回目は初めてではない');
+noteGame('g', { won: true, withHuman: false, best: null, beat: ['ピコ'], hard: false });
+r = readRecords();
+assert.deepEqual(r.cpus, { 'ピコ': { n: 3, hard: true }, 'ビット': { n: 1, hard: false } }, '同じ対局で同じ名前は1回・⭐は消えない');
 
 // ④ 弾幕回避: 当たった人はその時刻、最後の1人は last の手の時刻、時間切れまで残った人は時間いっぱい
 const st = { rules: { time: '90' }, dead: [12000, null, null] };

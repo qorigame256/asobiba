@@ -105,9 +105,14 @@ const isCpu = (id) => typeof id === 'string' && id.startsWith('cpu');
 // 種がまだ無い待合室では「CPU1」のまま。同じ対局の CPU どうしで名前がかぶらないよう、名前の数（16）と互いに素な間（5）ずつずらす。
 const CPU_NAMES = ['ロボたろう', 'ピコ', 'ガジェ丸', 'ネジ子', 'ポンコツ号', 'ビット', 'メカ吉', 'ボルト', 'ちびロボ', 'カラクリ', 'デンデン', 'ギア助', 'プログラ', 'キカイ姫', 'ドット', 'テツ丸'];
 function cpuName(id) {
+  const base = cpuBaseName(id);
+  return base ? '🤖' + base : 'CPU' + id.slice(3);
+}
+// 🤖 を付けない名前（CPU 図鑑の鍵）。種がまだ無ければ null
+function cpuBaseName(id) {
   const n = Number(id.slice(3)) || 1;
-  if (!S?.seed) return 'CPU' + id.slice(3);
-  return '🤖' + CPU_NAMES[((S.seed % CPU_NAMES.length) + (n - 1) * 5) % CPU_NAMES.length];
+  if (!S?.seed) return null;
+  return CPU_NAMES[((S.seed % CPU_NAMES.length) + (n - 1) * 5) % CPU_NAMES.length];
 }
 
 function nameOf(id) {
@@ -730,7 +735,7 @@ function rulesOf(gameId, rules) {
 // 例外: ぴったりストップの時計の見える時間（peek）・神経衰弱の札が見える時間（show）は、時間でもむずかしさのルールとして抽選する（各 rules で決めた）。
 // 弾幕回避の残機・ウミガメの質問の数・2色爆弾と記憶リレーのライフも抽選する（2026-10-10 本人承認）。
 // マルバツ・将棋の size は盤の大きさでなく遊び方（スーパー・消える・5五将棋）なので抽選する。
-const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check', 'mallet', 'stones', 'diffs', 'kind']);
+const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check', 'mallet', 'stones', 'diffs', 'kind', 'tries']);
 const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
 
 // 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、エアホッケーは 2〜3。ほかは2）
@@ -1484,7 +1489,20 @@ function noteAchievements(game, res, st) {
   // 自分の記録（ランキング・色の解放。records.js）。自己ベストは自分の席の数字だけ
   const value = game.record && st ? game.record.of(st, me, S.moves) : null;
   const best = Number.isInteger(value) ? { game, rules: rulesOf(S.gameId, S.rules), value } : null;
-  if (noteGame(`${S.code}:${resultKey()}`, { won, withHuman, best })) toast(`🎉 自己ベスト更新！ ${game.name} ${game.record.fmt(value)}`);
+  // CPU 図鑑: 勝った対局にいた CPU（いっしょに勝った CPU は除く）
+  const wonSeats = new Set(winnersOf(res));
+  const beat = won ? S.order.flatMap((id, p) => (isCpu(id) && !wonSeats.has(p) ? [cpuBaseName(id)] : [])).filter(Boolean) : [];
+  const { isNew, fresh } = noteGame(`${S.code}:${resultKey()}`, { won, withHuman, best, beat, hard });
+  if (isNew) lateToast(`🎉 自己ベスト更新！ ${game.name} ${game.record.fmt(value)}`);
+  if (fresh.length) lateToast(`📖 CPU 図鑑に ${fresh.join('・')} が載った！（${Object.keys(readRecords().cpus).length}/${CPU_NAMES.length}）`);
+}
+
+// 決着したときの記録の知らせ（自己ベスト・CPU 図鑑・色の解放）は、決着のあいさつ（greet。最大1.9秒後に出て2.2秒見える）に上書きされないよう、
+// そのあとに1つの一言にまとめて出す（前はすぐ出していたので、あいさつで消えていた）
+let lateNotes = [];
+function lateToast(text) {
+  if (!lateNotes.length) setTimeout(() => { toast(lateNotes.join('　')); lateNotes = []; }, 4200);
+  lateNotes.push(text);
 }
 
 // 「📷 画像で保存・共有」: いまの画面を画像にして iPhone の共有の画面を開く（画像を保存・LINE など）
@@ -2552,6 +2570,38 @@ function openRanking() {
   box.querySelector('.invite-actions button')?.focus();
 }
 
+/* ---------- CPU 図鑑（2026-10-22 本人の決定。記録は records.js の cpus） ---------- */
+// ホームの「📖 図鑑」で開く小窓（ボタンの名前はスマホ幅で2行に割れないよう短くした）。16体を CPU_NAMES の順に並べ、倒した CPU は名前と倒した回数（強さ「つよい」で倒したら ⭐）、まだの CPU は「？？？」。
+function openZukan() {
+  closeInvite();
+  const { cpus } = readRecords();
+  const got = CPU_NAMES.filter((n) => cpus[n]).length;
+  const pop = document.createElement('div');
+  pop.className = 'invite-pop zukan-pop';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-modal', 'true');
+  pop.setAttribute('aria-label', 'CPU 図鑑');
+  const cards = CPU_NAMES.map((n, i) => {
+    const c = cpus[n];
+    const no = String(i + 1).padStart(2, '0');
+    return c
+      ? `<li class="zukan-card got"><span class="zukan-no">No.${no}</span><span class="zukan-face">🤖</span><b>${esc(n)}${c.hard ? ' ⭐' : ''}</b><span class="zukan-n">${c.n}回 倒した</span></li>`
+      : `<li class="zukan-card"><span class="zukan-no">No.${no}</span><span class="zukan-face">❔</span><b>？？？</b><span class="zukan-n">まだ</span></li>`;
+  }).join('');
+  pop.innerHTML = `<div class="invite-box zukan-box">
+    <div class="invite-title">📖 CPU 図鑑（${got}/${CPU_NAMES.length}）</div>
+    <ul class="zukan-list">${cards}</ul>
+    <p class="invite-note">オンラインの対局で、あなたが勝った対局にいた CPU が載ります。⭐ は強さ「つよい」で倒した CPU。${got >= CPU_NAMES.length ? '🎉 ぜんぶそろいました！ 色「ロボ」が使えます（ホームの「🎨 色」）' : `${CPU_NAMES.length}体そろえると、色「ロボ」が使えるようになります。`}</p>
+    <div class="invite-actions"></div>
+  </div>`;
+  const box = pop.querySelector('.zukan-box');
+  box.querySelector('.invite-actions').append(makeButton('閉じる', closeInvite, 'secondary'));
+  pop.addEventListener('click', (e) => { if (e.target === pop) closeInvite(); });
+  pop.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeInvite(); });
+  document.body.append(pop);
+  box.querySelector('.invite-actions button')?.focus();
+}
+
 // Game Center の順位（アプリ版だけ）。押すまでは読まない（ログインの画面を勝手に出さないため）
 function drawBoards(wrap) {
   const boards = allBoards(GAMES);
@@ -3155,6 +3205,7 @@ nameInput.addEventListener('input', () => {
 nameInput.addEventListener('change', () => { if (isBad(cleanName(nameInput.value))) toast(BAD_TEXT_NOTE); });
 el('btn-about').onclick = () => openAbout();
 el('btn-rank').onclick = openRanking;
+el('btn-zukan').onclick = openZukan;
 el('btn-skin').onclick = openSkins;
 noAdsBtn.onclick = openNoAds;
 // ホームの下の段の「📳 振動」と「🏅 実績」（App Store 版だけ。2026-10-22 本人の決定。振動の付け外しは本人の希望で足した）
@@ -3240,7 +3291,7 @@ onOwnedChange(checkSkin); // 買う色を選んでいたのに買った記録が
 initRecords(GAMES);
 // 遊んで解放する色に届いたら知らせる
 onRecords((before, after) => {
-  for (const sk of newlyUnlocked(before, after)) toast(`🎨 新しい色「${sk.name}」が使えるようになりました（ホームの「🎨 色」）`);
+  for (const sk of newlyUnlocked(before, after)) lateToast(`🎨 新しい色「${sk.name}」が使えるようになりました（ホームの「🎨 色」）`);
 });
 initAds({ muted: isMuted() });
 initNative({ games: Object.keys(GAMES).length });

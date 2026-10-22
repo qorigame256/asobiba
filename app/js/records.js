@@ -6,6 +6,8 @@
 //   オンラインで自分の席の分だけ（同じ画面の対局は、どの席が自分か分からないので入れない）
 // Game Center のランキングは「勝った回数」と、record.gc の設定ごとの自己ベスト（ほかの設定が最初の値の対局だけ。本人の決定）。
 // 番号は LB_PREFIX ＋ ゲーム ＋ gc の設定（App Store Connect に同じ番号で、「いちばん大きい数字を残す」形で登録する。本人の作業。登録したら変えられない）。
+// - CPU 図鑑（cpus。2026-10-22 本人の決定）: オンラインで対局者として勝った対局にいた CPU（いっしょに勝った CPU は除く）の名前 → { n: 倒した回数, hard: 強さ「つよい」で倒したことがあるか }。
+//   部屋を出た人の代わりに打った CPU は入らない（席は人のまま）。名前は main.js の CPU_NAMES
 // エアホッケーは結果が main.js を通らないので数えない。
 
 import { reportScores, onGcSignedIn } from './native.js';
@@ -21,7 +23,12 @@ function load() {
   if (a?.best && typeof a.best === 'object') {
     for (const [k, v] of Object.entries(a.best)) if (typeof k === 'string' && Number.isInteger(v?.v)) best[k] = { v: v.v, d: typeof v.d === 'string' ? v.d.slice(0, 10) : '' };
   }
+  const cpus = {};
+  if (a?.cpus && typeof a.cpus === 'object') {
+    for (const [k, v] of Object.entries(a.cpus)) if (typeof k === 'string' && Number.isInteger(v?.n) && v.n > 0) cpus[k] = { n: v.n, hard: v.hard === true };
+  }
   return {
+    cpus,
     played: Number.isInteger(a?.played) ? a.played : 0,
     hwins: Number.isInteger(a?.hwins) ? a.hwins : 0,
     best,
@@ -94,11 +101,18 @@ export function onRecords(fn) { watchers.add(fn); }
 
 // 対局者として決着を見た。key は対局ごとに1つ（同じ対局を2回数えない）。
 // won: 自分が勝った・withHuman: 自分のほかに人がいた（オンライン）・best: { game, rules, value }（自己ベストを取るゲームの、自分の席の数字）
-// 新しい自己ベストなら true を返す
-export function noteGame(key, { won, withHuman, best }) {
+// beat: 倒した CPU の名前の一覧・hard: 強さ「つよい」の対局か（CPU 図鑑）
+// 新しい自己ベストなら isNew、初めて倒した CPU の名前を fresh で返す
+export function noteGame(key, { won, withHuman, best, beat = [], hard = false }) {
   const before = load();
-  if (before.seen.includes(key)) return false;
-  const a = { ...before, best: { ...before.best }, seen: [...before.seen, key].slice(-20) };
+  if (before.seen.includes(key)) return { isNew: false, fresh: [] };
+  const a = { ...before, best: { ...before.best }, cpus: { ...before.cpus }, seen: [...before.seen, key].slice(-20) };
+  const fresh = [];
+  for (const name of new Set(beat)) {
+    const c = a.cpus[name];
+    if (!c) fresh.push(name);
+    a.cpus[name] = { n: (c?.n ?? 0) + 1, hard: !!c?.hard || hard };
+  }
   a.played++;
   if (won && withHuman) a.hwins++;
   let isNew = false;
@@ -116,7 +130,7 @@ export function noteGame(key, { won, withHuman, best }) {
   save(a);
   if (out.length) reportScores(out);
   watchers.forEach((fn) => fn(before, a));
-  return isNew;
+  return { isNew, fresh };
 }
 
 // Game Center にログインできたら、いままでの記録をまとめて送る（Game Center はいちばん大きい数字を残すので、何度送ってもよい）
