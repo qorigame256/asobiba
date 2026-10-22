@@ -111,6 +111,8 @@ npx cap sync ios
 ### 3.2 切り分け: 署名なしでコンパイルだけ通す
 
 iPhone も Apple ID も使わずに「道具の側の問題」か「このアプリの側の問題」かを分ける段（スキル mac-device-check の §2.2）。初回は部品（capacitor-swift-pm 8.5.2 と、広告の部品が使う Google Mobile Ads SDK 13.11.0・User Messaging Platform、課金の部品 @capgo/native-purchases 8.8.2）を GitHub から取ってくるのでネットが要り、数分かかる。
+振動の部品 @capacitor/haptics 8.0.2 と、このリポジトリの中の自前の部品 `native/plugins/asobiba-native`（Game Center の実績と画像の保存・共有。Swift で書いた。**Windows では組み立てられないので、ここで初めてコンパイルが通るかが分かる**）も入る。
+自前の部品が通らなければ、6章の決まりどおり Mac の Claude がその場で直してよい（直したら、どこをなぜ直したかを持ち帰る）。
 
 ```bash
 cd ~/asobiba/native/ios/App
@@ -176,7 +178,15 @@ open ~/asobiba/native/ios/App/App.xcodeproj
 | 8 | 画面を暗くしない | iPhone の 設定 > 画面表示と明るさ > 自動ロック を **30秒** にする（終わったら元に戻す）。低電力モードは切る。部屋を作って待合室のまま触らず1分待つ。比べるためにホーム画面でも1分待つ | 待合室では画面が消えない。ホーム画面では30秒で暗くなる |
 | 13 | 広告を消す（値段） | 下の「課金を試す準備」をしてから Xcode の ▶ で入れ直す。ホームの一番下の「広告を消す」を押す | 小窓に「広告を消す（¥300）」のように値段の付いたボタンが出る（準備をしていないと「いまは買えません」） |
 | 14 | 広告を消す（買う） | 13 のボタンを押し、出てきた iPhone の買う画面で買う | 「広告を消しました」と出て、ホームの帯広告がすぐ消える。ボタンが「広告なし（購入済み）」になる。待合室でも帯が出ず、3局打って「もう一回」でも全画面広告が出ない |
+| 16 | 振動 | マルバツの「この画面で2人で」で1局打つ。次にホームの一番下の「📳 振動: オン」を押して「オフ」にし、もう1局 | 置くたびに軽くブルッとし、勝ちが決まったときに強めの2回の振動。オフにすると振動しない（iPhone の 設定 > サウンドと触覚 > システムの触覚 がオンのときだけ振動する） |
+| 17 | 画像で保存・共有 | 16 の結果の画面で「📷 画像で保存・共有」を押し、共有の画面で「画像を保存」 | iPhone の共有の画面が出て、いまの画面の画像が付いている。初めての保存で「写真に追加してよいか」と聞かれ、許可すると写真アプリに入る |
+| 18 | 実績（Game Center） | **有料の Apple Developer Program に入り、下の「Game Center の準備」をしてから。** ホームの一番下の「🏅 実績」を押す | Game Center のログインの画面か、実績の画面が開く。準備の前・無料の Apple ID では「Game Center にログインできませんでした」と出るのが正しい（アプリは止まらない） |
 | 15 | 開き直し・復元 | アプリを上へはらって閉じてから開く。次に Xcode の メニュー Debug > StoreKit > Manage Transactions で買い物を消し（Delete）、アプリの「広告を消す」→「購入を復元」 | 開き直しても広告が出ず、追跡の許可の画面も出ない。買い物を消したあとの復元では「記録が見つかりませんでした」と出る（消した買い物は戻らないのが正しい） |
+
+**Game Center の準備**（本人。有料の Apple Developer Program に入ったあと。**無料の Apple ID では Game Center を付けられないようだ（古い資料で見ただけで未確認）。付けると署名できなくなることがあるので、無料の間は付けない**）:
+Xcode の TARGETS の App > Signing & Capabilities > 左上の「+ Capability」→「Game Center」。App Store Connect のこのアプリの「Game Center」に、`app/js/native.js` の `ACHIEVEMENTS` の10個を、
+番号 `io.github.qorigame256.asobiba.ach.` ＋ 後ろの語（例 `io.github.qorigame256.asobiba.ach.firstwin`）で登録する（**登録したら番号は変えられない**）。名前・説明・絵はそこで決める。
+Capability を付けると増える `App.entitlements` と `project.pbxproj` の変更は持ち帰る（Windows に入れる）。
 
 **課金を試す準備**（Mac の Claude か本人。有料の Apple Developer Program に入る前は、App Store Connect に商品を登録できないので、Xcode の中だけの試験の店を使う。**無料の Apple ID でこの試験ができるかは未確認**）:
 Xcode のメニュー File > New > File from Template… →「StoreKit Configuration File」→ 名前 `NoAds.storekit`、置き場所は `native/ios/App/`、「Sync this file with an app in App Store Connect」は**外す**。

@@ -4,6 +4,7 @@ paths:
   - "app/js/platform.js"
   - "tools/build-native.mjs"
   - "app/js/ads.js"
+  - "app/js/native.js"
   - "app/privacy.html"
 ---
 
@@ -59,6 +60,17 @@ CLAUDE.md が目安の大きさを超えたため（Claude の推奨を本人が
   家族の承認待ちが通ったとき・返金のときは部品の `transactionUpdated` で聞き直す（返金で戻ったら、そこで広告の仕組みを動かし始める）。部品は届いた買い物を自分で片付ける（`finish`）。
   ライセンスの欄には MPL-2.0 の条件どおり部品のソースの置き場所を出す（`main.js` の `LICENSES` の3つ目の項目）。
   ブラウザで確かめるときは、広告と同じく偽物を置く（`window.Capacitor` の `registerPlugin('NativePurchases')` が偽物を返す形でも見られる。`main.js` はモジュールなので、同じページに `document.write` し直すと読み直されない。毎回存在しない住所を開き直してから書く）。
+- **アプリならではの良さの作り（2026-10-22。審査 4.2。本人の決定は下の「まだ作っていないもの」の 5。細かい所は本人が推奨どおりに承認し、振動の付け外しだけ本人が足した）**:
+  中身は `app/js/native.js` の1か所。振動は `@capacitor/haptics` 8.0.2（公式・MIT）。**Game Center と画像の保存・共有は自前の部品 `native/plugins/asobiba-native`**
+  （Capacitor 8 で使える Game Center の部品が無く、いちばん近い @openforge/capacitor-game-connect は Capacitor 5 まで。画像もここに入れて外の部品を増やさない。Claude の判断）。
+  自前の部品は `native/package.json` に `file:plugins/asobiba-native` で入れ、`npx cap sync ios` が `CapApp-SPM/Package.swift` に足す（Xcode のプロジェクトを手で書き換えない）。**Swift は Windows で組み立てられないので、直したら Mac で確かめる。**
+  - 振動: 番が来たとき（`turn`）・決着（勝ち `win` は強め、負け `lose` は弱め。勝ちの音と同じ見方）・自分の手が受け付けられたとき（`tap`。`onBoardMove`）。ホームの下の段の「📳 振動」で付け外し（localStorage の `bg-haptics`。最初はオン）。エアホッケーは `hockey.js` が自分で音を鳴らすので振動しない。
+  - 実績: `native.js` の `ACHIEVEMENTS`（10個。番号は `io.github.qorigame256.asobiba.ach.<語>`。App Store Connect に同じ番号で登録する）。数は localStorage の `bg-achv`（端末ごと。送るのは Game Center へだけ）。
+    数え方は `main.js` の `noteAchievements` の上のコメント。ログインの画面は初めて実績を取ったときと「🏅 実績」を押したときだけ出し、一度ログインできた端末（`bg-gc`）は起動のときに画面を出さずにつなぐ。
+    **Xcode で「Game Center」の Capability を付けるのは有料の登録のあと**（無料の Apple ID では付けられない見込み。付いていなくても signIn が失敗するだけでアプリは動く）。
+  - 画像で保存・共有: 結果の画面と、お絵描き当ての答えの場面（`phase === 'show'`）の下の段に「📷 画像で保存・共有」。画面の画像は殻の WKWebView の `takeSnapshot` で作る（外の道具で画面を描き直さない）。
+    写真に保存するので `Info.plist` に `NSPhotoLibraryAddUsageDescription` を足した。
+  - ブラウザで確かめるときは、広告と同じ偽物の `PluginHeaders` に `Haptics`（impact・notification）と `AsobibaNative`（signIn・reportAchievements・showAchievements・shareScreen）を足す。
 - `npm audit` は `@capacitor/cli` の中の uuid を指摘する（組み立ての道具の中だけで、アプリには入らない。直すと版が下がるので触っていない）。
 
 ## Apple・Google の決まりで効くもの（2026-10-17 に調べた。審査ガイドラインは 2026-06-08 版）
@@ -91,4 +103,7 @@ CLAUDE.md が目安の大きさを超えたため（Claude の推奨を本人が
 2. ~~プライバシーポリシーのページ（5.1.1）~~ 2026-10-21 に作った（`app/privacy.html`。決定は CLAUDE.md の「App Store 版」の 11 と、上の「本人が決めたことの細部」）。審査に出す前に、第1条の【要決定：氏名】を本名にし、App Store Connect のプライバシーの欄（どの情報を集めるかの申告）をこのページと食い違わないように書く
 3. ~~広告と追跡~~ 2026-10-22 に試験用の広告の番号で作った（上の「広告と追跡の作り」）。本物の番号は本人の AdMob 登録のあとに `ads.js` の `AD_UNITS` と `Info.plist` へ入れる
 4. ~~「広告を消す」の課金~~ 2026-10-22 に作った（上の「「広告を消す」の課金の作り」）。値段は保留のまま（審査に出す前に本人が決め、App Store Connect に商品を登録する）
-5. アプリならではの良さ（4.2） 6. アイコンと起動画面。
+5. ~~アプリならではの良さ（4.2）~~ 2026-10-22 に作った: **振動で知らせる・実績（Game Center）・写真に保存と共有の3つ**（本人の決定。Claude が出した6つの案から推奨どおり。選ばなかった案は `docs/出した案の一覧.md`。作りは上の「アプリならではの良さの作り」）。
+   細かい所（同日。Claude の推奨を承認）: 振動は番・決着・自分の手の3つの場面／実績は10個で端末ごとに数える／ログインの画面は初めて実績を取ったときと「🏅 実績」のときだけ／画像は結果の画面のボタンで画面ごと。
+   **振動はアプリの中でも付け外しできるようにする**（本人の決定。Claude は iPhone の設定に任せる案を推した）。Game Center の Capability と実績の登録は、有料の登録のあとの本人の作業。
+6. アイコンと起動画面。

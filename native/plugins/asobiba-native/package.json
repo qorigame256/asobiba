@@ -1,0 +1,15 @@
+{
+  "name": "asobiba-native",
+  "version": "1.0.0",
+  "private": true,
+  "description": "みんなの対戦の iPhone 側の小さな部品（Game Center の実績・画面を画像にして保存と共有）。使い方は app/js/native.js",
+  "license": "UNLICENSED",
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    }
+  },
+  "peerDependencies": {
+    "@capacitor/core": ">=8.0.0"
+  }
+}

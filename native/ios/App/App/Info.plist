@@ -68,6 +68,8 @@
 	<true/>
 	<key>GADApplicationIdentifier</key>
 	<string>ca-app-pub-3940256099942544~1458002511</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>結果の画面などを画像にして、写真に保存するときに使います。</string>
 	<key>NSUserTrackingUsageDescription</key>
 	<string>許可すると、ほかのアプリやウェブサイトでの行動をもとに、あなたに合った広告が表示されます。許可しなくても、すべての機能を使えます。</string>
 	<key>SKAdNetworkItems</key>

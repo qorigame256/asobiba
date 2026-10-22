@@ -37,6 +37,7 @@ import { IS_APP, WEB_URL } from './platform.js';
 import { isBad, mask, BAD_TEXT_NOTE } from './filter.js';
 import { play, endSound, isMuted, setMuted, isVoice, speak } from './sound.js';
 import { initAds, setAdsMuted, setBanner, countFinished, beforeLeaveResult, canBuyNoAds, hasNoAds, onNoAdsChange, noAdsPrice, buyNoAds, restoreNoAds } from './ads.js';
+import { initNative, haptic, canHaptic, hapticsOn, setHapticsOn, canAchieve, openAchievements, notePlayed, noteResult, noteRoomSize, canShare, shareScreen } from './native.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 見間違えやすい I O 0 1 を除く
 const CODE_LEN = 5;
@@ -1352,6 +1353,7 @@ function renderPage() {
   if (res) countResult(res);
   if (res) countLocal(game, res);
   if (res) countFinished(`${S.code ?? 'local'}:${resultKey()}`);
+  noteAchievements(game, res);
   resultUp = !!res;
   status.innerHTML = statusHtml(game, st, res);
   if (res && !game.multi && renderReview(game, st)) return; // ふりかえりで途中の局面を見ている
@@ -1386,6 +1388,7 @@ function renderPage() {
   if (res) {
     if (!game.multi) appendReview(game);
     controls.append(makeButton('もう一回', () => afterAd(rematch)));
+    appendShare();
     if (S.mode === 'online' && S.isHost) controls.append(makeButton('メンバーを変える', () => afterAd(() => newRound(S.gameId, { lobby: true })), 'secondary'));
   } else if (S.mode === 'local' && S.moves.length) {
     controls.append(
@@ -1395,6 +1398,7 @@ function renderPage() {
   } else if (S.mode === 'online' && !game.multi) {
     appendUndo(game);
   }
+  if (!res && S.gameId === 'oekaki' && st.phase === 'show') appendShare(); // お絵描き当ての答えの場面（描き終わった絵が出ている）
   appendFlip(game);
   appendPredict(game, res);
   appendReactions();
@@ -1414,6 +1418,27 @@ async function afterAd(action) {
   const key = resultKey();
   if (!(await beforeLeaveResult())) return;
   if (S && resultKey() === key) action();
+}
+
+/* ---------- アプリならではの良さ（App Store 版だけ。2026-10-22 本人の決定。中身は native.js） ---------- */
+// 実績の数え方（Claude の判断）: 遊んだゲームの種類は、対局者として対局の画面を開いたとき（同じ画面の対局も）。勝ちの数・連勝・「つよい」に勝った・
+// 人と対局したは、オンラインで対局者として決着を見たときだけ（同じ画面の対局は、だれが自分か分からないので数えない）。勝ったかは勝ちの音と同じ見方（sound.js の endSound）。
+// エアホッケーは結果が main.js を通らないので、遊んだ種類にだけ入る。
+function noteAchievements(game, res) {
+  const me = myPlayer();
+  if (S.mode === 'online') noteRoomSize(S.members.length);
+  if (S.mode === 'local' || me >= 0) notePlayed(S.gameId);
+  if (!res || S.mode !== 'online' || !(me >= 0)) return;
+  const won = endSound(res, me) === 'win';
+  const levels = cpuLevels(game);
+  const hard = !!levels && rulesOf(S.gameId, S.rules).cpu === levels[levels.length - 1] && S.order.some(isCpu);
+  noteResult(`${S.code}:${resultKey()}`, { won, beatHardCpu: won && hard, withHuman: S.order.some((id) => id && id !== S.myId && !isCpu(id)) });
+}
+
+// 「📷 画像で保存・共有」: いまの画面を画像にして iPhone の共有の画面を開く（画像を保存・LINE など）
+function appendShare() {
+  if (!canShare()) return;
+  ctl().append(makeButton('📷 画像で保存・共有', async () => { if (!(await shareScreen())) toast('画像にできませんでした'); }, 'secondary'));
 }
 
 /* ---------- 盤の向きを変える（2026-10-07。20回目の案。Claude の案から本人が推奨どおり選んだ） ---------- */
@@ -1588,6 +1613,7 @@ function moveSound(game, st, res, prevLen, mine) {
     try { said = game.sound?.(before, st, m, me); } catch { /* 終局の手に音の決めごとが合わなくても、勝ち負けの音は鳴らす */ }
     const end = endSound(res, me);
     if (isVoice(said)) { play(said); setTimeout(() => play(end), 700); } else play(end);
+    if (end === 'win' || end === 'lose') haptic(end);
     if (end === 'win') confetti(); // 勝ちの音を鳴らす画面には紙吹雪
     greet('end', isVoice(said) ? 1900 : 1200);
     return;
@@ -1595,7 +1621,7 @@ function moveSound(game, st, res, prevLen, mine) {
   const name = game.sound ? game.sound(before, st, m, me) : game.multi ? 'card' : 'place';
   if (name) play(name);
   if (mine && S.mode === 'online' && !game.realtime && !canMove(game, before, null) && Date.now() - S.waitFrom > TURN_PING_MS) {
-    setTimeout(() => { play('turn'); sayTurn(); }, 300);
+    setTimeout(() => { play('turn'); haptic('turn'); sayTurn(); }, 300);
   }
 }
 
@@ -2058,6 +2084,7 @@ function onBoardMove(move) {
   if (!st || !canMove(game, st, game.result(st))) return;
   if (game.multi) move = { ...move, p: myPlayer() };
   if (!game.apply(st, move)) return;
+  haptic('tap');
   pushMove(move);
 }
 
@@ -2196,6 +2223,7 @@ function startLive(gameId, mode) {
 // 毎フレーム動くゲームの画面。対局ごと（round）に1回だけ作り、描き直しでは作り直さない
 function renderLive(game) {
   const key = `${S.gameId}:${S.round}:${S.mode}:${S.live ?? ''}`;
+  noteAchievements(game, null);
   if (S.liveKey !== key) {
     stopLive();
     const online = S.mode === 'online';
@@ -2385,6 +2413,7 @@ const LICENSES = [
   ...(IS_APP ? [
     ['Capacitor（アプリの殻）', 'Copyright (c) 2017-present Drifty Co.'],
     ['@capacitor-community/admob（広告）', 'Copyright (c) 2021 Capacitor Community'],
+    ['@capacitor/haptics（振動）', 'Copyright 2020-present Ionic'],
     // MPL-2.0 は、使った部品のソースの置き場所を知らせることが条件（ファイル単位のライセンス。部品には手を入れていない）
     ['@capgo/native-purchases（広告を消す）', 'Martin Donadieu（Capgo）', 'Mozilla Public License 2.0（https://mozilla.org/MPL/2.0/）。ソース: https://github.com/Cap-go/capacitor-native-purchases'],
   ] : []),
@@ -2922,6 +2951,21 @@ nameInput.addEventListener('input', () => {
 nameInput.addEventListener('change', () => { if (isBad(cleanName(nameInput.value))) toast(BAD_TEXT_NOTE); });
 el('btn-about').onclick = () => openAbout();
 noAdsBtn.onclick = openNoAds;
+// ホームの下の段の「📳 振動」と「🏅 実績」（App Store 版だけ。2026-10-22 本人の決定。振動の付け外しは本人の希望で足した）
+function showAppExtras() {
+  const hap = el('btn-haptics');
+  hap.hidden = !canHaptic();
+  hap.textContent = hapticsOn() ? '📳 振動: オン' : '📳 振動: オフ';
+  el('btn-achv').hidden = !canAchieve();
+}
+el('btn-haptics').onclick = () => {
+  setHapticsOn(!hapticsOn());
+  showAppExtras();
+  if (hapticsOn()) haptic('tap');
+};
+el('btn-achv').onclick = async () => {
+  if (!(await openAchievements())) toast('Game Center にログインできませんでした（iPhone の「設定」→「Game Center」でログインできます）');
+};
 // 自分のマークを選ぶボタン（ホーム画面）
 function renderMarkPick() {
   const box = el('mark-pick');
@@ -2986,6 +3030,8 @@ document.body.classList.toggle('beginner', beginner);
 showBeginnerBtn();
 
 initAds({ muted: isMuted() });
+initNative({ games: Object.keys(GAMES).length });
+showAppExtras();
 showNoAdsBtn(); // 課金の部品があるかは initAds の始めで分かる（買ってあるかは分かりしだい onNoAdsChange で直す）
 
 const roomParam = new URL(location.href).searchParams.get('room');
