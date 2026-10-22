@@ -79,8 +79,10 @@ body {
 main {
   max-width: 760px;
   margin: 0 auto;
-  /* --ad-h は App Store 版の帯広告の高さ（ads.js が入れる。ウェブ版は 0） */
-  padding: 16px 16px calc(32px + var(--ad-h, 0px) + env(safe-area-inset-bottom));
+  /* --ad-h は App Store 版の帯広告の高さ（ads.js が入れる。ウェブ版は 0）
+     safe-area-inset-* は iPhone の時計・カメラ（横向きでは左右の切り欠き）にかかる幅。
+     index.html の viewport-fit=cover で画面の端まで描くので、ここで避ける（ふつうのブラウザでは 0） */
+  padding: calc(16px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) calc(32px + var(--ad-h, 0px) + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
 }
 
 h1 { font-size: 1.6rem; margin: 8px 0 4px; }
@@ -1079,7 +1081,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 /* 通信が切れたときの帯（対局の画面の一番上。スクロールしていても上に貼り付く） */
-.net-banner { position: sticky; top: 0; z-index: 60; margin: 0 0 8px; border-radius: 0 0 10px 10px; background: #c62d1f; color: #fff; font-weight: 700; font-size: .9rem; text-align: center; padding: 8px 12px; box-shadow: 0 2px 8px rgba(0, 0, 0, .25); }
+.net-banner { position: sticky; top: env(safe-area-inset-top); z-index: 60; margin: 0 0 8px; border-radius: 0 0 10px 10px; background: #c62d1f; color: #fff; font-weight: 700; font-size: .9rem; text-align: center; padding: 8px 12px; box-shadow: 0 2px 8px rgba(0, 0, 0, .25); }
 .net-banner[hidden] { display: none; }
 
 /* ---------- リアクション・おまかせ ---------- */
@@ -1656,7 +1658,7 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .mg-wait { padding: 40px 16px; text-align: center; color: var(--muted); }
 
 /* 招待の小窓（QR コード） */
-.invite-pop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0, 0, 0, .45); }
+.invite-pop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: calc(16px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom)); background: rgba(0, 0, 0, .45); }
 .invite-box { background: var(--panel); border-radius: var(--radius); padding: 18px 16px; width: 100%; max-width: 340px; text-align: center; box-shadow: 0 10px 30px rgba(0, 0, 0, .25); }
 .invite-title { font-weight: 700; font-size: 1.1rem; margin-bottom: 10px; }
 .invite-qr { width: 220px; height: 220px; margin: 0 auto; display: flex; align-items: center; justify-content: center; background: #fff; border-radius: 8px; }
