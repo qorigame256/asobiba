@@ -30,6 +30,9 @@ let noAds = false; // 「広告を消す」を買ってある
 let started = false; // 広告の仕組みを動かし始めた（買ってある人には動かさない）
 let muted0 = false;
 const noAdsWatchers = new Set();
+let owned = new Set(); // 買ってある商品の番号（「広告を消す」と買う色）
+let ownedKnown = false; // iPhone に一度聞けた（聞けるまでは、覚えている色を外さない）
+const ownedWatchers = new Set();
 let ready = false; // 広告を頼んでよい
 let wantBanner = false;
 let bannerOn = false; // 帯広告を出している（隠しているときは false）
@@ -50,18 +53,21 @@ export async function initAds({ muted }) {
   shop = cap?.isPluginAvailable?.('NativePurchases') ? cap.registerPlugin?.('NativePurchases') ?? null : null;
   if (shop) {
     // 家族の承認（承認を待つ買い物）が通ったとき・返金されたときに iPhone から届く
-    try { await shop.addListener('transactionUpdated', () => { checkNoAds(); }); } catch { /* 届かなくても起動のたびに確かめる */ }
-    await checkNoAds();
+    try { await shop.addListener('transactionUpdated', () => { checkOwned(); }); } catch { /* 届かなくても起動のたびに確かめる */ }
+    await checkOwned();
   }
   if (!noAds) await startAds();
 }
 
-// 「広告を消す」を買ってあるか、iPhone に聞き直す（いまも使える買い物だけ。返金されたものは入らない）
-async function checkNoAds() {
+// 買ってあるもの（「広告を消す」と買う色）を iPhone に聞き直す（いまも使える買い物だけ。返金されたものは入らない）
+async function checkOwned() {
   if (!shop) return noAds;
   try {
     const { purchases = [] } = await shop.getPurchases({ productType: 'inapp', onlyCurrentEntitlements: true });
-    setNoAds(purchases.some((p) => p.productIdentifier === NO_ADS_ID && !p.revocationDate));
+    owned = new Set(purchases.filter((p) => !p.revocationDate).map((p) => p.productIdentifier));
+    ownedKnown = true;
+    setNoAds(owned.has(NO_ADS_ID));
+    ownedWatchers.forEach((fn) => fn());
   } catch (e) {
     console.warn('買ったかどうかを確かめられませんでした', e); // そのときは前のまま
   }
@@ -182,32 +188,42 @@ export async function beforeLeaveResult() {
   return true;
 }
 
-/* ---------- 「広告を消す」（買い切り） ---------- */
+/* ---------- 買い切りの商品（「広告を消す」と買う色。2026-10-22 本人の決定） ---------- */
+// どちらも App Store Connect に「非消耗型」で登録する。買う色の番号は skin.js の SKIN_PREFIX。
 
 // 課金の部品が使えるか（アプリ版で、殻に部品が入っているとき）
 export const canBuyNoAds = () => !!shop;
+export const canBuy = canBuyNoAds;
 export const hasNoAds = () => noAds;
 // 買った・返金されたときに呼ぶ（ボタンの文字を替えるため）
 export function onNoAdsChange(fn) { noAdsWatchers.add(fn); }
+// その商品を買ってあるか（iPhone に聞けるまでは false）
+export const owns = (id) => owned.has(id);
+export const ownedChecked = () => ownedKnown;
+// 買ってあるものが分かった・変わったときに呼ぶ
+export function onOwnedChange(fn) { ownedWatchers.add(fn); }
 
 // 値段（iPhone の国の通貨で、Apple が決めた書き方。"¥300" など）。商品が見つからないときは null
-export async function noAdsPrice() {
+export async function priceOf(id) {
   if (!shop) return null;
   try {
-    const { product } = await shop.getProduct({ productIdentifier: NO_ADS_ID, productType: 'inapp' });
+    const { product } = await shop.getProduct({ productIdentifier: id, productType: 'inapp' });
     return product?.priceString || null;
   } catch {
     return null;
   }
 }
+export const noAdsPrice = () => priceOf(NO_ADS_ID);
 
 // 買う。'bought'（買えた）・'cancelled'（やめた）・'pending'（家族の承認待ちなど）・'error' を返す
-export async function buyNoAds() {
+export async function buy(id) {
   if (!shop) return 'error';
   try {
-    const t = await shop.purchaseProduct({ productIdentifier: NO_ADS_ID, productType: 'inapp', quantity: 1 });
-    if (t?.productIdentifier === NO_ADS_ID) setNoAds(true);
-    return (await checkNoAds()) ? 'bought' : 'error';
+    const t = await shop.purchaseProduct({ productIdentifier: id, productType: 'inapp', quantity: 1 });
+    if (t?.productIdentifier === id) owned.add(id);
+    if (id === NO_ADS_ID && owned.has(id)) setNoAds(true);
+    await checkOwned();
+    return owned.has(id) ? 'bought' : 'error';
   } catch (e) {
     const m = String(e?.message ?? e);
     if (/cancel/i.test(m)) return 'cancelled';
@@ -216,10 +232,13 @@ export async function buyNoAds() {
     return 'error';
   }
 }
+export const buyNoAds = () => buy(NO_ADS_ID);
 
-// 購入を復元（機種を替えたときなど。Apple ID のパスワードを聞かれることがある）。買ってあったら true
-export async function restoreNoAds() {
+// 購入を復元（機種を替えたときなど。Apple ID のパスワードを聞かれることがある）。その商品を買ってあったら true
+export async function restore(id) {
   if (!shop) return false;
   try { await shop.restorePurchases(); } catch (e) { console.warn('復元できませんでした', e); }
-  return checkNoAds();
+  await checkOwned();
+  return owned.has(id);
 }
+export const restoreNoAds = () => restore(NO_ADS_ID);

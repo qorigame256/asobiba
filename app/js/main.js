@@ -21,7 +21,9 @@
 // banned = ホストが退出させた人の id。あいさつが来ても入れず、もう一度「退出」を送る。
 // streak = 連勝（2026-10-06 本人の決定）。{ key: ゲームと顔ぶれ, counted: 数え終えた対局, wins: 人の id → 連勝の数 }。ホストだけが数えて全員へ送る。
 // tally = 部屋の成績表（2026-10-06 本人の決定）。{ games: 決着した対局の数, wins: 人の id → 勝った回数, preds: 人の id → 勝敗予想が当たった回数（10回目に足した。無いこともある）,
-//   played: 人の id → 対局した回数（勝率のため。24回目に足した。無いこともある） }。ゲームをまたいで数える。ホストが数えて全員へ送る。
+//   played: 人の id → 対局した回数（勝率のため。24回目に足した。無いこともある）,
+//   best: 記録の鍵（records.js の recordKey）→ [{ id, n: そのときの表示名, v: 数字 }] 上位3人（部屋の最高記録。2026-10-22 に足した。無いこともある） }。
+//   ゲームをまたいで数える。ホストが数えて全員へ送る。
 // preds = 勝敗予想（2026-10-06 本人の決定）。{ key: どの対局か, by: 人の id → 勝つと予想したプレイヤー番号 }。各自が全員へ送りっぱなしにし、受け取った端末がそれぞれ覚える。
 // beg = 初心者マークを付けている人の id の一覧（各自が自分の端末で付け外しし、ホストが集めて全員へ送る）。
 // undo = この対局で「待った」をした回数（盤のゲームのオンライン）。待ったをすると手の一覧が短くなり、ふつうの同期（長い方が正）では
@@ -36,8 +38,10 @@ import { isOwner, unlockOwner, forgetOwner } from './owner.js';
 import { IS_APP, WEB_URL } from './platform.js';
 import { isBad, mask, BAD_TEXT_NOTE } from './filter.js';
 import { play, endSound, isMuted, setMuted, isVoice, speak } from './sound.js';
-import { initAds, setAdsMuted, setBanner, countFinished, beforeLeaveResult, canBuyNoAds, hasNoAds, onNoAdsChange, noAdsPrice, buyNoAds, restoreNoAds } from './ads.js';
-import { initNative, haptic, canHaptic, hapticsOn, setHapticsOn, canAchieve, openAchievements, notePlayed, noteResult, noteRoomSize, canShare, shareScreen } from './native.js';
+import { initAds, setAdsMuted, setBanner, countFinished, beforeLeaveResult, canBuyNoAds, hasNoAds, onNoAdsChange, noAdsPrice, buyNoAds, restoreNoAds, onOwnedChange, owns, priceOf, buy, restore } from './ads.js';
+import { initNative, haptic, canHaptic, hapticsOn, setHapticsOn, canAchieve, openAchievements, notePlayed, noteResult, noteRoomSize, canShare, shareScreen, canRank, loadBoard } from './native.js';
+import { readRecords, noteGame, recordKey, rulesText, allBoards, initRecords, onRecords } from './records.js';
+import { SKINS, shownSkins, needText, usable, currentSkin, setSkin, checkSkin, newlyUnlocked, productOf } from './skin.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 見間違えやすい I O 0 1 を除く
 const CODE_LEN = 5;
@@ -172,7 +176,32 @@ function tallyHtml() {
   const hits = (id) => (Number.isInteger(pr[id]) && pr[id] > 0 ? pr[id] : 0);
   const seers = Object.keys(pr).filter((id) => !isCpu(id) && hits(id) && (S.members.includes(id) || S.names[id])).sort((a, b) => hits(b) - hits(a));
   const seerList = seers.map((id) => `<b>${esc(id === S.myId ? 'あなた' : nameOf(id))}</b> ${hits(id)}回`).join('・');
-  return `🏆 この部屋の成績（${t.games}回）: ${list}` + (seers.length ? `<br>🔮 予想の当たり: ${seerList}` : '');
+  return `🏆 この部屋の成績（${t.games}回）: ${list}` + (seers.length ? `<br>🔮 予想の当たり: ${seerList}` : '') + roomBestHtml(t);
+}
+
+// 部屋の最高記録（2026-10-22 本人の決定。ランキング）: 自己ベストを取るゲームごと・詳細設定の組み合わせごとに上位3人。名前はそのときの表示名（外から来た文字なので esc）
+function roomBestHtml(t) {
+  const best = t.best && typeof t.best === 'object' ? t.best : {};
+  const rows = Object.entries(best).map(([key, list]) => {
+    const game = GAMES[key.split('|')[0]];
+    if (!game?.record || !Array.isArray(list) || !list.length) return '';
+    const rt = rulesText(game, key);
+    const who = list.map((x) => `<b>${esc(x.id === S.myId ? 'あなた' : x.n)}</b> ${esc(game.record.fmt(x.v))}`).join('・');
+    return `<br>🎯 ${esc(game.name)}の${esc(game.record.label)}${rt === '最初の設定' ? '' : `（${esc(rt)}）`}: ${who}`;
+  });
+  return rows.join('');
+}
+
+// 届いた部屋の最高記録を整える（外から来た値なので、形の合うものだけ使う）
+function cleanBest(b) {
+  if (!b || typeof b !== 'object') return undefined;
+  const out = {};
+  for (const [key, list] of Object.entries(b).slice(0, 60)) {
+    if (typeof key !== 'string' || key.length > 200 || !GAMES[key.split('|')[0]]?.record || !Array.isArray(list)) continue;
+    const ok = list.slice(0, 3).filter((x) => typeof x?.id === 'string' && typeof x.n === 'string' && Number.isInteger(x.v)).map((x) => ({ id: x.id, n: mask(x.n.slice(0, 30)), v: x.v }));
+    if (ok.length) out[key] = ok;
+  }
+  return out;
 }
 
 // 成績表の勝率（2026-10-08。24回目の案。本人が選んだ）:「（3戦・67%）」。対局した回数で割る（観戦していた対局は数えない）。
@@ -614,7 +643,7 @@ function winnersOf(res) {
 }
 
 // 対局の結果を見たときに1回だけ、連勝と部屋の成績表を数える（ホストだけ）
-function countResult(res) {
+function countResult(res, st, game) {
   if (!S.isHost || S.mode !== 'online' || !S.order) return;
   const counted = `${S.gameId}:${S.round}`;
   if (S.streak?.counted === counted) return;
@@ -636,7 +665,24 @@ function countResult(res) {
   const old = t.games > 0 && !t.played;
   const played = { ...(t.played ?? {}) };
   if (!old) for (const id of new Set(S.order)) if (id && !isCpu(id)) played[id] = (played[id] ?? 0) + 1;
-  S.tally = { games: t.games + 1, wins, preds, ...(old ? {} : { played }) };
+  // 部屋の最高記録: 自己ベストを取るゲームなら、対局した人（人だけ。部屋を出て CPU が代わりに打った人は入れない）の数字で上位3人を入れ替える
+  let best = t.best;
+  if (game?.record && st) {
+    const key = recordKey(game, rulesOf(S.gameId, S.rules));
+    let list = [...(best?.[key] ?? [])];
+    S.order.forEach((id, p) => {
+      if (!id || isCpu(id) || cpuControlled(id)) return;
+      const v = game.record.of(st, p, S.moves);
+      if (!Number.isInteger(v)) return;
+      const i = list.findIndex((x) => x.id === id);
+      if (i >= 0 && list[i].v >= v) return;
+      if (i >= 0) list.splice(i, 1);
+      list.push({ id, n: nameOf(id).slice(0, 30), v });
+    });
+    list = list.sort((a, b) => b.v - a.v).slice(0, 3);
+    if (list.length) best = { ...(best ?? {}), [key]: list };
+  }
+  S.tally = { games: t.games + 1, wins, preds, ...(old ? {} : { played }), ...(best ? { best } : {}) };
   // 対局の履歴: 新しいものから HISTORY_MAX 個。勝った人はそのときの表示名で覚える（CPU の名前は対局ごとに変わるため）
   const names = [...won].map((id) => nameOf(id));
   S.history = [{ g: S.gameId, w: names }, ...(S.history ?? [])].slice(0, HISTORY_MAX);
@@ -1350,10 +1396,10 @@ function renderPage() {
   if (!game.multi) tickClock(game, st, res);
   trackTime(res);
   greetStart(res);
-  if (res) countResult(res);
+  if (res) countResult(res, st, game);
   if (res) countLocal(game, res);
   if (res) countFinished(`${S.code ?? 'local'}:${resultKey()}`);
-  noteAchievements(game, res);
+  noteAchievements(game, res, st);
   resultUp = !!res;
   status.innerHTML = statusHtml(game, st, res);
   if (res && !game.multi && renderReview(game, st)) return; // ふりかえりで途中の局面を見ている
@@ -1424,15 +1470,21 @@ async function afterAd(action) {
 // 実績の数え方（Claude の判断）: 遊んだゲームの種類は、対局者として対局の画面を開いたとき（同じ画面の対局も）。勝ちの数・連勝・「つよい」に勝った・
 // 人と対局したは、オンラインで対局者として決着を見たときだけ（同じ画面の対局は、だれが自分か分からないので数えない）。勝ったかは勝ちの音と同じ見方（sound.js の endSound）。
 // エアホッケーは結果が main.js を通らないので、遊んだ種類にだけ入る。
-function noteAchievements(game, res) {
+function noteAchievements(game, res, st) {
   const me = myPlayer();
   if (S.mode === 'online') noteRoomSize(S.members.length);
   if (S.mode === 'local' || me >= 0) notePlayed(S.gameId);
+  if (res && S.mode === 'local') noteGame(`local:${resultKey()}`, { won: false, withHuman: false, best: null });
   if (!res || S.mode !== 'online' || !(me >= 0)) return;
   const won = endSound(res, me) === 'win';
   const levels = cpuLevels(game);
   const hard = !!levels && rulesOf(S.gameId, S.rules).cpu === levels[levels.length - 1] && S.order.some(isCpu);
-  noteResult(`${S.code}:${resultKey()}`, { won, beatHardCpu: won && hard, withHuman: S.order.some((id) => id && id !== S.myId && !isCpu(id)) });
+  const withHuman = S.order.some((id) => id && id !== S.myId && !isCpu(id));
+  noteResult(`${S.code}:${resultKey()}`, { won, beatHardCpu: won && hard, withHuman });
+  // 自分の記録（ランキング・色の解放。records.js）。自己ベストは自分の席の数字だけ
+  const value = game.record && st ? game.record.of(st, me, S.moves) : null;
+  const best = Number.isInteger(value) ? { game, rules: rulesOf(S.gameId, S.rules), value } : null;
+  if (noteGame(`${S.code}:${resultKey()}`, { won, withHuman, best })) toast(`🎉 自己ベスト更新！ ${game.name} ${game.record.fmt(value)}`);
 }
 
 // 「📷 画像で保存・共有」: いまの画面を画像にして iPhone の共有の画面を開く（画像を保存・LINE など）
@@ -2461,6 +2513,158 @@ function openAbout(reportId = null) {
   row.querySelector('button')?.focus();
 }
 
+/* ---------- ランキング（2026-10-22 本人の決定。記録は records.js、Game Center は native.js） ---------- */
+// ホームの「🏆 ランキング」で開く小窓。上に自分の記録（遊んだ対局・人がいた対局の勝ち・自己ベスト）、アプリ版は下に Game Center の順位
+// （ランキングを選ぶと上位10人と自分の順位。全国と Game Center の友だちを切り替えられる）。名前は外から来た文字なので esc を通す。
+function openRanking() {
+  closeInvite();
+  const rec = readRecords();
+  const pop = document.createElement('div');
+  pop.className = 'invite-pop rank-pop';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-modal', 'true');
+  pop.setAttribute('aria-label', 'ランキング');
+  const rows = [];
+  for (const id of GAME_ORDER) {
+    const game = GAMES[id];
+    if (!game?.record) continue;
+    const keys = Object.keys(rec.best).filter((k) => k.split('|')[0] === id).sort((a, b) => rec.best[b].v - rec.best[a].v);
+    const items = keys.length
+      ? keys.map((k) => `<li><span class="rank-rule">${esc(rulesText(game, k))}</span><b>${esc(game.record.fmt(rec.best[k].v))}</b></li>`).join('')
+      : '<li class="rank-none">まだ記録がありません</li>';
+    rows.push(`<div class="rank-game"><div class="rank-game-name">${game.icon ?? ''} ${esc(game.name)}（${esc(game.record.label)}）</div><ul>${items}</ul></div>`);
+  }
+  pop.innerHTML = `<div class="invite-box rank-box">
+    <div class="invite-title">🏆 ランキング</div>
+    <div class="rank-sum"><div><span>遊んだ対局</span><b>${rec.played}局</b></div><div><span>人がいた対局の勝ち</span><b>${rec.hwins}勝</b></div></div>
+    <div class="rank-head">自己ベスト（この端末の記録・詳細設定ごと）</div>
+    ${rows.join('')}
+    <p class="invite-note">オンラインの対局で、自分が打った分だけ記録します。同じ画面の対局は「遊んだ対局」にだけ数えます。</p>
+    <div class="rank-gc"></div>
+    <div class="invite-actions"></div>
+  </div>`;
+  const box = pop.querySelector('.rank-box');
+  box.querySelector('.invite-actions').append(makeButton('閉じる', closeInvite, 'secondary'));
+  if (canRank()) drawBoards(box.querySelector('.rank-gc'));
+  pop.addEventListener('click', (e) => { if (e.target === pop) closeInvite(); });
+  pop.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeInvite(); });
+  document.body.append(pop);
+  box.querySelector('.invite-actions button')?.focus();
+}
+
+// Game Center の順位（アプリ版だけ）。押すまでは読まない（ログインの画面を勝手に出さないため）
+function drawBoards(wrap) {
+  const boards = allBoards(GAMES);
+  wrap.innerHTML = `<div class="rank-head">全国のランキング（Game Center）</div>
+    <div class="rank-pick"><select aria-label="ランキングを選ぶ">${boards.map((b) => `<option value="${esc(b.id)}">${esc(b.label)}</option>`).join('')}</select></div>
+    <div class="rank-scope"></div><div class="rank-list"></div>`;
+  const sel = wrap.querySelector('select');
+  const list = wrap.querySelector('.rank-list');
+  let scope = 'global';
+  const scopeBox = wrap.querySelector('.rank-scope');
+  const fmtOf = (id) => {
+    const b = boards.find((x) => x.id === id);
+    const g = b?.gameId ? GAMES[b.gameId] : null;
+    return g ? (v) => g.record.fmt(v) : (v) => `${v}勝`;
+  };
+  const load = async () => {
+    list.innerHTML = '<p class="invite-note">読み込んでいます…</p>';
+    const id = sel.value;
+    const r = await loadBoard(id, scope);
+    if (!list.isConnected || sel.value !== id) return;
+    if (!r) { list.innerHTML = '<p class="invite-note">Game Center にログインできないか、読み込めませんでした（iPhone の「設定」→「Game Center」でログインできます）</p>'; return; }
+    const fmt = fmtOf(id);
+    const items = r.entries.map((e) => `<li class="${e.me ? 'me' : ''}"><span class="rank-no">${e.rank}位</span><span class="rank-who">${esc(mask(e.name))}</span><b>${esc(fmt(e.value))}</b></li>`).join('');
+    const mine = r.mine ? `<p class="rank-mine">あなたは ${r.mine.rank}位（${esc(fmt(r.mine.value))}）${r.total ? ` / ${r.total}人` : ''}</p>` : '<p class="rank-mine">あなたの記録はまだありません</p>';
+    list.innerHTML = (items ? `<ol class="rank-ol">${items}</ol>` : '<p class="invite-note">まだだれも記録していません</p>') + mine;
+  };
+  const drawScope = () => {
+    scopeBox.innerHTML = '';
+    for (const [v, label] of [['global', '全国'], ['friends', '友だち']]) {
+      scopeBox.append(makeButton(label, () => { scope = v; drawScope(); load(); }, v === scope ? 'primary small' : 'secondary small'));
+    }
+  };
+  drawScope();
+  list.append(makeButton('順位を見る', load, 'primary'));
+  sel.onchange = load;
+}
+
+/* ---------- スキン（アプリ全体の色。2026-10-22 本人の決定。色の一覧と使えるかは skin.js） ---------- */
+// ホームの「🎨 色」で開く小窓。はじめから・遊んで解放（条件といまの数）・アプリ版で買う（値段・買う・購入を復元）に分けて並べ、押すとすぐその色になる。
+function openSkins() {
+  closeInvite();
+  const pop = document.createElement('div');
+  pop.className = 'invite-pop skin-pop';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-modal', 'true');
+  pop.setAttribute('aria-label', '色を選ぶ');
+  const box = document.createElement('div');
+  box.className = 'invite-box skin-box';
+  pop.append(box);
+  const prices = {};
+  let busy = false;
+  const draw = () => {
+    const rec = readRecords();
+    const cur = currentSkin().id;
+    const list = shownSkins();
+    box.innerHTML = '<div class="invite-title">🎨 色を選ぶ</div><p class="invite-note">アプリ全体の色が変わります（自分の画面だけ）。</p>';
+    for (const [kind, head] of [['free', 'はじめから選べる色'], ['unlock', '遊んで解放する色'], ['buy', '買う色']]) {
+      const group = list.filter((s) => s.kind === kind);
+      if (!group.length) continue;
+      box.insertAdjacentHTML('beforeend', `<div class="rank-head">${head}</div>`);
+      const grid = document.createElement('div');
+      grid.className = 'skin-grid';
+      for (const sk of group) {
+        const ok = usable(sk, rec);
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'skin-btn' + (sk.id === cur ? ' on' : '') + (ok ? '' : ' locked');
+        b.setAttribute('aria-pressed', String(sk.id === cur));
+        b.innerHTML = `<span class="skin-sw" style="background:${sk.sw[0]}"><i style="background:${sk.sw[1]}"></i></span><span class="skin-name">${sk.name}</span>`;
+        if (!ok && kind === 'unlock') b.insertAdjacentHTML('beforeend', `<span class="skin-need">🔒 ${esc(needText(sk, rec).text)}</span>`);
+        if (!ok && kind === 'buy') b.insertAdjacentHTML('beforeend', `<span class="skin-need">${prices[sk.id] === undefined ? '値段を確かめています…' : prices[sk.id] ? `🛒 ${esc(prices[sk.id])}` : 'いまは買えません'}</span>`);
+        b.onclick = async () => {
+          if (ok) { setSkin(sk.id); draw(); return; }
+          if (kind !== 'buy' || busy || !prices[sk.id]) return;
+          busy = true;
+          const r = await buy(productOf(sk));
+          busy = false;
+          if (r === 'bought') { setSkin(sk.id); toast(`「${sk.name}」を買いました。ありがとうございます`); }
+          else if (r === 'pending') toast('承認を待っています。承認されると使えるようになります');
+          else if (r === 'error') toast('買えませんでした。時間をおいてもう一度お試しください');
+          if (pop.isConnected) draw();
+        };
+        grid.append(b);
+      }
+      box.append(grid);
+    }
+    const row = document.createElement('div');
+    row.className = 'invite-actions';
+    if (list.some((s) => s.kind === 'buy')) {
+      row.append(makeButton('購入を復元', async () => {
+        if (busy) return;
+        busy = true;
+        const buys = SKINS.filter((s) => s.kind === 'buy');
+        await restore(productOf(buys[0]));
+        busy = false;
+        const n = buys.filter((s) => owns(productOf(s))).length;
+        toast(n ? `買った色を復元しました（${n}色）` : 'この Apple ID で色を買った記録が見つかりませんでした');
+        if (pop.isConnected) draw();
+      }, 'secondary'));
+    }
+    row.append(makeButton('閉じる', closeInvite, 'secondary'));
+    box.append(row);
+  };
+  draw();
+  pop.addEventListener('click', (e) => { if (e.target === pop) closeInvite(); });
+  pop.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeInvite(); });
+  document.body.append(pop);
+  box.querySelector('.skin-btn.on')?.focus();
+  // 買う色の値段（Apple が決めた書き方）を読む
+  const buys = shownSkins().filter((sk) => sk.kind === 'buy' && !owns(productOf(sk)));
+  Promise.all(buys.map(async (sk) => { prices[sk.id] = await priceOf(productOf(sk)); })).then(() => { if (pop.isConnected && buys.length) draw(); });
+}
+
 /* ---------- 広告を消す（App Store 版だけ。2026-10-22 本人の決定。買う・復元は ads.js） ---------- */
 // ホームの下の段のボタンから開く小窓。値段・「買う」・「購入を復元」（Apple の決まりで必須）を出す。対局の画面には出さない（本人の選択）。
 const noAdsBtn = el('btn-noads');
@@ -2723,7 +2927,7 @@ function adoptState(msg) {
   S.history = Array.isArray(msg.history)
     ? msg.history.filter((h) => GAMES[h?.g] && Array.isArray(h.w)).slice(0, HISTORY_MAX).map((h) => ({ g: h.g, w: h.w.filter((x) => typeof x === 'string').map((x) => x.slice(0, 30)) }))
     : null;
-  S.tally = msg.tally && Number.isInteger(msg.tally.games) && msg.tally.wins && typeof msg.tally.wins === 'object' ? msg.tally : null;
+  S.tally = msg.tally && Number.isInteger(msg.tally.games) && msg.tally.wins && typeof msg.tally.wins === 'object' ? { ...msg.tally, best: cleanBest(msg.tally.best) } : null;
   S.stay = msg.stay === true;
   S.cpuAuto = msg.cpuAuto === true;
   S.roomName = mask(cleanRoomName(msg.roomName));
@@ -2950,6 +3154,8 @@ nameInput.addEventListener('input', () => {
 });
 nameInput.addEventListener('change', () => { if (isBad(cleanName(nameInput.value))) toast(BAD_TEXT_NOTE); });
 el('btn-about').onclick = () => openAbout();
+el('btn-rank').onclick = openRanking;
+el('btn-skin').onclick = openSkins;
 noAdsBtn.onclick = openNoAds;
 // ホームの下の段の「📳 振動」と「🏅 実績」（App Store 版だけ。2026-10-22 本人の決定。振動の付け外しは本人の希望で足した）
 function showAppExtras() {
@@ -3029,6 +3235,13 @@ begBtn.onclick = () => {
 document.body.classList.toggle('beginner', beginner);
 showBeginnerBtn();
 
+checkSkin();
+onOwnedChange(checkSkin); // 買う色を選んでいたのに買った記録が無い（返金など）と分かったら、いつもの色に戻す
+initRecords(GAMES);
+// 遊んで解放する色に届いたら知らせる
+onRecords((before, after) => {
+  for (const sk of newlyUnlocked(before, after)) toast(`🎨 新しい色「${sk.name}」が使えるようになりました（ホームの「🎨 色」）`);
+});
 initAds({ muted: isMuted() });
 initNative({ games: Object.keys(GAMES).length });
 showAppExtras();

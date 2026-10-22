@@ -4,6 +4,7 @@
 // - 実績（Game Center）: 下の ACHIEVEMENTS の10個。数は端末ごとに数え、ログインしていれば Game Center へ送る。
 //   ログインの画面を出すのは、初めて実績を取ったときと、ホームの「🏅 実績」を押したときだけ（初めて開いたときは追跡の許可の画面が出るので重ねない）。
 //   一度ログインできた端末は、次の起動からは画面を出さずにつなぐ（iPhone が「おかえりなさい」の帯を出すだけ）。
+// - ランキング（Game Center）: records.js が決めた記録を送り、ランキングの画面で順位を読む（ログインの画面を出すのは、ランキングの画面で順位を見るときだけ）。
 // - 画像で保存・共有: いまの画面を画像にして iPhone の共有の画面を開く（画像を保存・LINE など）。結果の画面とお絵描き当ての答えの場面に出す。
 // iPhone 側は native/plugins/asobiba-native（Game Center と画像。自前の部品）と @capacitor/haptics（振動）。
 
@@ -96,10 +97,15 @@ async function signIn() {
   if (!g) return false;
   if (signedIn) return true;
   asking ??= g.signIn().then((r) => !!r?.ok, () => false).finally(() => { asking = null; });
+  const was = signedIn;
   signedIn = await asking;
   if (signedIn) store(GC_KEY, '1');
+  if (signedIn && !was) signedInWatchers.forEach((fn) => fn());
   return signedIn;
 }
+const signedInWatchers = new Set();
+// Game Center にログインできたときに1回呼ぶ（records.js がたまっている記録を送る）
+export function onGcSignedIn(fn) { signedInWatchers.add(fn); }
 
 // 起動のときに1回。前にログインできた端末なら、画面を出さずにつないで、たまっている分を送る
 export function initNative({ games }) {
@@ -141,6 +147,29 @@ export function noteRoomSize(n) {
   if (!IS_APP || n < 5 || readAch().room5) return;
   update((a) => { a.room5 = true; });
 }
+
+/* ---------- ランキング（Game Center。2026-10-22 本人の決定。何を送るかは records.js） ---------- */
+
+// 記録を送る（ログインしているときだけ。ここではログインの画面を出さない）。list: [{ id, value }]
+export function reportScores(list) {
+  if (!IS_APP || !signedIn || !list.length) return;
+  getGc()?.reportScores({ list })?.catch?.(() => {});
+}
+
+// ランキングを読む（まだならログインの画面を出す）。scope: 'global'（全国）| 'friends'（Game Center の友だち）。
+// { entries: [{ rank, name, value, me }], mine: { rank, value } | null, total } か、読めなければ null。name は外から来た文字（出すときは esc を通す）
+export async function loadBoard(id, scope) {
+  if (!(await signIn())) return null;
+  const r = await getGc().loadScores({ id, scope, count: 10 }).catch(() => null);
+  if (!r?.ok) return null;
+  const num = (x) => (Number.isFinite(x) ? Math.trunc(x) : null);
+  const entries = (Array.isArray(r.entries) ? r.entries : []).slice(0, 10)
+    .map((e) => ({ rank: num(e?.rank), name: String(e?.name ?? '').slice(0, 40), value: num(e?.value), me: !!e?.me }))
+    .filter((e) => e.rank !== null && e.value !== null);
+  const mine = r.mine && num(r.mine.rank) !== null ? { rank: num(r.mine.rank), value: num(r.mine.value) } : null;
+  return { entries, mine, total: num(r.total) ?? entries.length };
+}
+export const canRank = () => !!getGc();
 
 /* ---------- 画像で保存・共有 ---------- */
 

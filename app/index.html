@@ -14,6 +14,8 @@
   <meta name="apple-mobile-web-app-title" content="みんなの対戦">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="theme-color" content="#f7f2e9">
+  <!-- スキン（アプリ全体の色）を画面を描く前に当てる（ちらつかないように）。使えるかの確かめは js/skin.js の checkSkin -->
+  <script>try { var sk = localStorage.getItem('bg-skin'); if (sk && /^[a-z]+$/.test(sk) && sk !== 'std') document.documentElement.dataset.skin = sk; } catch (e) {}</script>
   <link rel="stylesheet" href="css/style.css">
   <script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
   <script type="module" src="js/main.js"></script>
@@ -40,6 +42,8 @@
           <button class="btn primary" type="submit">参加する</button>
         </div>
       </form>
+
+      <div class="home-tools"><button id="btn-rank" class="btn secondary small" type="button">🏆 ランキング</button><button id="btn-skin" class="btn secondary small" type="button">🎨 色</button></div>
 
       <h2 id="game-list-title">ゲームを選ぶ</h2>
       <div id="game-list" class="game-list"></div>

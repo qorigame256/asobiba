@@ -150,6 +150,8 @@ export default {
   multi: true,
   realtime: true,
   minPlayers: 1,
+  // 自己ベスト（ランキング）: 終わったときの持ち点
+  record: { label: '持ち点', of: (s, p) => s.points[p], fmt: (v) => `${v}点`, keys: ['rounds', 'bets', 'surrender', 'five', 'split'], gc: ['rounds'] },
   maxPlayers: 6,
   settings: [
     { key: 'rounds', label: '回数', desc: 'この回数を遊んで、持ち点が多い人の勝ち', def: 5, choices: [[3, '3回'], [5, '5回'], [10, '10回']] },

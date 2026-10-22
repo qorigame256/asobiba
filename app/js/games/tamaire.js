@@ -284,6 +284,8 @@ export default {
   realtime: true,
   evenTeams: true,
   minPlayers: 2,
+  // 自己ベスト（ランキング）: 自分が入れた点（チームの点ではない）
+  record: { label: '入れた点', of: (s, p) => pointsOf(s)[p], fmt: (v) => `${v}点`, keys: ['time', 'move', 'last'], gc: ['time'] },
   maxPlayers: 10,
   settings: [
     { key: 'time', label: '時間', desc: '1回の勝負の長さ', def: '60', choices: [['30', '30秒'], ['60', '60秒'], ['90', '90秒']] },
@@ -373,7 +375,7 @@ export default {
   render(root, s, o) {
     const me = o.me >= 0 ? o.me : null;
     const chips = scoreChips(o, pointsOf(s), {
-      extra: (p) => `<span style="color:${teamOf(p) ? '#777' : '#c0392b'}">${TEAM[teamOf(p)]}</span>`,
+      extra: (p) => `<span style="color:${teamOf(p) ? '#777' : 'var(--red-ink, #c0392b)'}">${TEAM[teamOf(p)]}</span>`,
     });
     const key = `${s.seed}:${me}`;
     if (ui?.key === key && root.contains(ui.canvas)) {

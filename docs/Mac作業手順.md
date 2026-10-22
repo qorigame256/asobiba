@@ -181,12 +181,18 @@ open ~/asobiba/native/ios/App/App.xcodeproj
 | 16 | 振動 | マルバツの「この画面で2人で」で1局打つ。次にホームの一番下の「📳 振動: オン」を押して「オフ」にし、もう1局 | 置くたびに軽くブルッとし、勝ちが決まったときに強めの2回の振動。オフにすると振動しない（iPhone の 設定 > サウンドと触覚 > システムの触覚 がオンのときだけ振動する） |
 | 17 | 画像で保存・共有 | 16 の結果の画面で「📷 画像で保存・共有」を押し、共有の画面で「画像を保存」 | iPhone の共有の画面が出て、いまの画面の画像が付いている。初めての保存で「写真に追加してよいか」と聞かれ、許可すると写真アプリに入る |
 | 18 | 実績（Game Center） | **有料の Apple Developer Program に入り、下の「Game Center の準備」をしてから。** ホームの一番下の「🏅 実績」を押す | Game Center のログインの画面か、実績の画面が開く。準備の前・無料の Apple ID では「Game Center にログインできませんでした」と出るのが正しい（アプリは止まらない） |
+| 19 | ランキング（Game Center） | 18 と同じ準備のあと、下の「ランキングの準備」もしてから。オンラインで弾幕回避を1局打ち、ホームの「🏆 ランキング」→ 下の「全国のランキング」で弾幕回避を選び「順位を見る」 | 自分の記録（生き残った秒数）が順位に出る。「友だち」でも開ける。準備の前は「ログインできないか、読み込めませんでした」と出るのが正しい |
+| 20 | 色を買う | 下の「課金を試す準備」の `NoAds.storekit` に、`io.github.qorigame256.asobiba.skin.kin` など6つ（金・夕焼け・星空・抹茶・海・木目。後ろの語は kin・yuyake・hoshi・matcha・umi・mokume）も「非消耗型」で足す。ホームの「🎨 色」→「買う色」の金を押して買う | 色の小窓に値段が出て、買うと画面がすぐ金の色になる。開き直しても金のまま。Manage Transactions で買い物を消して開き直すと、いつもの色に戻る |
 | 15 | 開き直し・復元 | アプリを上へはらって閉じてから開く。次に Xcode の メニュー Debug > StoreKit > Manage Transactions で買い物を消し（Delete）、アプリの「広告を消す」→「購入を復元」 | 開き直しても広告が出ず、追跡の許可の画面も出ない。買い物を消したあとの復元では「記録が見つかりませんでした」と出る（消した買い物は戻らないのが正しい） |
 
 **Game Center の準備**（本人。有料の Apple Developer Program に入ったあと。**無料の Apple ID では Game Center を付けられないようだ（古い資料で見ただけで未確認）。付けると署名できなくなることがあるので、無料の間は付けない**）:
 Xcode の TARGETS の App > Signing & Capabilities > 左上の「+ Capability」→「Game Center」。App Store Connect のこのアプリの「Game Center」に、`app/js/native.js` の `ACHIEVEMENTS` の10個を、
 番号 `io.github.qorigame256.asobiba.ach.` ＋ 後ろの語（例 `io.github.qorigame256.asobiba.ach.firstwin`）で登録する（**登録したら番号は変えられない**）。名前・説明・絵はそこで決める。
 Capability を付けると増える `App.entitlements` と `project.pbxproj` の変更は持ち帰る（Windows に入れる）。
+
+**ランキングの準備**（本人。Game Center の準備と同じとき）: App Store Connect のこのアプリの「Game Center」の「リーダーボード」に、`tools/test-records.mjs` が見ている24個を登録する。
+番号と名前の一覧は、Windows で `node -e "import('./app/js/records.js').then(async (r) => { const { GAMES } = await import('./app/js/games/index.js'); for (const b of r.allBoards(GAMES)) console.log(b.id, b.label); })"` を走らせると出る。
+どれも「クラシック」「いちばん大きい数字を残す（High to Low の Best Score）」で、弾幕回避（`lb.danmaku.`）は数字がミリ秒なので表示の形を時間にする。**登録したら番号は変えられない。**
 
 **課金を試す準備**（Mac の Claude か本人。有料の Apple Developer Program に入る前は、App Store Connect に商品を登録できないので、Xcode の中だけの試験の店を使う。**無料の Apple ID でこの試験ができるかは未確認**）:
 Xcode のメニュー File > New > File from Template… →「StoreKit Configuration File」→ 名前 `NoAds.storekit`、置き場所は `native/ios/App/`、「Sync this file with an app in App Store Connect」は**外す**。

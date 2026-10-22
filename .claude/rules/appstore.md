@@ -22,6 +22,7 @@ CLAUDE.md が目安の大きさを超えたため（Claude の推奨を本人が
   - 広告は Google の AdMob。**対局の結果を見せたあとの全画面広告（数回に1回まで）**と、**ホーム画面と待合室の一番下の帯広告**。対局の画面には帯広告を出さない（Google の決まりで、遊んでいる画面とボタンのすぐ横は不可）。
   - **追跡を付ける**（ATT＝「ほかのアプリでの行動の追跡を許可しますか」の画面を出し、許可した人には個人に合わせた広告）。「許可したら特典」「断ったら使えない」は Apple の決まりで作れない。
   - 課金は**「広告を消す」の買い切り1つだけ**（勝ち負けに関わらず、ウェブ版の人と同じ部屋で不公平にならないため）。**値段は保留**（審査に出す前に決める）。
+    → 2026-10-22 に本人が**買う色（スキン）**を足した（勝ち負けに関わらない見た目なので上の理由は崩れない。決定は CLAUDE.md の「ランキング・スキン」）。
   - 細かい所（2026-10-22 本人の決定。Claude が問いを出した）: 全画面広告は**決着した対局を3回数えるごとに1回、しかも前の広告から3分以上あける**（推奨を承認）。
     出すのは**結果の画面で、その人が自分で「もう一回」「メンバーを変える」「← ホーム」を押したとき**で、広告を閉じてから押した動きが進む（推奨を承認。勝手に出すと、全員が同時に動くゲームで次の対局の始まりに重なるため）。
     追跡の許可は**アプリを初めて開いたときに iPhone の画面だけ**を出す（Claude は先に短い説明を出す形を推したが、本人が説明なしを選んだ）。
@@ -70,7 +71,14 @@ CLAUDE.md が目安の大きさを超えたため（Claude の推奨を本人が
     **Xcode で「Game Center」の Capability を付けるのは有料の登録のあと**（無料の Apple ID では付けられない見込み。付いていなくても signIn が失敗するだけでアプリは動く）。
   - 画像で保存・共有: 結果の画面と、お絵描き当ての答えの場面（`phase === 'show'`）の下の段に「📷 画像で保存・共有」。画面の画像は殻の WKWebView の `takeSnapshot` で作る（外の道具で画面を描き直さない）。
     写真に保存するので `Info.plist` に `NSPhotoLibraryAddUsageDescription` を足した。
-  - ブラウザで確かめるときは、広告と同じ偽物の `PluginHeaders` に `Haptics`（impact・notification）と `AsobibaNative`（signIn・reportAchievements・showAchievements・shareScreen）を足す。
+  - ブラウザで確かめるときは、広告と同じ偽物の `PluginHeaders` に `Haptics`（impact・notification）と `AsobibaNative`（signIn・reportAchievements・showAchievements・shareScreen・reportScores・loadScores）を足す。
+- **ランキング（Game Center）と買う色の作り（2026-10-22。本人の決定は CLAUDE.md の「ランキング・スキン」。番号の付け方・何を送るかは Claude の判断）**:
+  - ランキングは自前の部品の `reportScores`（`GKLeaderboard.submitScore`）と `loadScores`（上位10人と自分の順位。全国か Game Center の友だち）。何を送るかは `records.js` の先頭。
+    番号は `io.github.qorigame256.asobiba.lb.` ＋ `wins`、またはゲーム＋分ける設定（`lb.danmaku.levelhard.time60` など）。**24個**（一覧は `records.js` の `allBoards`。`tools/test-records.mjs` が数と形を見ている）。
+    **App Store Connect に同じ番号で「いちばん大きい数字を残す」形で登録する（本人の作業。有料の登録のあと）。** 弾幕回避はミリ秒で送るので、表示の形は「時間（100分の1秒）」などを選ぶ（アプリの中の画面は自分で書き方を決めて出す）。
+    ログインの画面を出すのは、ランキングの画面で「順位を見る」を押したときだけ。ログインできたら、端末にたまっている記録をまとめて送る（`onGcSignedIn`）。
+  - 買う色は「広告を消す」と同じ部品で、商品の番号は `skin.js` の `SKIN_PREFIX` ＋ 色の id（`io.github.qorigame256.asobiba.skin.kin` など6つ）。**App Store Connect に「非消耗型」で6つ登録する（本人の作業）。**
+    買ってあるかは起動のたびに iPhone に聞き（`ads.js` の `checkOwned`。「広告を消す」と一緒）、買う色を選んでいたのに記録が無いと分かったらいつもの色に戻す（聞けるまでは戻さない）。
 - `npm audit` は `@capacitor/cli` の中の uuid を指摘する（組み立ての道具の中だけで、アプリには入らない。直すと版が下がるので触っていない）。
 
 ## Apple・Google の決まりで効くもの（2026-10-17 に調べた。審査ガイドラインは 2026-06-08 版）
@@ -107,3 +115,4 @@ CLAUDE.md が目安の大きさを超えたため（Claude の推奨を本人が
    細かい所（同日。Claude の推奨を承認）: 振動は番・決着・自分の手の3つの場面／実績は10個で端末ごとに数える／ログインの画面は初めて実績を取ったときと「🏅 実績」のときだけ／画像は結果の画面のボタンで画面ごと。
    **振動はアプリの中でも付け外しできるようにする**（本人の決定。Claude は iPhone の設定に任せる案を推した）。Game Center の Capability と実績の登録は、有料の登録のあとの本人の作業。
 6. アイコンと起動画面。
+（2026-10-22 に本人の依頼でランキングと買う色を足した。上の「ランキング（Game Center）と買う色の作り」）

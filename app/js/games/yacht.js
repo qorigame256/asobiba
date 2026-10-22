@@ -140,6 +140,12 @@ export default {
   multi: true,
   realtime: true,
   minPlayers: 2,
+  // 自己ベスト（ランキング）: 合計点。短い版のときは2回目のヨット・ジョーカーを使わないので、記録も分けない
+  record: {
+    label: '合計点', of: (s, p) => totalOfPl(s.pl[p]).total, fmt: (v) => `${v}点`,
+    keys: ['short', 'bonusYacht', 'joker'], gc: ['short'],
+    norm: (r) => (r.short ? { ...r, bonusYacht: false, joker: false } : r),
+  },
   maxPlayers: 10,
   settings: [
     { key: 'bonusYacht', label: '2回目のヨット', desc: 'ヨットの役に50点を書いたあとで、もう一度5個そろえたら +100点（そのときも、ほかの役を1つ選んで書く）', def: false },

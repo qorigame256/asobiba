@@ -7,6 +7,8 @@ import UIKit
 // - signIn: Game Center にログインする（まだなら iPhone のログインの画面を出す）。{ ok: ログインできたか }
 // - reportAchievements: 実績の進み具合を Game Center へ送る。{ list: [{ id, percent }] }
 // - showAchievements: Game Center の実績の画面を開く
+// - reportScores: ランキング（リーダーボード）へ記録を送る。{ list: [{ id, value }] }（2026-10-22 に足した。何を送るかは app/js/records.js）
+// - loadScores: ランキングの上位と自分の順位を読む。{ id, scope: "global" | "friends", count } → { ok, entries: [{ rank, name, value, me }], mine, total }
 // - shareScreen: いまの画面を画像にして、iPhone の共有の画面（画像を保存・LINE など）を開く
 // Game Center は、Xcode で「Game Center」の機能（capability）を付けないと動かない（無料の Apple ID では付けられない）。
 // 付いていなくても signIn が ok: false を返すだけで、アプリはふつうに動く。
@@ -18,6 +20,8 @@ public class AsobibaNativePlugin: CAPPlugin, CAPBridgedPlugin, GKGameCenterContr
         CAPPluginMethod(name: "signIn", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "reportAchievements", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "showAchievements", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "reportScores", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "loadScores", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "shareScreen", returnType: CAPPluginReturnPromise)
     ]
 
@@ -89,6 +93,55 @@ public class AsobibaNativePlugin: CAPPlugin, CAPBridgedPlugin, GKGameCenterContr
             vc.gameCenterDelegate = self
             top.present(vc, animated: true)
             call.resolve(["ok": true])
+        }
+    }
+
+    @objc public func reportScores(_ call: CAPPluginCall) {
+        guard GKLocalPlayer.local.isAuthenticated else {
+            call.resolve(["ok": false])
+            return
+        }
+        let list = call.getArray("list", JSObject.self) ?? []
+        let group = DispatchGroup()
+        var ok = true
+        for item in list {
+            guard let id = item["id"] as? String, let value = item["value"] as? NSNumber else { continue }
+            group.enter()
+            GKLeaderboard.submitScore(value.intValue, context: 0, player: GKLocalPlayer.local, leaderboardIDs: [id]) { error in
+                DispatchQueue.main.async { // 結果は main でまとめる（呼ばれる糸がそろっていないため）
+                    if error != nil { ok = false }
+                    group.leave()
+                }
+            }
+        }
+        group.notify(queue: .main) { call.resolve(["ok": ok]) }
+    }
+
+    @objc public func loadScores(_ call: CAPPluginCall) {
+        guard GKLocalPlayer.local.isAuthenticated, let id = call.getString("id") else {
+            call.resolve(["ok": false])
+            return
+        }
+        let scope: GKLeaderboard.PlayerScope = call.getString("scope") == "friends" ? .friendsOnly : .global
+        let count = max(1, min(50, call.getInt("count") ?? 10))
+        GKLeaderboard.loadLeaderboards(IDs: [id]) { boards, error in
+            guard error == nil, let board = boards?.first else {
+                call.resolve(["ok": false])
+                return
+            }
+            board.loadEntries(for: scope, timeScope: .allTime, range: NSRange(location: 1, length: count)) { local, entries, total, error in
+                guard error == nil else {
+                    call.resolve(["ok": false])
+                    return
+                }
+                let me = GKLocalPlayer.local.gamePlayerID
+                let list: [JSObject] = (entries ?? []).map { e in
+                    ["rank": e.rank, "name": e.player.displayName, "value": e.score, "me": e.player.gamePlayerID == me]
+                }
+                var result: JSObject = ["ok": true, "entries": list, "total": total]
+                if let l = local { result["mine"] = ["rank": l.rank, "value": l.score] as JSObject }
+                call.resolve(result)
+            }
         }
     }
 

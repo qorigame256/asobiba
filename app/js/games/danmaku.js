@@ -414,6 +414,14 @@ export default {
   multi: true,
   realtime: true,
   minPlayers: 2,
+  // 自己ベスト（ランキング）: 生き残った時間（ms）。最後の1人がほかの全員より長くもって終わったときは、その「last」の手の時刻
+  // （局面の scoreOf は時間いっぱいとして数えるので使わない）。局面の形を変えないよう、手の一覧から読む
+  record: {
+    label: '生き残った時間',
+    of: (s, p, moves = []) => s.dead[p] ?? moves.findLast((m) => m?.t === 'last' && m.p === p)?.ms ?? durOf(s) * 1000,
+    fmt: (v) => `${(Math.floor(v / 100) / 10).toFixed(1)}秒`,
+    keys: ['time', 'lives', 'level', 'dark', 'slow'], gc: ['level', 'time'],
+  },
   maxPlayers: 10,
   settings: [
     { key: 'time', label: '時間', desc: 'この時間まで残った人は全員1位。後ほど弾が多く速くなる', def: '90', choices: [['60', '60秒'], ['90', '90秒'], ['120', '120秒']] },

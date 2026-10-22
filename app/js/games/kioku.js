@@ -70,6 +70,8 @@ export default {
   multi: true,
   realtime: true,
   minPlayers: 2,
+  // 自己ベスト（ランキング）: 覚えられたいちばん長い数。最後の1人になると終わるので、勝った人の記録はそこで止まる
+  record: { label: '覚えた長さ', of: (s, p) => s.best[p], fmt: (v) => `${v}個`, keys: ['lives', 'step', 'reverse'], gc: ['step', 'reverse'] },
   maxPlayers: 10,
   settings: [
     { key: 'lives', label: '間違えられる回数', desc: '何回間違えたら脱落か', def: 1, choices: [[1, '1回で脱落'], [3, '3回まで']] },
