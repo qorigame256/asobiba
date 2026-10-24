@@ -49,7 +49,7 @@ CLAUDE.md が目安の大きさを超えたため。Claude の推奨を本人が
 - 部屋の名前の作り（`main.js` の「部屋の名前」の節）: `S.roomName`（`cleanRoomName` で空白をまとめて16文字まで）。`state` の `roomName` で送り、受け手も同じように整える。
   外から来た文字なので、部屋の欄は `textContent`、招待の小窓は `esc()` で出す。
 - 詳細設定を覚える作り（`main.js` の「詳細設定を覚える」の節）: localStorage の `bg-rules`（ゲームの id → 詳細設定）。ホストが詳細設定を変える・おまかせ・最初に戻すのたびに `rememberRules` で保存し、
-  `createRoom` の始めの `rules` に `savedRules()` を入れる。値の正しさは `rulesOf` が見る（おかしな値は最初の値に直る）。同じ画面の対局には使わない（詳細設定を選ぶ所が無いため）。
+  `openRoom`（`createRoom` が名前を聞いたあとに呼ぶ）の始めの `rules` に `savedRules()` を入れる。値の正しさは `rulesOf` が見る（おかしな値は最初の値に直る）。同じ画面の対局には使わない（詳細設定を選ぶ所が無いため）。
 - CPU の強さを自動で合わせる作り（`main.js` の「CPU の強さを自動で合わせる」の節）: 部屋の設定 `S.cpuAuto`（`state` の `cpuAuto` で送る）。詳細設定「CPU の強さ」（key `cpu`）を持つ盤のゲームだけ（`cpuLevels`）。
   `newRound` の盤のゲームのもう一回で `adjustCpu` が決着を見て、勝った人に人がいて CPU がいなければ1段上げ、逆なら1段下げる（引き分け・人どうし・CPU どうしは変えない）。
   変えた強さは詳細設定に入れて全員へ送り、`rememberRules` で覚える。エアホッケーは結果が `main.js` を通らないので出さない。

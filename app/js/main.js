@@ -2358,8 +2358,60 @@ function stopLive() {
   S.liveKey = null;
 }
 
+/* ---------- 名前は部屋に入るときに聞く（2026-10-24 本人の決定。前はホーム画面の欄だった） ---------- */
+// 招待リンクから来た人はホームを通らずに部屋へ入るので、名前を入れないまま「プレイヤー2」になっていた。
+// 部屋を作るとき・部屋コードや招待リンクで入るときに小窓で聞く。前に入れた名前が最初から入っていて「OK」だけで進める。
+// 再読み込みで部屋に戻るとき（タブに部屋を覚えているとき）と、名前を使わない同じ画面の対局では聞かない（Claude の判断）。
+// 空のままでは進めない（Claude の判断。聞く目的が名前を付けてもらうことなので）。マークはホームで選ぶ（本人の選択）。
+function askName(okText, onOk, onCancel = () => {}) {
+  closeInvite();
+  const pop = document.createElement('div');
+  pop.className = 'invite-pop';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-modal', 'true');
+  pop.setAttribute('aria-label', 'あなたの名前');
+  pop.innerHTML = `<form class="invite-box name-ask">
+    <label class="invite-title" for="ask-name">あなたの名前</label>
+    <input id="ask-name" maxlength="10" autocomplete="nickname" placeholder="例: たろう">
+    <p class="invite-note">部屋の人の画面に出ます（10文字まで）。</p>
+    <div class="invite-actions"></div>
+  </form>`;
+  const form = pop.querySelector('form');
+  const input = pop.querySelector('#ask-name');
+  input.value = myName();
+  const cancel = () => { closeInvite(); onCancel(); };
+  const ok = makeButton(okText, null);
+  ok.type = 'submit';
+  form.querySelector('.invite-actions').append(ok, makeButton('やめる', cancel, 'secondary'));
+  const check = () => {
+    const n = cleanName(input.value);
+    input.classList.toggle('bad', isBad(n));
+    ok.disabled = !n;
+  };
+  input.addEventListener('input', check);
+  check();
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const n = cleanName(input.value);
+    if (!n) return;
+    if (isBad(n)) { toast(BAD_TEXT_NOTE); input.focus(); return; }
+    try { localStorage.setItem(NAME_KEY, n); } catch { /* 無視 */ }
+    closeInvite();
+    onOk();
+  });
+  pop.addEventListener('click', (e) => { if (e.target === pop) cancel(); });
+  pop.addEventListener('keydown', (e) => { if (e.key === 'Escape') cancel(); });
+  document.body.append(pop);
+  input.focus();
+  input.select();
+}
+
 function createRoom(gameId) {
   if (!canHost()) return;
+  askName('部屋を作る', () => openRoom(gameId));
+}
+
+function openRoom(gameId) {
   const myId = newId();
   S = {
     mode: 'online', code: randomString(CODE_LEN, CODE_CHARS), myId, isHost: true,
@@ -2377,6 +2429,15 @@ function joinRoom(raw) {
   if (code.length !== CODE_LEN) { toast(`部屋コードは${CODE_LEN}文字です`); return false; }
   if (wasKicked(code)) { toast('この部屋には入れません'); return false; }
   const saved = loadRoom(code);
+  if (saved) enterRoom(code, saved);
+  else {
+    showScreen('home'); // 小窓の後ろはホーム（招待リンクから来たときも）
+    askName('入る', () => enterRoom(code, null), () => setUrlRoom(null));
+  }
+  return true;
+}
+
+function enterRoom(code, saved) {
   S = saved
     ? { ...saved, mode: 'online', code }
     : {
@@ -2387,7 +2448,6 @@ function joinRoom(raw) {
   setUrlRoom(code);
   enterPlay();
   openNet();
-  return true;
 }
 
 function enterPlay() {
@@ -3247,14 +3307,6 @@ setInterval(() => {
 /* ---------- 起動 ---------- */
 
 renderHome();
-const nameInput = el('my-name');
-nameInput.value = myName();
-nameInput.addEventListener('input', () => {
-  const bad = isBad(cleanName(nameInput.value)); // 一覧に当たる間は覚えない（打っている途中で当たることもあるので、知らせるのは欄を離れたとき）
-  nameInput.classList.toggle('bad', bad);
-  if (!bad) try { localStorage.setItem(NAME_KEY, cleanName(nameInput.value)); } catch { /* 無視 */ }
-});
-nameInput.addEventListener('change', () => { if (isBad(cleanName(nameInput.value))) toast(BAD_TEXT_NOTE); });
 el('btn-about').onclick = () => openAbout();
 el('btn-rank').onclick = openRanking;
 el('btn-zukan').onclick = openZukan;

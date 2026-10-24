@@ -1395,7 +1395,7 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .about-license { margin-top: 10px; text-align: left; font-size: .8rem; color: var(--muted); }
 .about-license summary { cursor: pointer; text-align: center; }
 .about-license pre { white-space: pre-wrap; font-size: .7rem; max-height: 180px; overflow: auto; background: var(--bg, #fff); padding: 6px; border-radius: 6px; }
-#my-name.bad { outline: 2px solid #d33; }
+#ask-name.bad { outline: 2px solid #d33; }
 
 /* ---------- ババ抜き・ダウト ---------- */
 [data-game="babanuki"] .board, [data-game="doubt"] .board { width: min(100%, 680px); }
@@ -1670,6 +1670,8 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .invite-code strong { letter-spacing: .12em; font-size: 1.2rem; }
 .invite-actions { display: flex; gap: 8px; margin-top: 14px; }
 .invite-actions .btn { flex: 1; }
+.name-ask input { display: block; width: 100%; margin-top: 10px; font: inherit; font-size: 1.1rem; padding: 8px 12px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--field); color: var(--ink); }
+.name-ask .invite-title { display: block; }
 /* お開きの表彰（main.js の showAward） */
 .award-list { list-style: none; margin: 12px 0 4px; padding: 0; text-align: left; }
 .award-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: var(--hi, #fff7e0); margin-bottom: 6px; }
