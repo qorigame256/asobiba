@@ -86,7 +86,7 @@ function myDev() {
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName', 'cpuAuto', 'rps', 'hidden', 'ptsMode', 'devs', 'bannedDevs'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName', 'cpuAuto', 'rps', 'hidden', 'ptsMode', 'devs', 'bannedDevs', 'again', 'away', 'bench'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -519,6 +519,7 @@ function changedRules(game) {
 }
 
 function appendLobbyExtras(board) {
+  board.append(meTools());
   const nm = roomNamePanel();
   if (nm) board.append(nm);
   const r = readyLine();
@@ -801,7 +802,7 @@ function myPlayer() {
 }
 
 const alive = (id) => id === S.myId || Date.now() - (S.seen[id] ?? 0) < LOST_MS;
-const cpuControlled = (id) => isCpu(id) || !S.members.includes(id);
+const cpuControlled = (id) => isCpu(id) || !S.members.includes(id) || !!S.away?.includes(id); // away = 対局の途中で待合室へ行った人（2026-10-26）
 // 待合室で CPU を選べるか。毎フレーム動くゲーム（エアホッケー）は、liveCpu が認めたとき（3人）だけ
 const cpuPickable = (game) => !game?.live || !!game.liveCpu?.(rulesOf(S.gameId, S.rules));
 
@@ -837,8 +838,9 @@ function boardPick() {
 function lineup(game) {
   const seats = game.seats?.(rulesOf(S.gameId, S.rules)) ?? null;
   const max = seats ?? game.maxPlayers;
-  const humans = S.members.slice(0, max);
-  const watchers = S.members.slice(max);
+  const pool = S.members.filter((id) => !S.bench?.includes(id)); // bench = ホストが観戦に回した人（2026-10-26）
+  const humans = pool.slice(0, max);
+  const watchers = [...pool.slice(max), ...S.members.filter((id) => S.bench?.includes(id))];
   if (game.noCpu) return { humans, watchers, cpus: 0, seats, max };
   let cpus = seats ? seats - humans.length
     : Math.max(0, Math.min(Math.max(S.cpus, game.minPlayers - humans.length), game.maxPlayers - humans.length));
@@ -1469,6 +1471,7 @@ function renderPage() {
     board.className = 'board';
     return;
   }
+  if (S.lobbyView && S.mode === 'online' && !S.isHost) { renderAwayLobby(game, st); return; }
 
   const res = game.result(st);
   S.myTurnNow = myTurnNow(game, st, res);
@@ -1481,6 +1484,8 @@ function renderPage() {
   noteAchievements(game, res, st);
   resultUp = !!res;
   status.innerHTML = statusHtml(game, st, res);
+  const band = turnBand(game, st, res);
+  if (band) status.prepend(band);
   if (res && !game.multi && renderReview(game, st)) return; // ふりかえりで途中の局面を見ている
 
   // 新しく打たれた手だけ動きを付ける（接続表示の更新などで描き直したときは動かさない）
@@ -1490,7 +1495,7 @@ function renderPage() {
   if (S.shownKey !== key && !S.moves.length && game.startSound) play(game.startSound);
   S.shownKey = key;
   S.shownLen = S.moves.length;
-  const opts = { canMove: canMove(game, st, res), onMove: onBoardMove, fresh, me: myPlayer(), view: boardView(game) };
+  const opts = { canMove: canMove(game, st, res), onMove: onBoardMove, fresh, me: watchSeat(game), view: boardView(game) };
   if (game.multi) {
     Object.assign(opts, {
       names: S.order.map(nameOf),
@@ -1512,9 +1517,10 @@ function renderPage() {
 
   if (res) {
     if (!game.multi) appendReview(game);
-    controls.append(makeButton('もう一回', () => afterAd(rematch)));
+    if (S.mode === 'online' && againNeed().length) appendAgain();
+    else controls.append(makeButton('もう一回', () => afterAd(rematch)));
     appendShare();
-    if (S.mode === 'online' && S.isHost) controls.append(makeButton('メンバーを変える', () => afterAd(() => newRound(S.gameId, { lobby: true })), 'secondary'));
+    if (S.mode === 'online' && S.isHost) controls.append(makeButton('🏠 みんなで待合室へ', () => afterAd(() => newRound(S.gameId, { lobby: true })), 'secondary'));
   } else if (S.mode === 'local' && S.moves.length) {
     controls.append(
       makeButton('1手戻す', () => { S.moves.pop(); render(); }, 'secondary'),
@@ -1528,10 +1534,246 @@ function renderPage() {
   appendFlip(game);
   appendPredict(game, res);
   appendReactions();
+  appendWatchSelect(game);
+  if (S.mode === 'online' && !S.isHost) controls.append(makeButton('🏠 待合室へ', () => goAwayLobby(game, st, res), 'ghost small'));
   if (S.mode === 'online' && S.isHost) controls.append(gameSelect());
   appendMemberPanel();
   scheduleCpu(game, st, res);
   scheduleReferee(game, st, res);
+  if (res) checkAgain();
+}
+
+/* ---------- 順番の帯（2026-10-26 本人の依頼。本人が絵で示した形）: 番のあるゲームで、対局の画面の上に席を順に並べ、いまの番の人を目立たせる ---------- */
+// Claude の判断: 番が決まらない場面（全員が同時に動く・turn が null）と決着のあとは出さない。席の印はゲームの players（○・× など）。
+// 色の名前（黒・白・赤…）は色の丸にする。カードゲームは印が無いので席の番号。CPU は名前に 🤖 が付く（nameOf）。逆回り（いろあわせの dir）なら矢印も逆。
+const COLOR_DOT = { 黒: '⚫', 白: '⚪', 赤: '🔴', 黄: '🟡', 緑: '🟢', 紫: '🟣', 青: '🔵' };
+function turnBand(game, st, res) {
+  if (res || game.realtime || !game.turn) return null;
+  const t = game.turn(st);
+  if (!Number.isInteger(t) || t < 0) return null;
+  const n = S.mode === 'online' ? S.order?.length ?? 0 : game.multi ? 0 : boardSeats(S.gameId, S.rules);
+  if (n < 2 || t >= n) return null;
+  const me = myPlayer();
+  const band = document.createElement('div');
+  band.className = 'turn-band';
+  const back = st?.dir === -1;
+  const seats = [...Array(n).keys()];
+  if (back) seats.reverse();
+  seats.forEach((i, k) => {
+    if (k) {
+      const arrow = document.createElement('span');
+      arrow.className = 'turn-arrow';
+      arrow.textContent = '＞';
+      band.append(arrow);
+    }
+    const card = document.createElement('div');
+    card.className = 'turn-card' + (i === t ? ' now' : '') + (i === me ? ' mine' : '');
+    const label = !game.multi ? game.players?.[i] : null;
+    const mark = document.createElement('span');
+    mark.className = 'turn-mark';
+    mark.textContent = label ? (COLOR_DOT[label] ?? label) : String(i + 1);
+    const who = document.createElement('span');
+    who.className = 'turn-name';
+    who.textContent = S.mode === 'online' ? (i === me ? 'あなた' : nameOf(S.order[i])) : label ?? `${i + 1}番`;
+    card.append(mark, who);
+    band.append(card);
+  });
+  return band;
+}
+
+/* ---------- 観戦の人が、だれの手元を見るか選ぶ（2026-10-26 本人の依頼） ---------- */
+// 手札や自分だけの盤があるゲーム（カードゲーム（multi）と、隠す情報のある盤のゲーム（noLocal。海戦ゲーム））で、観戦の人だけに出す。
+// 選んだ人の席の番号をゲームの me に渡す（canMove は myPlayer で見るので、見るだけで打てない）。選びは人の id で覚え、この端末だけ（送らない・保存しない）。
+const watchable = (game) => S.mode === 'online' && (game.multi || game.noLocal) && !game.live;
+function watchSeat(game) {
+  const me = myPlayer();
+  if (me !== SPECTATOR || !watchable(game) || !S.watchId) return me;
+  const i = S.order?.indexOf(S.watchId) ?? -1;
+  return i >= 0 ? i : me;
+}
+function appendWatchSelect(game) {
+  if (!watchable(game) || myPlayer() !== SPECTATOR || !S.order) return;
+  const label = document.createElement('label');
+  label.className = 'game-select';
+  label.textContent = '👀 見る画面 ';
+  const sel = document.createElement('select');
+  sel.append(new Option('みんなの画面（手札は見えない）', ''));
+  S.order.forEach((id) => { if (!isCpu(id) || game.multi) sel.append(new Option(`${nameOf(id)} の画面`, id)); });
+  sel.value = S.order.includes(S.watchId) ? S.watchId : '';
+  sel.onblur = () => render();
+  sel.onchange = () => { S.watchId = sel.value || null; sel.onblur = null; sel.blur(); render(); };
+  label.append(sel);
+  ctl().append(label);
+}
+
+/* ---------- 対局から待合室へ（2026-10-26 本人の依頼） ---------- */
+// ゲスト（ホスト以外）が対局の画面の「🏠 待合室へ」を押すと、その人の画面だけ待合室の形（成績・対局の履歴・名前の変更・ランキング・次のゲームの投票）になる。
+// 対局している人なら、そのあいだ席は CPU が代わりに打つ（type: 'away' をホストが S.away に集めて state で送る。cpuControlled が見る）。「対局の画面に戻る」で戻る。
+// Claude の判断: ホストは CPU の手を考える端末なので、対局の途中には出さない（決着のあとの「🏠 みんなで待合室へ」で全員を戻す）。
+function goAwayLobby(game, st, res) {
+  const seated = S.order?.includes(S.myId);
+  if (seated && !res && !confirm('待合室へ行くと、そのあいだ あなたの席は CPU が代わりに打ちます。行きますか？')) return;
+  S.lobbyView = true;
+  if (seated && !res) send({ type: 'away', on: true, round: S.round });
+  window.scrollTo(0, 0);
+  render();
+}
+function backFromLobby() {
+  S.lobbyView = false;
+  if (S.away?.includes(S.myId)) send({ type: 'away', on: false, round: S.round });
+  render();
+}
+function renderAwayLobby(game, st) {
+  const status = el('status');
+  const board = el('board');
+  const res = game.result(st);
+  status.innerHTML = `<div class="status-main">待合室</div><div class="status-sub">${res ? '対局は終わりました。' : `いまは ${esc(game.name)} の対局が続いています。`}</div>`;
+  board.className = 'board lobby';
+  board.innerHTML = '';
+  const tally = tallyLine();
+  if (tally) board.append(tally);
+  const hist = historyLine();
+  if (hist) board.append(hist);
+  board.append(meTools());
+  const controls = ctl();
+  controls.append(makeButton('▶ 対局の画面に戻る', backFromLobby), voteSelect());
+  appendMemberPanel();
+}
+
+// 待合室の「自分のこと」の段: 名前を変える・自分の記録（ランキング）
+function meTools() {
+  const row = document.createElement('div');
+  row.className = 'lobby-me';
+  row.append(renameButton(), makeButton('🏆 自分の成績', openRanking, 'secondary small'));
+  return row;
+}
+
+// 観戦に回す（2026-10-26 本人の依頼）: カードなど人数の決まらないゲームの待合室で、ホストが部屋の人を対局から外して観戦にする（S.bench。state で送る）。
+// 盤のゲームは前から席ごとに人を選べるので出さない。外した人は lineup が観戦に入れる。部屋を出た人の分は残っていても数えない。
+function benchPanel(game) {
+  const det = document.createElement('details');
+  det.className = 'lobby-rules';
+  det.open = !!S.benchOpen;
+  det.ontoggle = () => { S.benchOpen = det.open; };
+  det.innerHTML = '<summary>👀 観戦に回す人を選ぶ</summary>';
+  for (const id of S.members) {
+    const on = !!S.bench?.includes(id);
+    const label = document.createElement('label');
+    label.className = 'rule-row';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = on;
+    input.onchange = () => {
+      S.bench = input.checked ? [...new Set([...(S.bench ?? []), id])] : (S.bench ?? []).filter((x) => x !== id);
+      saveRoom();
+      sendState();
+      render();
+    };
+    const text = document.createElement('span');
+    text.textContent = `${id === S.myId ? 'あなた' : nameOf(id)} は観戦する`;
+    label.append(input, text);
+    det.append(label);
+  }
+  return det;
+}
+
+// 名前を変える（待合室）。名前を聞く小窓で入れ直し、ゲストは hello で、ホストは自分で直して全員へ送る
+function renameButton() {
+  return makeButton('✏️ 名前を変える', () => askName('変える', () => {
+    if (!S) return;
+    if (S.isHost) { S.names = { ...S.names, [S.myId]: myName() || S.names[S.myId] }; saveRoom(); sendState(); } else askState();
+    toast('名前を変えました');
+    render();
+  }), 'secondary small');
+}
+
+/* ---------- もう一回は全員の OK で（2026-10-26 本人の依頼） ---------- */
+// 決着のあと、対局していた人（部屋にいる人。CPU はいつも OK）が「✅ もう一回」を押す。全員そろえばすぐ次の対局、だれかが「🏠 待合室へ」を選ぶか
+// AGAIN_MS（20秒。推奨を本人が承認）たってもそろわなければ、全員で待合室へ。数えるのはホストの端末（S.again = { round, ids }。state で送る）。
+// 残りの秒数は各端末が結果を見たときから数える（端末ごとに少しずれる）。決めるのはホストの時計。
+// Claude の判断: 対局していた人が1人もいない（CPU どうしを観戦していた）ときは、今までどおりの「もう一回」ボタン。
+const AGAIN_MS = 20000;
+const againNeed = () => (S.order ?? []).filter((id) => !isCpu(id) && S.members.includes(id));
+const againIds = () => (S.again?.round === S.round ? S.again.ids : []);
+function sayAgain(ok) {
+  if (S.isHost) onAgain(S.myId, ok, S.round);
+  else { send({ type: 'again', ok, round: S.round }); if (ok) { S.again = { round: S.round, ids: [...againIds(), S.myId] }; render(); } }
+}
+function onAgain(id, ok, round) {
+  if (!S.isHost || round !== S.round || !againNeed().includes(id)) return;
+  if (!ok) {
+    toast(`${id === S.myId ? 'あなた' : nameOf(id)}が待合室を選んだので、みんなで待合室へ戻ります`);
+    newRound(S.gameId, { lobby: true });
+    return;
+  }
+  if (!againIds().includes(id)) S.again = { round: S.round, ids: [...againIds(), id] };
+  saveRoom();
+  sendState();
+  checkAgain();
+  render();
+}
+// ホストだけ。全員そろったらすぐ次、時間切れなら待合室（render のたびと、時間切れのときに見る）
+function checkAgain() {
+  if (!S?.isHost || S.mode !== 'online' || !S.order) return;
+  const game = GAMES[S.gameId];
+  const st = replay(S);
+  if (!st || !game.result(st) || game.live) return;
+  const need = againNeed();
+  if (!need.length) return;
+  const key = resultKey();
+  if (S.againKey !== key) {
+    S.againKey = key;
+    S.againStart = Date.now();
+    clearTimeout(S.againTimer);
+    const session = S;
+    S.againTimer = setTimeout(() => { if (S === session) checkAgain(); }, AGAIN_MS + 50);
+  }
+  const ids = againIds();
+  if (need.every((id) => ids.includes(id))) { setTimeout(() => { if (S?.againKey === key && resultKey() === key) newRound(S.gameId); }, 0); return; }
+  if (Date.now() - S.againStart >= AGAIN_MS) {
+    setTimeout(() => {
+      if (S?.againKey !== key || resultKey() !== key) return;
+      toast('全員の OK がそろわなかったので、待合室へ戻りました');
+      newRound(S.gameId, { lobby: true });
+    }, 0);
+  }
+}
+let againTick = null;
+function appendAgain() {
+  const need = againNeed();
+  const ids = againIds();
+  const key = resultKey();
+  S.againSeen ??= {};
+  S.againSeen[key] ??= Date.now();
+  const box = document.createElement('div');
+  box.className = 'again-box';
+  const waitFor = need.filter((id) => !ids.includes(id));
+  const line = document.createElement('p');
+  line.className = 'again-line';
+  line.innerHTML = `🔁 もう一回: OK ${need.length - waitFor.length}/${need.length}人${waitFor.length ? `（まだ: ${waitFor.map((id) => esc(id === S.myId ? 'あなた' : nameOf(id))).join('・')}）` : ''}　<b class="again-left"></b>`;
+  box.append(line);
+  const acts = document.createElement('div');
+  acts.className = 'again-acts';
+  if (need.includes(S.myId) && !ids.includes(S.myId)) {
+    acts.append(
+      makeButton('✅ もう一回', () => afterAd(() => sayAgain(true))),
+      makeButton('🏠 待合室へ（ほかの遊び）', () => afterAd(() => sayAgain(false)), 'secondary'),
+      makeButton('やめる（部屋を出る）', () => leave(), 'ghost small'),
+    );
+  } else if (need.includes(S.myId)) {
+    acts.innerHTML = '<span class="again-wait">OK しました。みんなを待っています…</span>';
+  }
+  box.append(acts);
+  ctl().append(box);
+  const tick = () => {
+    const left = Math.max(0, Math.ceil((AGAIN_MS - (Date.now() - (S?.againSeen?.[key] ?? Date.now()))) / 1000));
+    const b = document.querySelector('.again-left');
+    if (!b || resultKey() !== key) { clearInterval(againTick); againTick = null; return; }
+    b.textContent = `残り ${left}秒`;
+  };
+  clearInterval(againTick);
+  againTick = setInterval(tick, 500);
+  tick();
 }
 
 /* ---------- 全画面広告（App Store 版だけ。2026-10-22 本人の決定）: 結果の画面のボタンを押したとき、押した動きの前に出す ---------- */
@@ -1854,12 +2096,16 @@ function renderLobby(game) {
   }
   for (let i = 1; i <= cpus; i++) html += row(`CPU${i}`, 'cpu');
   html += '</ul>';
-  if (watchers.length) html += `<p class="lobby-note">観戦: ${watchers.map((id) => esc(nameOf(id))).join('、')}（${max}人までのため）</p>`;
+  const over = watchers.filter((id) => !S.bench?.includes(id));
+  const benched = watchers.filter((id) => S.bench?.includes(id));
+  if (over.length) html += `<p class="lobby-note">観戦: ${over.map((id) => esc(nameOf(id))).join('、')}（${max}人までのため）</p>`;
+  if (benched.length) html += `<p class="lobby-note">観戦: ${benched.map((id) => esc(nameOf(id))).join('、')}（観戦に回した人）</p>`;
   html += short
     ? `<p class="lobby-total">あと${game.minPlayers - humans.length}人そろうと始められます</p>`
     : `<p class="lobby-total">${humans.length + cpus}人で遊びます</p>`;
   board.className = 'board lobby';
   board.innerHTML = html;
+  if (S.isHost && S.members.length > 1) board.append(benchPanel(game));
   const tally = tallyLine();
   if (tally) board.append(tally);
   const hist = historyLine();
@@ -2417,6 +2663,8 @@ function newRound(gameId, { lobby = false } = {}) {
   }
   S.gameId = gameId;
   S.round += 1;
+  S.away = [];
+  S.lobbyView = false;
   S.first = 1 - S.first;
   S.moves = [];
   S.undo = 0;
@@ -2448,6 +2696,7 @@ function startRound() {
   }
   S.round += 1;
   S.order = order;
+  S.away = [];
   S.seed = randomSeed();
   // 前の対局と同じ顔ぶれのときだけ、前の順位を引き継ぐ
   const prev = S.carry ? order.map((id) => S.carry[id]) : null;
@@ -3088,7 +3337,7 @@ function openNet() {
 function send(msg, qos) { S?.net?.send(msg, qos); }
 function sendState() {
   const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, undo, streak, beg } = S;
-  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {}, roomName: S.roomName ?? '', cpuAuto: !!S.cpuAuto, rps: S.rps ?? null, ptsMode: !!S.ptsMode });
+  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {}, roomName: S.roomName ?? '', cpuAuto: !!S.cpuAuto, rps: S.rps ?? null, ptsMode: !!S.ptsMode, again: S.again ?? null, away: S.away ?? [], bench: S.bench ?? [] });
 }
 function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves, u: S.undo ?? 0 }); }
 function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner, mark: myMark(), dev: myDev() }); }
@@ -3146,6 +3395,16 @@ function onMessage(msg) {
     case 'kick':
       // ホストから（まだ部屋に入れてもらう前なら、届いたもの）だけ受け付ける
       if (!S.isHost && (!S.members.length || msg.from === S.members[0])) { onKicked(msg.ban !== false); return; }
+      break;
+    case 'again': // もう一回の OK（ok: false は待合室を選んだ）
+      if (S.isHost && msg.from !== S.myId) onAgain(msg.from, msg.ok === true, msg.round);
+      return;
+    case 'away': // 対局の途中で待合室へ行った・戻った（その間、席は CPU）
+      if (S.isHost && msg.from !== S.myId && msg.round === S.round && S.order?.includes(msg.from)) {
+        S.away = msg.on === true ? [...new Set([...(S.away ?? []), msg.from])] : (S.away ?? []).filter((id) => id !== msg.from);
+        saveRoom();
+        sendState();
+      }
       break;
     case 'replaced': // 同じ端末から入り直した別の画面が、この画面の席を引き継いだ
       if (!S.isHost && msg.from === S.members[0]) { leave(false); toast('別の画面でこの部屋に入り直したので、この画面は部屋を出ました'); return; }
@@ -3259,6 +3518,11 @@ function adoptState(msg) {
   const rp = msg.rps; // 待合室でじゃんけん
   S.rps = rp && Number.isInteger(rp.n) && rp.hands && typeof rp.hands === 'object' ? { n: rp.n, hands: Object.fromEntries(Object.entries(rp.hands).filter(([id, h]) => typeof id === 'string' && RPS[h])) } : null;
   S.votes = msg.votes && typeof msg.votes === 'object' ? Object.fromEntries(Object.entries(msg.votes).filter(([id, g]) => typeof id === 'string' && typeof g === 'string' && GAMES[g]?.ready)) : {};
+  const ag = msg.again; // もう一回の OK
+  S.again = ag && Number.isInteger(ag.round) && Array.isArray(ag.ids) ? { round: ag.round, ids: ag.ids.filter((id) => typeof id === 'string') } : null;
+  S.away = Array.isArray(msg.away) ? msg.away.filter((id) => typeof id === 'string') : [];
+  S.bench = Array.isArray(msg.bench) ? msg.bench.filter((id) => typeof id === 'string') : [];
+  if (S.round !== msg.round || S.gameId !== msg.gameId) S.lobbyView = false; // 次の対局が始まったら、待合室を見ていた人も対局の画面へ
   for (const id of S.members) S.seen[id] ??= Date.now();
   const sameRound = S.gameId === msg.gameId && S.round === msg.round;
   const mu = Number.isInteger(msg.u) ? msg.u : 0;

@@ -148,3 +148,16 @@ CLAUDE.md が目安の大きさを超えたため。Claude の推奨を本人が
   ホストが人数を自分で選ぶと `S.playersSet`（ゲームごと。送らない・保存しない）で止まり、「最初の設定に戻す」で戻る。合わせた値は「詳細設定を覚える」に入れない。
 - 読み上げ（`sound.js`）: 大きさは `VOICE_VOL`（0.45）。最初に触れたときの準備は、音を0にした「あ」を読み、始まった（onstart）と分かるまで触れるたびにやり直す。
   Chrome で読み上げが詰まらないよう、読み上げ中の文を `held` に持っておく。止まったままなら `resume` してから読む。
+- もう一回の全員 OK（`againNeed`・`appendAgain`・`onAgain`・`checkAgain`）: 要る人は `S.order` のうち CPU でなく部屋にいる人。ホストが `S.again`（{ round, ids }）に集めて `state` で送る。
+  ゲストは `type: 'again'`（ok: true / false）。false（「🏠 待合室へ」）が1人でも来たら、ホストがすぐ全員を待合室へ（`newRound(…, { lobby: true })`）。
+  時間はホストの端末が結果を最初に見たとき（`S.againKey`・`S.againStart`）から `AGAIN_MS`。残りの秒数の表示は各端末が結果を最初に見たときから数える（`S.againSeen`。少しずれる）。
+  要る人がいない（CPU どうしを観戦）ときと、同じ画面の対局は前の「もう一回」ボタン。前のゲストの `type: 'rematch'` も受け付けたまま。
+- 対局から待合室へ（`goAwayLobby`・`renderAwayLobby`・`backFromLobby`）: ゲストだけ。見ている画面は `S.lobbyView`（送らない）。対局している人が途中で行くと `type: 'away'` を送り、
+  ホストが `S.away` に入れて `state` で送る。**`cpuControlled` は away の人も CPU が打つと見る**。次の対局（round が進む）で `S.away` と `S.lobbyView` は空に戻る。
+  待合室の形の画面は成績・履歴・名前を変える・自分の成績・次のゲームの投票（じゃんけんは待合室の間だけの仕組みなので出さない）。
+- 名前を変える（`renameButton`）: 名前を聞く小窓をそのまま使う。ゲストは `hello` を送り直し（`acceptMember` が名前を直す）、ホストは自分の `S.names` を直して送る。
+- 順番の帯（`turnBand`）: `status` の先頭に入れる。番が決まらない場面（turn が null・realtime）と決着のあとは出さない。印はゲームの `players`（色の名前は色の丸 `COLOR_DOT`）、カードゲームは席の番号。
+  いろあわせの逆回り（状態の `dir === -1`）は並びを逆にする。抜けた人を薄くするのは、ゲームから抜けた人を知る共通の約束が無いのでしていない。
+- 観戦の人の見る画面（`watchable`・`watchSeat`・`appendWatchSelect`）: カードゲーム（multi）と `noLocal` のゲームだけ。選んだ人の席の番号をゲームの `me` に渡すだけで、
+  打てるかは `canMove`（`myPlayer` で見る）なので見るだけ。CPU の画面も選べる（盤のゲームの noLocal では CPU を出さない）。
+- 観戦に回す（`benchPanel`・`S.bench`）: カードなど multi の待合室でホストが選ぶ。`lineup` が bench の人を対局から外して観戦に入れる。盤のゲームは前から席ごとに選べるので出さない。
