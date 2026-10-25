@@ -1,7 +1,7 @@
 // swift-tools-version: 5.9
 import PackageDescription
 
-// みんなの対戦の iPhone 側の小さな部品。書き方は @capacitor/haptics の Package.swift に合わせた。
+// みんなの遊び場の iPhone 側の小さな部品。書き方は @capacitor/haptics の Package.swift に合わせた。
 let package = Package(
     name: "AsobibaNative",
     platforms: [.iOS(.v15)],

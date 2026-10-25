@@ -39,7 +39,7 @@ CLAUDE.md が目安の大きさを超えたため（Claude の推奨を本人が
 - `native/www/` と `native/node_modules/` は Git に入れない（作り直せる）。`native/ios/` は入れる（Windows で `npx cap add ios` を走らせて作った。Windows でも作れた）。
   `native/ios/App/App/public/` は殻が中身を写す所で、`ios/.gitignore` が外している。
 - 版は Capacitor 8.5.2 に固定（2026-10-17 時点の最新は 8.5.3 だが出て10日だったので、1つ前）。iOS 15 以上（Capacitor の既定）。
-- アプリの識別子（Bundle ID）は `io.github.qorigame256.asobiba`（Claude の判断。App Store Connect にアプリを登録するまでは変えられる）。表示名は「みんなの対戦」（商標は未確認）。
+- アプリの識別子（Bundle ID）は `io.github.qorigame256.asobiba`（Claude の判断。App Store Connect にアプリを登録するまでは変えられる）。表示名は「みんなの遊び場」（2026-10-26 本人の決定で「みんなの対戦」から変えた）。
 - 手元で見る: `node tools/build-native.mjs` → `.claude/launch.json` の `native-www`（http://localhost:8090/）。
   アプリ版として見るには、存在しない住所（/app-check など）を開き、`index.html` の頭に `<base href="http://localhost:8090/">` と `window.Capacitor={isNativePlatform:()=>true}` を足したものを `document.write` する。
   iframe の srcdoc で真似ると住所が about:srcdoc になり、部屋を作るところで `history.replaceState` が止まる（本物のアプリでは起きない）。
@@ -101,7 +101,7 @@ CLAUDE.md が目安の大きさを超えたため（Claude の推奨を本人が
 
 本人の決定 8 で「調べてから決める」とした名前の結果。スマホのゲームは第9類（類似群 11C01）で、紙の札・おもちゃ（第28類 24A01・24B01）とは
 特許庁の類似の基準で別の群（J-PlatPat の商品・役務名検索で「電子計算機・携帯電話機・スマートフォン又は携帯情報端末用ゲームプログラム」が 11C01 だけなのを確かめた）。
-- **みんなの対戦**: 文字でも読み（ミンナノタイセン、似た読みも）でも登録なし。
+- **みんなの遊び場**（2026-10-26。アプリ名を変えたとき）: 文字でも読み（ミンナノアソビバ、似た読みも）でも登録なし。前の名前「みんなの対戦」も登録なしだった。
 - **ワードウルフ**: 2件。第28類「カードゲーム」（株式会社幻冬舎。登録6351574）と第35類（広告業など。個人。登録6025190）。第9類・第41類には無い。
 - **ヨット**: 5件。ゲームに関わりうるのは第9類のセイコーエプソンの1件（登録5754738）だが、指定商品はプリンターだけ。ほかは菓子・服など。
 - **コネクトフォー**: 日本では文字でも読み（コネクトフォー・コネクトヨン、似た読み）でも登録なし。米国では Hasbro の登録商標（2026-10-17 に調べた）。

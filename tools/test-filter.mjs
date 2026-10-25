@@ -24,7 +24,7 @@ assert.ok(isBad('ばかりのばか'), '例外の外にある語は当てる');
 // 文用の一覧（完全一致の語が文の一部では当たらない）
 assert.ok(isBad('ばか', 'sentence'));
 // 当たらないもの
-for (const s of ['たろう', 'みんなの対戦', 'Aさんの部屋', '', null]) assert.ok(!isBad(s), String(s));
+for (const s of ['たろう', 'みんなの遊び場', 'Aさんの部屋', '', null]) assert.ok(!isBad(s), String(s));
 // 見える記号を挟んだ形は塞がない（もとのアプリと同じ決まり）
 assert.ok(!isBad('ば・か'));
 

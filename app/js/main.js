@@ -72,9 +72,21 @@ function myName() {
   try { const n = cleanName(localStorage.getItem(NAME_KEY)); return isBad(n) ? '' : n; } catch { return ''; } // 前に覚えた名前が一覧に当たるときも使わない
 }
 
+// 端末の印（2026-10-26）。人の id は部屋に入るたびに変わるので、抜けた人が入り直すと同じ人が2人並んでいた。
+// hello に端末の印を入れ、ホストは同じ印の人が入り直してきたら前の席を引き継がせる（acceptMember）。締め出しも印で見る。
+// 同じ端末の別のタブ（試しに2人で入るとき）を1人にまとめないよう、引き継ぐのは名前も同じか、前の人の合図が途切れているときだけ。
+const DEV_KEY = 'bg-dev';
+function myDev() {
+  try {
+    let d = localStorage.getItem(DEV_KEY);
+    if (!/^[a-z0-9]{12}$/.test(d ?? '')) { d = newId(); localStorage.setItem(DEV_KEY, d); }
+    return d;
+  } catch { return ''; }
+}
+
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName', 'cpuAuto', 'rps', 'hidden', 'ptsMode'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName', 'cpuAuto', 'rps', 'hidden', 'ptsMode', 'devs', 'bannedDevs'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -154,7 +166,7 @@ function setBeginner(on) {
   document.body.classList.toggle('beginner', on);
   showBeginnerBtn();
   if (S?.mode === 'online') {
-    if (S.isHost) { setBeg(S.myId, on); sendState(); } else send({ type: 'hello', isHost: false, name: myName(), beg: on, mark: myMark() });
+    if (S.isHost) { setBeg(S.myId, on); sendState(); } else send({ type: 'hello', isHost: false, name: myName(), beg: on, mark: myMark(), dev: myDev() });
   }
   if (S) render();
 }
@@ -1018,8 +1030,36 @@ function gameOrder() {
 // 部屋を作る・同じ画面で遊ぶことができる端末か。App Store 版は合言葉なしでだれでも（2026-10-17 本人の決定。外さないと審査の人が試せない）
 const canHost = () => IS_APP || isOwner();
 
+/* ---------- ゲームの文字検索（2026-10-26 本人の依頼）: ホーム画面の一覧を、名前・読み・説明で絞り込む ---------- */
+// Claude の判断: カタカナはひらがなにそろえ、漢字の名前は READING の読みでも当たるようにした。種類の言葉（かーど・ばん など）も足した。
+const CARD_WORDS = 'かーど とらんぷ ふだ';
+const READING = {
+  tictactoe: 'まるばつ ばん', connect4: 'よんもくならべ ばん', reversi: 'りばーし ばん', gomoku: 'ごもくならべ ばん', dots: 'てんとせん ばん', mancala: 'まんから ばん',
+  kaisen: 'かいせんげーむ ばん', colors: 'いろあわせ ' + CARD_WORDS, daifugo: 'だいふごう だいひんみん ' + CARD_WORDS, poker: 'ぽーかー ' + CARD_WORDS, speed: 'すぴーど ' + CARD_WORDS,
+  babanuki: 'ばばぬき ' + CARD_WORDS, doubt: 'だうと ' + CARD_WORDS, sevens: 'しちならべ ' + CARD_WORDS, blackjack: 'ぶらっくじゃっく ' + CARD_WORDS, hitai: 'ひたいかーど ' + CARD_WORDS,
+  hitblow: 'ひっとあんどぶろー すうじ', sensou: 'せんそう わりばし ゆび てあそび', yubisuma: 'ゆびすま てあそび', tamebeam: 'ためてびーむ てあそび', memory: 'しんけいすいじゃく ' + CARD_WORDS,
+  yacht: 'よっと さいころ', seri: 'せりあい ' + CARD_WORDS, nim: 'いしとりげーむ', flags: 'はたあげ', kanji: 'なんどくかんじ くいず', targets: 'まとのはやおし まとあて',
+  pittari: 'ぴったりすとっぷ', kioku: 'きおくりれー', typing: 'たいぴんぐはやうち', danmaku: 'だんまくかいひ あくしょん', tamaire: 'たまいれ あくしょん', machigai: 'まちがいさがし',
+  bombs: 'にしょくばくだんさばいばる あくしょん', umigame: 'うみがめのすーぷ くいず', wordwolf: 'わーどうるふ', oekaki: 'おえかきあて え', hockey: 'えあほっけー あくしょん',
+  hasami: 'はさみしょうぎ ばん', shogi: 'しょうぎ ばん', mahjong: 'まーじゃん', jinro: 'じんろう',
+};
+const toHira = (t) => String(t ?? '').toLowerCase().replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60)).replace(/\s+/g, '');
+const gameHay = (id) => toHira(`${GAMES[id].name}${READING[id] ?? ''}${GAMES[id].desc ?? ''}`);
+function filterGames() {
+  const q = toHira(el('game-search')?.value);
+  let shown = 0;
+  for (const card of el('game-list').children) {
+    const hit = !q || gameHay(card.dataset.id).includes(q);
+    card.hidden = !hit;
+    if (hit) shown++;
+  }
+  el('game-search-none').hidden = shown > 0 || !el('game-list').children.length;
+}
+
 function renderHome() {
   const owner = canHost();
+  el('game-search').hidden = !owner;
+  el('game-search').oninput = filterGames;
   el('home-lead').textContent = owner
     ? '部屋を作って、友だちに招待リンクを送れば対戦できます。'
     : '招待された部屋コードを入れて参加してください。部屋を作れるのは、このサイトの持ち主だけです。';
@@ -1033,6 +1073,7 @@ function renderHome() {
     const g = GAMES[id];
     const card = document.createElement('article');
     card.className = 'game-card' + (g.ready ? '' : ' not-ready') + (favs.includes(id) ? ' fav' : '');
+    card.dataset.id = id;
     card.innerHTML = `<div class="game-icon" aria-hidden="true">${g.icon}</div><h3>${g.name}</h3><p>${g.desc}</p>`;
     if (g.ready) {
       const star = document.createElement('button');
@@ -1071,6 +1112,7 @@ function renderHome() {
     }
     list.append(card);
   }
+  filterGames();
 }
 
 // 持ち主の合言葉を入れる所。持ち主の端末では「登録を外す」だけ出す（友だちの端末で入れたときに外せるように）
@@ -1214,8 +1256,8 @@ function statusHtml(game, st, res) {
     } else {
       const t = game.turn(st);
       if (t === null) main = game.phaseText?.(st, me, pn) ?? '';
-      else if (t === me) main = 'あなたの番です';
-      else main = `${pn(t)}の番です…`;
+      else if (t === me) main = 'あなたのターン';
+      else main = `${pn(t)}のターン…`;
     }
     if (me === SPECTATOR) sub = vacantSeats().length && !res ? '観戦中です（部屋を出た人の席に、下のボタンで途中から入れます）' : '観戦中です（次の対局から参加できます）';
   } else {
@@ -1233,14 +1275,14 @@ function statusHtml(game, st, res) {
       else if (res.winner === me) main = 'あなたの勝ち！🎉';
       else main = n > 2 ? `${name(res.winner)}（${who(res.winner)}）の勝ち…` : 'あなたの負け…';
     } else if (S.mode === 'local') {
-      main = `${name(game.turn(st))}の番です`;
+      main = `${name(game.turn(st))}のターン`;
     } else if (!seatsFilled()) {
       main = '友だちの参加を待っています。<br>上の「招待する」で部屋のリンクを送ってください。';
     } else if (me === SPECTATOR) {
-      main = `${name(game.turn(st))}（${who(game.turn(st))}）の番です`;
+      main = `${name(game.turn(st))}（${who(game.turn(st))}）のターン`;
     } else {
       const t = game.turn(st);
-      main = t === me ? 'あなたの番です' : n > 2 ? `${name(t)}（${who(t)}）の番です…` : '相手の番です…';
+      main = t === me ? 'あなたのターン' : n > 2 ? `${name(t)}（${who(t)}）のターン…` : '相手のターン…';
     }
     if (S.mode === 'online') {
       if (me === SPECTATOR) {
@@ -1360,17 +1402,35 @@ function render() {
 }
 
 /* ---------- 番が来たらタブの名前で知らせる（2026-10-07。10回目の案。Claude の案から本人が推奨どおり選んだ） ---------- */
-// オンラインで自分の番のあいだ、タブの名前の頭に「● あなたの番」を付ける（ほかのタブを見ていても気づけるように）。
+// オンラインで自分の番のあいだ、タブの名前の頭に「● あなたのターン」を付ける（ほかのタブを見ていても気づけるように）。
 // Claude の判断: 番が決まるゲームだけ（全員が同時に動く realtime のゲームと、番の決まらない場面（turn が null）では付けない。「番が来た」音と同じ考え方）。
 const BASE_TITLE = typeof document !== 'undefined' ? document.title : '';
-const TURN_TITLE = '● あなたの番 - ';
+const TURN_TITLE = '● あなたのターン - ';
 function setTurnTitle(on) {
   const want = on ? TURN_TITLE + BASE_TITLE : BASE_TITLE;
   if (document.title !== want) document.title = want;
 }
 const myTurnNow = (game, st, res) => S.mode === 'online' && !game.realtime && canMove(game, st, res) && (!game.multi || game.turn(st) === myPlayer());
 
+/* ---------- 人数の詳細設定を部屋の人数に合わせる（2026-10-26 本人の依頼） ---------- */
+// 詳細設定「人数」（key players）を持つゲームで、待合室にいる間、部屋の人数（観戦を含む）に合う一番多い人数を選んでおく。
+// 合う人数が無い（麻雀で2人など）ときは最初の値。ホストがこの部屋でそのゲームの人数を自分で選んだら、もう合わせない（S.playersSet。送らない）。
+// Claude の判断: 合わせた値は「詳細設定を覚える」に入れない（次の部屋は、そのときの人数でまた合わせるため）。
+function autoPlayers() {
+  const x = GAMES[S.gameId]?.settings?.find((s) => s.key === 'players' && s.choices);
+  if (!x || S.playersSet?.[S.gameId]) return;
+  const n = S.members.length;
+  const fit = x.choices.map(([c]) => c).filter((c) => c <= n);
+  const want = n >= 2 && fit.length ? Math.max(...fit) : x.def;
+  const cur = rulesOf(S.gameId, S.rules);
+  if (cur.players === want) return;
+  S.rules = { ...S.rules, [S.gameId]: { ...cur, players: want } };
+  saveRoom();
+  sendState();
+}
+
 function renderPage() {
+  if (S.mode === 'online' && S.isHost && !S.order) autoPlayers();
   resultUp = false;
   setBanner(false); // 待合室だけ下で出し直す（出し入れは ads.js がまとめるので、続けて呼んでもちらつかない）
   const focused = document.activeElement;
@@ -1747,15 +1807,15 @@ function moveSound(game, st, res, prevLen, mine) {
 }
 
 /* ---------- 番が来たら名前を読み上げ・あいさつ（2026-10-08 の23回目の案。Claude の案から本人が推奨どおり選んだ） ---------- */
-// 番が来たら名前を読み上げ: オンラインで5秒より長く待ったあとに自分の番が来たとき（「番が来た」音と同じとき）、音のあとに「○○さんの番です」と言う。
-//   読むのは自分の端末に入れた自分の名前（マーク・🔰 は付けない）。名前が空なら「あなたの番です」。
+// 番が来たら名前を読み上げ: オンラインで5秒より長く待ったあとに自分の番が来たとき（「番が来た」音と同じとき）、音のあとに「○○さんのターン」と言う。
+//   読むのは自分の端末に入れた自分の名前（マーク・🔰 は付けない）。名前が空なら「あなたのターン」（2026-10-26 本人の依頼で「番です」から替えた）。
 // あいさつ: 対局の始め（手がまだ無い局面を初めて描いたとき）に「よろしくお願いします」、決着した手が届いたときに勝ち負けの音のあとで「ありがとうございました」。
 //   画面の下に一言（toast）を出して読み上げる。オンラインも同じ画面の対局も。各自の端末が自分で出す（送らない）。
 //   途中から入った・再読み込みで手がある局面を開いたときは、始めのあいさつは出さない。エアホッケーは main.js で描かないので出ない。
 // 声は 🔇 なら出さない（一言は出す）。Claude の判断: 「番が来た」音は残し、そのあとに声を足した（声が出ない端末でも気づけるように）。
 function sayTurn() {
   const name = myName();
-  speak(name ? `${name}さんの番です` : 'あなたの番です', 'turn-voice');
+  speak(name ? `${name}さんのターン` : 'あなたのターン', 'turn-voice');
 }
 
 const GREET = { start: 'よろしくお願いします', end: 'ありがとうございました' };
@@ -2034,6 +2094,7 @@ function rulesPanel(game) {
   det.append(sum);
   const cur = rulesOf(S.gameId, S.rules);
   const set = (key, value) => {
+    if (key === 'players') S.playersSet = { ...S.playersSet, [S.gameId]: true }; // もう部屋の人数に合わせない（autoPlayers）
     S.rules = { ...S.rules, [S.gameId]: { ...cur, [key]: value } };
     rememberRules();
     saveRoom();
@@ -2062,6 +2123,7 @@ function rulesPanel(game) {
   if (S.isHost && changedRules(game).length) {
     const back = makeButton('↺ 最初の設定に戻す', () => {
       const { [S.gameId]: _, ...rest } = S.rules;
+      S.playersSet = { ...S.playersSet, [S.gameId]: false };
       S.rules = rest;
       rememberRules();
       saveRoom();
@@ -2141,19 +2203,70 @@ function toggleHidden(id) {
   render();
 }
 
+// 入り直してきた人（新しい id）に、前の id の席・成績・名前を引き継がせる。前の id の画面がまだ開いていれば、部屋を出てもらう
+function replaceMember(old, neu, name) {
+  const swap = (id) => (id === old ? neu : id);
+  const rekey = (o) => (o && typeof o === 'object' && old in o ? Object.fromEntries(Object.entries(o).map(([k, v]) => [swap(k), v])) : o);
+  S.members = S.members.map(swap);
+  S.names = rekey(S.names);
+  if (name) S.names[neu] = name;
+  if (S.order) S.order = S.order.map(swap);
+  if (S.pick) S.pick = S.pick.map(swap);
+  if (S.line) S.line = S.line.map(swap);
+  if (S.tally) {
+    S.tally = { ...S.tally, wins: rekey(S.tally.wins), played: rekey(S.tally.played), pts: rekey(S.tally.pts), preds: rekey(S.tally.preds) };
+    if (S.tally.best) S.tally.best = Object.fromEntries(Object.entries(S.tally.best).map(([k, list]) => [k, list.map((b) => (b.id === old ? { ...b, id: neu } : b))]));
+  }
+  S.marks = rekey(S.marks);
+  S.votes = rekey(S.votes);
+  S.devs = rekey(S.devs);
+  S.beg = (S.beg ?? []).map(swap);
+  if (S.ready) S.ready = { ...S.ready, ids: S.ready.ids.map(swap) };
+  S.seen[neu] = Date.now();
+  delete S.seen[old];
+  send({ type: 'replaced', to: old });
+}
+
+// 退出させる（2026-10-26 本人の依頼で、また入れる形と、この部屋に二度と入れない形を選べるようにした）
 function kick(id) {
-  if (!confirm(`${nameOf(id)} を部屋から退出させますか？（この部屋には戻れなくなります）`)) return;
-  S.banned = [...(S.banned ?? []), id];
+  askChoice(`${nameOf(id)} を部屋から退出させますか？`, '「締め出す」と、その端末からはこの部屋に二度と入れません。', [
+    ['退出させる（また入れる）', () => doKick(id, false)],
+    ['締め出す（もう入れない）', () => doKick(id, true), 'danger'],
+  ]);
+}
+function doKick(id, ban) {
+  if (!S?.members.includes(id)) return;
+  if (ban) {
+    S.banned = [...(S.banned ?? []), id];
+    if (S.devs?.[id]) S.bannedDevs = [...(S.bannedDevs ?? []), S.devs[id]];
+  }
   S.members = S.members.filter((m) => m !== id);
-  send({ type: 'kick', to: id });
+  send({ type: 'kick', to: id, ban });
   saveRoom();
   sendState();
   render();
 }
 
-// 自分が退出させられたとき
-function onKicked() {
-  try { localStorage.setItem(kickedKey(S.code), '1'); } catch { /* 無視 */ }
+// いくつかのボタンから1つ選ぶ小窓（名前を聞く小窓と同じ見た目）。buttons = [[文字, 押したとき, 見た目], …]。「やめる」はいつも足す
+function askChoice(title, note, buttons, cancelText = 'やめる') {
+  closeInvite();
+  const pop = document.createElement('div');
+  pop.className = 'invite-pop';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-modal', 'true');
+  pop.innerHTML = '<div class="invite-box choice-box"><p class="invite-title"></p><p class="invite-note"></p><div class="invite-actions choice-actions"></div></div>';
+  pop.querySelector('.invite-title').textContent = title;
+  pop.querySelector('.invite-note').textContent = note;
+  const acts = pop.querySelector('.invite-actions');
+  for (const [text, fn, cls] of buttons) acts.append(makeButton(text, () => { closeInvite(); fn(); }, cls ?? 'primary'));
+  if (cancelText) acts.append(makeButton(cancelText, closeInvite, 'secondary'));
+  pop.addEventListener('click', (e) => { if (e.target === pop) closeInvite(); });
+  document.body.append(pop);
+}
+
+// 自分が退出させられたとき。ban = 締め出された（この部屋に二度と入れない）
+function onKicked(ban = true) {
+  if (ban) try { localStorage.setItem(kickedKey(S.code), '1'); } catch { /* 無視 */ }
   forgetRoom(S.code);
   const net = S.net;
   setTimeout(() => net?.close(), 300);
@@ -2162,7 +2275,7 @@ function onKicked() {
   setTurnTitle(false);
   setUrlRoom(null);
   showScreen('home');
-  alert('部屋を作った人によって、部屋から退出させられました。');
+  alert(ban ? '部屋を作った人によって、部屋から締め出されました（この部屋にはもう入れません）。' : '部屋を作った人によって、部屋から退出させられました。');
 }
 
 function gameSelect() {
@@ -2978,7 +3091,7 @@ function sendState() {
   send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {}, roomName: S.roomName ?? '', cpuAuto: !!S.cpuAuto, rps: S.rps ?? null, ptsMode: !!S.ptsMode });
 }
 function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves, u: S.undo ?? 0 }); }
-function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner, mark: myMark() }); }
+function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner, mark: myMark(), dev: myDev() }); }
 
 function onConn(status) {
   const back = status === 'ready' && S.everReady && S.conn !== 'ready';
@@ -2987,7 +3100,7 @@ function onConn(status) {
     if (back) toast('通信がもどりました');
     S.everReady = true;
     S.pingAt = null;
-    send({ type: 'hello', isHost: S.isHost, name: myName(), beg: beginner, mark: myMark() });
+    send({ type: 'hello', isHost: S.isHost, name: myName(), beg: beginner, mark: myMark(), dev: myDev() });
     if (S.isHost) { setBeg(S.myId, beginner); setMark(S.myId, myMark()); sendState(); }
   }
   render();
@@ -3032,7 +3145,10 @@ function onMessage(msg) {
       return;
     case 'kick':
       // ホストから（まだ部屋に入れてもらう前なら、届いたもの）だけ受け付ける
-      if (!S.isHost && (!S.members.length || msg.from === S.members[0])) { onKicked(); return; }
+      if (!S.isHost && (!S.members.length || msg.from === S.members[0])) { onKicked(msg.ban !== false); return; }
+      break;
+    case 'replaced': // 同じ端末から入り直した別の画面が、この画面の席を引き継いだ
+      if (!S.isHost && msg.from === S.members[0]) { leave(false); toast('別の画面でこの部屋に入り直したので、この画面は部屋を出ました'); return; }
       break;
     case 'move':
       onMoves(msg);
@@ -3092,9 +3208,15 @@ function onMessage(msg) {
 }
 
 function acceptMember(msg) {
-  if (S.banned.includes(msg.from)) { send({ type: 'kick', to: msg.from }); return; }
+  const dev = typeof msg.dev === 'string' && /^[a-z0-9]{12}$/.test(msg.dev) ? msg.dev : '';
+  if (S.banned.includes(msg.from) || (dev && S.bannedDevs?.includes(dev))) { send({ type: 'kick', to: msg.from }); return; }
   const name = cleanName(msg.name);
-  if (S.members.includes(msg.from)) {
+  if (dev) S.devs = { ...(S.devs ?? {}), [msg.from]: dev };
+  // 同じ端末から入り直してきた人（名前も同じか、前の人の合図が途切れている）は、前の席を引き継ぐ
+  const old = dev && !S.members.includes(msg.from) ? S.members.find((id) => id !== S.myId && S.devs?.[id] === dev && (cleanName(S.names[id]) === name || !alive(id))) : null;
+  if (old) {
+    replaceMember(old, msg.from, name);
+  } else if (S.members.includes(msg.from)) {
     if (name && S.names[msg.from] !== name) S.names[msg.from] = name;
   } else if (S.members.length < MAX_MEMBERS) {
     S.members.push(msg.from);

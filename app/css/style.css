@@ -69,6 +69,8 @@ body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: 
 * { box-sizing: border-box; }
 
 html, body { margin: 0; }
+/* ダブルタップでの拡大をどの画面でも止める（2026-10-26 本人の依頼）。touch-action は親で止めると中の要素にも効く。2本指で広げる拡大は残る */
+html { touch-action: manipulation; }
 body {
   background: var(--bg);
   color: var(--ink);
@@ -104,6 +106,8 @@ p { margin: 0; }
 .btn.primary { background: var(--accent); color: var(--accent-ink); }
 .btn.secondary { background: var(--panel); color: var(--ink); border: 1.5px solid var(--line); }
 .btn.ghost { background: transparent; color: var(--muted); padding: 8px 10px; }
+.btn.danger { background: #c0392b; color: #fff; }
+.choice-actions { flex-direction: column; align-items: stretch; }
 .btn.small { padding: 6px 14px; font-size: .9rem; }
 .btn:hover { filter: brightness(1.05); }
 
@@ -151,6 +155,8 @@ p { margin: 0; }
 .mark-btn:first-child { font-size: .85rem; }
 .mark-btn.on { border-color: var(--accent, #d9643a); box-shadow: 0 0 0 2px var(--accent, #d9643a) inset; }
 
+.game-search { width: 100%; box-sizing: border-box; font: inherit; padding: 10px 14px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--field, #fff); color: var(--ink); margin: 0 0 12px; }
+.game-search-none { color: var(--muted); margin: 0 0 12px; }
 .game-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

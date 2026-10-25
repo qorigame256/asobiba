@@ -2,7 +2,7 @@ import Capacitor
 import GameKit
 import UIKit
 
-// みんなの対戦の iPhone 側の小さな部品（2026-10-22。審査 4.2 の「アプリならではの良さ」）。JS からは app/js/native.js が呼ぶ。
+// みんなの遊び場の iPhone 側の小さな部品（2026-10-22。審査 4.2 の「アプリならではの良さ」）。JS からは app/js/native.js が呼ぶ。
 // Capacitor 8 で使える Game Center の部品が見つからなかったので自前で持つ（写真の保存・共有もここに入れ、外の部品を増やさない）。
 // - signIn: Game Center にログインする（まだなら iPhone のログインの画面を出す）。{ ok: ログインできたか }
 // - reportAchievements: 実績の進み具合を Game Center へ送る。{ list: [{ id, percent }] }

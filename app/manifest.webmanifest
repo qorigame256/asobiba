@@ -1,6 +1,6 @@
 {
-  "name": "みんなの対戦ボードゲーム",
-  "short_name": "みんなの対戦",
+  "name": "みんなの遊び場",
+  "short_name": "みんなの遊び場",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

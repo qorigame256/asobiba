@@ -200,7 +200,7 @@ export default {
       if (me >= 0 && s.wager[me] === null) return `<b>賭ける額を選んでください</b>（${s.round + 1}/${s.rounds}回目）`;
       return `ほかの人が額を選ぶのを待っています…（${s.round + 1}/${s.rounds}回目）`;
     }
-    if (me >= 0 && !s.done[me]) return `<b>あなたの番</b>です（${s.round + 1}/${s.rounds}回目）`;
+    if (me >= 0 && !s.done[me]) return `<b>あなたのターン</b>（${s.round + 1}/${s.rounds}回目）`;
     return `ほかの人を待っています…（${s.round + 1}/${s.rounds}回目）`;
   },
 

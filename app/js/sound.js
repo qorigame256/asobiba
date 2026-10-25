@@ -27,6 +27,9 @@ export const isVoice = (name) => name in SAY;
 // 音ごとの大きさ（素材の最大音量はそろえてあるので、耳ざわりなものを下げる）
 const GAIN = { pop: 0.5, stone: 0.6, wall: 0.4, turn: 0.6, question: 0.6, hit: 0.6, wrong: 0.6, shuffle: 0.7 };
 const MASTER = 0.6;
+// 読み上げの大きさ（0〜1）。2026-10-26 本人の声「あなたの番ですの声が大きすぎる」で 0.9 から下げた。
+// iPhone の Safari は読み上げの大きさの指定を聞かないことがあり、その端末では本体の音量で決まる（未確認）
+const VOICE_VOL = 0.45;
 const MUTE_KEY = 'bg-mute';
 const GAP_MS = 40; // 同じ音がこれより短い間に重なったら1回だけ鳴らす
 
@@ -56,13 +59,28 @@ function unlock() {
     }
   }
   if (ctx.state !== 'running') ctx.resume().catch(() => {});
-  // iPhone は、画面に触れた流れの中で一度読み上げておかないと、あとから読み上げられない
+  // iPhone は、画面に触れた流れの中で一度読み上げておかないと、あとから読み上げられない。
+  // 空の文だと読み上げが始まらず準備にならない端末があるので、音を0にした短い文にし、本当に始まった（onstart）と分かるまで触れるたびにやり直す（2026-10-26）
   if (!spoke && typeof speechSynthesis !== 'undefined') {
-    spoke = true;
-    try { speechSynthesis.speak(new SpeechSynthesisUtterance('')); } catch { /* 読み上げが使えない端末 */ }
+    try {
+      const u = new SpeechSynthesisUtterance('あ');
+      u.volume = 0;
+      u.onstart = () => { spoke = true; };
+      keep(u);
+      speechSynthesis.speak(u);
+    } catch { spoke = true; /* 読み上げが使えない端末 */ }
   }
 }
 let spoke = false;
+// Chrome は読み上げ中の文を手放すと、終わりの知らせが来ないまま後の読み上げが詰まって止まることがあるので、終わるまで持っておく
+const held = new Set();
+function keep(u) {
+  held.add(u);
+  const drop = () => held.delete(u);
+  u.addEventListener('end', drop);
+  u.addEventListener('error', drop);
+  setTimeout(drop, 15000);
+}
 
 function say(text) {
   try {
@@ -70,7 +88,9 @@ function say(text) {
     u.lang = 'ja-JP';
     const v = speechSynthesis.getVoices().find((x) => x.lang?.startsWith('ja'));
     if (v) u.voice = v;
-    u.volume = MASTER + 0.3;
+    u.volume = VOICE_VOL;
+    keep(u);
+    if (speechSynthesis.paused) speechSynthesis.resume(); // 他のアプリへ移って戻ったあと、止まったままになる端末がある
     speechSynthesis.speak(u);
   } catch { /* 読み上げが使えない端末 */ }
 }
@@ -94,7 +114,7 @@ export function play(name, vol = 1) {
   src.start();
 }
 
-// 決まった言葉でない文を読み上げる（番が来たときの「○○さんの番です」・対局の始めと終わりのあいさつ。2026-10-08 の23回目の案）。
+// 決まった言葉でない文を読み上げる（番が来たときの「○○さんのターン」・対局の始めと終わりのあいさつ。2026-10-08 の23回目の案）。
 // 音と同じく 🔇 のときと、まだ画面に触れていないときは言わない。key ごとに GAP_MS より短い間の重なりは1回だけ
 export function speak(text, key = 'speak') {
   if (muted || !ctx || !text) return;
