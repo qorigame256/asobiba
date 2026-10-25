@@ -17,7 +17,7 @@
 //   turn(局面) → 手番のプレイヤー番号（同時に動けるゲームなどで決まらないときは null）,
 //   canAct(局面, p) → p がいま手を打てるか,
 //   apply(局面, 手) → 次の局面 | null。手には打った人の番号 p が入っている（本体が足す）,
-//   result(局面) → null | { winner: p, …ゲームが使う情報 },
+//   result(局面) → null | { winner: p, …ゲームが使う情報 }（3人以上で順位が付くゲームは、成績表の順位で点のため順位が分かる欄も持つ。下の seatPoints）,
 //   cpu(局面, p) → p の手（p は付けなくてよい。いまは何もしないなら null）。ホストの端末だけで動く,
 //   render(要素, 局面, { me: 自分の番号（観戦は -1）, names: 各プレイヤーの名前, cpu: CPU が操作中か, sub: 部屋を出た人の席を CPU が代わりに打っているか,
 //     away: 応答が無いか, canMove, onMove, fresh })。names は外から来た文字なので textContent で出すか esc() を通す。
@@ -102,3 +102,39 @@ export const GAMES = {
 };
 // 遊び方（howto.js）。対局画面の「？遊び方」で出す（main.js の renderHowto）
 for (const [id, lines] of Object.entries(HOWTO)) if (GAMES[id]) GAMES[id].howto = lines;
+
+// 結果から勝った人のプレイヤー番号の一覧（引き分けは空）
+export function winnersOf(res) {
+  if (Array.isArray(res.winners)) return res.winners.filter(Number.isInteger);
+  return Number.isInteger(res.winner) ? [res.winner] : [];
+}
+
+// 部屋の成績表の「順位で点」（2026-10-24 本人の決定。28回目の案）: 席ごとの点 ＝ その対局で自分より下の順位になった人の数
+// （4人で1位なら3点・2位なら2点、2人で勝てば1点。同じ順位の人は数えない。引き分けはだれも0点）。n は席の数（CPU も入る）。
+// 結果の形はゲームごとに違うので、次の順で「強さ」（大きいほど上）を決める。ゲームの結果に足す欄の約束でもある:
+//   place（席ごとの順位。1 が一番上。同じ順位がありうるゲームはこれを持つ）→ ranking と places（ranking の並びごとの順位。ひたいカード）→
+//   ranking と pts（席ごとの合計点。点数で勝負する回数制）→ ranking（上から並べた席。同じ順位なし）→ scores（席ごとの点。teams があるチーム戦は使わない）→
+//   勝った人だけ（勝った人が上・ほかは同じ）。勝った人がいないときは、負けた人（loser）だけが下（ほかは同じ）、それも無ければ引き分け。draw: true も引き分け。
+export function seatPoints(res, n) {
+  const w = winnersOf(res);
+  const none = Array(n).fill(0);
+  if (res.draw === true) return none;
+  if (!w.length) return Number.isInteger(res.loser) ? none.map((_, p) => (p === res.loser ? 0 : 1)) : none;
+  const okArr = (a) => Array.isArray(a) && a.length === n && a.every(Number.isFinite);
+  const rk = Array.isArray(res.ranking) ? res.ranking.filter((p) => Number.isInteger(p) && p >= 0 && p < n) : null;
+  let st;
+  if (okArr(res.place)) st = res.place.map((v) => -v);
+  else if (rk && Array.isArray(res.places) && res.places.length === res.ranking.length) {
+    st = Array(n).fill(-Infinity);
+    res.ranking.forEach((p, i) => { if (rk.includes(p) && Number.isFinite(res.places[i])) st[p] = -res.places[i]; });
+  } else if (rk && okArr(res.pts)) st = res.pts.slice();
+  else if (rk) {
+    st = Array(n).fill(-Infinity); // 並びに入っていない席は一番下
+    rk.forEach((p, i) => { st[p] = n - i; });
+  } else if (okArr(res.scores) && res.teams === undefined) st = res.scores.slice();
+  else st = none.map((_, p) => (w.includes(p) ? 1 : 0));
+  // 勝った人（同点の1位を含む）は同じ一番上にそろえる（並びの都合で勝った人どうしに差が付かないように）
+  const top = Math.max(...st.filter(Number.isFinite), 0) + 1;
+  for (const p of w) if (p >= 0 && p < n) st[p] = top;
+  return st.map((v) => st.filter((x) => x < v).length);
+}

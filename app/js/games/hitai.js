@@ -4,7 +4,11 @@
 // Claude の判断: 強さは 2 < 3 < … < K < A（マークは関係ない）。いちばん強い札が2人以上なら山分けし、割り切れない分は次の回へ。
 //   全員が降りたら、場の点は次の回へ持ち越す。持ち点が2点に足りない人は、残り全部で勝負できる。持ち点が0になった人は脱落。
 //   親は毎回となりへ回る。札は毎回52枚から配り直す（seed と回の番号から）。
-// 手: { p, t: 'bet' | 'fold' | 'next', r: 何回目か }。r が今の回と違う手は反則（同じ「次へ」が2回届いても1回だけ進む）。
+// 詳細設定「札の取り替え」（2026-10-24 本人の決定。28回目の案。key は swap。最初は なし）: 毎回1度だけ、自分の番に勝負か降りるかを選ぶ前に、
+//   自分の札（見えない）を山の次の札と取り替えられる。新しい札も自分には見えない。点は払わない（本人の選択）。取り替えたあとも自分の番のまま。
+//   Claude の判断: 取り替えた札は山に戻さず、勝負がついたら「取り替える前は K」と全員に見せる。CPU は2割ほどで取り替える（自分の札は見えないので、得も損もしない）。
+//   なしのときは局面の形が前と全く同じ（swapped・next を持たない）。
+// 手: { p, t: 'bet' | 'fold' | 'swap' | 'next', r: 何回目か }。r が今の回と違う手は反則（同じ「次へ」が2回届いても1回だけ進む）。
 
 import { mulberry32, shuffle } from './util.js';
 import { rankOf, makeDeck, cardEl, backEl, cardLabel } from './cards.js';
@@ -14,7 +18,9 @@ const ANTE = 1;
 const BET = 2;
 const power = (c) => (rankOf(c) === 1 ? 14 : rankOf(c)); // A が一番強い
 
-const clone = (s) => ({ ...s, chips: s.chips.slice(), outOrder: s.outOrder.slice(), cards: s.cards.slice(), act: s.act.slice(), paid: s.paid.slice(), got: s.got.slice() });
+const clone = (s) => ({ ...s, chips: s.chips.slice(), outOrder: s.outOrder.slice(), cards: s.cards.slice(), act: s.act.slice(), paid: s.paid.slice(), got: s.got.slice(), ...(s.swapped ? { swapped: s.swapped.slice() } : {}) });
+// その回の山（配る札も、取り替えで引く札も、ここから順に使う）
+const roundDeck = (s) => shuffle(makeDeck(), mulberry32((s.seed ^ (s.round * 0x9e3779b9)) >>> 0));
 const alive = (s) => Array.from({ length: s.n }, (_, p) => p).filter((p) => !s.outOrder.includes(p));
 // 終わったときの順位（1から）。残った人は持ち点が同じなら同じ順位（同点優勝。2026-10-10 本人の決定）、脱落した人は後に脱落した人ほど上
 const placeOf = (s, p) => (s.outOrder.includes(p) ? s.ranking.indexOf(p) + 1 : 1 + alive(s).filter((q) => s.chips[q] > s.chips[p]).length);
@@ -25,7 +31,7 @@ function startRound(s) {
   const live = alive(s);
   const order = Array.from({ length: s.n }, (_, k) => (s.dealer + 1 + k) % s.n).filter((p) => live.includes(p));
   s.dealer = order[0];
-  const deck = shuffle(makeDeck(), mulberry32((s.seed ^ (s.round * 0x9e3779b9)) >>> 0));
+  const deck = roundDeck(s);
   s.cards = Array(s.n).fill(null);
   s.act = Array(s.n).fill(null);
   s.paid = Array(s.n).fill(0);
@@ -40,6 +46,8 @@ function startRound(s) {
   s.carry = 0;
   s.phase = 'bet';
   s.toAct = s.dealer;
+  // 札の取り替え: 取り替える前の札（取り替えていなければ null）と、山の次に引く札の位置
+  if (s.rules.swap) { s.swapped = Array(s.n).fill(null); s.next = live.length; }
 }
 
 // 全員が選び終えたら勝負
@@ -83,6 +91,7 @@ function logText(s, nameP) {
   if (!L) return `第${s.round}回。自分の札は見えません。ほかの人の札を見て、勝負するか決めてください`;
   if (L.t === 'bet') return `${nameP(L.p)}は勝負！（${L.amount}点）`;
   if (L.t === 'fold') return `${nameP(L.p)}は降りた`;
+  if (L.t === 'swap') return `${nameP(L.p)}は札を取り替えた`;
   if (L.t === 'next') return `第${s.round}回を始めます`;
   return '';
 }
@@ -98,11 +107,12 @@ export default {
   maxPlayers: 8,
   settings: [
     { key: 'rounds', label: '回数', desc: 'この回数で持ち点が一番多い人の勝ち（持ち点が0になった人は抜ける）', def: 10, choices: [[5, '5回'], [10, '10回'], [15, '15回']] },
+    { key: 'swap', label: '札の取り替え', desc: '毎回1度だけ、勝負か降りるかを選ぶ前に、自分の見えない札を山の札と取り替えられる（新しい札も見えない。点は払わない）', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const s = {
-      n, seed, rules: { rounds: [5, 10, 15].includes(rules.rounds) ? rules.rounds : 10 }, chips: Array(n).fill(START), outOrder: [],
+      n, seed, rules: { rounds: [5, 10, 15].includes(rules.rounds) ? rules.rounds : 10, ...(rules.swap === true ? { swap: true } : {}) }, chips: Array(n).fill(START), outOrder: [],
       round: 0, dealer: n - 1, carry: 0, pot: 0, cards: [], act: [], paid: [], got: [], winners: [],
       phase: 'bet', toAct: null, over: false, ranking: null, step: 0, last: null,
     };
@@ -126,7 +136,7 @@ export default {
   sound(a, b, m) {
     if (m.t === 'next') return 'shuffle';
     if (b.phase === 'end' && a.phase !== 'end') return 'chip';
-    return m.t === 'bet' ? 'chip' : 'pop';
+    return m.t === 'bet' ? 'chip' : m.t === 'swap' ? 'card' : 'pop';
   },
   cpuDelay(s) { return s.phase === 'end' ? 3200 : 700; }, // 札を見せる間は長めに
 
@@ -149,6 +159,15 @@ export default {
       startRound(s);
       return s;
     }
+    if (m.t === 'swap') {
+      // 札の取り替え: 1回に1度だけ。山の次の札と替え、自分の番のまま（このあと勝負か降りるかを選ぶ）
+      if (!s.rules.swap || s.swapped[p] !== null) return null;
+      s.swapped[p] = s.cards[p];
+      s.cards[p] = roundDeck(s)[s.next];
+      s.next += 1;
+      s.last = { p, t: 'swap' };
+      return s;
+    }
     if (m.t === 'bet') {
       const amount = Math.min(BET, s.chips[p]);
       s.chips[p] -= amount;
@@ -169,8 +188,10 @@ export default {
   // 見込みが4割を超えれば勝負。弱めるため、2割は逆を選ぶ。勝負の後の「次へ」もここで出す。
   cpu(s, p) {
     if (s.phase === 'end') return { t: 'next', r: s.round };
+    // 札の取り替え: 自分の札は見えないので得も損もしないが、使うこともあるように2割ほどで取り替える
+    if (s.rules.swap && s.swapped[p] === null && Math.random() < 0.2) return { t: 'swap', r: s.round };
     const others = alive(s).filter((q) => q !== p && s.act[q] !== 'fold');
-    const seen = alive(s).filter((q) => q !== p).map((q) => s.cards[q]);
+    const seen = [...alive(s).filter((q) => q !== p).map((q) => s.cards[q]), ...(s.swapped ?? []).filter((c, q) => c && q !== p)]; // ほかの人が取り替えて捨てた札も見えている
     const pool = makeDeck().filter((c) => !seen.includes(c)); // 自分の札の候補（見えていない札）
     const best = others.length ? Math.max(...others.map((q) => power(s.cards[q]))) : 0;
     const chance = pool.reduce((a, c) => a + (power(c) > best ? 1 : power(c) === best ? 0.5 : 0), 0) / pool.length;
@@ -207,6 +228,7 @@ export default {
       }
       const tags = [];
       if (s.got[p]) tags.push(['rank', `+${s.got[p]}`]);
+      if (s.swapped?.[p]) tags.push(['rank', shown ? `取り替える前 ${cardLabel(s.swapped[p])}` : '取り替えた']);
       if (s.act[p] === 'bet') tags.push(['last', '勝負']);
       else if (s.act[p] === 'fold') tags.push(['away', '降りた']);
       if (o.away[p]) tags.push(['away', '応答なし']);
@@ -253,8 +275,10 @@ export default {
     head.className = 'cc-hand-head';
     head.textContent = `あなた（${s.dealer === me ? 'Ⓓ 親・' : ''}持ち点 ${s.chips[me]}）`;
     const now = document.createElement('small');
-    now.textContent = shown ? `あなたの札は ${cardLabel(s.cards[me])} でした${s.got[me] ? `／ +${s.got[me]}` : ''}`
-      : s.act[me] === 'bet' ? '勝負しました' : s.act[me] === 'fold' ? '降りました' : 'あなたの札は見えません（おでこに貼ってあるつもり）';
+    const swappedMe = s.swapped?.[me];
+    now.textContent = shown ? `あなたの札は ${cardLabel(s.cards[me])} でした${swappedMe ? `（取り替える前は ${cardLabel(swappedMe)}）` : ''}${s.got[me] ? `／ +${s.got[me]}` : ''}`
+      : s.act[me] === 'bet' ? '勝負しました' : s.act[me] === 'fold' ? '降りました'
+        : swappedMe ? '札を取り替えました（新しい札も見えません）' : 'あなたの札は見えません（おでこに貼ってあるつもり）';
     head.append(now);
     root.append(head);
 
@@ -279,6 +303,16 @@ export default {
       fold.textContent = '降りる';
       fold.onclick = () => o.onMove({ t: 'fold', r: s.round });
       actions.append(bet, fold);
+      if (s.rules.swap && s.swapped[me] === null) {
+        // 札の取り替え（1回に1度だけ・点は払わない）。押したあとも自分の番のまま
+        const swap = document.createElement('button');
+        swap.type = 'button';
+        swap.className = 'btn ghost';
+        swap.textContent = '札を取り替える';
+        swap.title = '自分の札を山の札と取り替えます（この回に1度だけ・点は払いません）。新しい札も見えません';
+        swap.onclick = () => o.onMove({ t: 'swap', r: s.round });
+        actions.append(swap);
+      }
       root.append(actions);
     } else if (o.canMove && shown) {
       const actions = document.createElement('div');

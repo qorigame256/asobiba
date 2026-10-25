@@ -22,6 +22,7 @@
 // streak = 連勝（2026-10-06 本人の決定）。{ key: ゲームと顔ぶれ, counted: 数え終えた対局, wins: 人の id → 連勝の数 }。ホストだけが数えて全員へ送る。
 // tally = 部屋の成績表（2026-10-06 本人の決定）。{ games: 決着した対局の数, wins: 人の id → 勝った回数, preds: 人の id → 勝敗予想が当たった回数（10回目に足した。無いこともある）,
 //   played: 人の id → 対局した回数（勝率のため。24回目に足した。無いこともある）,
+//   pts: 人の id → 順位で点の合計（28回目に足した。無いこともある。ホストが「順位で点」を選んだときだけ表に出す。下の「成績表を順位で点」）,
 //   best: 記録の鍵（records.js の recordKey）→ [{ id, n: そのときの表示名, v: 数字 }] 上位3人（部屋の最高記録。2026-10-22 に足した。無いこともある） }。
 //   ゲームをまたいで数える。ホストが数えて全員へ送る。
 // preds = 勝敗予想（2026-10-06 本人の決定）。{ key: どの対局か, by: 人の id → 勝つと予想したプレイヤー番号 }。各自が全員へ送りっぱなしにし、受け取った端末がそれぞれ覚える。
@@ -31,7 +32,7 @@
 // stay = 勝ち残り（2026-10-06 本人の決定。盤のゲームのオンライン）。オンなら、もう一回で負けた人が観戦の人と交代する。line = 交代を待つ人の順番。
 //   どちらもホストが決めて全員へ送る（ほかの人の画面にも「次に入る人」を出すため）。
 
-import { GAMES, GAME_ORDER } from './games/index.js';
+import { GAMES, GAME_ORDER, winnersOf, seatPoints } from './games/index.js';
 import { connectRoom } from './net.js';
 import { esc } from './games/util.js';
 import { isOwner, unlockOwner, forgetOwner } from './owner.js';
@@ -73,7 +74,7 @@ function myName() {
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName', 'cpuAuto', 'rps', 'hidden'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName', 'cpuAuto', 'rps', 'hidden', 'ptsMode'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -173,16 +174,29 @@ function tallyHtml() {
   const t = S.tally;
   if (S.mode !== 'online' || !t?.games) return '';
   const w = (id) => (Number.isInteger(t.wins[id]) ? t.wins[id] : 0); // 届いた数は整数だけ使う（外から来た値なので）
-  const ids = [...new Set([...S.members, ...Object.keys(t.wins)])].filter((id) => !isCpu(id) && (S.members.includes(id) || w(id)));
-  ids.sort((a, b) => w(b) - w(a));
-  const list = ids.map((id) => `<b>${esc(id === S.myId ? 'あなた' : nameOf(id))}</b> ${w(id)}勝${rateText(t, id, w(id))}`).join('・');
+  // 順位で点（28回目の案）: ホストが選んだら点の多い順に「12点（4勝・10戦・40%）」。点を数える前の形の成績表なら一言添えて勝った回数のまま
+  const usePts = ptsOn(t);
+  const pt = (id) => (usePts && Number.isInteger(t.pts[id]) ? t.pts[id] : 0);
+  const ids = [...new Set([...S.members, ...Object.keys(t.wins), ...(usePts ? Object.keys(t.pts) : [])])].filter((id) => !isCpu(id) && (S.members.includes(id) || w(id) || pt(id)));
+  ids.sort((a, b) => pt(b) - pt(a) || w(b) - w(a));
+  const list = ids.map((id) => {
+    const who = `<b>${esc(id === S.myId ? 'あなた' : nameOf(id))}</b>`;
+    if (!usePts) return `${who} ${w(id)}勝${rateText(t, id, w(id))}`;
+    const rate = rateText(t, id, w(id));
+    return `${who} ${pt(id)}点（${w(id)}勝${rate ? '・' + rate.slice(1, -1) : ''}）`;
+  }).join('・');
+  const head = `🏆 この部屋の成績（${t.games}回${usePts ? '・順位で点' : ''}）`
+    + (S.ptsMode && !usePts ? '<small>（点は「成績を0に戻す」のあとから数えます）</small>' : '');
   // 勝敗予想の当たり（2026-10-07。10回目の案）: 1回でも当たった人だけ、当たった回数の多い順に出す（観戦だけの人も入る）
   const pr = t.preds && typeof t.preds === 'object' ? t.preds : {};
   const hits = (id) => (Number.isInteger(pr[id]) && pr[id] > 0 ? pr[id] : 0);
   const seers = Object.keys(pr).filter((id) => !isCpu(id) && hits(id) && (S.members.includes(id) || S.names[id])).sort((a, b) => hits(b) - hits(a));
   const seerList = seers.map((id) => `<b>${esc(id === S.myId ? 'あなた' : nameOf(id))}</b> ${hits(id)}回`).join('・');
-  return `🏆 この部屋の成績（${t.games}回）: ${list}` + (seers.length ? `<br>🔮 予想の当たり: ${seerList}` : '') + roomBestHtml(t);
+  return `${head}: ${list}` + (seers.length ? `<br>🔮 予想の当たり: ${seerList}` : '') + roomBestHtml(t);
 }
+
+// 成績表を点で並べるか（ホストが「順位で点」を選んでいて、成績表が点を数えている形のとき）
+const ptsOn = (t) => !!S.ptsMode && !!t?.pts && typeof t.pts === 'object';
 
 // 部屋の最高記録（2026-10-22 本人の決定。ランキング）: 自己ベストを取るゲームごと・詳細設定の組み合わせごとに上位3人。名前はそのときの表示名（外から来た文字なので esc）
 function roomBestHtml(t) {
@@ -274,8 +288,9 @@ function tallyLine() {
 // 予想の当たりが1回でもあれば「🔮 予想王」（いちばん多く当てた人。同じ回数なら全員）も添える。紙吹雪は動きを減らす設定の端末では出ない（confetti）。
 function awardRanks() {
   const t = S.tally;
-  const w = (id) => (Number.isInteger(t?.wins?.[id]) ? t.wins[id] : 0);
-  const ids = [...new Set([...S.members, ...Object.keys(t?.wins ?? {})])].filter((id) => !isCpu(id) && w(id) > 0 && (S.members.includes(id) || S.names[id]));
+  const src = ptsOn(t) ? t.pts : t?.wins ?? {}; // 順位で点なら点で表彰する（28回目の案）
+  const w = (id) => (Number.isInteger(src[id]) ? src[id] : 0);
+  const ids = [...new Set([...S.members, ...Object.keys(src)])].filter((id) => !isCpu(id) && w(id) > 0 && (S.members.includes(id) || S.names[id]));
   const counts = [...new Set(ids.map(w))].sort((a, b) => b - a).slice(0, 3);
   return counts.map((n) => ({ n, ids: ids.filter((id) => w(id) === n) })); // 上から順に、同じ勝ち数の人をまとめる
 }
@@ -294,7 +309,7 @@ function showAward() {
   const rows = [];
   for (const r of ranks) {
     if (place > 3) break;
-    rows.push(`<li class="award-row"><span class="award-medal">${medal[place - 1]}</span><span class="award-place">${place}位</span><span class="award-who">${r.ids.map(who).join('・')}</span><span class="award-n">${r.n}勝</span></li>`);
+    rows.push(`<li class="award-row"><span class="award-medal">${medal[place - 1]}</span><span class="award-place">${place}位</span><span class="award-who">${r.ids.map(who).join('・')}</span><span class="award-n">${r.n}${ptsOn(S.tally) ? '点' : '勝'}</span></li>`);
     place += r.ids.length;
   }
   const pr = S.tally.preds && typeof S.tally.preds === 'object' ? S.tally.preds : {};
@@ -310,7 +325,7 @@ function showAward() {
   pop.innerHTML = `<div class="invite-box award-box">
     <div class="invite-title">🏆 今日の表彰</div>${S.roomName ? `<div class="invite-room">🏷 ${esc(S.roomName)}</div>` : ''}
     <p class="invite-note">この部屋で ${games}回 遊びました。おつかれさま！</p>
-    ${rows.length ? `<ol class="award-list">${rows.join('')}</ol>` : '<p class="award-none">だれも勝たず、みんな引き分けでした</p>'}
+    ${rows.length ? `<ol class="award-list">${rows.join('')}</ol>` : `<p class="award-none">${ptsOn(S.tally) ? 'だれも点を取らず、みんな引き分けでした' : 'だれも勝たず、みんな引き分けでした'}</p>`}
     ${kings.length ? `<p class="award-seer">🔮 予想王: ${kings.map(who).join('・')}（${best}回 当てた）</p>` : ''}
   </div>`;
   const row = document.createElement('div');
@@ -641,12 +656,6 @@ function stayHtml(res) {
 // 勝ち残りでは顔ぶれが毎回変わるので、顔ぶれでなくゲームだけで見る（勝ち続けている人の連勝が続くように）
 const streakKey = () => (stayOn() ? `${S.gameId}:stay` : `${S.gameId}:${[...roundOrder()].sort().join(',')}`);
 
-// 結果から勝った人のプレイヤー番号の一覧（引き分けは空）
-function winnersOf(res) {
-  if (Array.isArray(res.winners)) return res.winners.filter(Number.isInteger);
-  return Number.isInteger(res.winner) ? [res.winner] : [];
-}
-
 // 対局の結果を見たときに1回だけ、連勝と部屋の成績表を数える（ホストだけ）
 function countResult(res, st, game) {
   if (!S.isHost || S.mode !== 'online' || !S.order) return;
@@ -670,6 +679,11 @@ function countResult(res, st, game) {
   const old = t.games > 0 && !t.played;
   const played = { ...(t.played ?? {}) };
   if (!old) for (const id of new Set(S.order)) if (id && !isCpu(id)) played[id] = (played[id] ?? 0) + 1;
+  // 順位で点（28回目の案）: 表に出すのが勝った回数のときも数えておく（途中で切り替えても点がそろっているように）。
+  // 前の形の成績表（pts が無いまま対局がある）は、点が足りなくなるので「成績を0に戻す」まで数えない（勝率と同じ）
+  const oldPts = t.games > 0 && !t.pts;
+  const pts = { ...(t.pts ?? {}) };
+  if (!oldPts) seatPoints(res, S.order.length).forEach((v, p) => { const id = S.order[p]; if (id && !isCpu(id) && v > 0) pts[id] = (pts[id] ?? 0) + v; });
   // 部屋の最高記録: 自己ベストを取るゲームなら、対局した人（人だけ。部屋を出て CPU が代わりに打った人は入れない）の数字で上位3人を入れ替える
   let best = t.best;
   if (game?.record && st) {
@@ -687,7 +701,7 @@ function countResult(res, st, game) {
     list = list.sort((a, b) => b.v - a.v).slice(0, 3);
     if (list.length) best = { ...(best ?? {}), [key]: list };
   }
-  S.tally = { games: t.games + 1, wins, preds, ...(old ? {} : { played }), ...(best ? { best } : {}) };
+  S.tally = { games: t.games + 1, wins, preds, ...(old ? {} : { played }), ...(oldPts ? {} : { pts }), ...(best ? { best } : {}) };
   // 対局の履歴: 新しいものから HISTORY_MAX 個。勝った人はそのときの表示名で覚える（CPU の名前は対局ごとに変わるため）
   const names = [...won].map((id) => nameOf(id));
   S.history = [{ g: S.gameId, w: names }, ...(S.history ?? [])].slice(0, HISTORY_MAX);
@@ -1871,6 +1885,7 @@ function renderBoardLobby(game) {
   appendLobbyExtras(board);
   if (!game.live) board.append(stayPanel());
   if (cpuLevels(game)) board.append(cpuAutoPanel(game));
+  board.append(ptsPanel());
   if (game.settings) board.append(rulesPanel(game));
   if (!S.isHost) { controls.append(readyButton(), voteSelect()); return; }
   const start = makeButton('始める', startRound);
@@ -1962,6 +1977,29 @@ function cpuAutoPanel() {
   input.onchange = () => { S.cpuAuto = input.checked; saveRoom(); sendState(); render(); };
   const text = document.createElement('span');
   text.innerHTML = '<b>🤖 CPU の強さを自動で合わせる</b> <small>もう一回のとき、人が CPU に勝ったら1段強く、負けたら1段弱くします</small>';
+  label.append(input, text);
+  box.append(label);
+  return box;
+}
+
+/* ---------- 成績表を順位で点（2026-10-24 本人の決定。28回目の案）: ホストが待合室で選ぶと、成績表を点の多い順に並べ、お開きの表彰も点で決める ---------- */
+// 点はその対局で自分より下の順位になった人の数（games/index.js の seatPoints）。部屋の設定（S.ptsMode。state の ptsMode で送る）で、最初は勝った回数（今まで）。
+// Claude の判断: 点は選んでいなくてもいつも数える（途中で切り替えても点がそろっているように）。ゲームを変えても残る（勝ち残りと同じ）。
+function ptsPanel() {
+  const box = document.createElement('div');
+  box.className = 'lobby-stay';
+  const about = '<small>その対局で自分より下になった人の数が点です（4人で1位なら3点・2位なら2点、2人で勝てば1点、引き分けは0点）</small>';
+  if (!S.isHost) {
+    if (S.ptsMode) box.innerHTML = `<p class="lobby-note">🏅 成績表は順位で点を付けています ${about}</p>`;
+    return box;
+  }
+  const label = document.createElement('label');
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.checked = !!S.ptsMode;
+  input.onchange = () => { S.ptsMode = input.checked; saveRoom(); sendState(); render(); };
+  const text = document.createElement('span');
+  text.innerHTML = `<b>🏅 成績表を順位で点にする</b> ${about}`;
   label.append(input, text);
   box.append(label);
   return box;
@@ -2937,7 +2975,7 @@ function openNet() {
 function send(msg, qos) { S?.net?.send(msg, qos); }
 function sendState() {
   const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, undo, streak, beg } = S;
-  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {}, roomName: S.roomName ?? '', cpuAuto: !!S.cpuAuto, rps: S.rps ?? null });
+  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {}, roomName: S.roomName ?? '', cpuAuto: !!S.cpuAuto, rps: S.rps ?? null, ptsMode: !!S.ptsMode });
 }
 function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves, u: S.undo ?? 0 }); }
 function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner, mark: myMark() }); }
@@ -3088,6 +3126,7 @@ function adoptState(msg) {
   S.tally = msg.tally && Number.isInteger(msg.tally.games) && msg.tally.wins && typeof msg.tally.wins === 'object' ? { ...msg.tally, best: cleanBest(msg.tally.best) } : null;
   S.stay = msg.stay === true;
   S.cpuAuto = msg.cpuAuto === true;
+  S.ptsMode = msg.ptsMode === true;
   S.roomName = mask(cleanRoomName(msg.roomName));
   S.marks = msg.marks && typeof msg.marks === 'object' ? Object.fromEntries(Object.entries(msg.marks).filter(([id, m]) => typeof id === 'string' && MARKS.includes(m) && m)) : {};
   const tm = msg.timer;

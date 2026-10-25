@@ -132,7 +132,8 @@ export default {
       const best = Math.max(...s.got);
       const winners = s.got.map((v, p) => (v === best ? p : -1)).filter((p) => p >= 0);
       const ranking = Array.from({ length: s.n }, (_, p) => p).sort((a, b) => s.got[b] - s.got[a]);
-      return { winner: winners[0], winners, ranking, got: s.got.slice(), ender: s.ender };
+      const place = s.got.map((v) => 1 + s.got.filter((x) => x > v).length); // 席ごとの順位（同点は同じ。成績表の順位で点）
+      return { winner: winners[0], winners, ranking, got: s.got.slice(), ender: s.ender, place };
     }
     const lose = s.rules.last === 'lose';
     // 最後を取った人が負けのとき、2人なら相手の勝ち。3人以上は「負けが1人」として表す

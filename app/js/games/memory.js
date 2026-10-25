@@ -76,7 +76,8 @@ export default {
     const best = Math.max(...s.scores);
     const winners = s.scores.map((v, p) => (v === best ? p : -1)).filter((p) => p >= 0);
     const ranking = Array.from({ length: s.n }, (_, p) => p).sort((a, b) => s.scores[b] - s.scores[a]);
-    return { winner: winners[0], winners, ranking };
+    const place = s.scores.map((v) => 1 + s.scores.filter((x) => x > v).length); // 席ごとの順位（同点は同じ。成績表の順位で点）
+    return { winner: winners[0], winners, ranking, place };
   },
   // はずれた2枚を見せる間は少し長く待つ
   cpuDelay(s) { return s.open.length === 2 ? 1300 : 650; },

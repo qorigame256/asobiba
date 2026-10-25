@@ -24,6 +24,8 @@
 //   鳴いたあとの打牌は引いていないので手出し。リーチ中の自動の打牌はツモ切り。
 // 役の早見表（2026-10-07 本人の決定。詳細設定ではなく、いつも出す）: 場の情報の段の「📖 役」で、和了れる役の一覧を盤の上に重ねて開く。
 //   観戦の人も見られる。見せるだけ（YAKU_GUIDE・yakuPanel）。表の役の名前と翻数は tools/test-mahjong.mjs がエンジンと突き合わせる。
+// 鳴きなし（2026-10-24 本人の決定。詳細設定ではなく、各自が手牌の下のボタンで付け外しする）: 付けている間は、ロンできない確認（鳴けるだけ）を
+//   聞かずに自分の端末が「見送る」を送る。ロンできるときは今どおり聞き、ポン・チー・カンのボタンは出さない。手の中身は今と同じ（noCallOn・noCallEl）。
 // Claude の判断: 暗槓への国士無双のロンは作らない（ごくまれなため）。抜いた北へのロンはできる（槍槓は付かない）。
 //   リーチ中で和了れない・カンできないときは1秒で自動でツモ切りする。局の結果は全員が「次へ」を押すか30秒で次の局へ。
 //
@@ -667,6 +669,20 @@ const tileText = (k) => (E.isHonor(k) ? HONOR_CHAR[k - E.EAST] : `${E.numberOf(k
 let ui = { key: null, sel: null, riichi: false };
 let keepH = { key: null, h: 0 }; // 1局の間の盤の一番高いところ（render の先頭のコメント）
 
+// 鳴きなし（2026-10-24。28回目の案）: 付けている間は、ポン・チー・カンを聞かずに自分の端末が「見送る」を送る（ロンは今どおり聞く）。
+// 付けたかどうかは端末ごとに覚える（初心者マークと同じ。localStorage の bg-mj-nocall）。Node の自動確認からも読まれるので、読み込み時には触らない。
+const NOCALL_KEY = 'bg-mj-nocall';
+let noCall = null; // null = まだ読んでいない
+let autoPassed = null; // 自動で見送った確認（同じ確認に2回送らないため）
+function noCallOn() {
+  if (noCall === null) { try { noCall = localStorage.getItem(NOCALL_KEY) === '1'; } catch { noCall = false; } }
+  return noCall;
+}
+function setNoCall(on) {
+  noCall = on;
+  try { localStorage.setItem(NOCALL_KEY, on ? '1' : '0'); } catch { /* 保存できない端末でも、ページを開いている間は効く */ }
+}
+
 function meldsEl(h, p, small) {
   const box = document.createElement('div');
   box.className = 'mj-melds';
@@ -1127,9 +1143,17 @@ function render(root, s, o) {
     for (const k of opts.kakan) actions.append(button(`カン（${tileText(k)}）`, 'secondary', () => o.onMove({ a: 'kakan', k, n: s.seq })));
     if (opts.nuki) actions.append(button('北を抜く', 'secondary', () => o.onMove({ a: 'nuki', n: s.seq })));
     hint.textContent = ui.riichi ? 'リーチして切る牌を2回タップ（光っている牌だけ）' : '切る牌を2回タップしてください（1回目で選ぶ）';
+  } else if (h.phase === 'claim' && !watching && h.claim.options[me] && !h.claim.responses[me] && o.canMove && noCallOn() && !h.claim.options[me].includes('ron')) {
+    // 鳴きなし: 鳴けるだけ（ロンできない）なら聞かずに見送る。描き直しの途中で手を送らないよう、描き終えてから1回だけ送る
+    const passKey = `${s.seed}:${s.handNo}:${s.seq}:${me}`;
+    if (autoPassed !== passKey) {
+      autoPassed = passKey;
+      setTimeout(() => o.onMove({ a: 'pass', n: s.seq }), 0);
+    }
+    hint.textContent = '鳴きなし: 見送りました';
   } else if (h.phase === 'claim' && !watching && h.claim.options[me] && !h.claim.responses[me] && o.canMove) {
     const c = h.claim;
-    const acts = c.options[me];
+    const acts = noCallOn() ? c.options[me].filter((a) => a === 'ron') : c.options[me]; // 鳴きなしでもロンは聞く（ポン・チー・カンのボタンは出さない）
     const p = document.createElement('div');
     p.className = 'mj-claim';
     p.append(`${c.from === me ? '' : o.names[c.from]}の${c.src === 'discard' ? '捨て牌' : c.src === 'kakan' ? '加槓' : '抜いた北'} `);
@@ -1152,6 +1176,23 @@ function render(root, s, o) {
   }
   root.append(actions, hint);
   if (!watching) root.append(meldsEl(h, me, false));
+  if (!watching) root.append(noCallEl(draw));
+}
+
+// 「鳴きなし」の切り替え（自分の画面だけ。観戦の人には出さない）。style.css は使わず、ここで見た目を付ける
+function noCallEl(draw) {
+  const on = noCallOn();
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display: flex; justify-content: flex-end; margin-top: 6px;';
+  const b = button(on ? '🙅 鳴きなし中' : '鳴きなし', on ? 'primary' : 'ghost', () => {
+    setNoCall(!noCallOn());
+    draw();
+  });
+  b.style.cssText = 'padding: 2px 10px; font-size: .8rem;';
+  b.setAttribute('aria-pressed', String(on));
+  b.title = on ? 'ポン・チー・カンを聞かずに見送っています（ロンは聞きます）。押すと元に戻します' : '押すと、ポン・チー・カンを聞かずに見送ります（ロンは聞きます）。この端末で覚えます';
+  wrap.append(b);
+  return wrap;
 }
 
 /* ---------- ゲームの約束 ---------- */

@@ -2413,7 +2413,7 @@ for (let k = 0; k < 300; k++) {
       st = NIM.apply(st, { p: st.turn, t: 'take', pile: 0, k: 1 + Math.floor(rnd() * cap) });
       h.update(strip(st));
     }
-    h.update(JSON.stringify(NIM.result(st)));
+    h.update(JSON.stringify({ ...NIM.result(st), place: undefined })); // place（成績表の順位で点のため。28回目に足した）は除いて比べる
   }
   assert.equal(h.digest('hex').slice(0, 16), 'f35b3d147a198386', '山1つでは前と全く同じ局面');
   // 3つ: 3・5・7個。局面の形は山1つと同じ欄だけ
@@ -3709,21 +3709,48 @@ assert.notEqual(GM.cpu(s, 0, { cpu: 'strong' }), 3, 'ぴったり五目の CPU �
   const pn = (p) => `P${p}`;
   assert.equal(HT.resultText(HT.result(tie), 1, pn), 'P0・P1が同点で優勝！🎉');
   assert.equal(HT.resultText(HT.result(tie), 2, pn), 'あなたは3位');
-  // CPU どうしで最後まで（反則を出さない・持ち点の合計は変わらない）
+  // 札の取り替え（28回目の案）: なしでは前と同じ形・1回に1度だけ・山の次の札・取り替えても自分の番のまま
+  assert.equal(HT.apply(HT.init(3, 42, { rules: {} }), { p: 0, t: 'swap', r: 1 }), null, 'なしでは取り替えられない');
+  assert.deepEqual(HT.init(3, 42, { rules: { swap: false } }), HT.init(3, 42, { rules: {} }), 'なしでは局面の形が前と同じ');
+  let w = HT.init(3, 42, { rules: { swap: true } });
+  assert.deepEqual(w.cards, HT.init(3, 42, { rules: {} }).cards, 'ありでも配る札は同じ');
+  const before0 = w.cards[0];
+  w = HT.apply(w, { p: 0, t: 'swap', r: 1 });
+  assert.ok(w && w.cards[0] !== before0 && w.swapped[0] === before0, '取り替えると札が変わり、前の札を覚える');
+  assert.ok(!w.cards.slice(1).includes(w.cards[0]), 'ほかの人と同じ札は来ない');
+  assert.deepEqual([w.toAct, w.pot, w.chips], [0, 3, [19, 19, 19]], '取り替えても自分の番のまま・点は払わない');
+  assert.equal(HT.apply(w, { p: 0, t: 'swap', r: 1 }), null, '1回に1度だけ');
+  assert.equal(HT.apply(w, { p: 1, t: 'swap', r: 1 }), null, '番でない人は取り替えられない');
+  w = HT.apply(w, { p: 0, t: 'bet', r: 1 });
+  const before1 = w.cards[1];
+  w = HT.apply(w, { p: 1, t: 'swap', r: 1 });
+  assert.ok(![before1, w.swapped[0], w.cards[0], w.cards[2]].includes(w.cards[1]), '2人目は山のさらに次の札（配った札・捨てた札は来ない）');
+  w = HT.apply(HT.apply(w, { p: 1, t: 'fold', r: 1 }), { p: 2, t: 'fold', r: 1 });
+  assert.equal(w.phase, 'end');
+  assert.equal(HT.apply(w, { p: 2, t: 'swap', r: 1 }), null, '勝負がついたら取り替えられない');
+  w = HT.apply(w, { p: 0, t: 'next', r: 1 });
+  assert.deepEqual(w.swapped, [null, null, null], '次の回はまた取り替えられる');
+  // CPU どうしで最後まで（反則を出さない・持ち点の合計は変わらない。半分は札の取り替えありで、同じ札が2人に行かない）
+  let cpuSwaps = 0;
   for (let g = 0; g < 100; g++) {
     const n = 2 + (g % 7);
-    let st = HT.init(n, g * 977 + 3, { rules: { rounds: [5, 10, 15][g % 3] } });
+    let st = HT.init(n, g * 977 + 3, { rules: { rounds: [5, 10, 15][g % 3], swap: g % 2 === 0 } });
     let guard = 0;
     while (!HT.result(st)) {
       const p = st.phase === 'end' ? (g % n) % n : st.toAct;
       // 動ける人の CPU だけに打たせる（main.js と同じ）。前は持ち点0で抜けた人を選ぶことがあり、まれに落ちていた
       const q = HT.canAct(st, p) ? p : [...Array(n).keys()].find((i) => HT.canAct(st, i));
-      st = HT.apply(st, { ...HT.cpu(st, q), p: q });
+      const mv = HT.cpu(st, q);
+      if (mv.t === 'swap') cpuSwaps++;
+      st = HT.apply(st, { ...mv, p: q });
       assert.ok(st, 'ひたいカードの CPU が反則');
+      const held = st.cards.filter(Boolean);
+      assert.equal(new Set([...held, ...(st.swapped ?? []).filter(Boolean)]).size, held.length + (st.swapped ?? []).filter(Boolean).length, '同じ札が2回出てこない');
       assert.equal(st.chips.reduce((a, b) => a + b, 0) + (st.phase === 'end' ? st.carry : st.pot), n * 20, '持ち点と場の点の合計は変わらない');
       assert.ok(++guard < 1000);
     }
   }
+  assert.ok(cpuSwaps > 0, 'CPU もときどき札を取り替える');
   console.log('hitai OK');
 }
 
@@ -4316,7 +4343,7 @@ for (let g = 0; g < 20; g++) {
         h.update(JSON.stringify(st));
       }
     }
-    h.update(JSON.stringify(YT.result(st)));
+    h.update(JSON.stringify({ ...YT.result(st), place: undefined })); // place（成績表の順位で点のため。28回目に足した）は除いて比べる
   }
   assert.equal(h.digest('hex').slice(0, 16), '705f2dc797153558', '短い版 なしでは今までと全く同じ局面');
   assert.deepEqual(YT.init(3, 21, { rules: { short: false } }), YT.init(3, 21), 'なしでは short を持たない');
@@ -5839,6 +5866,26 @@ console.log('kaisen OK');
   b = run(b, [{ p: 2, t: 'boom', n: 1 }, { p: 2, t: 'boom', n: 2 }, { p: 2, t: 'boom', n: 3 }]);
   assert.deepEqual(B.result(b).winners, [0], '最後まで残った人の勝ち');
   assert.deepEqual(B.result(b).ranking, [0, 2, 1], 'あとで脱落した人ほど上');
+  // 送る相手（28回目の案）: 選べる では、ねらった人が自分以外の生き残りならその人へ、ほかはくじ。くじ（最初）では to を見ない
+  let a = run(B.init(4, 21, { rules: { aim: 'pick' } }), [{ p: -1, t: 'go' }]);
+  const aimFirst = [1, 2, 3].find((q) => q !== BM.targetOf(a, 0)); // くじでは選ばれない人をねらう（くじと見分けるため）
+  a = run(a, [{ p: 0, t: 'send', n: 1, k: 5, to: aimFirst }]);
+  assert.equal(a.inc[aimFirst], 5, '選べる: ねらった人に届く');
+  assert.equal(a.log.at(-1).to, aimFirst, '選べる: 知らせもねらった人');
+  a = run(a, [{ p: aimFirst, t: 'boom', n: 1 }, { p: aimFirst, t: 'boom', n: 2 }, { p: aimFirst, t: 'boom', n: 3 }]);
+  const afterOut = BM.targetOf(a, 0);
+  a = run(a, [{ p: 0, t: 'send', n: 2, k: 10, to: aimFirst }]);
+  assert.equal(a.inc[afterOut], 10, '選べる: ねらった人が脱落していたらくじ');
+  assert.equal(a.inc[aimFirst], 5, '選べる: 脱落した人には届かない');
+  const selfAim = BM.targetOf(a, 1);
+  a = run(a, [{ p: 1, t: 'send', n: 1, k: 5, to: 1 }]);
+  assert.ok(selfAim !== 1 && a.inc[selfAim] >= 5, '選べる: 自分をねらってもくじ');
+  let c = run(B.init(4, 21), [{ p: -1, t: 'go' }]);
+  const lot = BM.targetOf(c, 0);
+  const other = [1, 2, 3].find((q) => q !== lot);
+  c = run(c, [{ p: 0, t: 'send', n: 1, k: 5, to: other }]);
+  assert.equal(c.inc[lot], 5, 'くじ（最初）では to を見ない');
+  assert.equal(c.inc[other], 0);
   // ライフ
   b = run(B.init(2, 5, { rules: { lives: '1' } }), [{ p: -1, t: 'go' }, { p: 0, t: 'boom', n: 1 }]);
   assert.equal(b.out[0], 0, 'ライフ1なら1回で脱落');
@@ -5870,6 +5917,29 @@ console.log('kaisen OK');
   };
   assert.ok(boomAt('slow') > boomAt('normal') && boomAt('normal') > boomAt('fast'), 'CPU が初めて爆発させるのは はやいほど早い');
   console.log('bombs first CPU boom (s) slow/normal/fast', boomAt('slow'), boomAt('normal'), boomAt('fast'));
+}
+
+// ---------- 成績表の順位で点（28回目の案）: 自分より下の順位になった人の数。結果の形ごとに確かめる ----------
+{
+  const { seatPoints } = await import('../app/js/games/index.js');
+  assert.deepEqual(seatPoints({ winner: 1, cells: [] }, 2), [0, 1], '2人で勝てば1点・負けは0点');
+  assert.deepEqual(seatPoints({ winner: null, cells: [] }, 2), [0, 0], '引き分けはだれも0点');
+  assert.deepEqual(seatPoints({ winner: 2, cells: [] }, 4), [0, 0, 3, 0], '勝った人だけ分かる盤のゲームの4人: 勝った人が3点');
+  assert.deepEqual(seatPoints({ winner: 0, ranking: [0, 2, 1, 3] }, 4), [3, 1, 2, 0], '順位の並び: 4人で 3・2・1・0点');
+  assert.deepEqual(seatPoints({ winners: [0, 1], ranking: [0, 1, 2], places: [1, 1, 3] }, 3), [1, 1, 0], 'ひたいカードの同点優勝: 同じ順位の人は数えない');
+  assert.deepEqual(seatPoints({ winner: 0, ranking: [0, 1, 2, 3], place: [1, 2, 2, 4] }, 4), [3, 1, 1, 0], '席ごとの順位（place）で2位が2人');
+  assert.deepEqual(seatPoints({ winner: 0, ranking: [0, 1, 2], pts: [9, 4, 4] }, 3), [2, 0, 0], '回数制の合計点（pts）で2位が2人');
+  assert.deepEqual(seatPoints({ winners: [1, 2], scores: [2, 5, 5, 0] }, 4), [1, 2, 2, 0], '点（scores）で並べる・1位が2人');
+  assert.deepEqual(seatPoints({ winners: [0, 2], team: 0, teams: [5, 3], scores: [3, 9, 2, 1] }, 4), [2, 0, 2, 0], 'チーム戦は個人の点を見ず、勝ったチームが負けたチームの人数ぶん');
+  assert.deepEqual(seatPoints({ winner: null, draw: true, ranking: [0, 1, 2] }, 3), [0, 0, 0], 'draw は順位の並びがあっても0点');
+  assert.deepEqual(seatPoints({ winner: null, loser: 2, ender: 2 }, 3), [1, 1, 0], '負けが1人だけ（石取りの3人）: ほかの人が1点ずつ');
+  assert.deepEqual(seatPoints({ winners: [], side: 'none' }, 4), [0, 0, 0, 0], 'だれも勝たない（ワードウルフの全員の負け）は0点');
+  assert.deepEqual(seatPoints({ winner: 1, ranking: [1, 0] }, 3), [1, 2, 0], '並びに入っていない席は一番下');
+  // ゲームの本物の結果: 神経衰弱の同点（place を足した）・スピードの3人の同着・玉入れのチーム
+  const M = GAMES.memory;
+  const mres = M.result({ ...M.init(4, 3, { rules: {} }), done: true, scores: [3, 1, 1, 0] });
+  assert.deepEqual(seatPoints(mres, 4), [3, 1, 1, 0], '神経衰弱で2位が2人なら同じ点');
+  assert.deepEqual(seatPoints({ winner: null, draw: false, ranking: [2, 0, 1], place: [2, 2, 1], winners: [2] }, 3), [0, 0, 2], 'スピードの3人で2位が2人');
 }
 
 // 遊び方: どのゲームにもあり、長くしない（1つ4行まで）

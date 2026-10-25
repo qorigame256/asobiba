@@ -6,13 +6,16 @@
 // 詳細設定（2026-10-06 本人の決定）: ライフ 1・3（最初）・5。速さ ゆっくり・ふつう（最初）・はやい は
 //   「忙しさの曲線のどこから始めるか」だけを決める（本人の指定）。いちばん短い間（0.55秒）と一度に出る数の上限（3個）はどれも同じ。
 //   忙しさ L = 始まりからの秒数 ＋ 速さの差（START）。数字は Claude の判断。
+// 詳細設定「送る相手」（2026-10-24 本人の決定。28回目の案。key は aim）: くじ（最初。今までと同じ）・選べる。選べるでは、上の名前の札を押すと
+//   その人をねらう（🎯。もう一度押すとくじに戻る）。送りの手に to を入れ、届いた局面でその人がまだ生き残っていればその人へ、いなければ今までどおりくじ（sendTarget）。
+//   Claude の判断: ねらいは次に変えるまで続く（ねらった人が脱落したらくじに戻る）。CPU はくじのまま（弱めのまま・特定の人を責めないように）。
 //
 // 自分の盤の爆弾の動きは自分の端末だけで計算する（ほかの人の盤は見えない）。手の一覧に入るのは「爆発した」「送った」だけ。
 // 送る相手は手の一覧の中身から決める（全員同じ相手になる）。届いた分は、その人の端末が入り口から出す（受け取った合計 inc と、
 // 出し終えた数を比べる。開き直したときは、それまでに届いた分は出さない）。
 //
 // 進行: ready →(3秒)→ go → play → 生き残りが1人以下で end
-// 手: { p: -1, t: 'go' } / { p, t: 'boom', n: その人の何回目の爆発か } / { p, t: 'send', n: 何回目の送りか, k: 5 | 10 }
+// 手: { p: -1, t: 'go' } / { p, t: 'boom', n: その人の何回目の爆発か } / { p, t: 'send', n: 何回目の送りか, k: 5 | 10, to?: ねらった席（送る相手が「選べる」のときだけ） }
 
 import { mulberry32 } from './util.js';
 import { since, scoreChips } from './party.js';
@@ -58,6 +61,13 @@ export function targetOf(s, from) {
   if (!cand.length) return -1;
   const rng = mulberry32((s.seed ^ Math.imul(s.step + 1, 0x9e3779b1)) >>> 0);
   return cand[Math.floor(rng() * cand.length)];
+}
+
+// 送りの手が届いたときの相手。送る相手が「選べる」で、ねらった人が自分以外の生き残りならその人、ほかはくじ（届いたときには脱落していることもあるため）
+export const canAim = (s) => s.rules?.aim === 'pick';
+export function sendTarget(s, m) {
+  const ok = canAim(s) && Number.isInteger(m.to) && m.to !== m.p && m.to >= 0 && m.to < s.n && s.out[m.to] === null;
+  return ok ? m.to : targetOf(s, m.p);
 }
 
 /* ---------- 画面 ---------- */
@@ -141,9 +151,37 @@ function drop(b) {
   if (ui.counts[i] >= box.cap) {
     ui.counts[i] = 0;
     ui.sends += 1;
-    ui.flash = { text: `${box.cap}個 発射！`, at: performance.now() };
-    o.onMove({ t: 'send', n: ui.sends, k: box.cap });
+    const to = aimNow(s);
+    ui.flash = { text: to === null ? `${box.cap}個 発射！` : `${o.names[to]}へ ${box.cap}個 発射！`, at: performance.now() };
+    o.onMove({ t: 'send', n: ui.sends, k: box.cap, ...(to === null ? {} : { to }) });
   }
+}
+
+// いまねらっている席（送る相手が「選べる」で、自分以外の生き残りを選んでいるときだけ。ほかは null ＝ くじ）
+function aimNow(s) {
+  if (!ui || !canAim(s) || ui.aim === null || ui.aim === ui.me || s.out[ui.aim] !== null) return null;
+  return ui.aim;
+}
+
+// 送る相手が「選べる」とき、上の名前の札を押すとその人をねらう（🎯。もう一度押すとくじに戻る）。札は描き直しのたびに作り直すので、そのたびに付け直す
+function aimChips(chips, s, me) {
+  if (!canAim(s) || me === null || s.phase === 'end' || s.out[me] !== null) return;
+  [...chips.children].forEach((chip, p) => {
+    if (p === me || s.out[p] !== null) return;
+    const on = aimNow(s) === p;
+    chip.classList.add('aimable');
+    chip.classList.toggle('aim', on);
+    chip.setAttribute('role', 'button');
+    chip.setAttribute('aria-pressed', String(on));
+    chip.tabIndex = 0;
+    chip.title = on ? 'この人をねらっています（押すとくじに戻る）' : '押すと、この人へ爆弾を送る';
+    const pick = () => {
+      ui.aim = ui.aim === p ? null : p;
+      aimChips(ui.chips, ui.cur.s, ui.me);
+    };
+    chip.onclick = pick;
+    chip.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } };
+  });
 }
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -311,6 +349,7 @@ export default {
   settings: [
     { key: 'lives', label: 'ライフ', desc: '何回爆発させたら脱落か', def: '3', choices: [['1', '1回'], ['3', '3回'], ['5', '5回']] },
     { key: 'speed', label: '速さ', desc: '始まったときの忙しさ。どれも時間がたつほど爆弾が多く出てくる（いちばん忙しい所は同じ）', def: 'normal', choices: [['slow', 'ゆっくり'], ['normal', 'ふつう'], ['fast', 'はやい']] },
+    { key: 'aim', label: '送る相手', desc: '3人以上のとき、いっぱいにした爆弾をだれへ送るか。選べる では上の名前を押した人をねらう（押さなければくじ）', def: 'random', choices: [['random', 'くじ'], ['pick', '選べる']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -375,7 +414,7 @@ export default {
     }
     if (m.t === 'send') {
       if (m.n !== s0.sent[m.p] + 1 || (m.k !== 5 && m.k !== 10)) return null;
-      const to = targetOf(s0, m.p);
+      const to = sendTarget(s0, m);
       const s = clone(s0);
       s.step += 1;
       s.sent[m.p] = m.n;
@@ -421,6 +460,7 @@ export default {
       ui.chips.replaceWith(chips);
       ui.chips = chips;
       ui.cur = { s, o };
+      aimChips(chips, s, me);
       ui.wrap.classList.toggle('ac-live', s.phase === 'play' && me !== null && s.out[me] === null);
       if (s.phase !== 'ready') since(goKey(s));
       return;
@@ -433,7 +473,8 @@ export default {
     canvas.className = 'ac-canvas';
     const note = document.createElement('p');
     note.className = 'ac-note';
-    note.textContent = '爆弾を指（マウス）でつまんで、同じ色の枠へ運びます。黄色いふちの爆弾は、ほかの人から送られてきたものです。';
+    note.textContent = '爆弾を指（マウス）でつまんで、同じ色の枠へ運びます。黄色いふちの爆弾は、ほかの人から送られてきたものです。'
+      + (canAim(s) && s.n > 2 && me !== null ? '上の名前を押すと、その人へ送ります（もう一度押すとくじ）。' : '');
     wrap.append(canvas);
     root.append(chips, wrap, note);
     if (s.phase !== 'end') window.scrollTo(0, 0);
@@ -445,8 +486,9 @@ export default {
       bombs: [], held: null, fx: [], counts: [0, 0, 0, 0], flash: null, last: performance.now(),
       // 開き直したときは、それまでの爆発・送り・届いた分を引き継ぐ（同じ番号の手を送らないように）
       lost: me === null ? 0 : s.boom[me], sends: me === null ? 0 : s.sent[me], consumed: me === null ? 0 : s.inc[me],
-      nextSpawn: sec, nextInc: 0,
+      nextSpawn: sec, nextInc: 0, aim: null,
     };
+    aimChips(chips, s, me);
     wrap.classList.toggle('ac-live', s.phase === 'play' && me !== null && s.out[me] === null);
     resize();
     let drag = null;

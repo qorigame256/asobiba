@@ -185,7 +185,7 @@ export default {
     const winners = leaders(totals);
     const rk = ranks(totals);
     const ranking = Array.from({ length: s.n }, (_, p) => p).sort((a, b) => rk[a] - rk[b]);
-    return { winner: winners[0], winners, ranking };
+    return { winner: winners[0], winners, ranking, place: rk }; // place: 席ごとの順位（同点は同じ。成績表の順位で点）
   },
   resultText(res, me, pn) { return winnersText(res.winners, me, pn); },
 

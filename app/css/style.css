@@ -1645,6 +1645,10 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .ac-field { display: flex; justify-content: center; }
 .ac-canvas { display: block; border-radius: 12px; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .ac-note { text-align: center; font-size: .82rem; color: var(--muted); margin: 0; }
+/* 2色爆弾の「送る相手: 選べる」: 名前の札を押してねらう */
+.cc-opp.aimable { cursor: pointer; }
+.cc-opp.aim { border-color: #e74c3c; box-shadow: 0 0 0 2px rgba(231, 76, 60, .35); }
+.cc-opp.aim .cc-opp-name::before { content: '🎯 '; }
 /* 弾幕回避のスロー（詳細設定）。ボタンは盤の上の1行 */
 .dm-slow { display: flex; justify-content: center; }
 .board button.dm-slow-btn { min-width: 13em; padding: 6px 14px; font-size: .9rem; font-variant-numeric: tabular-nums; touch-action: manipulation; }
