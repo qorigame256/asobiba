@@ -78,7 +78,7 @@ export default {
   // 札を表にしたあとは、見せるために少し長く待つ
   cpuDelay(s) {
     if (s.phase === 'doubt') return 900 + Math.floor(Math.random() * 1600);
-    return s.reveal && s.reveal.by !== null ? 1800 : 700;
+    return s.reveal && s.reveal.by !== null ? 3500 : 700; // 2026-10-26 本人の依頼で、引き取った枚数を長く見せるため 1.8秒から延ばした
   },
 
   // 締め切りの合図。全員が決めたらすぐ、誰かがダウトしたら1秒後、それ以外は受付の秒数のあと
@@ -185,6 +185,13 @@ export default {
       cnt.className = 'bb-count';
       cnt.textContent = `${s.hands[p].length}枚`;
       chip.append(name, cnt);
+      // ダウトで札を引き取った人に「＋◯枚」（2026-10-26 本人の依頼で、増えた枚数を次のダウトの結果まで出したままにする）
+      if (s.reveal && s.reveal.by !== null && s.reveal.taker === p) {
+        const d = document.createElement('div');
+        d.className = 'db-delta';
+        d.textContent = `＋${s.reveal.got}枚`;
+        chip.append(d);
+      }
       if (s.phase === 'doubt' && p in s.calls) chip.append(tag('last', 'ダウト！'));
       else if (s.phase === 'doubt' && s.passed.includes(p)) chip.append(tag('away', '通す'));
       if (o.away[p]) chip.append(tag('away', '応答なし'));
@@ -221,6 +228,13 @@ export default {
       }
     }
     if (cards.childElementCount) field.append(cards);
+    // うそ・本当を大きく（2026-10-26 本人の依頼）。札を表にしたあとの場だけ
+    if (s.phase !== 'doubt' && s.reveal && s.reveal.by !== null) {
+      const st = document.createElement('div');
+      st.className = 'db-stamp ' + (s.reveal.lie ? 'lie' : 'true');
+      st.textContent = s.reveal.lie ? 'うそ！' : '本当！';
+      field.append(st);
+    }
     root.append(field);
 
     const log = document.createElement('p');

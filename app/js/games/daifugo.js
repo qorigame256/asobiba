@@ -309,6 +309,9 @@ const clone = (s) => ({
 /* ---------- 画面 ---------- */
 
 let sel = { key: null, cards: [] }; // 選んでいる札（通信で描き直されても消えないよう外に持つ）
+// 出せる札が無いときの自動パス（2026-10-26 本人の依頼）。同じ局面で2回送らないよう、送った局面を覚える
+let autoPassKey = null;
+const AUTO_PASS_MS = 1200;
 
 const RULE_LIST = [
   { key: 'revolution', label: '革命', desc: '同じ数字4枚で、強さの順番が逆になる', def: true },
@@ -784,7 +787,7 @@ export default {
           ? `${nameP(s.gives[0].to)}に渡す札を${s.gives[0].k}枚選んで「渡す」`
           : bombing ? '12ボンバー: 数字を1つ選ぶと、全員がその数字の札を全部捨てます（あなたも）'
           : pd ? (pd.t === 'seven' ? `7渡し: ${nameP(nextActive(s, me))}に渡す札を${pd.k}枚選んで「渡す」` : `10捨て: 捨てる札を${pd.k}枚選んで「捨てる」`)
-          : legal.length ? '出す札を選んで「出す」。光っている札が使えます' : '出せる札がありません。「パス」を押してください';
+          : legal.length ? '出す札を選んで「出す」。光っている札が使えます' : '出せる札がありません。自動でパスします';
         head.append(hint);
       }
       root.append(head);
@@ -844,6 +847,14 @@ export default {
         }
         if (sel.cards.length) btn('選び直す', 'ghost', true, () => { sel.cards = []; draw(); });
         root.append(actions);
+        // 出せる札が無ければ自動でパス（2026-10-26 本人の依頼）。何が起きたか分かるよう少し待ち、同じ局面では1回だけ送る
+        if (!giving && !pd && !bombing && s.phase === 'play' && s.field && !legal.length) {
+          const key = `${s.step}:${me}:${s.hands[me].join()}`;
+          if (autoPassKey !== key) {
+            autoPassKey = key;
+            setTimeout(() => { if (autoPassKey === key) o.onMove({ t: 'pass' }); }, AUTO_PASS_MS);
+          }
+        }
       }
     }
 

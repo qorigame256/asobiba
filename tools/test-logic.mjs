@@ -2851,7 +2851,26 @@ assert.equal(KJ.referee(s).key, 'solved0', '誰かが正解したら少し待っ
 s = KJ.apply(s, { p: 2, t: 'try', q: 0, text: yomi, ms: 3500, n: 1 });
 assert.equal(KJ.apply(s, { p: 2, t: 'try', q: 0, text: yomi, ms: 100, n: 2 }), null, '正解したあとは答えられない');
 s = ref(KJ, s, 'close');
-assert.deepEqual(s.scores, [0, 0, 1], '届いた順ではなく、速く正解した人に1点');
+assert.deepEqual(s.scores, [2, 0, 3], '正解した人は全員が点。届いた順ではなく、速い順に3点・2点（2026-10-26 から）');
+// パス（2026-10-26）: 全員が正解かパスなら締め切る。パスした人はその問題に答えられない
+{
+  let p = ref(KJ, KJ.init(3, 2, { rules: {} }), 'next');
+  const y0 = p.qs[0][1][0];
+  p = KJ.apply(p, { p: 0, t: 'pass', q: 0 });
+  assert.ok(p.passed[0], 'パスした');
+  assert.equal(KJ.apply(p, { p: 0, t: 'pass', q: 0 }), null, 'パスは2回目を弾く');
+  assert.equal(KJ.apply(p, { p: 0, t: 'try', q: 0, text: y0, ms: 900, n: 1 }), null, 'パスしたら答えられない');
+  p = KJ.apply(p, { p: 1, t: 'pass', q: 0 });
+  assert.equal(KJ.referee(p).key, 'open0', 'まだパスしていない人がいる');
+  p = KJ.apply(p, { p: 2, t: 'pass', q: 0 });
+  assert.equal(KJ.referee(p).key, 'all0', '全員パスなら締め切る');
+  p = ref(KJ, p, 'close');
+  assert.deepEqual(p.scores, [0, 0, 0]);
+  p = ref(KJ, p, 'next');
+  assert.deepEqual(p.passed, [false, false, false], '次の問題ではパスが消える');
+  const { pointsOf } = await import('../app/js/games/kanji.js');
+  assert.deepEqual(pointsOf([5000, null, 3000, 3000, 9000]), [1, 0, 3, 3, 1], '同じ速さは同じ点で、次は2つ飛ばして1点');
+}
 for (const level of ['easy', 'hard', 'expert', 'mix']) {
   const st = KJ.init(2, 7, { rules: { level } });
   assert.equal(new Set(st.qs.map(([w]) => w)).size, 10, '10問とも違う漢字: ' + level);
@@ -2873,7 +2892,8 @@ for (const level of ['easy', 'hard', 'expert', 'mix']) {
         assert.equal(o.filter((x) => isRight(ys, x)).length, 1, '正解は1つだけ: ' + w + ' ' + o);
         assert.ok(o.includes(ys[0]), '正解は最初の読み');
         const pool = KANJI[levelOf(w)].map(([, y]) => y[0]);
-        assert.ok(o.every((x) => pool.includes(x)), 'まちがいは同じ難しさの問題の読み: ' + w);
+        // 送りがなのある漢字は、そろえるためにほかの難しさの読みや作った読みも使う（2026-10-26。下の「送りがながそろう」で見る）
+        if (!/[ぁ-ゖ]$/.test(w)) assert.ok(o.every((x) => pool.includes(x)), 'まちがいは同じ難しさの問題の読み: ' + w);
         assert.deepEqual(o, choicesOf(seed, i, [w, ys]), '種と何問目かから作る');
       });
     }
@@ -2913,7 +2933,7 @@ for (const level of ['easy', 'hard', 'expert', 'mix']) {
   c = KJ.apply(c, { p: 0, t: 'try', q: 1, text: r1, ms: 4000, n: 1 });
   assert.equal(KJ.apply(c, { p: 0, t: 'try', q: 1, text: r1, ms: 4000, n: 1 }), null, '正解も2回目は弾く');
   c = ref(KJ, c, 'close');
-  assert.deepEqual(c.scores, [1, 0, 0], '届いた順ではなく、速く正解した人に1点');
+  assert.deepEqual(c.scores, [3, 2, 0], '届いた順ではなく、速い順に3点・2点');
   // 打ち込むときは前と同じ（4つの読みを持たず、何度でも答え直せる）
   const t0 = KJ.init(3, 2, { rules: {} });
   assert.equal(t0.opts, undefined, '打ち込むでは4つを作らない');
@@ -2933,7 +2953,7 @@ for (const level of ['easy', 'hard', 'expert', 'mix']) {
     // 種は問題ごとに別にする（CPU の予定と画面に出た時刻は種と何問目かで覚えているため）
     for (const [choice, level, seed] of [[true, 'easy', 9101], [true, 'expert', 9202], [false, 'hard', 9303]]) {
       let st = KJ.init(4, seed, { rules: { choice, level, time: '15' } });
-      let rights = 0, wrongs = 0, openedAt = clock;
+      let rights = 0, wrongs = 0, passes = 0, openedAt = clock;
       for (let guard = 0; guard < 5000 && !KJ.result(st); guard++) {
         if (st.phase === 'open') {
           for (let p = 0; p < 4; p++) {
@@ -2941,7 +2961,8 @@ for (const level of ['easy', 'hard', 'expert', 'mix']) {
             if (!m) continue;
             const next = KJ.apply(st, { ...m, p });
             assert.ok(next, 'CPU の手が通る ' + JSON.stringify(m));
-            if (next.solved[p] !== null) rights += 1; else wrongs += 1;
+            if (m.t === 'pass') passes += 1; // 正解しない問題はパスする（2026-10-26 から）
+            else if (next.solved[p] !== null) rights += 1; else wrongs += 1;
             assert.equal(KJ.cpu(next, p), null, 'CPU は1問に1回だけ答える');
             st = next;
           }
@@ -2955,10 +2976,21 @@ for (const level of ['easy', 'hard', 'expert', 'mix']) {
       assert.ok(KJ.result(st), 'CPU どうしで最後まで: ' + level);
       assert.ok(rights > 0, 'CPU は正解することがある');
       if (choice) assert.ok(wrongs > 0, '4つから選ぶ CPU はまちがえることもある');
-      else assert.equal(wrongs, 0, '打ち込む CPU は正解しか送らない');
+      else { assert.equal(wrongs, 0, '打ち込む CPU は正解しか送らない'); assert.ok(passes > 0, '打ち込む CPU は分からない問題をパスする'); }
     }
   } finally {
     performance.now = realNow;
+  }
+}
+// 4つから選ぶの送りがな（2026-10-26）: 送りがなのある漢字では4つとも同じ送りがなで終わる。4つとも違い、正しい読みが入る
+{
+  const { choicesOf, okuri } = await import('../app/js/games/kanji.js');
+  for (let seed = 0; seed < 10; seed++) for (const x of allWords) {
+    const c = choicesOf(seed, seed % 5, x);
+    assert.equal(new Set(c).size, 4, '4つとも違う読み: ' + x[0]);
+    assert.ok(c.includes(x[1][0]), '正しい読みが入る: ' + x[0]);
+    const t = okuri(x[0]);
+    if (t) assert.ok(c.every((y) => y.endsWith(t)), '送りがながそろう: ' + x[0] + ' ' + c.join(','));
   }
 }
 // 詳細設定「問題の数」（2026-10-07 の16回目）: 10・15・20問。10問は前と全く同じ・同じ問題は出ない・選んだ数で終わる
@@ -2971,8 +3003,9 @@ for (const level of ['easy', 'hard', 'expert', 'mix']) {
       const st = KJ.init(3, k, { rules: { level, choice, ...extra } });
       fp.push(st.qs.map(([w]) => w).join(',') + (st.opts ? st.opts.flat().join(',') : ''));
     }
-    // 「問題の数」を足す前の kanji.js で取った指紋（seed 0〜99・難しさ4つ・答え方2つの問題と4つの読み）
-    assert.equal(createHash('sha256').update(fp.join('|')).digest('hex').slice(0, 16), '503492210e95d4be', '10問は前と全く同じ問題 ' + JSON.stringify(extra));
+    // 指紋（seed 0〜99・難しさ4つ・答え方2つの問題と4つの読み）。「問題の数」を足す前は 503492210e95d4be。
+    // 2026-10-26 に問題を足し、4つから選ぶの送りがなをそろえたので取り直した（rounds を付けても付けなくても同じことを見る）
+    assert.equal(createHash('sha256').update(fp.join('|')).digest('hex').slice(0, 16), '87a386dbe73462a8', '10問は rounds が無いときと同じ問題 ' + JSON.stringify(extra));
   }
   for (const level of ['easy', 'hard', 'expert']) assert.ok(KANJI[level].length >= 20, 'どの難しさも20問出せる: ' + level);
   assert.equal(KJ.init(2, 3, { rules: { rounds: 12 } }).qs.length, 10, 'おかしな数は10問');
@@ -3068,9 +3101,9 @@ for (const level of ['easy', 'hard', 'expert', 'mix']) {
     });
     assert.ok(reviewOf(st, 2).every((r, q) => r.mark === (q % 4 === 0 ? '⭕' : '❌')), 'ほかの人の印はその人の正解で決まる');
     assert.ok(reviewOf(st, null).every((r) => r.mark === '') && reviewOf(st, -1).every((r) => r.mark === ''), '観戦の人には印を付けない');
-    // 点は今までどおり（ふりかえりの記録は点に使わない）
+    // 点（ふりかえりの記録は点に使わない）。2026-10-26 から正解した全員に速い順で3点・2点
     const quarter = (k) => st.qs.filter((_, q) => q % 4 === k).length;
-    assert.deepEqual(st.scores, [quarter(2), quarter(2), quarter(0)], '点は速く正解した人に1点のまま');
+    assert.deepEqual(st.scores, [3 * quarter(2) + (choice ? 0 : 2 * quarter(0)), 3 * quarter(2), 3 * quarter(0)], '正解した人は速い順に3点・2点');
     assert.deepEqual(rows.map((r) => r.fast), st.log.map((x) => x.winners), '点を付けた人とふりかえりの速い人は同じ');
   }
   // 途中では締め切った問題だけ。始める前は空

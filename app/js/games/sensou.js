@@ -7,11 +7,13 @@
 // 「分ける」（詳細設定でオン・オフ）: 自分の番に、両手の合計を変えずに左右へ配り直す。消えた手にも配れる。
 //   左右を入れ替えただけの形や、今と同じ形にはできない。1本の手は4本まで。分けて手を0本にはできない（自分で消すのは不可。Claude の判断）。
 // 両手とも消えた人は負けて抜ける。最後に残った1人の勝ち。順位は抜けた順の逆。
-// 決着が付かずに続くことがあるので、手数が 人数×40 に達したら引き分けにする（Claude の判断。変えるなら本人に確認）。
+// 決着が付かずに続くことがあるので、手数が決めた数に達したら引き分けにする。前は 人数×40（Claude の判断）だったが、2026-10-26 本人の決定で
+// 詳細設定「引き分けまでの手数」（limit。40・60・80・100手。最初は40。人数に関係なく全体の手数）にした。
 // 手: { p, t: 'atk', from: 自分の手 0左|1右, to: 相手の番号, hand: 相手の手 0|1 } / { p, t: 'split', h: [左, 右] }
 
 const MAX_FINGERS = 4;
-const LIMIT_PER_PLAYER = 40;
+const LIMITS = [40, 60, 80, 100];
+const limitOf = (s) => (LIMITS.includes(s.rules.limit) ? s.rules.limit : LIMITS[0]);
 const HAND_NAME = ['左手', '右手'];
 
 const aliveP = (s, p) => s.hands[p][0] + s.hands[p][1] > 0;
@@ -70,6 +72,7 @@ export default {
   maxPlayers: 6,
   settings: [
     { key: 'over', label: '5本を超えた手', desc: '地域でルールが違う所。ちょうど5本の手はどちらでも消える', def: 'wrap', choices: [['wrap', '超えた分が残る（4本に3本で2本）'], ['dead', '消える']] },
+    { key: 'limit', label: '引き分けまでの手数', desc: 'この手数までに決着しなければ引き分け（全員の手を合わせた数）', def: 40, choices: LIMITS.map((k) => [k, `${k}手`]) },
     { key: 'split', label: '分ける', desc: '自分の番に、両手の指の合計を変えずに左右へ配り直せる（消えた手にも配れる。分けて0本にはできない）', def: true },
   ],
 
@@ -90,7 +93,7 @@ export default {
     return { winner: s.winner, draw: s.draw, ranking: [...alive, ...s.out.slice().reverse()] };
   },
   cpuDelay() { return 700; },
-  info(s) { return `手数 ${s.count} / ${s.n * LIMIT_PER_PLAYER}（ここまでで決着しなければ引き分け）`; },
+  info(s) { return `手数 ${s.count} / ${limitOf(s)}（ここまでで決着しなければ引き分け）`; },
 
   resultText(res, me, pn) {
     if (res.draw) return '決着が付かず引き分け！';
@@ -122,7 +125,7 @@ export default {
     s.count += 1;
     const alive = Array.from({ length: s.n }, (_, q) => q).filter((q) => aliveP(s, q));
     if (alive.length === 1) s.winner = alive[0];
-    else if (s.count >= s.n * LIMIT_PER_PLAYER) s.draw = true;
+    else if (s.count >= limitOf(s)) s.draw = true;
     else s.turn = nextAlive(s, p);
     return s;
   },
@@ -246,13 +249,22 @@ export default {
       cancel.textContent = 'やめる';
       cancel.onclick = () => { chosen = null; draw(); };
       actions.append(cancel);
-    } else if (splits.length) {
+    } else if (s.rules.split) {
+      // 分けられないときもボタンを出して、なぜ押せないかを書く（2026-10-26 本人の声「分けるが出ないことがあった」。
+      // 左右を入れ替えるだけ・0本の手を作る分け方はできないので、1本と1本・4本と4本・1本だけ などでは分けられない）
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'btn secondary';
       b.textContent = '分ける';
+      b.disabled = !splits.length;
       b.onclick = () => { chosen = { step: s.step, split: true }; draw(); };
       actions.append(b);
+      if (!splits.length) {
+        const why = document.createElement('small');
+        why.className = 'ss-why';
+        why.textContent = 'いまの指では分けられません（左右を入れ替えるだけ・0本の手を作る分け方はできないため）';
+        actions.append(why);
+      }
     }
     if (actions.childElementCount) root.append(actions);
   },

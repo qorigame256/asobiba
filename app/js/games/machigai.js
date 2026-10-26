@@ -207,7 +207,13 @@ function clock() {
   let text = '';
   if (s.phase === 'play') {
     const left = Math.max(0, Math.ceil((limitOf(s) - since(playKey(s))) / 1000));
-    text = `${s.r + 1}/${roundsOf(s)}枚目・残り ${left}秒・見つかった違い ${foundIn(s, s.r)}/${ndiffOf(s)}`;
+    // 残りの違いの数を大きく（2026-10-26 本人の依頼）。時間と何枚目かは小さく添える
+    const rest = ndiffOf(s) - foundIn(s, s.r);
+    const html = `<span class="mg-rest">のこり <b>${rest}</b> 個</span><span class="mg-sub">${s.r + 1}/${roundsOf(s)}枚目・残り ${left}秒</span>`;
+    if (ui.clockText !== html) { ui.clock.innerHTML = html; ui.clockText = html; }
+    if (ui.morph) drawMorph(s);
+    requestAnimationFrame(clock);
+    return;
   } else if (s.phase === 'show') text = `${s.r + 1}/${roundsOf(s)}枚目の答え（点線の丸が見つからなかった違い）`;
   else if (s.phase === 'ready') {
     const left = Math.ceil((READY_MS - since(`machigai:${s.seed}:ready`)) / 1000);
@@ -396,7 +402,9 @@ export default {
           + (slowOf(s) ? '右の絵は始めは左と同じで、少しずつ変わっていきます。' : '');
         pics.append(wait);
       }
-      if (s.phase !== 'end') window.scrollTo(0, 0);
+      // 絵が出たら、2枚とも画面に入る位置へ（2026-10-26 本人の依頼。前はページの一番上へ戻していて、スマホでは下の絵が隠れていた）
+      if (s.phase === 'play') requestAnimationFrame(() => clockEl.scrollIntoView({ block: 'start' }));
+      else if (s.phase !== 'end') window.scrollTo(0, 0);
       clock();
     } else {
       chips.scrollLeft = ui.chips.scrollLeft;

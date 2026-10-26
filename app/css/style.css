@@ -1210,6 +1210,8 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .pt-timebar { height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; margin-top: 10px; }
 .pt-timebar > div { height: 100%; width: 100%; background: #3a9d55; border-radius: inherit; }
 .pt-timebar.low > div { background: #e04b3c; }
+.pt-secs { text-align: center; font-weight: 800; font-size: 1.1rem; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.pt-secs.low { color: #e04b3c; }
 
 /* ---------- 石取り ---------- */
 .nim { display: flex; flex-direction: column; gap: 12px; }
@@ -1667,6 +1669,11 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .mg-pics { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
 .mg-pic { flex: 1 1 300px; max-width: 520px; width: 100%; aspect-ratio: 4 / 3; border-radius: 10px; border: 2px solid #0002; touch-action: manipulation; user-select: none; -webkit-user-select: none; cursor: pointer; }
 .mg-wait { padding: 40px 16px; text-align: center; color: var(--muted); }
+.mg-rest { display: block; font-size: 1.6rem; line-height: 1.2; }
+.mg-rest b { font-size: 2.2rem; color: #e74c3c; }
+.mg-sub { display: block; font-size: .85rem; font-weight: 400; color: var(--muted); }
+/* スマホの縦長の画面では、2枚の絵が上下に並んでも画面に収まる幅にする（2026-10-26。190px は上の時計と点数の札のぶん） */
+@media (max-width: 700px) { .mg-pic { flex: 0 0 auto; width: min(100%, calc((100dvh - 190px) * 2 / 3)); } }
 
 /* 招待の小窓（QR コード） */
 .invite-pop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: calc(16px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom)); background: rgba(0, 0, 0, .45); }
@@ -1786,3 +1793,9 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 
 /* 待合室の「自分のこと」の段（名前を変える・自分の成績） */
 .lobby-me { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+
+/* ダウト（2026-10-26）: 引き取った枚数と、うそ・本当を大きく */
+.db-delta { font-weight: 800; color: #c0392b; font-size: 1.05rem; }
+.db-stamp { font-size: 2.6rem; font-weight: 900; text-align: center; letter-spacing: .1em; margin: 4px 0; }
+.db-stamp.lie { color: #c0392b; }
+.db-stamp.true { color: #2f8a4a; }

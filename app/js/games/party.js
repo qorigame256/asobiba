@@ -83,21 +83,31 @@ function tag(cls, text) {
 }
 
 // 残り時間の帯。ms 後に空になる。帯の要素が画面から外れたら勝手に止まる
-export function timeBar(key, limit) {
+// secs = true なら、帯の下に残りの秒数も数字で出す（2026-10-26 本人の依頼。難読漢字）。そのときは帯と数字を包んだ要素を返す
+export function timeBar(key, limit, { secs = false } = {}) {
   const bar = document.createElement('div');
   bar.className = 'pt-timebar';
   const fill = document.createElement('div');
   bar.append(fill);
+  const num = secs ? document.createElement('div') : null;
+  if (num) num.className = 'pt-secs';
   const tick = () => {
     if (!bar.isConnected && bar.dataset.started) return;
     bar.dataset.started = '1';
     const left = Math.max(0, 1 - since(key) / limit);
     fill.style.width = (left * 100).toFixed(1) + '%';
     bar.classList.toggle('low', left < 0.3);
+    if (num) {
+      num.textContent = `残り ${Math.ceil((left * limit) / 1000)}秒`;
+      num.classList.toggle('low', left < 0.3);
+    }
     if (left > 0) requestAnimationFrame(tick);
   };
   tick();
-  return bar;
+  if (!num) return bar;
+  const box = document.createElement('div');
+  box.append(bar, num);
+  return box;
 }
 
 export const secText = (ms) => (ms / 1000).toFixed(2) + '秒';

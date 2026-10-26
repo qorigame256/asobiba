@@ -13,7 +13,13 @@
 // 「ふりかえり」（2026-10-07 本人の決定。詳細設定にせず、いつも出す）: 対局が終わった画面に、出た漢字と正しい読みを出た順に並べる
 //   （自分が正解した問題に ⭕、まちがえた・答えなかった問題に ❌。観戦の人には印を付けない。いちばん速く正解した人の名前も小さく添える）。
 //   見せるだけで手・点は変えない。そのために締め切り（close）のとき、その問題でだれが何秒で正解したかを局面の log に足していく（reviewOf）。
-// 手: { p: -1, t: 'next' | 'close' } / { p, t: 'try', q: 問題番号, text: 答え, ms, n: その問題で何回目の答えか }
+// 2026-10-26 本人の依頼で変えた所:
+//   点: 前は「いちばん速く正解した人に1点」。正解した人は全員が点をもらい、速い順に 3点・2点・それ以降は1点（同じ速さは同じ点。PTS）。
+//     そのため、誰かが正解したらすぐ締め切らず、AFTER_MS（5秒）待つか、全員が正解かパスをしたら締め切る（Claude の判断）。
+//   パス: その問題を降りる（{ p, t: 'pass', q }）。全員が正解かパスなら次の問題へ。CPU は正解しない問題では、答える予定の時刻にパスする。
+//   残り時間を数字でも出す（party.js の timeBar の secs）。
+//   4つから選ぶ: 送りがなのある漢字（躊躇う など）では、まちがいの読みも同じ送りがなで終わるものから選ぶ（送りがなで答えが分かってしまうため）。
+// 手: { p: -1, t: 'next' | 'close' } / { p, t: 'try', q: 問題番号, text: 答え, ms, n: その問題で何回目の答えか } / { p, t: 'pass', q }
 
 import { mulberry32, shuffle, esc } from './util.js';
 import { since, kana, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
@@ -23,10 +29,20 @@ const ROUNDS = [[10, '10問'], [15, '15問'], [20, '20問']]; // 問題の数（
 const READY_MS = 3000;
 const SHOWN_MS = 3500;
 const GRACE_MS = 1500;
+const AFTER_MS = 5000; // 誰かが正解してから締め切るまで（ほかの人も答えられるように）
+const PTS = [3, 2]; // 速い順の点。それより後ろは1点
 const HINT_AT = 0.4; // ヒント（詳細設定）を出すのは、制限時間のこの割合がたったとき
 const LEVELS = { easy: 'ふつう', hard: 'むずかしい', expert: '超むずかしい', mix: 'ぜんぶまぜる' };
 const CPU_RATE = { easy: 0.55, hard: 0.4, expert: 0.3, mix: 0.4 };
 const CHOICES = 4; // 答え方「4つから選ぶ」のボタンの数
+// まちがいの読みを作るときの、近い音のかな（同じ行の別の段と、濁点を付け外ししたもの）
+const ROWS = ['あいうえお', 'かきくけこ', 'がぎぐげご', 'さしすせそ', 'ざじずぜぞ', 'たちつてと', 'だぢづでど', 'なにぬねの', 'はひふへほ', 'ばびぶべぼ', 'まみむめも', 'らりるれろ', 'やゆよ'];
+const VOICE = { か: 'が', き: 'ぎ', く: 'ぐ', け: 'げ', こ: 'ご', さ: 'ざ', し: 'じ', す: 'ず', せ: 'ぜ', そ: 'ぞ', た: 'だ', ち: 'ぢ', つ: 'づ', て: 'で', と: 'ど', は: 'ば', ひ: 'び', ふ: 'ぶ', へ: 'べ', ほ: 'ぼ' };
+function nearKana(c) {
+  const row = ROWS.find((r) => r.includes(c)) ?? '';
+  const v = VOICE[c] ?? Object.keys(VOICE).find((k) => VOICE[k] === c);
+  return [...row].filter((x) => x !== c).concat(v ? [v] : []);
+}
 
 const limitOf = (s) => Number(s.rules.time) * 1000;
 const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 10);
@@ -48,12 +64,42 @@ export function choicesOf(seed, q, [word, yomis]) {
     used.add(ys[0]);
     others.push(ys[0]);
   }
-  // 文字数の差が小さい順（同じ差の中はまぜた順のまま）
-  others.sort((a, b) => Math.abs([...a].length - len) - Math.abs([...b].length - len));
-  return shuffle([ans, ...others.slice(0, CHOICES - 1)], rnd);
+  // 送りがな（漢字のうしろのひらがな）がある漢字は、まちがいの読みも同じ送りがなで終わるものだけにする（2026-10-26 本人の依頼。送りがなで答えが分かってしまうため）。
+  // 同じ難しさで足りなければほかの難しさから、それでも足りなければ答えの送りがなでない1文字を別のかなに替えた読みを作る（Claude の判断）
+  const tail = okuri(word);
+  const near = (a, b) => Math.abs([...a].length - len) - Math.abs([...b].length - len); // 文字数の差が小さい順（同じ中はまぜた順のまま）
+  if (!tail) return shuffle([ans, ...others.sort(near).slice(0, CHOICES - 1)], rnd);
+  const pick = others.filter((y) => y.endsWith(tail)).sort(near);
+  for (const [w, ys] of shuffle(Object.values(KANJI).flat(), rnd)) {
+    if (pick.length >= CHOICES - 1) break;
+    if (w !== word && ys[0].endsWith(tail) && !used.has(ys[0])) { used.add(ys[0]); pick.push(ys[0]); }
+  }
+  const stem = [...ans].slice(0, [...ans].length - [...tail].length);
+  for (let guard = 0; pick.length < CHOICES - 1 && guard < 200 && stem.length; guard++) {
+    const k = stem.length > 1 ? 1 + Math.floor(rnd() * (stem.length - 1)) : 0; // 1文字目は替えない（読み始めで見分けが付くため）
+    let near = nearKana(stem[k]);
+    if (!near.length) near = [...ROWS.join('')]; // わ・ん など近い音を決めていないかなは、どれかのかなに
+    const c = near[Math.floor(rnd() * near.length)];
+    const y = [...stem.slice(0, k), c, ...stem.slice(k + 1)].join('') + tail;
+    if (!used.has(y)) { used.add(y); pick.push(y); }
+  }
+  return shuffle([ans, ...pick.slice(0, CHOICES - 1)], rnd);
 }
 
-const clone = (s) => ({ ...s, scores: s.scores.slice(), tries: s.tries.slice(), solved: s.solved.slice(), said: s.said.slice() });
+// 漢字のうしろに続くひらがな（送りがな）。無ければ ''
+export const okuri = (word) => word.match(/[ぁ-ゖ]+$/)?.[0] ?? '';
+
+const clone = (s) => ({ ...s, scores: s.scores.slice(), tries: s.tries.slice(), solved: s.solved.slice(), said: s.said.slice(), passed: (s.passed ?? Array(s.n).fill(false)).slice() });
+// その問題でもう答えない人（正解・パス・4つから選ぶで答えた）
+const doneOf = (s, p) => s.solved[p] !== null || !!s.passed?.[p] || (!!s.opts && s.tries[p] > 0);
+// 締め切りのとき、正解した人の点（速い順に PTS、それより後ろは1点。同じ速さは同じ点）
+export function pointsOf(solved) {
+  return solved.map((v) => {
+    if (v === null) return 0;
+    const rank = solved.filter((x) => x !== null && x < v).length; // 自分より速い人の数
+    return PTS[rank] ?? 1;
+  });
+}
 
 // 「ふりかえり」の中身（画面に依存しない）。出た順に { n: 何問目, word, yomi: 読み（2つ以上は「／」で）, mark: ⭕・❌・''（観戦）, fast: いちばん速く正解した人の番号の一覧, ms }。
 // log は締め切りのたびに足した { solved: 各自の正解の時間（ms か null）, winners }。締め切っていない問題は出さない
@@ -80,6 +126,16 @@ const REVIEW_CSS = `
 
 /* ---------- 画面 ---------- */
 
+// 「パス」（2026-10-26）。押したらその問題はもう答えない。全員が正解かパスなら次の問題へ
+function passButton(s, o) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'btn ghost kj-pass';
+  b.textContent = 'パス（この問題をとばす）';
+  b.onclick = () => { b.disabled = true; o.onMove({ t: 'pass', q: s.q }); };
+  return b;
+}
+
 // 答えを打っている途中に描き直しが来ても入力欄を作り直さない（作り直すとスマホのキーボードが閉じる）
 let ui = null; // { mount, wrap, form, input, note, chips, card, n }
 const cpuPlan = new Map();
@@ -88,7 +144,7 @@ export default {
   id: 'kanji',
   name: '難読漢字',
   icon: '🈂️',
-  desc: '読めそうで読めない漢字の読みを、いちばん先に当てた人が1点',
+  desc: '読めそうで読めない漢字の読みを当てる。正解すれば点、速いほど高い点',
   ready: true,
   multi: true,
   realtime: true,
@@ -118,6 +174,7 @@ export default {
   // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
   sound(a, b, m, me) {
     if (m.p === -1) return m.t === 'next' ? 'question' : b.last.winners.includes(me) ? 'correct' : 'pop';
+    if (m.t === 'pass') return m.p === me ? 'pop' : null;
     if (m.p === me) return b.solved[me] !== null ? 'correct' : 'wrong';
     return b.solved[m.p] !== null ? 'pop' : null; // ほかの人が正解したときだけ
   },
@@ -131,8 +188,8 @@ export default {
   referee(s) {
     if (s.phase === 'ready') return { key: 'ready', ms: READY_MS, move: { t: 'next' } };
     if (s.phase === 'open') {
-      if (s.solved.some((v) => v !== null)) return { key: 'solved' + s.q, ms: GRACE_MS, move: { t: 'close' } };
-      if (s.opts && s.tries.every((v) => v > 0)) return { key: 'all' + s.q, ms: GRACE_MS, move: { t: 'close' } }; // 4つから選ぶ: 全員が答えた
+      if ([...Array(s.n).keys()].every((p) => doneOf(s, p))) return { key: 'all' + s.q, ms: GRACE_MS, move: { t: 'close' } }; // 全員が正解・パス・（4つから選ぶで）答えた
+      if (s.solved.some((v) => v !== null)) return { key: 'solved' + s.q, ms: AFTER_MS, move: { t: 'close' } };
       return { key: 'open' + s.q, ms: limitOf(s) + GRACE_MS, move: { t: 'close' } };
     }
     if (s.phase === 'shown') return { key: 'shown' + s.q, ms: SHOWN_MS, move: { t: 'next' } };
@@ -151,6 +208,7 @@ export default {
         s.tries = Array(s.n).fill(0);
         s.solved = Array(s.n).fill(null);
         s.said = Array(s.n).fill('');
+        s.passed = Array(s.n).fill(false);
         return s;
       }
       if (m.t === 'close' && s0.phase === 'open') {
@@ -160,17 +218,25 @@ export default {
         const times = s.solved.filter((v) => v !== null);
         const best = times.length ? Math.min(...times) : null;
         const winners = best === null ? [] : s.solved.map((v, p) => (v === best ? p : -1)).filter((p) => p >= 0);
-        for (const p of winners) s.scores[p] += 1;
-        s.last = { winners, best };
+        const pts = pointsOf(s.solved);
+        pts.forEach((v, p) => { s.scores[p] += v; });
+        s.last = { winners, best, pts };
         s.log = [...(s0.log ?? []), { solved: s.solved.slice(), winners }]; // ふりかえり用（点には使わない）
         return s;
       }
       return null;
     }
+    if (m.t === 'pass') {
+      if (s0.phase !== 'open' || m.q !== s0.q || !Number.isInteger(m.p) || m.p < 0 || m.p >= s0.n || doneOf(s0, m.p)) return null;
+      const s = clone(s0);
+      s.step += 1;
+      s.passed[m.p] = true;
+      return s;
+    }
     if (m.t !== 'try' || s0.phase !== 'open' || m.q !== s0.q || !Number.isInteger(m.p) || m.p < 0 || m.p >= s0.n) return null;
     if (typeof m.text !== 'string' || !m.text || m.text.length > 30) return null;
     if (typeof m.ms !== 'number' || !(m.ms >= 0) || m.ms > limitOf(s0) + 500) return null;
-    if (m.n !== s0.tries[m.p] + 1 || s0.solved[m.p] !== null) return null;
+    if (m.n !== s0.tries[m.p] + 1 || s0.solved[m.p] !== null || s0.passed?.[m.p]) return null;
     if (s0.opts && (s0.tries[m.p] > 0 || !s0.opts[s0.q].includes(m.text))) return null; // 4つから選ぶ: 1回だけ・4つのどれか
     const s = clone(s0);
     s.step += 1;
@@ -184,7 +250,7 @@ export default {
   // （4つから選ぶときは、正解しない分は同じ時刻に4つから適当に選ぶ。たまたま当たることもある）
   cpuDelay(s) { return s.phase === 'open' ? 250 : 500; },
   cpu(s, p) {
-    if (s.phase !== 'open' || s.solved[p] !== null) return null;
+    if (s.phase !== 'open' || doneOf(s, p)) return null;
     const key = qKey(s) + ':' + p;
     let plan = cpuPlan.get(key);
     if (!plan) {
@@ -201,21 +267,22 @@ export default {
       const opts = s.opts[s.q];
       return { t: 'try', q: s.q, text: plan.ok ? s.qs[s.q][1][0] : opts[Math.floor(Math.random() * opts.length)], ms, n: 1 };
     }
-    if (!plan.ok) return null;
+    if (!plan.ok) return { t: 'pass', q: s.q }; // 分からない問題はパス（全員パスで次へ進めるように）
     return { t: 'try', q: s.q, text: s.qs[s.q][1][0], ms, n: s.tries[p] + 1 };
   },
 
   render(root, s, o) {
     const me = o.me >= 0 ? o.me : null;
     // 4つから選ぶときは、自分が答えたら（○×を付けるため）作り直す
-    const mount = `${s.seed}:${s.q}:${s.phase}:${me}:${me !== null && s.solved[me] !== null}${s.opts && me !== null ? ':' + s.tries[me] : ''}`;
+    const mount = `${s.seed}:${s.q}:${s.phase}:${me}:${me !== null && s.solved[me] !== null}:${me !== null && !!s.passed?.[me]}${s.opts && me !== null ? ':' + s.tries[me] : ''}`;
     const shown = s.phase === 'shown' || s.phase === 'end';
     const won = s.phase === 'end' ? leaders(s.scores) : [];
     const extra = (p) => {
-      if (s.phase === 'open') return s.solved[p] !== null ? '<span class="pt-ok">正解！</span>' : '';
+      if (s.phase === 'open') return s.solved[p] !== null ? '<span class="pt-ok">正解！</span>' : s.passed?.[p] ? '<span class="pt-ng">パス</span>' : '';
       if (!shown || !s.last || s.q < 0) return '';
-      if (s.last.winners.includes(p)) return `<span class="pt-ok">○ ${secText(s.solved[p])} +1</span>`;
-      if (s.solved[p] !== null) return `<span class="pt-ok">○ ${secText(s.solved[p])}</span>`;
+      const got = s.last.pts?.[p] ?? (s.last.winners.includes(p) ? 1 : 0);
+      if (s.solved[p] !== null) return `<span class="pt-ok">○ ${secText(s.solved[p])}${got ? ` +${got}` : ''}</span>`;
+      if (s.passed?.[p]) return '<span class="pt-ng">パス</span>';
       return s.tries[p] ? '<span class="pt-ng">×</span>' : '<span class="pt-ng">―</span>';
     };
     const chips = scoreChips(o, s.scores, { won, extra });
@@ -256,7 +323,7 @@ export default {
     card.querySelector('.kj-word').textContent = word;
     if (s.phase === 'open') {
       since(key); // 画面に出た時刻を覚える
-      card.append(timeBar(key, limit));
+      card.append(timeBar(key, limit, { secs: true }));
       if (s.rules.hint) {
         const hint = document.createElement('div');
         hint.className = 'kj-hint';
@@ -279,7 +346,8 @@ export default {
 
     if (s.opts && s.q >= 0) {
       wrap.append(this.choiceGrid(s, me, o, key, limit, note));
-    } else if (s.phase === 'open' && me !== null && s.solved[me] === null) {
+      if (s.phase === 'open' && me !== null && !doneOf(s, me)) wrap.append(passButton(s, o));
+    } else if (s.phase === 'open' && me !== null && s.solved[me] === null && !s.passed?.[me]) {
       const form = document.createElement('form');
       form.className = 'kj-form';
       form.innerHTML = '<input type="text" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="send" maxlength="30" placeholder="ひらがなで（送りがなも）"><button type="submit" class="btn primary">答える</button>';
@@ -297,7 +365,7 @@ export default {
       };
       ui.form = form;
       ui.input = input;
-      wrap.append(form);
+      wrap.append(form, passButton(s, o));
       setTimeout(() => {
         if (!form.isConnected) return;
         input.disabled = true;
@@ -391,8 +459,9 @@ export default {
     if (s.phase === 'open') {
       const someone = s.solved.some((v) => v !== null);
       if (me !== null && s.solved[me] !== null) note.textContent = `正解！（${secText(s.solved[me])}）ほかの人を待っています`;
-      else if (me !== null && s.tries[me] && s.said[me]) note.textContent = `${s.opts ? '× ' : ''}「${s.said[me]}」はちがいます${s.opts ? '（この問題はもう答えられません）' : ''}${someone ? '（ほかの人が正解しました。まもなく締め切り）' : ''}`;
-      else if (someone) note.textContent = 'ほかの人が正解しました。まもなく締め切り！';
+      else if (me !== null && s.passed?.[me]) note.textContent = 'パスしました。ほかの人を待っています';
+      else if (me !== null && s.tries[me] && s.said[me]) note.textContent = `${s.opts ? '× ' : ''}「${s.said[me]}」はちがいます${s.opts ? '（この問題はもう答えられません）' : ''}${someone ? '（ほかの人が正解しました。5秒で締め切り）' : ''}`;
+      else if (someone) note.textContent = 'ほかの人が正解しました。5秒で締め切り！ 正解すれば点がもらえます';
       else if (me === null) note.textContent = '観戦中';
       else note.textContent = s.opts ? '4つから1つ選んでください（答えられるのは1回だけ）' : 'カタカナで打っても大丈夫です';
     } else if (s.phase === 'shown' && s.last) {

@@ -2041,7 +2041,21 @@ function moveSound(game, st, res, prevLen, mine) {
     greet('end', isVoice(said) ? 1900 : 1200);
     return;
   }
-  const name = game.sound ? game.sound(before, st, m, me) : game.multi ? 'card' : 'place';
+  // 手が2つ以上まとめて届いたとき、前は最後の1手の音だけ鳴らしていたので、最後がほかの人の「鳴らさない」手だと無音になった（2026-10-26 本人の声「効果音がならないゲームがある」）。
+  // 新しい手を後ろから見て、最初に音のある手の音を1つ鳴らす（重ねると、うるさいので1つ）
+  let name = null;
+  const steps = [];
+  let cur = before;
+  for (let i = prevLen; i < S.moves.length; i++) {
+    const nx = game.apply(cur, S.moves[i]);
+    if (!nx) break;
+    steps.push([cur, nx, S.moves[i]]);
+    cur = nx;
+  }
+  for (let k = steps.length - 1; k >= 0 && !name; k--) {
+    const [a, b, mm] = steps[k];
+    try { name = game.sound ? game.sound(a, b, mm, me) : game.multi ? 'card' : 'place'; } catch { name = null; }
+  }
   if (name) play(name);
   if (mine && S.mode === 'online' && !game.realtime && !canMove(game, before, null) && Date.now() - S.waitFrom > TURN_PING_MS) {
     setTimeout(() => { play('turn'); haptic('turn'); sayTurn(); }, 300);
