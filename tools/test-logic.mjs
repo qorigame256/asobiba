@@ -3442,6 +3442,55 @@ assert.deepEqual([0, 1, 2].map((p) => UM.carry(s, p)), [1, 0, 0], '出題者を�
 assert.equal(UM.init(3, 2, { prev: [1, 0, 0] }).setter, 1, '次は出題者をしていない人');
 assert.equal(UM.result(UM.apply(UM.apply(UM.init(2, 3, {}), { p: 0, t: 'pick', idx: 0 }), { p: 0, t: 'reveal' })).winner, null, '答えを明かして終わる');
 assert.equal(UM.apply(UM.init(2, 3, {}), { p: 1, t: 'reveal' }), null, '出題者でない人は明かせない');
+// 2026-10-26: 出題者を代わる・答えを直す・CPU の出題者
+{
+  const { cpuReply, cpuJudge } = await import('../app/js/games/umigame.js');
+  let w = UM.init(3, 5, {});
+  assert.equal(UM.apply(w, { p: w.setter, t: 'hand', to: w.setter }), null, '自分には代われない');
+  const to = (w.setter + 1) % 3;
+  let v = UM.apply(w, { p: w.setter, t: 'hand', to });
+  assert.equal(v.setter, to, '問題を選ぶ前に出題者を代われる');
+  assert.notEqual(v.turn, to, '代わった人は質問の番にならない');
+  v = UM.apply(v, { p: to, t: 'pick', idx: 0 });
+  assert.equal(UM.apply(v, { p: to, t: 'hand', to: w.setter }), null, '問題を選んだあとは代われない');
+  v = UM.apply(v, { p: v.turn, t: 'ask', text: '鍵は関係ありますか？' });
+  v = UM.apply(v, { p: to, t: 'reply', r: 'no' });
+  assert.equal(UM.apply(v, { p: v.turn, t: 'fix', i: 0, r: 'yes' }), null, '回答者は答えを直せない');
+  const fixed = UM.apply(v, { p: to, t: 'fix', i: 0, r: 'yes' });
+  assert.equal(fixed.log[0].r, 'yes', '出題者は前の答えを直せる');
+  assert.equal(fixed.log[0].fixed, true);
+  assert.equal(fixed.asked, v.asked, '直しても質問の数は変わらない');
+  assert.equal(UM.apply(v, { p: to, t: 'fix', i: 0, r: 'part' }), null, '部分的にはいが無ければ直せない');
+  // CPU の出題者: CPU の席が出題者になり、手がかりのある問題を選ぶ。質問を待つ間は動かない
+  const c = UM.init(3, 7, { rules: { setter: 'cpu', partial: true }, cpus: [2] });
+  assert.equal(c.setter, 2, 'CPU の席が出題者');
+  assert.equal(UM.fixedCpus({ setter: 'cpu' }), 1);
+  assert.equal(UM.fixedCpus({}), 0);
+  const pk = UM.cpu(c, 2);
+  assert.equal(pk.t, 'pick');
+  let cs = UM.apply(c, { ...pk, p: 2 });
+  assert.ok(cs, 'CPU が選んだ問題で始まる');
+  assert.equal(UM.canAct(cs, 2), false, 'CPU の出題者は質問を待つ間は動かない');
+  assert.equal(UM.apply(cs, { p: 2, t: 'hand', to: 0 }), null);
+  assert.equal(UM.init(3, 7, { rules: {}, cpus: [] }).setter, 0, 'ふつうは人の出題者');
+  const P1 = { title: '遅刻に拍手' };
+  assert.equal(cpuReply(P1, '鍵は関係ありますか？', true), 'yes', '手がかりの言葉があれば はい');
+  assert.equal(cpuReply(P1, 'カギが関係する？', true), 'yes', 'カタカナでも');
+  assert.equal(cpuReply(P1, '彼女は怒られましたか？', true), 'no', 'いいえの言葉');
+  assert.equal(cpuReply(P1, '天気は関係ありますか？', true), 'na', 'どちらも無ければ関係ありません');
+  assert.equal(cpuReply(P1, '鍵を持っていませんか？', true), 'no', '「〜ませんか」は入れ替える');
+  assert.equal(cpuReply(P1, '鍵があって社長は怒りましたか？', true), 'part', '両方あれば部分的にはい');
+  assert.equal(cpuReply(P1, '鍵があって社長は怒りましたか？', false), 'yes', '部分的にはいが無ければ はい');
+  assert.equal(cpuJudge(P1, '彼女だけが鍵を持っていて、みんな会議室に入れなかった'), true, '手がかりの組が全部あれば正解');
+  assert.equal(cpuJudge(P1, '鍵を持っていた'), false, '組が足りなければちがう');
+  // CPU の出題者で最後まで: 返事と判定が反則にならない
+  cs = UM.apply(cs, { p: cs.turn, t: 'ask', text: '会議室に入れなかったのですか？' });
+  assert.ok(UM.canAct(cs, 2));
+  cs = UM.apply(cs, { ...UM.cpu(cs, 2), p: 2 });
+  assert.ok(cs && cs.log.length === 1, 'CPU が質問に答える');
+  // CPU が出題者なら、回答者も自分の番に降参できる
+  assert.equal(UM.result(UM.apply(cs, { p: cs.turn, t: 'reveal' })).winner, null, '回答者が降参して答えを見る');
+}
 // ウミガメの「部分的にはい」（詳細設定）: ありのときだけ part で答えられる。なしでは今までと同じ局面
 {
   const ask = (rules) => UM.apply(UM.apply(UM.init(3, 1, { rules }), { p: 0, t: 'pick', idx: 0 }), { p: 1, t: 'ask', text: 'しつもん' });

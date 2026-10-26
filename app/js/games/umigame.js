@@ -2,14 +2,25 @@
 // 自分の番には「質問」「解答」「パス」のどれか1つ。出題者は質問に「はい・いいえ・関係ない」で答え、解答の正誤を決める。
 // 外しても続けられ、いちばん先に当てた人の勝ち。出題者は「答えを明かして終わる」こともできる。
 // 出題者は対局ごとに交代（これまで出題者をした回数がいちばん少ない人。同じ顔ぶれで続けたときに引き継ぐ）。
-// CPU は入れない（質問も判定もできないため）。部屋を出た人の番は自動でパス、出題者が出たら答えを明かして終わる。
+// CPU は回答者には入れない（質問ができないため）。部屋を出た人の番は自動でパス、出題者が出たら答えを明かして終わる。
 // 手: { p, t: 'pick', idx } / { p, t: 'custom', q, a } / { p, t: 'ask' | 'guess', text } / { p, t: 'pass' }
 //     / { p, t: 'reply', r: 'yes' | 'no' | 'na' | 'part'（部分的にはい。詳細設定があるときだけ） } / { p, t: 'judge', ok } / { p, t: 'reveal' }
+//     / { p, t: 'hand', to }（問題を選ぶ前に、出題者をほかの人に代わる） / { p, t: 'fix', i, r }（出題者が前の答えを直す）
+//
+// 2026-10-26 本人の依頼で足したもの（作りは Claude の判断）:
+//   詳細設定「出題者」（setter）: 人（順番に交代。最初）／CPU。CPU にすると CPU が1人だけ入って出題者になる（fixedCpus。main.js の lineup）。
+//     CPU の席は init の cpus（main.js が渡す）で知る。CPU の出題者は CPU_KEYS（umigame-data.js）のある問題からくじで選び、
+//     質問には言葉の手がかりで答え、解答も手がかりの言葉の組で正誤を決める（cpuReply・cpuJudge）。CPU が出題者のときは、回答者も自分の番に「降参して答えを見る」ができる。
+//   出題者を選ぶ: 問題を選ぶ前に、出題者が「出題者を代わる」でほかの人（CPU の席は除く）に渡せる（hand）。代わった人が問題を選ぶ。
+//   答えを直す: 出題者は、やりとりの欄の質問の答え（はい・いいえ・関係ありません・部分的にはい）をあとから直せる（fix。直した印 fixed を付ける）。
+//   考えた時間: 各人の札に、いまの番の人が考えている秒数と、これまでの合計を出す。手の一覧に時刻は入れられないので、
+//     各端末が局面の変わった時刻で数える（再読み込みすると0から。端末ごとに少しずれる）。
+//   部分的にはい: 最初を「あり」にした。
 
 import { esc } from './util.js';
-import { since } from './party.js';
+import { since, kana } from './party.js';
 import { shown } from '../filter.js';
-import { PUZZLES } from './umigame-data.js';
+import { PUZZLES, CPU_KEYS } from './umigame-data.js';
 
 // 詳細設定「質問の数」（2026-10-06 本人の決定。最初は「決めない」＝今までどおり）: 20回・30回にすると、全員で合わせてその回数まで質問できる
 //   （数えるのは出題者が答えた質問だけ。解答・パスは数えない）。使い切ったら、回答者が1人1回ずつ順に最後の解答（パスも可）をして、
@@ -23,8 +34,31 @@ const TIMES = [[0, '決めない'], [300, '5分'], [600, '10分']];
 const MAX_TEXT = 120;
 const MAX_PUZZLE = 300;
 export const REPLY = { yes: 'はい', no: 'いいえ', na: '関係ありません', part: '部分的にはい' };
-// 詳細設定「部分的にはい」（2026-10-07 本人の決定。21回目の案。最初は なし）: 出題者の答えに「部分的にはい」（質問の一部は合っている）を足す。
-//   Claude の判断: ボタンは「はい」と「いいえ」の間に置く。ありのときだけ局面に partial: true を持つ（なしでは今までと全く同じ形で、part の答えは反則）。
+// 詳細設定「部分的にはい」（2026-10-07 本人の決定。21回目の案。2026-10-26 から最初は あり）: 出題者の答えに「部分的にはい」（質問の一部は合っている）を足す。
+//   Claude の判断: ボタンは「はい」と「いいえ」の間に置く。ありのときだけ局面に partial: true を持つ（なしでは part の答えは反則）。
+
+// CPU の出題者が使える問題（手がかりのあるもの）の番号
+const CPU_PICKS = PUZZLES.map((x, i) => (CPU_KEYS[x.title] ? i : -1)).filter((i) => i >= 0);
+const has = (text, words) => words.some((w) => text.includes(kana(w)));
+// 質問への CPU の答え。「〜ない？」「〜ませんか？」で終わる質問は、はい・いいえを入れ替える
+export function cpuReply(puzzle, text, partial) {
+  const k = CPU_KEYS[puzzle.title];
+  if (!k) return 'na';
+  const t = kana(text);
+  const yes = has(t, k.yes);
+  const no = has(t, k.no);
+  if (!yes && !no) return 'na';
+  let r = yes && no ? (partial ? 'part' : 'yes') : yes ? 'yes' : 'no';
+  if (r !== 'part' && /(ない|ません|ませんでした|なかった)(です)?(か|の)?[?？。!！]*$/.test(String(text).trim())) r = r === 'yes' ? 'no' : 'yes';
+  return r;
+}
+// 解答の正誤。手がかりの言葉の組が全部入っていれば正解
+export function cpuJudge(puzzle, text) {
+  const k = CPU_KEYS[puzzle.title];
+  if (!k) return false;
+  const t = kana(text);
+  return k.need.every((g) => has(t, g));
+}
 
 const okText = (t, max) => typeof t === 'string' && t.trim().length > 0 && t.length <= max;
 
@@ -35,6 +69,7 @@ function nextAsker(s, from) {
 }
 
 const clone = (s) => ({ ...s, log: s.log.slice() });
+const cpuSetter = (s) => !!s.cpus?.includes(s.setter);
 const timeKey = (s) => `umigame:${s.seed}:time`;
 
 // 質問を使い切ったか時間切れなら、最後の解答に入る（回答者が1人1回ずつ）
@@ -87,22 +122,28 @@ export default {
   ready: true,
   multi: true,
   noCpu: true,
+  fixedCpus: (rules) => (rules.setter === 'cpu' ? 1 : 0), // CPU の出題者だけ入る（main.js の lineup）
   minPlayers: 2,
   maxPlayers: 10,
   settings: [
-    { key: 'partial', label: '部分的にはい', desc: '出題者の答えに「部分的にはい」（質問の一部は合っている）を足す。話が進みやすくなる', def: false },
+    { key: 'setter', label: '出題者', desc: 'CPU にすると、CPU が問題を出して質問に答えます（言葉の手がかりで答える簡単な CPU。手がかりを用意した14問から出します）', def: 'human', choices: [['human', '人（順番に交代）'], ['cpu', 'CPU']] },
+    { key: 'partial', label: '部分的にはい', desc: '出題者の答えに「部分的にはい」（質問の一部は合っている）を足す。話が進みやすくなる', def: true },
     { key: 'limit', label: '質問の数', desc: '全員で合わせて何回まで質問できるか。使い切ったら1人1回ずつ最後の解答をして、だれも当てられなければ出題者の勝ち', def: 0, choices: LIMITS },
     { key: 'time', label: '制限時間', desc: '問題が出てからこの時間がたったら、1人1回ずつ最後の解答をして、だれも当てられなければ出題者の勝ち', def: 0, choices: TIMES },
   ],
 
-  init(n, seed, { prev = null, rules = {} } = {}) {
+  init(n, seed, { prev = null, rules = {}, cpus = [] } = {}) {
     const limit = LIMITS.some(([v]) => v && v === rules.limit) ? rules.limit : 0;
     const counts = Array.isArray(prev) && prev.length === n ? prev.slice() : Array(n).fill(0);
-    const low = Math.min(...counts);
-    const setter = counts.indexOf(low);
+    const cpuSeats = Array.isArray(cpus) ? cpus.filter((i) => Number.isInteger(i) && i >= 0 && i < n) : [];
+    const humanSeats = counts.map((_, i) => i).filter((i) => !cpuSeats.includes(i));
+    const low = Math.min(...humanSeats.map((i) => counts[i]));
+    // CPU の出題者（詳細設定）なら CPU の席。ふつうは出題者をした回数がいちばん少ない人（CPU の席は除く）
+    const setter = rules.setter === 'cpu' && cpuSeats.length ? cpuSeats[0] : humanSeats.find((i) => counts[i] === low) ?? 0;
     // limit = 質問できる回数（0 は決めない）・asked = 答えた質問の数・final = 最後の解答の残りの番の数（使い切るまでは null）
     const s = { n, seed, counts, setter, limit, asked: 0, final: null, phase: 'pick', puzzle: null, turn: nextAsker({ n, setter }, setter), pending: null, log: [], winner: null, step: 0 };
-    if (rules.partial) s.partial = true; // なしのときは局面に何も足さない（今までと同じ形）
+    if (rules.partial) s.partial = true; // なしのときは局面に何も足さない
+    if (cpuSeats.length) s.cpus = cpuSeats; // CPU の席（いるときだけ）
     if (TIMES.some(([v]) => v && v === rules.time)) { s.time = rules.time; s.timeUp = false; } // 制限時間（決めないなら足さない）
     return s;
   },
@@ -120,7 +161,9 @@ export default {
   },
   canAct(s, p) {
     if (s.phase === 'end') return false;
-    return p === s.setter || (s.phase === 'ask' && p === s.turn);
+    // CPU の出題者は、質問を待っている間は何もしない（main.js が何度も CPU を呼ばないように）
+    if (p === s.setter) return s.phase !== 'ask' || !cpuSetter(s);
+    return s.phase === 'ask' && p === s.turn;
   },
   result(s) { return s.phase === 'end' ? { winner: s.winner, setterWon: s.winner !== null && s.winner === s.setter } : null; },
   // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
@@ -146,6 +189,17 @@ export default {
     const s = clone(s0);
     s.step += 1;
     switch (m.t) {
+      case 'hand': // 問題を選ぶ前に出題者を代わる（CPU の席には渡さない）
+        if (!isSetter || s.phase !== 'pick' || !Number.isInteger(m.to) || m.to < 0 || m.to >= s.n || m.to === s.setter || s.cpus?.includes(m.to)) return null;
+        s.setter = m.to;
+        s.turn = nextAsker(s, s.setter);
+        return s;
+      case 'fix': { // 出題者が前の答えを直す
+        const e = s.log[m.i];
+        if (!isSetter || !Number.isInteger(m.i) || !e || e.kind !== 'ask' || !Object.hasOwn(REPLY, m.r) || (m.r === 'part' && !s.partial) || e.r === m.r) return null;
+        s.log[m.i] = { ...e, r: m.r, fixed: true };
+        return s;
+      }
       case 'pick':
         if (!isSetter || s.phase !== 'pick' || !PUZZLES[m.idx] || !Number.isInteger(m.idx)) return null;
         s.puzzle = { ...PUZZLES[m.idx] };
@@ -188,8 +242,8 @@ export default {
         startFinal(s); // 解答を待っている間に時間切れになっていた
         s.turn = nextAsker(s, s.turn);
         return s;
-      case 'reveal':
-        if (!isSetter) return null;
+      case 'reveal': // CPU が出題者のときは、回答者も自分の番に降参できる
+        if (!isSetter && !(cpuSetter(s) && s.phase === 'ask' && m.p === s.turn)) return null;
         s.phase = 'end';
         s.winner = null;
         return s;
@@ -198,9 +252,17 @@ export default {
     }
   },
 
-  // CPU は入らないので、ここに来るのは部屋を出た人の席だけ
-  cpuDelay() { return 1000; },
-  cpu(s, p) { return p === s.setter ? { t: 'reveal' } : { t: 'pass' }; },
+  // CPU の出題者（詳細設定）は問題を選び、質問と解答に手がかりで答える。それ以外（部屋を出た人の席・CPU の回答者）は今までどおり
+  cpuDelay(s) { return cpuSetter(s) && s.phase === 'reply' ? 1500 : 1000; },
+  cpu(s, p) {
+    if (p === s.setter && cpuSetter(s)) {
+      if (s.phase === 'pick') return { t: 'pick', idx: CPU_PICKS[Math.floor(Math.random() * CPU_PICKS.length)] };
+      if (s.phase === 'reply' && s.pending.kind === 'ask') return { t: 'reply', r: cpuReply(s.puzzle, s.pending.text, !!s.partial) };
+      if (s.phase === 'reply') return { t: 'judge', ok: cpuJudge(s.puzzle, s.pending.text) };
+      return null;
+    }
+    return p === s.setter ? { t: 'reveal' } : { t: 'pass' };
+  },
 
   render(root, s, o) {
     const me = o.me >= 0 ? o.me : null;
@@ -221,6 +283,20 @@ export default {
       draft = { ask: '', q: '', a: '' };
     }
 
+    // 考えた時間: 局面が変わったら、それまで番だった人の合計に足す（各端末の時計で数える）
+    const turnNow = this.turn(s);
+    if (!ui.clock || ui.clock.seed !== s.seed) ui.clock = { seed: s.seed, step: s.step, p: turnNow, at: performance.now(), sum: Array(s.n).fill(0) };
+    if (ui.clock.step !== s.step) {
+      const now = performance.now();
+      if (ui.clock.p !== null && ui.clock.p !== undefined) ui.clock.sum[ui.clock.p] += now - ui.clock.at;
+      ui.clock = { ...ui.clock, step: s.step, p: turnNow, at: now };
+    }
+    const clockText = (p) => {
+      const cur = s.phase !== 'end' && ui.clock.p === p ? performance.now() - ui.clock.at : 0;
+      const fmt = (ms) => { const t = Math.floor(ms / 1000); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+      return cur ? `⏱ ${fmt(cur)}（計 ${fmt(ui.clock.sum[p] + cur)}）` : `⏱ 計 ${fmt(ui.clock.sum[p])}`;
+    };
+
     /* 上の部分（参加者・問題・やりとり）は毎回描き直す */
     const top = document.createElement('div');
     const chips = document.createElement('div');
@@ -236,6 +312,11 @@ export default {
       role.className = 'pt-extra';
       role.textContent = p === s.setter ? '出題者' : '回答者';
       chip.append(role);
+      const clock = document.createElement('div');
+      clock.className = 'pt-extra um-clock';
+      clock.dataset.p = p;
+      clock.textContent = clockText(p);
+      chip.append(clock);
       if (o.away[p] || (o.sub?.[p])) {
         const t = document.createElement('span');
         t.className = 'cc-tag away';
@@ -268,13 +349,30 @@ export default {
         const li = document.createElement('li');
         const who = `<b>${esc(nameP(e.p))}</b>`;
         if (e.kind === 'pass') li.innerHTML = `${who}: <span class="um-muted">パス</span>`;
-        else if (e.kind === 'ask') li.innerHTML = `${who}: ${esc(shown(e.text, o.hidden?.[e.p], 'sentence'))} <span class="um-r ${e.r}">${REPLY[e.r]}</span>`;
+        else if (e.kind === 'ask') {
+          li.innerHTML = `${who}: ${esc(shown(e.text, o.hidden?.[e.p], 'sentence'))} <span class="um-r ${e.r}">${REPLY[e.r]}</span>${e.fixed ? ' <small class="um-muted">（直した）</small>' : ''}`;
+          // 出題者（人）は答えを直せる
+          if (isSetter && !cpuSetter(s) && s.phase !== 'end') {
+            const fix = document.createElement('select');
+            fix.className = 'um-fix';
+            fix.title = '答えを直す';
+            fix.innerHTML = '<option value="">直す</option>' + Object.entries(REPLY).filter(([r]) => r !== e.r && (r !== 'part' || s.partial)).map(([r, t]) => `<option value="${r}">${t}</option>`).join('');
+            const i = s.log.indexOf(e);
+            fix.onchange = () => { if (fix.value) o.onMove({ t: 'fix', i, r: fix.value }); };
+            li.append(' ', fix);
+          }
+        }
         else li.innerHTML = `${who}（解答）: ${esc(shown(e.text, o.hidden?.[e.p], 'sentence'))} <span class="um-r ${e.ok ? 'yes' : 'no'}">${e.ok ? '正解！' : 'ちがいます'}</span>`;
         list.append(li);
       }
       top.append(list);
     }
     clearInterval(ui.tick);
+    clearInterval(ui.clockTick);
+    ui.clockTick = setInterval(() => {
+      if (!root.contains(top)) { clearInterval(ui.clockTick); return; }
+      for (const el of top.querySelectorAll('.um-clock')) el.textContent = clockText(Number(el.dataset.p));
+    }, 1000);
     if ((s.limit || s.time) && s.phase !== 'pick') {
       const left = document.createElement('p');
       left.className = 'um-left';
@@ -344,6 +442,15 @@ export default {
           o.onMove({ t: 'custom', q: q.value, a: a.value });
         }));
         act.append(own);
+        // 出題者を代わる（CPU の席には渡さない）
+        const others = Array.from({ length: s.n }, (_, p) => p).filter((p) => p !== s.setter && !s.cpus?.includes(p));
+        if (others.length) {
+          const hand = document.createElement('select');
+          hand.className = 'um-select';
+          hand.innerHTML = '<option value="">出題者を代わる…</option>' + others.map((p) => `<option value="${p}">${esc(nameP(p))}に代わってもらう</option>`).join('');
+          hand.onchange = () => { if (hand.value !== '') o.onMove({ t: 'hand', to: Number(hand.value) }); };
+          act.append(hand);
+        }
       } else {
         note(`${nameP(s.setter)}が問題を選んでいます…`);
       }
@@ -360,6 +467,10 @@ export default {
         };
         if (last) row(button('パス', 'secondary', () => o.onMove({ t: 'pass' })), button('答えを言う', 'primary', send('guess')));
         else row(button('パス', 'secondary', () => o.onMove({ t: 'pass' })), button('答えを言う', 'secondary', send('guess')), button('質問する', 'primary', send('ask')));
+        if (cpuSetter(s)) {
+          note('CPU の出題者は、質問の言葉の手がかりで答えます（短くはっきり聞くと答えやすい）');
+          row(button('降参して答えを見る', 'ghost', () => { if (confirm('降参して答えを見ますか？')) o.onMove({ t: 'reveal' }); }));
+        }
       } else {
         note(`${nameP(s.turn)}が考えています…`);
       }

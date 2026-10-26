@@ -782,7 +782,8 @@ function replay(R) {
   let st;
   if (game.multi) {
     if (!Array.isArray(R.order) || R.order.length < game.minPlayers || R.order.length > game.maxPlayers) return null;
-    st = game.init(R.order.length, R.seed, { rules: rulesOf(R.gameId, R.rules), prev: R.prev ?? null });
+    // cpus = CPU の席の番号（ウミガメのスープで CPU を出題者にするとき使う。2026-10-26）
+    st = game.init(R.order.length, R.seed, { rules: rulesOf(R.gameId, R.rules), prev: R.prev ?? null, cpus: R.order.map((id, i) => (isCpu(id) ? i : -1)).filter((i) => i >= 0) });
   } else {
     if (Array.isArray(R.order) && R.order.length !== boardSeats(R.gameId, R.rules)) return null;
     st = game.init({ rules: rulesOf(R.gameId, R.rules), seed: R.seed ?? 0 }); // seed は始めの盤を種で決めるゲーム（コネクトフォーのじゃま石）が使う
@@ -841,7 +842,12 @@ function lineup(game) {
   const pool = S.members.filter((id) => !S.bench?.includes(id)); // bench = ホストが観戦に回した人（2026-10-26）
   const humans = pool.slice(0, max);
   const watchers = [...pool.slice(max), ...S.members.filter((id) => S.bench?.includes(id))];
-  if (game.noCpu) return { humans, watchers, cpus: 0, seats, max };
+  if (game.noCpu) {
+    // CPU を入れないゲームでも、詳細設定で決まった数だけ入ることがある（fixedCpus。ウミガメのスープの CPU の出題者。2026-10-26）
+    const c = game.fixedCpus?.(rulesOf(S.gameId, S.rules)) ?? 0;
+    if (!c) return { humans, watchers, cpus: 0, seats, max };
+    return { humans: pool.slice(0, max - c), watchers: [...pool.slice(max - c), ...S.members.filter((id) => S.bench?.includes(id))], cpus: c, seats, max };
+  }
   let cpus = seats ? seats - humans.length
     : Math.max(0, Math.min(Math.max(S.cpus, game.minPlayers - humans.length), game.maxPlayers - humans.length));
   // チームで分かれるゲーム（玉入れ）は全員の数を偶数にする（足りなければ CPU を1人足す。上限なら1人減らす）
@@ -2104,8 +2110,8 @@ function renderLobby(game) {
 
   const { humans, watchers, cpus, seats, max } = lineup(game);
   const row = (text, cls = '') => `<li class="${cls}">${text}</li>`;
-  const short = game.noCpu && humans.length < game.minPlayers;
-  let html = `<p class="lobby-note">${seats ? `${seats}人` : playersText(game)}で遊べます。${game.noCpu ? 'CPU は入れません。' : '足りない分は CPU が入ります。'}</p><ul class="lobby-list">`;
+  const short = game.noCpu && humans.length + cpus < game.minPlayers;
+  let html = `<p class="lobby-note">${seats ? `${seats}人` : playersText(game)}で遊べます。${game.noCpu ? (cpus ? `CPU は${cpus}人だけ入ります。` : 'CPU は入れません。') : '足りない分は CPU が入ります。'}</p><ul class="lobby-list">`;
   for (const id of humans) {
     const marks = [id === S.myId ? 'あなた' : '', id === S.members[0] ? '部屋を作った人' : ''].filter(Boolean).join('・');
     html += row(`${esc(nameOf(id))}${marks ? ` <small>（${marks}）</small>` : ''}`);
@@ -2117,7 +2123,7 @@ function renderLobby(game) {
   if (over.length) html += `<p class="lobby-note">観戦: ${over.map((id) => esc(nameOf(id))).join('、')}（${max}人までのため）</p>`;
   if (benched.length) html += `<p class="lobby-note">観戦: ${benched.map((id) => esc(nameOf(id))).join('、')}（観戦に回した人）</p>`;
   html += short
-    ? `<p class="lobby-total">あと${game.minPlayers - humans.length}人そろうと始められます</p>`
+    ? `<p class="lobby-total">あと${game.minPlayers - humans.length - cpus}人そろうと始められます</p>`
     : `<p class="lobby-total">${humans.length + cpus}人で遊びます</p>`;
   board.className = 'board lobby';
   board.innerHTML = html;
