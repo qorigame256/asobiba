@@ -1369,6 +1369,42 @@ setInterval(() => {
   box.innerHTML = thinkHtml(GAMES[S.gameId]);
 }, 500);
 
+// 遊び方の図を作る（書き方は howto-fig.js の先頭）
+function howtoFigs(figs) {
+  const wrap = document.createElement('div');
+  wrap.className = 'hf';
+  figs.forEach((f, i) => {
+    const fig = document.createElement('figure');
+    fig.className = 'hf-fig';
+    const grid = document.createElement('div');
+    grid.className = 'hf-grid';
+    for (const line of f.g.split(' / ')) {
+      const row = document.createElement('div');
+      row.className = 'hf-row';
+      for (const tok of line.split(' ').filter(Boolean)) {
+        const cell = document.createElement('span');
+        let t = tok;
+        if (t.startsWith('~')) { cell.className = 'hf-text'; t = t.slice(1); }
+        else if (t.startsWith('[') && t.endsWith(']')) { t = t.slice(1, -1); cell.className = 'hf-card' + (/[♥♦]/.test(t) ? ' red' : ''); }
+        else {
+          cell.className = 'hf-cell';
+          if (t.startsWith('!')) { cell.classList.add('hi'); t = t.slice(1); }
+          if (/^[♠♣♥♦]/.test(t)) cell.classList.add('hf-card', ...(/[♥♦]/.test(t) ? ['red'] : []));
+          if (t === '.') t = '';
+        }
+        cell.textContent = t;
+        row.append(cell);
+      }
+      grid.append(row);
+    }
+    const cap = document.createElement('figcaption');
+    cap.textContent = `${figs.length > 1 ? `${i + 1}. ` : ''}${f.c}`;
+    fig.append(grid, cap);
+    wrap.append(fig);
+  });
+  return wrap;
+}
+
 // 「？遊び方」。ゲームが変わったら中身を差し替えて閉じる。開け閉めは描き直しても保つ
 let howtoFor = null;
 function renderHowto(game) {
@@ -1382,6 +1418,17 @@ function renderHowto(game) {
     if (howtoFor?.split('\n')[0] !== game.id) box.hidden = true; // ゲームが変わったら閉じる（ルールが変わっただけなら開いたまま）
     howtoFor = key;
     const lines = game.howto.map((t) => { const p = document.createElement('p'); p.textContent = t; return p; });
+    // 図があれば図を上に出し、文は「くわしく」に畳む（2026-10-26 本人の依頼「図解を中心に・文は短く」）
+    const figs = game.howtoFigs?.length ? [howtoFigs(game.howtoFigs)] : [];
+    let detail = lines;
+    if (figs.length) {
+      const d = document.createElement('details');
+      d.className = 'howto-more';
+      const sum = document.createElement('summary');
+      sum.textContent = 'くわしく（細かいルール・詳細設定）';
+      d.append(sum, ...lines);
+      detail = [d];
+    }
     const rules = document.createElement('div');
     rules.className = 'howto-rules';
     const head = document.createElement('b');
@@ -1389,7 +1436,7 @@ function renderHowto(game) {
     const body = document.createElement('span');
     body.textContent = changed.length ? `（最初と変えたもの）${changed.join('・')}` : '（詳細設定は最初のまま）';
     rules.append(head, ' ', body);
-    box.replaceChildren(...lines, ...(game.settings?.length ? [rules] : [])); // 詳細設定の無いゲームには出さない
+    box.replaceChildren(...figs, ...detail, ...(game.settings?.length ? [rules] : [])); // 詳細設定の無いゲームには出さない
   }
   btn.setAttribute('aria-expanded', String(!box.hidden));
 }

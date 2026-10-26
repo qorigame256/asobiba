@@ -6130,6 +6130,15 @@ for (const id of GAME_ORDER) {
   const h = GAMES[id].howto;
   assert.ok(Array.isArray(h) && h.length >= 1 && h.length <= 4 && h.every((x) => typeof x === 'string' && x), `${id} の遊び方（1〜4行）`);
 }
+// 遊び方の図（2026-10-26）: どのゲームにも2〜3枚あり、一言は30文字まで
+for (const id of GAME_ORDER) {
+  const f = GAMES[id].howtoFigs;
+  assert.ok(Array.isArray(f) && f.length >= 2 && f.length <= 3, `${id} の遊び方の図（2〜3枚）`);
+  for (const x of f) {
+    assert.ok(typeof x.g === 'string' && x.g.trim() && !x.g.includes('  '), `${id} の図の形`);
+    assert.ok(typeof x.c === 'string' && x.c && [...x.c].length <= 30, `${id} の図の一言（30文字まで）: ${x.c}`);
+  }
+}
 
 // 2026-10-10 の Codex の点検（bd1687a..7032e05）で見つかったもの
 {

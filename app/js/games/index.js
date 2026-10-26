@@ -93,6 +93,7 @@ import tamaire from './tamaire.js';
 import machigai from './machigai.js';
 import bombs from './bombs.js';
 import { HOWTO } from './howto.js';
+import { FIGS } from './howto-fig.js';
 
 // 準備中のゲームを一覧に出すとき: soon('id', '名前', '絵文字')
 export const soon = (id, name, icon) => ({ id, name, icon, desc: 'じゅんび中', ready: false });
@@ -104,6 +105,8 @@ export const GAMES = {
 };
 // 遊び方（howto.js）。対局画面の「？遊び方」で出す（main.js の renderHowto）
 for (const [id, lines] of Object.entries(HOWTO)) if (GAMES[id]) GAMES[id].howto = lines;
+// 遊び方の図（howto-fig.js）。「？遊び方」の上に出し、howto の文は「くわしく」に畳む
+for (const [id, figs] of Object.entries(FIGS)) if (GAMES[id]) GAMES[id].howtoFigs = figs;
 
 // 結果から勝った人のプレイヤー番号の一覧（引き分けは空）
 export function winnersOf(res) {

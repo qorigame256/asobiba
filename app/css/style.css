@@ -1742,6 +1742,17 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .lobby-roomname { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 10px; font-size: .9rem; }
 .lobby-roomname input { flex: 1 1 180px; min-width: 0; font: inherit; padding: 6px 10px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--field); color: var(--ink); }
 .invite-room { font-weight: 700; margin: -4px 0 8px; overflow-wrap: anywhere; }
+.hf { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 6px; }
+.hf-fig { flex: 1 1 140px; margin: 0; padding: 8px 6px 6px; border-radius: 10px; background: var(--field); border: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.hf-grid { display: flex; flex-direction: column; gap: 3px; align-items: center; }
+.hf-row { display: flex; gap: 3px; align-items: center; justify-content: center; flex-wrap: wrap; }
+.hf-cell { min-width: 28px; height: 28px; padding: 0 3px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 6px; font-size: 1.05rem; line-height: 1; }
+.hf-cell.hi { outline: 2.5px solid #f2b705; outline-offset: -1px; background: rgba(242, 183, 5, .18); }
+.hf-card { min-width: 26px; height: 34px; padding: 0 3px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid #bbb; border-radius: 5px; background: #fff; color: #222; font-size: .85rem; font-weight: bold; }
+.hf-card.red { color: #d0312d; }
+.hf-text { font-size: .9rem; padding: 0 1px; }
+.hf-fig figcaption { font-size: .82rem; line-height: 1.4; text-align: center; }
+.howto-more summary { cursor: pointer; color: var(--muted); font-size: .85rem; margin: 2px 0; }
 .howto-rules { margin: 8px 0 2px; padding-top: 6px; border-top: 1px dashed var(--line); font-size: .85rem; }
 .howto-rules span { color: var(--muted); }
 
