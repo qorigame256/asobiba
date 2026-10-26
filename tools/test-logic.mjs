@@ -6216,9 +6216,9 @@ for (const id of GAME_ORDER) {
   // 決めた役で投票と夜を確かめる: 0 人狼・1 占い師・2 騎士・3〜5 村人
   const base = { ...J.init(6, 1, { rules: {} }), roles: ['wolf', 'seer', 'knight', 'villager', 'villager', 'villager'] };
   base.roles = ['wolf', 'seer', 'knight', 'villager', 'villager', 'villager'];
-  let s = J.apply(base, { p: 3, t: 'say', text: 'こんにちは', k: 1 });
+  let s = J.apply(base, { p: 3, t: 'say', text: 'こんにちは', k: 1, d: 1 });
   assert.equal(s.chat.length, 1);
-  assert.equal(J.apply(s, { p: 3, t: 'say', text: 'こんにちは', k: 1 }), null, '同じ発言が2回届いても1回');
+  assert.equal(J.apply(s, { p: 3, t: 'say', text: 'こんにちは', k: 1, d: 1 }), null, '同じ発言が2回届いても1回');
   s = J.apply(s, { p: 1, t: 'tovote', d: 1 });
   assert.equal(s.phase, 'vote');
   assert.equal(J.apply(s, { p: 1, t: 'vote', to: 1, v: 1, d: 1 }), null, '自分には入れられない');
@@ -6248,7 +6248,10 @@ for (const id of GAME_ORDER) {
   assert.ok(guarded.alive[4], '守られた人は死なない');
   const bitten = J.apply(n, { p: 2, t: 'guard', to: 5, d: 1 });
   assert.equal(bitten.alive[4], false);
-  assert.equal(J.apply(bitten, { p: 4, t: 'say', text: 'あ', k: 1 }), null, 'やられた人は話せない');
+  assert.equal(J.apply(bitten, { p: 4, t: 'say', text: 'あ', k: 1, d: 2 }), null, 'やられた人は話せない');
+  // 1日目に打って届くのが遅れた発言は、2日目の発言として入らない（Codex の点検の指摘。5 は1日目に話していない）
+  assert.equal(J.apply(bitten, { p: 5, t: 'say', text: '前の日', k: 1, d: 1 }), null, '前の日の発言は入らない');
+  assert.equal(J.apply(bitten, { p: 5, t: 'say', text: '今日', k: 1, d: 2 }).chat.at(-1).d, 2);
   // 人狼を追放したら村人チームの勝ち
   let w = J.apply(bitten, { p: 1, t: 'tovote', d: 2 });
   for (const p of [0, 1, 2, 3, 5]) w = J.apply(w, { p, t: 'vote', to: p === 0 ? 1 : 0, v: 1, d: 2 });

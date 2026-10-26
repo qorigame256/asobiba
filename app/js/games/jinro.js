@@ -12,7 +12,7 @@
 //   追放・襲われた人の役は、終わるまで見せない。やられた人は話し合い・投票・夜の行動ができない（見ているだけ）。
 //   手札と同じ簡易の隠し方（全員の端末が全員の役を知っている。開発用の道具で覗ける）。
 //   CPU: 昼はたまに決まり文句を言うだけ（話し合いはできない）。投票は、人狼なら人狼以外から、占い師なら見つけた人狼、ほかは適当。夜の行動も適当。
-// 手: { p, t: 'say', text, k: その人の何回目の発言か } / { p, t: 'tovote', d } / { p, t: 'vote', to, v: 何回目の投票か, d: 何日目か }
+// 手: { p, t: 'say', text, k: その人の何回目の発言か, d: 何日目か } / { p, t: 'tovote', d } / { p, t: 'vote', to, v: 何回目の投票か, d: 何日目か }
 //   / { p, t: 'bite' | 'see' | 'guard', to, d } / { p: -1, t: 'tovote' | 'votetime' | 'dawn', d }（ホストの時間切れ）。
 //   k・v・d で、同じ手が2回届いても2回目は反則になる（realtime。main.js の rebase）。
 
@@ -194,7 +194,8 @@ export default {
     const okTo = (to) => Number.isInteger(to) && to >= 0 && to < s0.n && s0.alive[to] && to !== p;
     switch (m.t) {
       case 'say': {
-        if (s0.phase !== 'day' || typeof m.text !== 'string' || !m.text.trim() || m.text.length > MAX_TEXT || m.k !== s0.said[p] + 1) return null;
+        // d: 前の日に打って届くのが遅れた発言を、次の日の発言として入れない（Codex の点検の指摘）
+        if (s0.phase !== 'day' || m.d !== s0.day || typeof m.text !== 'string' || !m.text.trim() || m.text.length > MAX_TEXT || m.k !== s0.said[p] + 1) return null;
         const s = clone(s0);
         s.step += 1;
         s.said[p] = m.k;
@@ -246,7 +247,7 @@ export default {
     const pick = (a) => (a.length ? a[Math.floor(Math.random() * a.length)] : null);
     if (s.phase === 'day') {
       if (s.said[p] >= s.day * 2 || Math.random() > 0.25) return null; // 1日に2回まで・たまに
-      return { t: 'say', text: pick(CPU_LINES), k: s.said[p] + 1 };
+      return { t: 'say', text: pick(CPU_LINES), k: s.said[p] + 1, d: s.day };
     }
     const others = aliveList(s).filter((q) => q !== p);
     if (s.phase === 'vote') {
@@ -294,7 +295,7 @@ export default {
         const text = input.value.trim();
         if (!text || cur.phase !== 'day' || !co.canMove) return;
         input.value = '';
-        co.onMove({ t: 'say', text: text.slice(0, MAX_TEXT), k: cur.said[me] + 1 });
+        co.onMove({ t: 'say', text: text.slice(0, MAX_TEXT), k: cur.said[me] + 1, d: cur.day });
       };
       wrap.append(top, form, act);
       root.append(wrap);
