@@ -9,6 +9,10 @@
 // 2人なら先に出し切った方の勝ち。3人なら2人が出し切るまで続ける（本人の決定）。同時に出し切ったら同じ順位。
 // 手: { p, t: 'play', card: 出す札, pile: 台札の番号 } / { p, t: 'flip' }（スピード！）
 // 札そのもので手を表すので、通信で同じ手が2回届いても2回目は反則として弾かれる（main.js の rebase が頼りにしている）。
+// スワイプ（2026-10-26 本人の依頼）: 自分の札を指で押したまま台札へ動かして離すと出せる（タップで出すのも残した）。
+//   離した所が出せる台札ならそこへ。台札の外で離したときは、上へ動かしていれば、離した所に横の位置がいちばん近い出せる台札へ（Claude の判断）。
+//   ほかの人の手が届くと画面を作り直すので、つかんでいる札は外（drag）に持ち、指の動きは window で受ける。
+//   スワイプの間ページが動かないよう、自分の札の列は touch-action: none（style.css の .sp-side.mine .sp-row）。
 
 import { mulberry32, shuffle } from './util.js';
 import { rankOf, cardEl, cardLabel } from './cards.js';
@@ -169,6 +173,8 @@ export default {
 
   render(root, s, o) {
     const me = o.me >= 0 ? o.me : null;
+    cur = { s, o, root };
+    if (drag && (!o.canMove || !s.fields[me ?? 0]?.includes(drag.card))) endDrag();
     const n = s.piles.length;
     const bottom = me ?? 0;
     const others = seats(s).filter((p) => p !== bottom).sort((a, b) => ((a - bottom + n) % n) - ((b - bottom + n) % n));
@@ -203,13 +209,20 @@ export default {
         const piles = seats(s).filter((i) => fits(s, card, t[i]));
         const ok = mine && can && piles.length > 0;
         const e = cardEl(card, ok ? 'button' : 'div');
+        e.dataset.card = card;
         if (ok) {
           e.classList.add('usable');
           e.onclick = () => {
+            if (performance.now() - swipedAt < 400) return; // スワイプで出した直後のクリックは数えない
             if (piles.length === 1) o.onMove({ t: 'play', card, pile: piles[0] });
             else { chosen = { step: s.step, card }; draw(); }
           };
+          e.onpointerdown = (ev) => {
+            if (ev.button > 0) return;
+            drag = { id: ev.pointerId, card, x0: ev.clientX, y0: ev.clientY, dx: 0, dy: 0, moved: false };
+          };
         }
+        if (drag?.card === card && drag.moved) { e.classList.add('sp-drag'); e.style.transform = `translate(${drag.dx}px, ${drag.dy}px)`; }
         if (chosen?.card === card) e.classList.add('selected');
         row.append(e);
       }
@@ -225,6 +238,7 @@ export default {
       const target = chosen && fits(s, chosen.card, t[i]);
       const e = cardEl(t[i], target ? 'button' : 'div');
       e.classList.add('sp-pile');
+      e.dataset.pile = i;
       if (target) {
         e.classList.add('target');
         e.onclick = () => { const card = chosen.card; chosen = null; o.onMove({ t: 'play', card, pile: i }); };
@@ -246,7 +260,7 @@ export default {
     if (chosen) msg.textContent = `${cardLabel(chosen.card)} を${n > 2 ? 'どれ' : 'どちら'}に出しますか？ 光っている台札をタップ`;
     else if (s.last?.t === 'flip') msg.textContent = `${nameP(s.last.p)}が「スピード！」`;
     else if (s.last) msg.textContent = `${nameP(s.last.p)}が ${cardLabel(s.last.card)} を出した`;
-    else msg.textContent = '光っている札をタップすると出せます';
+    else msg.textContent = '光っている札をタップするか、台札へスワイプすると出せます';
     root.append(msg);
 
     if (can && stuck(s)) {
@@ -264,3 +278,59 @@ export default {
     root.append(side(bottom, me !== null));
   },
 };
+
+/* ---------- スワイプ ---------- */
+
+let cur = null; // いちばん新しい描き直しの { s, o, root }
+let drag = null; // つかんでいる札 { id, card, x0, y0, dx, dy, moved }
+let swipedAt = 0;
+
+function cardNode() { return drag && cur?.root.querySelector(`.sp-side.mine [data-card="${drag.card}"]`); }
+function endDrag() {
+  const e = cardNode();
+  if (e) { e.classList.remove('sp-drag'); e.style.transform = ''; }
+  cur?.root.querySelectorAll('.sp-pile.drop').forEach((x) => x.classList.remove('drop'));
+  drag = null;
+}
+// 指の下にある、その札を出せる台札の番号（無ければ -1）
+function pileAt(x, y) {
+  const el = document.elementFromPoint(x, y)?.closest?.('.sp-pile');
+  if (!el || !cur?.root.contains(el)) return -1;
+  const i = Number(el.dataset.pile);
+  return fits(cur.s, drag.card, tops(cur.s)[i]) ? i : -1;
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pointermove', (ev) => {
+    if (!drag || ev.pointerId !== drag.id) return;
+    drag.dx = ev.clientX - drag.x0;
+    drag.dy = ev.clientY - drag.y0;
+    if (!drag.moved && Math.hypot(drag.dx, drag.dy) > 12) drag.moved = true;
+    if (!drag.moved) return;
+    const e = cardNode();
+    if (e) { e.classList.add('sp-drag'); e.style.transform = `translate(${drag.dx}px, ${drag.dy}px)`; }
+    const i = pileAt(ev.clientX, ev.clientY);
+    cur.root.querySelectorAll('.sp-pile').forEach((x) => x.classList.toggle('drop', Number(x.dataset.pile) === i));
+  });
+  window.addEventListener('pointerup', (ev) => {
+    if (!drag || ev.pointerId !== drag.id) return;
+    const { card, moved, dy } = drag;
+    let pile = moved ? pileAt(ev.clientX, ev.clientY) : -1;
+    if (moved && pile < 0 && dy < -30) {
+      // 台札の外で離した: 上へ動かしていれば、横の位置がいちばん近い出せる台札
+      let best = Infinity;
+      for (const el of cur.root.querySelectorAll('.sp-pile')) {
+        const i = Number(el.dataset.pile);
+        if (!fits(cur.s, card, tops(cur.s)[i])) continue;
+        const r = el.getBoundingClientRect();
+        const d = Math.abs(r.left + r.width / 2 - ev.clientX);
+        if (d < best) { best = d; pile = i; }
+      }
+    }
+    endDrag();
+    if (!moved) return; // 動かしていなければタップ（onclick が扱う）
+    swipedAt = performance.now();
+    if (pile >= 0 && cur.o.canMove) { chosen = null; cur.o.onMove({ t: 'play', card, pile }); }
+  });
+  window.addEventListener('pointercancel', (ev) => { if (drag && ev.pointerId === drag.id) endDrag(); });
+}

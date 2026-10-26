@@ -1462,17 +1462,17 @@ stronger('s9 c9 h9 d13 s3', 'JK h9 d9 c4 s2', 'ジョーカー入りのスリー
 assert.equal(compareEval(ev('JK h13 d9 c4 s2'), ev('s13 c13 h9 d4 c2')), 0, 'ジョーカーの無い手と同じ強さなら引き分け');
 assert.equal(compareEval(ev('JK s2 s5 s7 s9'), ev('h1 h2 h5 h7 h9')), 0, 'ジョーカー入りのフラッシュも同じ強さなら引き分け');
 
-s = P.init(3, 5, { rules: { end: 'last', hands: 10 } });
-assert.deepEqual(s, P.init(3, 5, { rules: { end: 'last', hands: 10 } }), '同じ種なら同じ配り方');
+s = P.init(3, 5, { rules: { mode: 'chips', end: 'last', hands: 10 } });
+assert.deepEqual(s, P.init(3, 5, { rules: { mode: 'chips', end: 'last', hands: 10 } }), '同じ種なら同じ配り方');
 assert.deepEqual(s.h.bet.filter((x) => x).sort((a, b) => a - b), [10, 20], 'ブラインドを出す');
 assert.equal(s.h.toAct, (s.h.bb + 1) % 3, 'ブラインドの次の人から');
 assert.equal(P.apply(s, { p: s.h.toAct, t: 'check' }), null, '賭けがあるときはチェックできない');
-t = P.init(2, 5, { rules: {} });
+t = P.init(2, 5, { rules: { mode: 'chips' } });
 assert.equal(t.h.sb, t.h.dealer, '2人のときは親が小さいブラインド');
 assert.equal(t.h.toAct, t.h.dealer, '2人のとき1回目の賭けは親から');
 
 const pstate = (o, h) => ({
-  n: 3, seed: 1, rules: { end: 'last', hands: 10 }, outAt: [null, null, null], outOrder: [], handNo: 1, dealer: 0,
+  n: 3, seed: 1, rules: { mode: 'chips', end: 'last', hands: 10 }, outAt: [null, null, null], outOrder: [], handNo: 1, dealer: 0,
   over: false, ranking: null, step: 0, last: null, ...o,
   h: {
     no: 1, dealer: 0, sb: 1, bb: 2, small: 10, big: 20, deck: [], muck: [], shuffles: 0, folded: [false, false, false],
@@ -1490,14 +1490,14 @@ t = P.apply(s, { p: 2, t: 'check' });
 assert.deepEqual(t.chips, [0, 500, 1200], '一番強い人が全部取る');
 assert.deepEqual(t.outAt, [1, null, null], '持ち点が無くなったら脱落');
 assert.equal(t.over, false);
-s = pstate({ chips: [0, 500, 500], rules: { end: 'hands', hands: 1 } }, { cards: sideCards, total: [100, 300, 300], acted: [false, true, false], toAct: 2, startChips: [100, 800, 800] });
+s = pstate({ chips: [0, 500, 500], rules: { mode: 'chips', end: 'hands', hands: 1 } }, { cards: sideCards, total: [100, 300, 300], acted: [false, true, false], toAct: 2, startChips: [100, 800, 800] });
 t = P.apply(s, { p: 2, t: 'check' });
 assert.deepEqual(P.result(t).ranking, [1, 2, 0], '決めた回数で終わり、持ち点の多い順');
 s = pstate({ chips: [500, 500, 500] }, { cards: [['s10', 'h11', 'd12', 'c13', 'h1'], ['h10', 'c11', 's12', 'd13', 's1'], sideCards[2]], total: [101, 101, 101], acted: [true, true, false], toAct: 2, startChips: [601, 601, 601] });
 t = P.apply(s, { p: 2, t: 'check' });
 assert.deepEqual(t.chips, [651, 652, 500], '引き分けは山分け。端数は親（0）の次の人（1）から');
 // 降りて1人になったら、その人が全部取る
-s = P.init(3, 9, { rules: {} });
+s = P.init(3, 9, { rules: { mode: 'chips' } });
 t = P.apply(s, { p: s.h.toAct, t: 'fold' });
 const second = t.h.toAct;
 t = P.apply(t, { p: second, t: 'fold' });
@@ -1509,11 +1509,11 @@ let pgames = 0;
 let hands = 0;
 for (let k = 0; k < 60; k++) {
   const n = 2 + (k % 5);
-  const rules = k % 2 ? { end: 'last', hands: 10 } : { end: 'hands', hands: 5 };
+  const rules = k % 2 ? { mode: 'chips', end: 'last', hands: 10 } : { mode: 'chips', end: 'hands', hands: 5 };
   let st = P.init(n, k * 31337 + 7, { rules });
   let steps = 0;
   while (!P.result(st)) {
-    const p = st.h.phase === 'end' ? st.outAt.indexOf(null) : P.turn(st);
+    const p = st.h.phase === 'end' ? st.outAt.findIndex((x, q) => x === null && !st.h.ok[q]) : P.turn(st);
     const next = P.apply(st, { ...P.cpu(st, p), p });
     assert.ok(next, `ポーカーの CPU が反則の手を出した（${n}人）`);
     st = next;
@@ -1530,12 +1530,60 @@ for (let k = 0; k < 60; k++) {
 }
 console.log('poker games', pgames, 'hands', hands);
 
+// ポーカーの結果の画面（2026-10-26）: 残っている全員の OK か、10秒の締め切りで次の勝負へ。1人が2回 OK はできない
+s = P.init(3, 9, { rules: { mode: 'chips' } });
+t = P.apply(s, { p: s.h.toAct, t: 'fold' });
+t = P.apply(t, { p: t.h.toAct, t: 'fold' });
+assert.equal(t.h.phase, 'end');
+assert.equal(P.referee(t).ms, 10000, '結果の画面は10秒で次へ');
+assert.equal(P.concurrent(t), true, '結果の画面ではホストが手を足し直す');
+let pu = P.apply(t, { p: 0, t: 'next' });
+assert.equal(pu.h.phase, 'end', '1人の OK ではまだ進まない');
+assert.equal(P.apply(pu, { p: 0, t: 'next' }), null, '同じ人が2回 OK はできない');
+pu = P.apply(P.apply(pu, { p: 1, t: 'next' }), { p: 2, t: 'next' });
+assert.equal(pu.handNo, 2, '全員の OK で次の勝負へ');
+assert.equal(P.apply(P.apply(t, { p: 1, t: 'next' }), { p: -1, t: 'next' }).handNo, 2, '締め切りで次の勝負へ');
+assert.equal(P.apply(s, { p: -1, t: 'next' }), null, '勝負の途中では締め切りの手は反則');
+
+// ポーカーのチップなし（2026-10-26。最初の設定）: 賭けずに交換から始まり、全員が交換したら勝負。一番強い人が1勝、回数で終わる
+s = P.init(3, 11, { rules: {} });
+assert.equal(s.rules.mode, 'simple', '最初はチップなし');
+assert.equal(s.h.phase, 'draw', 'チップなしは交換から');
+assert.deepEqual(s.h.bet, [0, 0, 0], 'ブラインドを出さない');
+assert.equal(s.h.toAct, (s.h.dealer + 1) % 3, '親の次の人から交換');
+assert.equal(P.apply(s, { p: s.h.toAct, t: 'check' }), null, 'チップなしでは賭けの手は無い');
+s = { ...s, h: { ...s.h, cards: [['s9', 'h9', 'd9', 'c2', 'h4'], ['c9', 'h9', 'd9', 'c3', 'h4'], ['s2', 'h5', 'd7', 'c11', 'h12']] } };
+for (let k = 0; k < 3; k++) s = P.apply(s, { p: s.h.toAct, t: 'draw', idx: [] });
+assert.equal(s.h.phase, 'end', '全員が交換したら勝負');
+assert.deepEqual(s.wins, [0, 1, 0], '一番強い人が1勝（同じスリーカードは残りの札で比べる）');
+assert.deepEqual(s.chips, [1000, 1000, 1000], 'チップは動かない');
+let simpleHands = 0;
+for (let k = 0; k < 20; k++) {
+  const n = 2 + (k % 5);
+  let st = P.init(n, k * 4241 + 5, { rules: { hands: 5, joker: k % 3 === 0 } });
+  let steps = 0;
+  while (!P.result(st)) {
+    const p = st.h.phase === 'end' ? st.outAt.findIndex((x, q) => x === null && !st.h.ok[q]) : P.turn(st);
+    const next = P.apply(st, { ...P.cpu(st, p), p });
+    assert.ok(next, `ポーカー（チップなし）の CPU が反則の手を出した（${n}人）`);
+    st = next;
+    assert.ok(['draw', 'end'].includes(st.h.phase), 'チップなしは交換と勝負だけ');
+    if (++steps > 5000) throw new Error('ポーカー（チップなし）が終わらない');
+  }
+  const r = P.result(st);
+  assert.equal(st.handNo, 5, 'チップなしは決めた回数で終わる');
+  assert.ok(st.wins.reduce((a, b) => a + b, 0) >= 5, '毎回だれかが勝つ');
+  assert.deepEqual(r.winners, r.ranking.filter((p) => st.wins[p] === Math.max(...st.wins)), '勝ちの一番多い人（同点は全員）の優勝');
+  simpleHands += st.handNo;
+}
+console.log('poker simple games 20, hands', simpleHands);
+
 // ポーカーのジョーカー: なしでは前と同じ配り方、ありでは53枚。6人が全部交換しても札が崩れない。CPU どうしで最後まで進み、ジョーカーを捨てない
 const pkCards = (st) => [...st.h.deck, ...st.h.muck, ...st.h.cards.flatMap((c, q) => (c && !st.h.folded[q] ? c : []))]; // 降りた人の札は捨て札にある
 assert.deepEqual({ ...P.init(4, 77, { rules: {} }), rules: null }, { ...P.init(4, 77, { rules: { joker: false } }), rules: null }, 'ジョーカーなしは前と同じ');
 assert.equal(pkCards(P.init(4, 77, { rules: {} })).length, 52);
 assert.ok(!pkCards(P.init(6, 77, { rules: {} })).includes('JK'), 'なしではジョーカーが無い');
-s = P.init(6, 77, { rules: { joker: true } });
+s = P.init(6, 77, { rules: { mode: 'chips', joker: true } });
 assert.equal(pkCards(s).length, 53, 'ジョーカーありは53枚');
 assert.equal(new Set(pkCards(s)).size, 53);
 assert.ok(pkCards(s).includes('JK'));
@@ -1551,10 +1599,10 @@ let pjGames = 0;
 let jkSeen = 0;
 for (let k = 0; k < 30; k++) {
   const n = 2 + (k % 5);
-  let st = P.init(n, k * 7919 + 3, { rules: { end: k % 2 ? 'last' : 'hands', hands: 5, joker: true } });
+  let st = P.init(n, k * 7919 + 3, { rules: { mode: 'chips', end: k % 2 ? 'last' : 'hands', hands: 5, joker: true } });
   let steps = 0;
   while (!P.result(st)) {
-    const p = st.h.phase === 'end' ? st.outAt.indexOf(null) : P.turn(st);
+    const p = st.h.phase === 'end' ? st.outAt.findIndex((x, q) => x === null && !st.h.ok[q]) : P.turn(st);
     const m = { ...P.cpu(st, p), p };
     if (m.t === 'draw') {
       assert.ok(m.idx.every((i) => st.h.cards[p][i] !== 'JK'), 'CPU はジョーカーを捨てない');
@@ -5696,17 +5744,17 @@ console.log('kaisen OK');
   t = run(T.init(2, 3), [{ p: -1, t: 'go' }, { p: 0, t: 'in', n: 1 }, { p: 1, t: 'in', n: 1 }, { p: -1, t: 'end' }]);
   assert.equal(T.result(t).draw, true, '同じ数なら引き分け');
   const TM = await import('../app/js/games/tamaire.js');
-  const fly = (x, vx, vy) => { const b = { x, y: TM.H - 0.16, ...TM.launch(vx, vy) }; let q = null; for (let i = 0; i < 2400 && !q; i++) q = TM.stepBall(b, 1 / 240); return q; };
-  assert.equal(fly(0.15, 0.15, -3.85), 'in', '横から弧を描いて投げると入る');
+  const fly = (x, vx, vy) => { const b = { x, y: TM.HAND_Y, ...TM.launch(vx, vy) }; let q = null; for (let i = 0; i < 2400 && !q; i++) q = TM.stepBall(b, 1 / 240); return q; };
+  assert.equal(fly(0.15, 0.15, -3.7), 'in', '横から弧を描いて投げると入る');
   assert.notEqual(fly(0.5, 0, -3.5), 'in', 'カゴの真下からは入らない');
   // 動くカゴ
   assert.equal(TM.rimX(false, 1.5), 0.5, '止まっているカゴは真ん中');
   assert.equal(TM.rimX(true, 0), 0.5, '動くカゴも始まりは真ん中');
   assert.ok(Math.abs(TM.rimX(true, 1.5) - 0.7) < 1e-9 && Math.abs(TM.rimX(true, 4.5) - 0.3) < 1e-9, '左右に幅の2割ずつ・6秒で1往復');
-  const flyAt = (rx, x, vx, vy) => { const b = { x, y: TM.H - 0.16, ...TM.launch(vx, vy) }; let q = null; for (let i = 0; i < 2400 && !q; i++) q = TM.stepBall(b, 1 / 240, rx); return q; };
-  assert.equal(flyAt(0.5, 0.15, 0.15, -3.85), 'in');
-  assert.notEqual(flyAt(0.7, 0.15, 0.15, -3.85), 'in', 'カゴが動くと同じ投げ方では入らない');
-  assert.equal(flyAt(0.7, 0.35, 0.15, -3.85), 'in', 'カゴと一緒にずらして投げれば入る');
+  const flyAt = (rx, x, vx, vy) => { const b = { x, y: TM.HAND_Y, ...TM.launch(vx, vy) }; let q = null; for (let i = 0; i < 2400 && !q; i++) q = TM.stepBall(b, 1 / 240, rx); return q; };
+  assert.equal(flyAt(0.5, 0.15, 0.15, -3.7), 'in');
+  assert.notEqual(flyAt(0.7, 0.15, 0.15, -3.7), 'in', 'カゴが動くと同じ投げ方では入らない');
+  assert.equal(flyAt(0.7, 0.35, 0.15, -3.7), 'in', 'カゴと一緒にずらして投げれば入る');
   assert.equal(T.init(2, 1).rules.move, 'stay', '最初は止まっている');
   // ラスト10秒は2点（2026-10-07）
   assert.equal(T.init(2, 1).rules.last, 'off', '最初は なし');

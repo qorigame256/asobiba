@@ -1053,6 +1053,10 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .sp-center .pcard { width: min(22vw, 88px); }
 .sp.board .sp-pile.target { box-shadow: 0 0 0 4px var(--win); cursor: pointer; }
 .sp-pile.pop { animation: pop .18s ease-out; }
+/* スワイプで出す（2026-10-26）: 自分の札の列の上では指でページが動かない。つかんだ札は指についてくる・落とせる台札を光らせる */
+.sp-side.mine .sp-row { touch-action: none; }
+.sp-row .pcard.sp-drag { position: relative; z-index: 5; pointer-events: none; transition: none; box-shadow: 0 8px 18px rgba(0, 0, 0, .3); }
+.sp-pile.drop { outline: 4px solid #ffd43b; outline-offset: 2px; }
 .board button.btn.sp-flip { font-size: 1.3rem; padding: 14px 36px; }
 /* 3人: 相手の札は小さく、台札は3つ並べて下に持ち主の名前 */
 .sp-side.sp3:not(.mine) { padding: 6px 10px; }

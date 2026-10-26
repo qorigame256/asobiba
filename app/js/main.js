@@ -3598,8 +3598,8 @@ function onMoves(msg) {
     if (!S.isHost && msg.from === S.members[0] && replay({ ...S, moves: msg.moves })) {
       S.moves = msg.moves.slice();
       saveRoom();
-    } else if (S.isHost && GAMES[S.gameId].realtime) {
-      rebase(msg);
+    } else if (S.isHost && (GAMES[S.gameId].realtime || GAMES[S.gameId].concurrent?.(replay(S)))) {
+      rebase(msg); // 同時に動くゲームと、みんなが同時に押す場面（concurrent。ポーカーの結果の OK など）は、ホストが手を足し直す
     } else if (S.isHost) sendState(); else askState();
   }
 }

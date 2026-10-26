@@ -1,4 +1,7 @@
-// 玉入れ（運動会の玉入れ風）。赤と白の2チーム対抗（2026-10-05 本人承認）。画面を指（マウス）ではじいて、自分のチームのカゴへ玉を投げる。
+// 玉入れ（運動会の玉入れ風）。赤と白の2チーム対抗（2026-10-05 本人承認）。パチンコ（ゴムひもで玉を引いて飛ばす道具）で、自分のチームのカゴへ玉を飛ばす。
+// 2026-10-26 本人の依頼で、はじく操作からパチンコに替えた: 画面のどこかを押してそのまま引き、離すと引いたのと逆の向きへ飛ぶ。
+//   引いた長さ（SLING_PULL まで）が強さ。押した所の横の位置にパチンコを置く（押した位置からの動きで引くので、どこを押してもよい）。
+//   遊んでいる間も画面をスクロールできるように、ページ全体は止めず、絵（canvas）の上だけ指の動きを取る（前は .ac-live でページごと止めていた）。
 // 制限時間（詳細設定）が来たら、入った数の多いチームの勝ち。個人の入れた数も出す。
 // チームは席の番号で決める（偶数の席が赤、奇数の席が白。席順は main.js が毎回まぜる）。人数は待合室で偶数にそろえる（evenTeams）。
 // 玉の動きは各自の端末だけで計算し、入った数（合計）を 0.6秒ごとにまとめて手として送る（1個ずつ送ると手の一覧が長くなりすぎるため）。
@@ -25,7 +28,9 @@ export const G = 2.5; // 重力（盤の横幅 / 秒²）
 export const BALL_R = 0.022;
 export const RIM = { x: 0.5, y: 0.34, half: 0.095, depth: 0.09 }; // カゴの口（真ん中・高さ・半分の幅）と深さ
 const GROUND = H - 0.04;
-const HAND_Y = H - 0.16;
+export const HAND_Y = H - 0.30; // パチンコの位置（玉が飛び出す高さ）。下に引く分の場所を空けてある
+const SLING_PULL = 0.2; // 引ける長さ（盤の横幅に対して）。いっぱいに引くと MAX_V の速さ
+const SLING_MIN = 0.025; // これより短いと飛ばさない（押しただけ）
 const RELOAD_MS = 280;
 const MAX_V = 3.4;
 export const TEAM = ['赤', '白'];
@@ -66,7 +71,7 @@ export function stepBall(b, dt, rx = RIM.x) {
   return null;
 }
 
-// はじいた速さ（盤の横幅 / 秒）から、投げる玉の速さを決める
+// パチンコで引いた分の速さ（盤の横幅 / 秒）から、投げる玉の速さを決める
 export function launch(vx, vy) {
   const sp = Math.hypot(vx, vy);
   const k = sp > MAX_V ? MAX_V / sp : 1;
@@ -169,14 +174,40 @@ function drawField() {
     ctx.stroke();
     ctx.globalAlpha = 1;
   }
-  // 手もとの玉
-  if (ui.me !== null && s.phase === 'play' && performance.now() - ui.lastThrow > RELOAD_MS) {
+  // パチンコ（Y の形の枠とゴムひも）と、手もとの玉（引いているときは引いた所）
+  if (ui.me !== null && s.phase !== 'end') {
+    const ax = ui.handX;
+    const fork = 0.045;
+    ctx.strokeStyle = '#6b4a2b';
+    ctx.lineWidth = Math.max(3, k * 0.014);
+    ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.arc(ui.handX * k, HAND_Y * k, BALL_R * k, 0, Math.PI * 2);
-    ctx.fillStyle = TEAM_COLOR[team];
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(0,0,0,.4)';
+    ctx.moveTo(ax * k, (HAND_Y + 0.17) * k);
+    ctx.lineTo(ax * k, (HAND_Y + 0.07) * k);
+    ctx.lineTo((ax - fork) * k, HAND_Y * k);
+    ctx.moveTo(ax * k, (HAND_Y + 0.07) * k);
+    ctx.lineTo((ax + fork) * k, HAND_Y * k);
     ctx.stroke();
+    const ready = s.phase === 'play' && performance.now() - ui.lastThrow > RELOAD_MS;
+    const pull = ui.aim ?? { x: 0, y: 0 };
+    const bx = ax + pull.x; const by = HAND_Y + pull.y;
+    ctx.strokeStyle = '#3b2a1a';
+    ctx.lineWidth = Math.max(1.5, k * 0.006);
+    ctx.beginPath();
+    ctx.moveTo((ax - fork) * k, HAND_Y * k);
+    ctx.lineTo(bx * k, by * k);
+    ctx.lineTo((ax + fork) * k, HAND_Y * k);
+    ctx.stroke();
+    ctx.lineCap = 'butt';
+    if (ready) {
+      ctx.beginPath();
+      ctx.arc(bx * k, by * k, BALL_R * k, 0, Math.PI * 2);
+      ctx.fillStyle = TEAM_COLOR[team];
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,.4)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
   }
   // 「+1」（2点の玉は「+2」）
   const now = performance.now();
@@ -278,7 +309,7 @@ export default {
   id: 'tamaire',
   name: '玉入れ',
   icon: '🧺',
-  desc: '赤と白のチームに分かれて、画面をはじいて玉をカゴへ。たくさん入れたチームの勝ち',
+  desc: '赤と白のチームに分かれて、パチンコで玉をカゴへ。たくさん入れたチームの勝ち',
   ready: true,
   multi: true,
   realtime: true,
@@ -390,7 +421,6 @@ export default {
       ui.chips.replaceWith(chips);
       ui.chips = chips;
       ui.cur = { s, o };
-      ui.wrap.classList.toggle('ac-live', s.phase === 'play' && me !== null);
       if (s.phase !== 'ready') since(goKey(s));
       return;
     }
@@ -402,7 +432,7 @@ export default {
     canvas.className = 'ac-canvas';
     const note = document.createElement('p');
     note.className = 'ac-note';
-    note.textContent = '画面の下の方から、カゴへ向かって指（マウス）をすばやくはじくと玉が飛びます。'
+    note.textContent = 'パチンコです。絵のどこかを押したまま、飛ばしたい向きと逆へ引いて離すと玉が飛びます（長く引くほど強い）。'
       + (lastOf(s) ? `残り${LAST_SEC}秒からは1つ2点！` : '');
     wrap.append(canvas);
     root.append(chips, wrap, note);
@@ -415,46 +445,46 @@ export default {
       lastSend: 0, lastThrow: 0, last: performance.now(), handX: 0.5,
       calm: !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
     };
-    wrap.classList.toggle('ac-live', s.phase === 'play' && me !== null);
     resize();
     let drag = null;
+    // 押した所からの指の動き（盤の座標）を、引いた長さ SLING_PULL までに縮めたもの
+    const pullOf = (b) => {
+      const dx = b.x - drag.x; const dy = b.y - drag.y;
+      const d = Math.hypot(dx, dy);
+      const k = d > SLING_PULL ? SLING_PULL / d : 1;
+      return { x: dx * k, y: dy * k, d: Math.min(d, SLING_PULL) };
+    };
     canvas.addEventListener('pointerdown', (e) => {
+      if (drag) return;
       const b = toBoard(canvas, e);
-      drag = { id: e.pointerId, pts: [{ t: performance.now(), ...b }] };
+      drag = { id: e.pointerId, x: b.x, y: b.y };
       ui.handX = clamp(b.x, 0.08, 0.92);
+      ui.aim = { x: 0, y: 0 };
       try { canvas.setPointerCapture?.(e.pointerId); } catch { /* 指がもう離れていたとき */ }
       e.preventDefault();
     });
     canvas.addEventListener('pointermove', (e) => {
-      const b = toBoard(canvas, e);
-      if (drag?.id === e.pointerId) {
-        drag.pts.push({ t: performance.now(), ...b });
-        if (drag.pts.length > 30) drag.pts.shift();
-      } else if (e.pointerType === 'mouse') ui.handX = clamp(b.x, 0.08, 0.92);
+      if (drag?.id !== e.pointerId) return;
+      ui.aim = pullOf(toBoard(canvas, e));
       e.preventDefault();
     });
     const up = (e) => {
       if (drag?.id !== e.pointerId) return;
-      const pts = drag.pts;
+      const pull = pullOf(toBoard(canvas, e));
       drag = null;
+      ui.aim = null;
       const { s: cur, o: co } = ui.cur;
       const now = performance.now();
       if (ui.me === null || cur.phase !== 'play' || !co.canMove || since(goKey(cur)) / 1000 >= durOf(cur) || now - ui.lastThrow < RELOAD_MS) return;
-      // 最後の 0.1秒ほどの動きから、はじいた速さを出す
-      const lastP = pts[pts.length - 1];
-      const first = pts.find((q) => lastP.t - q.t <= 110) ?? pts[0];
-      const dt = (lastP.t - first.t) / 1000;
-      if (dt < 0.01) return;
-      const vx = (lastP.x - first.x) / dt; const vy = (lastP.y - first.y) / dt;
-      if (vy > -0.6) return; // 上向きにはじいていない
-      const v = launch(vx, vy);
+      if (pull.d < SLING_MIN || pull.y <= 0) return; // ほとんど引いていない・上へ引いた（下へは飛ばさない）
+      const v = launch(-pull.x / SLING_PULL * MAX_V / 0.9, -pull.y / SLING_PULL * MAX_V / 0.9);
       ui.lastThrow = now;
       const ball = { x: ui.handX, y: HAND_Y, vx: v.vx, vy: v.vy };
       ui.balls.push(ball);
       co.stream({ b: [+ball.x.toFixed(3), +ball.y.toFixed(3), +ball.vx.toFixed(3), +ball.vy.toFixed(3)] });
     };
     canvas.addEventListener('pointerup', up);
-    canvas.addEventListener('pointercancel', () => { drag = null; });
+    canvas.addEventListener('pointercancel', () => { drag = null; ui.aim = null; });
     loop(ui);
   },
 };

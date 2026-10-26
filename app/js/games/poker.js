@@ -14,13 +14,21 @@
 // ジョーカー（詳細設定・最初はなし。2026-10-06 本人承認）: 山に1枚足して53枚。どの札の代わりにもなり、その手で一番強くなる札として数える
 //   （同じ役どうしの比べ方も同じ。ジョーカーが入っていない手との差は付けない）。一番強い役に「ファイブカード」（同じ数字5枚）が加わる。
 //   作り（Claude の判断）: evaluate がジョーカーを52通りの札に置き替えて一番強いものを選ぶ。手札ではジョーカーを右の端に並べる。CPU はジョーカーを捨てない。
+// 遊び方「チップなし（かんたん）」（mode: 'simple'。2026-10-26 本人の依頼で足して最初の設定にした。チップを賭けるのは mode: 'chips'）:
+//   賭けをしない。5枚配る → 親の次の人から順に1回交換 → 役の強さで勝負し、一番強い人（同じ強さなら全員）が1勝（s.wins）。
+//   詳細設定の回数（hands）だけ勝負して、勝ちの多い人の優勝（同じ数なら同じ順位。終わり方 end は使わない）。チップの欄（chips）は残すが動かない。
+// 勝負の結果の画面（2026-10-26 本人の依頼）: 前はだれか1人が「次の勝負へ」を押せば進んだ。いまは残っている全員が OK（手は 'next'）を押すか、
+//   ホストの端末で NEXT_MS（10秒）たつ（{ p: -1, t: 'next' }。referee）と次の勝負へ。OK した人は h.ok。CPU は1.5秒で OK する。
+//   全員が同時に押すので、この間だけホストが手を足し直す（concurrent。main.js の rebase）。
 
 import { mulberry32, shuffle } from './util.js';
 import { SUITS, JOKER, suitOf, rankOf, makeDeck, cardEl, backEl } from './cards.js';
+import { since } from './party.js';
 
 const START_CHIPS = 1000;
 const LEVEL_HANDS = 5;
 const CAP = 4;
+const NEXT_MS = 10000; // 結果の画面から次の勝負へ自動で進むまで
 const HAND_NAMES = ['役なし', 'ワンペア', 'ツーペア', 'スリーカード', 'ストレート', 'フラッシュ', 'フルハウス', 'フォーカード', 'ストレートフラッシュ', 'ファイブカード'];
 const HAND_HELP = [
   ['ロイヤルストレートフラッシュ', '同じマークの 10・J・Q・K・A'],
@@ -136,8 +144,13 @@ function startHand(s) {
     no: s.handNo, dealer: s.dealer, sb, bb, small, big, deck, muck: [], shuffles: 0, cards,
     folded: Array(s.n).fill(false), bet: Array(s.n).fill(0), total: Array(s.n).fill(0), acted: Array(s.n).fill(false),
     drew: Array(s.n).fill(null), maxBet: 0, raises: 1, unit: big, phase: 'bet1', toAct: null, result: null,
-    startChips: s.chips.slice(),
+    startChips: s.chips.slice(), ok: Array(s.n).fill(false),
   };
+  if (simple(s)) { // チップなし: 賭けずにすぐ交換から
+    s.h.phase = 'draw';
+    s.h.toAct = nextDrawer(s, s.dealer);
+    return;
+  }
   pay(s, sb, small);
   pay(s, bb, big);
   s.h.maxBet = Math.max(...s.h.bet);
@@ -173,6 +186,21 @@ function endBetting(s) {
   } else {
     showdown(s);
   }
+}
+
+const simple = (s) => s.rules.mode === 'simple';
+
+// チップなし: 一番強い人（同じ強さなら全員）が1勝
+function showdownSimple(s) {
+  const h = s.h;
+  const ps = live(s);
+  const ev = {};
+  for (const p of ps) ev[p] = evaluate(h.cards[p]);
+  const best = ps.reduce((a, b) => (compareEval(ev[b], ev[a]) > 0 ? b : a));
+  const got = Array(s.n).fill(0);
+  for (const p of ps) if (compareEval(ev[p], ev[best]) === 0) { got[p] = 1; s.wins[p] += 1; }
+  h.result = { kind: 'show', ev, got };
+  finishHand(s);
 }
 
 // 出した額ごとに分け前（ポット）を作り、それぞれ一番強い人が取る
@@ -225,6 +253,13 @@ function finishHand(s) {
   const busted = range(s.n).filter((p) => isAlive(s, p) && s.chips[p] === 0).sort((a, b) => h.startChips[a] - h.startChips[b]);
   for (const p of busted) { s.outAt[p] = s.handNo; s.outOrder.push(p); }
   const alive = range(s.n).filter((p) => isAlive(s, p));
+  if (simple(s)) {
+    if (s.handNo >= s.rules.hands) {
+      s.over = true;
+      s.ranking = range(s.n).sort((a, b) => s.wins[b] - s.wins[a]);
+    }
+    return;
+  }
   if (alive.length <= 1 || (s.rules.end === 'hands' && s.handNo >= s.rules.hands)) {
     s.over = true;
     const byChips = alive.slice().sort((a, b) => s.chips[b] - s.chips[a]);
@@ -248,10 +283,11 @@ function drawCards(s, k) {
 }
 
 const clone = (s) => ({
-  ...s, chips: s.chips.slice(), outAt: s.outAt.slice(), outOrder: s.outOrder.slice(),
+  ...s, chips: s.chips.slice(), outAt: s.outAt.slice(), outOrder: s.outOrder.slice(), ...(s.wins ? { wins: s.wins.slice() } : {}),
   h: s.h && {
     ...s.h, deck: s.h.deck.slice(), muck: s.h.muck.slice(), cards: s.h.cards.map((c) => c && c.slice()),
     folded: s.h.folded.slice(), bet: s.h.bet.slice(), total: s.h.total.slice(), acted: s.h.acted.slice(), drew: s.h.drew.slice(),
+    ok: (s.h.ok ?? Array(s.n).fill(false)).slice(),
   },
 });
 
@@ -316,6 +352,7 @@ function logText(s, nameP) {
     case 'raise': return `${name}がレイズ（${L.to}まで上乗せ）${L.allin ? '・オールイン' : ''}`;
     case 'draw': return L.n ? `${name}が${L.n}枚交換した` : `${name}は交換しなかった`;
     case 'next': return `第${s.handNo}回の勝負を始めます`;
+    case 'ok': return `${name}が OK（次の勝負を待っています）`;
     default: return '';
   }
 }
@@ -330,16 +367,18 @@ export default {
   minPlayers: 2,
   maxPlayers: 6,
   settings: [
-    { key: 'end', label: '終わり方', desc: '「最後の1人まで」はチップが無くなった人から抜ける。「決めた回数で」はその回数でチップが一番多い人の勝ち', def: 'last', choices: [['last', '最後の1人まで'], ['hands', '決めた回数で']] },
-    { key: 'hands', label: '回数', desc: '「決めた回数で」のときに勝負する回数', def: 10, choices: [[5, '5回'], [10, '10回'], [20, '20回']] },
+    { key: 'mode', label: '遊び方', desc: 'チップなし: 賭けずに、交換したあと役の強さだけで勝負（勝ちの多い人の優勝）。チップを賭ける: 本式に近いポーカー', def: 'simple', choices: [['simple', 'チップなし（かんたん）'], ['chips', 'チップを賭ける']] },
+    { key: 'end', label: '終わり方', desc: 'チップを賭けるときだけ。「最後の1人まで」はチップが無くなった人から抜ける。「決めた回数で」はその回数でチップが一番多い人の勝ち', def: 'last', choices: [['last', '最後の1人まで'], ['hands', '決めた回数で']] },
+    { key: 'hands', label: '回数', desc: '勝負する回数（チップなしのとき・チップを賭けて「決めた回数で」のとき）', def: 10, choices: [[5, '5回'], [10, '10回'], [20, '20回']] },
     { key: 'joker', label: 'ジョーカー', desc: '1枚入れる（53枚）。どの札の代わりにもなり、一番強くなる札として数える。同じ数字5枚の「ファイブカード」が一番強い役になる', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const s = {
-      n, seed, rules: { end: 'last', hands: 10, ...rules }, chips: Array(n).fill(START_CHIPS), outAt: Array(n).fill(null), outOrder: [],
+      n, seed, rules: { mode: 'simple', end: 'last', hands: 10, ...rules }, chips: Array(n).fill(START_CHIPS), outAt: Array(n).fill(null), outOrder: [],
       handNo: 0, dealer: -1, h: null, over: false, ranking: null, step: 0, last: null,
     };
+    if (simple(s)) s.wins = Array(n).fill(0);
     startHand(s);
     return s;
   },
@@ -347,20 +386,33 @@ export default {
   turn(s) { return s.over || s.h.phase === 'end' ? null : s.h.toAct; },
   canAct(s, p) {
     if (s.over) return false;
-    if (s.h.phase === 'end') return isAlive(s, p);
+    if (s.h.phase === 'end') return isAlive(s, p) && !s.h.ok?.[p];
     return s.h.toAct === p;
   },
-  result(s) { return s.over ? { winner: s.ranking[0], ranking: s.ranking } : null; },
+  // 結果の画面ではみんなが同時に OK を押すので、ホストが手を足し直す（main.js の rebase）
+  concurrent(s) { return !s.over && s.h.phase === 'end'; },
+  referee(s) { return !s.over && s.h.phase === 'end' ? { key: 'next' + s.handNo, ms: NEXT_MS, move: { t: 'next' } } : null; },
+  result(s) {
+    if (!s.over) return null;
+    if (!simple(s)) return { winner: s.ranking[0], ranking: s.ranking };
+    const top = Math.max(...s.wins);
+    const winners = s.ranking.filter((p) => s.wins[p] === top);
+    return { winner: winners.length === 1 ? winners[0] : null, winners, ranking: s.ranking, pts: s.wins.slice() };
+  },
   startSound: 'shuffle',
   // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
   sound(a, b, m) {
-    if (m.t === 'next') return 'shuffle';
+    if (m.t === 'next') return b.handNo !== a.handNo ? 'shuffle' : 'pop';
     if (b.h.phase === 'end' && a.h.phase !== 'end') return 'chip'; // 勝負が付いてチップを集める
     return m.t === 'draw' ? 'card' : m.t === 'call' || m.t === 'raise' ? 'chip' : 'pop';
   },
-  cpuDelay(s) { return s.h?.phase === 'end' ? 3000 : 600; }, // 勝負の結果は少し長めに見せる
+  cpuDelay(s) { return s.h?.phase === 'end' ? 1500 : 600; }, // 勝負の結果の OK（全員の OK か10秒で次へ）
 
   resultText(res, me, pn) {
+    if (res.winners?.length > 1) {
+      if (res.winners.includes(me)) return 'あなたも優勝！（同点）🎉';
+      return `${res.winners.map(pn).join('・')}が同点で優勝！`;
+    }
     if (me >= 0) {
       const i = res.ranking.indexOf(me);
       return i === 0 ? 'あなたの優勝！🎉' : `あなたは${i + 1}位`;
@@ -370,6 +422,14 @@ export default {
   phaseText(s) { return s.h.phase === 'end' ? `第${s.handNo}回の勝負がつきました` : ''; },
 
   apply(s0, m) {
+    if (m?.p === -1) { // 結果の画面で10秒たった
+      if (m.t !== 'next' || s0.over || s0.h.phase !== 'end') return null;
+      const s = clone(s0);
+      s.step += 1;
+      startHand(s);
+      s.last = { p: -1, t: 'next' };
+      return s;
+    }
     if (!m || !Number.isInteger(m.p) || !this.canAct(s0, m.p)) return null;
     const s = clone(s0);
     const h = s.h;
@@ -378,8 +438,11 @@ export default {
 
     if (h.phase === 'end') {
       if (m.t !== 'next') return null;
-      startHand(s);
-      s.last = { p, t: 'next' };
+      h.ok[p] = true;
+      if (range(s.n).every((q) => !isAlive(s, q) || h.ok[q])) {
+        startHand(s);
+        s.last = { p, t: 'next' };
+      } else s.last = { p, t: 'ok' };
       return s;
     }
 
@@ -393,7 +456,10 @@ export default {
       h.drew[p] = idx.length;
       s.last = { p, t: 'draw', n: idx.length };
       h.toAct = nextDrawer(s, p);
-      if (h.toAct === null) startBet2(s);
+      if (h.toAct === null) {
+        if (simple(s)) showdownSimple(s);
+        else startBet2(s);
+      }
       return s;
     }
 
@@ -469,9 +535,9 @@ export default {
       name.textContent = (h.dealer === p ? 'Ⓓ ' : '') + o.names[p];
       const info = document.createElement('div');
       info.className = 'cc-opp-count';
-      info.textContent = isAlive(s, p) || h.cards[p] ? `持ち点 ${s.chips[p]}` : '脱落';
+      info.textContent = simple(s) ? `${s.wins[p]}勝` : isAlive(s, p) || h.cards[p] ? `持ち点 ${s.chips[p]}` : '脱落';
       chip.append(name, info);
-      if (h.cards[p] && (h.bet[p] || h.phase !== 'end')) {
+      if (!simple(s) && h.cards[p] && (h.bet[p] || h.phase !== 'end')) {
         const b = document.createElement('div');
         b.className = 'pk-bet';
         b.textContent = h.phase === 'end' ? '' : `賭け ${h.bet[p]}`;
@@ -485,7 +551,8 @@ export default {
         if (!h.folded[p]) chip.append(row);
       }
       const tags = [];
-      if (h.result?.got[p]) tags.push(['rank', `+${h.result.got[p]}`]);
+      if (h.result?.got[p]) tags.push(['rank', simple(s) ? '勝ち！' : `+${h.result.got[p]}`]);
+      if (h.phase === 'end' && !s.over && h.ok?.[p]) tags.push(['ok', 'OK✓']);
       if (shown && !h.folded[p]) tags.push(['prev', handName(h.result.ev[p])]);
       if (h.folded[p]) tags.push(['away', '降りた']);
       else if (h.cards[p] && s.chips[p] === 0 && h.phase !== 'end') tags.push(['last', 'オールイン']);
@@ -506,8 +573,10 @@ export default {
     table.className = 'pk-table';
     const phaseName = { bet1: '1回目の賭け', draw: '札の交換', bet2: '2回目の賭け', end: '勝負' }[h.phase];
     const limit = s.rules.end === 'hands' ? ` / ${s.rules.hands}回` : '';
-    table.innerHTML = `<div class="pk-pot">場のチップ <b>${potTotal}</b></div>`
-      + `<div class="pk-meta">第${s.handNo}回${limit}・${phaseName}・ブラインド ${h.small}/${h.big}</div>`;
+    table.innerHTML = simple(s)
+      ? `<div class="pk-pot">チップなし</div><div class="pk-meta">第${s.handNo}回 / ${s.rules.hands}回・${phaseName}・交換したら役の強さで勝負</div>`
+      : `<div class="pk-pot">場のチップ <b>${potTotal}</b></div>`
+        + `<div class="pk-meta">第${s.handNo}回${limit}・${phaseName}・ブラインド ${h.small}/${h.big}</div>`;
     root.append(table);
 
     const log = document.createElement('p');
@@ -520,7 +589,7 @@ export default {
       list.className = 'df-ranking';
       for (const p of s.ranking) {
         const li = document.createElement('li');
-        li.textContent = `${nameP(p)}（持ち点 ${s.chips[p]}）`;
+        li.textContent = simple(s) ? `${nameP(p)}（${s.wins[p]}勝）` : `${nameP(p)}（持ち点 ${s.chips[p]}）`;
         list.append(li);
       }
       root.append(list);
@@ -531,10 +600,10 @@ export default {
       const head = document.createElement('div');
       head.className = 'cc-hand-head';
       const ev = evaluate(h.cards[me]);
-      head.textContent = `あなた（${h.dealer === me ? 'Ⓓ 親・' : ''}持ち点 ${s.chips[me]}・賭け ${h.bet[me]}）`;
+      head.textContent = simple(s) ? `あなた（${s.wins[me]}勝）` : `あなた（${h.dealer === me ? 'Ⓓ 親・' : ''}持ち点 ${s.chips[me]}・賭け ${h.bet[me]}）`;
       const now = document.createElement('small');
       now.textContent = (h.folded[me] ? 'この勝負は降りました' : `いまの役: ${handName(ev)}`)
-        + (h.result?.got[me] ? `／ +${h.result.got[me]} 獲得` : '');
+        + (h.result?.got[me] ? (simple(s) ? '／ この勝負に勝ち！' : `／ +${h.result.got[me]} 獲得`) : '');
       head.append(now);
       root.append(head);
 
@@ -589,16 +658,32 @@ export default {
       }
     }
 
-    if (h.phase === 'end' && !s.over && o.canMove) {
-      const actions = document.createElement('div');
-      actions.className = 'cc-actions';
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'btn primary';
-      b.textContent = '次の勝負へ';
-      b.onclick = () => o.onMove({ t: 'next' });
-      actions.append(b);
-      root.append(actions);
+    if (h.phase === 'end' && !s.over) {
+      // 全員の OK か10秒で次の勝負へ。残りの秒数は各自の画面に出てからの時間（ホストの時計と少しずれる）
+      const key = `pk:${s.seed}:${s.handNo}`;
+      const alive = range(s.n).filter((p) => isAlive(s, p));
+      const okN = alive.filter((p) => h.ok?.[p]).length;
+      const note = document.createElement('p');
+      note.className = 'pk-hint';
+      const tick = () => {
+        if (!note.isConnected && note.dataset.on) return;
+        note.dataset.on = '1';
+        note.textContent = `OK ${okN}/${alive.length}人・全員そろうか、あと${Math.max(0, Math.ceil((NEXT_MS - since(key)) / 1000))}秒で次の勝負へ`;
+        setTimeout(tick, 250);
+      };
+      tick();
+      root.append(note);
+      if (o.canMove) {
+        const actions = document.createElement('div');
+        actions.className = 'cc-actions';
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn primary';
+        b.textContent = 'OK（次の勝負へ）';
+        b.onclick = () => o.onMove({ t: 'next' });
+        actions.append(b);
+        root.append(actions);
+      }
     }
 
     const help = document.createElement('details');
