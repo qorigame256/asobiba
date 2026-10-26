@@ -1,7 +1,7 @@
 // 2色爆弾サバイバル（本人の案。2026-10-05）。自分の盤の入り口から赤と青の爆弾が歩きながら出てくる。
 // 枠は各色に「5」と「10」が1つずつ、合計4つ。爆弾を指でつまんで同じ色の枠へ入れ、5の枠に5個（10の枠に10個）入れたら、
 // その数の爆弾が、生き残りの中からランダムに選んだ相手の盤へ飛んでいく。
-// 爆弾は出てから FUSE 秒で爆発する（最後の2.5秒は点滅）。入れずに爆発させる・違う色の枠に入れるとライフが1減り、3回で脱落。最後まで残った人の勝ち。
+// 爆弾は出てから FUSE 秒で爆発する（最後の3秒は点滅。2026-10-26 までは2.5秒）。入れずに爆発させる・違う色の枠に入れるとライフが1減り、3回で脱落。最後まで残った人の勝ち。
 // 出てくる間は時間とともに短くなり、一度に出る数も増える（だんだん忙しくなる）。
 // 詳細設定（2026-10-06 本人の決定）: ライフ 1・3（最初）・5。速さ ゆっくり・ふつう（最初）・はやい は
 //   「忙しさの曲線のどこから始めるか」だけを決める（本人の指定）。いちばん短い間（0.55秒）と一度に出る数の上限（3個）はどれも同じ。
@@ -14,6 +14,12 @@
 // 送る相手は手の一覧の中身から決める（全員同じ相手になる）。届いた分は、その人の端末が入り口から出す（受け取った合計 inc と、
 // 出し終えた数を比べる。開き直したときは、それまでに届いた分は出さない）。
 //
+// 2026-10-26 本人の依頼（作りは Claude の判断）:
+//   相手から届いた爆弾は、入り口からでなく上から降ってくる（横の位置はばらばら。降りきるまでは壁で跳ね返らない。fall）。
+//   始まってから BOTTOM_AT 秒たつと、歩く場所の下にも入り口が開き、ふつうに出てくる爆弾の半分が下から出る（速さの設定によらず同じ時間）。
+//   爆発まで BLINK（3秒）を切った爆弾は、点滅に合わせて大きくなったり戻ったりし、つまめる範囲も広くなる（urgent）。
+//   爆弾どうしは、直径の75%より深くは重ならない（中心の間を MIN_GAP 以上に押し離す。つまんでいる爆弾は動かさない）。
+//
 // 進行: ready →(3秒)→ go → play → 生き残りが1人以下で end
 // 手: { p: -1, t: 'go' } / { p, t: 'boom', n: その人の何回目の爆発か } / { p, t: 'send', n: 何回目の送りか, k: 5 | 10, to?: ねらった席（送る相手が「選べる」のときだけ） }
 
@@ -24,13 +30,18 @@ import { fitCanvas, toBoard, clamp } from './action.js';
 const READY_MS = 3000;
 export const LIVES = 3;
 export const FUSE = 9; // 秒
-const BLINK = 2.5;
+const BLINK = 3; // 最後の何秒を点滅させるか（2026-10-26 に 2.5 から。点滅に合わせて大きくもなる）
+const PULSE = 1.35; // 点滅しているときの大きさ
+const GRAB = 0.075; // 指でつまめる範囲（爆弾の中心から）
+const GRAB_URGENT = 0.1; // 爆発まで3秒を切った爆弾をつまめる範囲
+const BOTTOM_AT = 30; // 下の入り口が開くまでの秒数
 export const H = 1.25;
 const R = 0.035; // 爆弾の半径
 const COLOR = ['#e74c3c', '#3b7ddd'];
 const COLOR_NAME = ['赤', '青'];
 const FIELD = { x0: 0.26, x1: 0.74, y0: 0.2, y1: H - 0.04 };
 const DOOR = { x: 0.5, y: 0.13 };
+const MIN_GAP = R * 2 * 0.25; // 爆弾の中心どうしの近さの下限（直径の75%までしか重ならない）
 // 枠: 左が赤、右が青。上が 5、下が 10
 const BOXES = [
   { c: 0, cap: 5, x0: 0.02, x1: 0.23, y0: 0.2, y1: 0.58 },
@@ -78,10 +89,34 @@ function boxAt(x, y) {
   return BOXES.findIndex((b) => x >= b.x0 - 0.02 && x <= b.x1 + 0.02 && y >= b.y0 - 0.02 && y <= b.y1 + 0.02);
 }
 
-function spawn(sec, incoming) {
-  const a = Math.PI / 2 + (Math.random() - 0.5) * 1.6;
+// 爆弾を1つ出す。incoming = 相手から届いた（上から降ってくる）、bottom = 下の入り口から
+function spawn(sec, incoming, bottom = false) {
   const sp = 0.08 + Math.random() * 0.05;
-  ui.bombs.push({ c: Math.random() < 0.5 ? 0 : 1, x: DOOR.x, y: FIELD.y0 + R, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: sec, turn: sec + 1 + Math.random(), inc: incoming });
+  const c = Math.random() < 0.5 ? 0 : 1;
+  if (incoming) {
+    const x = FIELD.x0 + R + Math.random() * (FIELD.x1 - FIELD.x0 - 2 * R);
+    ui.bombs.push({ c, x, y: -R, vx: 0, vy: 0.45, born: sec, turn: sec + 1 + Math.random(), inc: true, fall: true });
+    return;
+  }
+  const a = (bottom ? -Math.PI / 2 : Math.PI / 2) + (Math.random() - 0.5) * 1.6;
+  ui.bombs.push({ c, x: DOOR.x, y: bottom ? FIELD.y1 - R : FIELD.y0 + R, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: sec, turn: sec + 1 + Math.random(), inc: false });
+}
+const urgent = (b, sec) => FUSE - (sec - b.born) < BLINK;
+// 爆弾どうしを押し離す（直径の75%より深く重ならないように）。つまんでいる爆弾は動かさない
+function separate() {
+  const list = ui.bombs.filter((b) => b !== ui.held);
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      const a = list[i]; const b = list[j];
+      let dx = b.x - a.x; let dy = b.y - a.y;
+      let d = Math.hypot(dx, dy);
+      if (d >= MIN_GAP) continue;
+      if (d < 1e-6) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d = Math.hypot(dx, dy); }
+      const push = (MIN_GAP - d) / 2;
+      a.x -= (dx / d) * push; a.y -= (dy / d) * push;
+      b.x += (dx / d) * push; b.y += (dy / d) * push;
+    }
+  }
 }
 
 function boom(x, y, sec) {
@@ -103,7 +138,9 @@ function step() {
   // ふつうに出てくる分
   while (ui.nextSpawn <= sec) {
     const L = levelOf(s, ui.nextSpawn);
-    for (let i = spawnCount(L, Math.random()); i > 0; i--) spawn(ui.nextSpawn, false);
+    const open = ui.nextSpawn >= BOTTOM_AT; // 下の入り口が開いたら、半分は下から
+    if (open && !ui.bottomOpen) { ui.bottomOpen = true; ui.flash = { text: '下の入り口が開いた！', at: performance.now() }; }
+    for (let i = spawnCount(L, Math.random()); i > 0; i--) spawn(ui.nextSpawn, false, open && Math.random() < 0.5);
     ui.nextSpawn += spawnGap(L);
   }
   // 相手から届いた分（0.15秒おきに1個）
@@ -114,6 +151,16 @@ function step() {
   }
   for (const b of ui.bombs) {
     if (b === ui.held) continue;
+    if (b.fall) { // 上から降っている間は、歩く場所に入るまでまっすぐ落ちる
+      b.y += b.vy * dt;
+      if (b.y >= FIELD.y0 + R + 0.06) {
+        b.fall = false;
+        const a = Math.random() * Math.PI * 2;
+        const sp = 0.08 + Math.random() * 0.05;
+        b.vx = Math.cos(a) * sp; b.vy = Math.sin(a) * sp;
+      }
+      continue;
+    }
     if (sec > b.turn) { // ときどき向きを変える
       const a = Math.random() * Math.PI * 2;
       const sp = Math.hypot(b.vx, b.vy);
@@ -126,6 +173,7 @@ function step() {
     if (b.y < FIELD.y0 + R) { b.y = FIELD.y0 + R; b.vy = Math.abs(b.vy); }
     if (b.y > FIELD.y1 - R) { b.y = FIELD.y1 - R; b.vy = -Math.abs(b.vy); }
   }
+  separate();
   // 時間切れで爆発
   ui.bombs = ui.bombs.filter((b) => {
     if (sec - b.born < FUSE) return true;
@@ -142,6 +190,7 @@ function drop(b) {
   if (i < 0) { // 枠の外: 歩く場所へ戻す
     b.x = clamp(b.x, FIELD.x0 + R, FIELD.x1 - R);
     b.y = clamp(b.y, FIELD.y0 + R, FIELD.y1 - R);
+    b.fall = false;
     return;
   }
   ui.bombs = ui.bombs.filter((q) => q !== b);
@@ -197,6 +246,7 @@ function roundRect(ctx, x, y, w, h, r) {
 function drawBomb(ctx, k, b, sec, scale = 1) {
   const left = FUSE - (sec - b.born);
   const blink = left < BLINK && Math.floor(left * 6) % 2 === 0;
+  if (blink) scale *= PULSE; // 最後の3秒は、点滅に合わせて大きくなる
   ctx.beginPath();
   ctx.arc(b.x * k, b.y * k, R * k * scale, 0, Math.PI * 2);
   ctx.fillStyle = blink ? '#fff' : COLOR[b.c];
@@ -231,6 +281,10 @@ function draw() {
   ctx.fillStyle = '#111';
   roundRect(ctx, (DOOR.x - 0.07) * k, (FIELD.y0 - 0.05) * k, 0.14 * k, 0.06 * k, 6);
   ctx.fill();
+  if (s.phase === 'play' && sec >= BOTTOM_AT) { // 下の入り口
+    roundRect(ctx, (DOOR.x - 0.07) * k, (FIELD.y1 - 0.01) * k, 0.14 * k, 0.05 * k, 6);
+    ctx.fill();
+  }
   // 枠
   BOXES.forEach((b, i) => {
     roundRect(ctx, b.x0 * k, b.y0 * k, (b.x1 - b.x0) * k, (b.y1 - b.y0) * k, 10);
@@ -254,8 +308,10 @@ function draw() {
       ctx.fill();
     }
   });
-  for (const b of ui.bombs) if (b !== ui.held) drawBomb(ctx, k, b, sec);
-  if (ui.held) drawBomb(ctx, k, ui.held, sec, 1.25);
+  if (s.phase === 'play') { // 終わったら爆弾は消す（前は残りの秒数がおかしな数で残っていた）
+    for (const b of ui.bombs) if (b !== ui.held) drawBomb(ctx, k, b, sec);
+    if (ui.held) drawBomb(ctx, k, ui.held, sec, 1.25);
+  }
   // 爆発
   const now = performance.now();
   ui.fx = ui.fx.filter((f) => now - f.at < 500);
@@ -496,11 +552,20 @@ export default {
       const { s: cur } = ui.cur;
       if (ui.me === null || cur.phase !== 'play' || cur.out[ui.me] !== null) return;
       const p = toBoard(canvas, e);
-      let best = null; let bd = 0.075;
-      for (const b of ui.bombs) { const d = Math.hypot(b.x - p.x, b.y - p.y); if (d < bd) { bd = d; best = b; } }
+      // つまむ爆弾: 範囲の中でいちばん近いもの。爆発まで3秒を切った爆弾は範囲が広く、少し選ばれやすい
+      const sec = since(goKey(cur)) / 1000;
+      let best = null; let bd = Infinity;
+      for (const b of ui.bombs) {
+        const d = Math.hypot(b.x - p.x, b.y - p.y);
+        const u = urgent(b, sec);
+        if (d > (u ? GRAB_URGENT : GRAB)) continue;
+        const score = d - (u ? GRAB_URGENT - GRAB : 0);
+        if (score < bd) { bd = score; best = b; }
+      }
       e.preventDefault();
       if (!best) return;
       ui.held = best;
+      best.fall = false;
       drag = { id: e.pointerId, dx: best.x - p.x, dy: best.y - p.y };
       try { canvas.setPointerCapture?.(e.pointerId); } catch { /* 指がもう離れていたとき */ }
     });
