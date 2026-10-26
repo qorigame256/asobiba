@@ -6191,4 +6191,93 @@ for (const id of GAME_ORDER) {
   }
 }
 
+// 人狼（2026-10-26）: 役の数・投票（並んだらもう一度）・夜（守られたら死なない）・勝ち負け・CPU どうしで最後まで
+{
+  const J = GAMES.jinro;
+  const { wolfCount } = await import('../app/js/games/jinro.js');
+  assert.deepEqual([4, 6, 7, 9, 10].map((n) => wolfCount(n, 'auto')), [1, 1, 2, 2, 3]);
+  assert.equal(wolfCount(4, 2), 1, '人狼は人数の半分未満');
+  for (let n = 4; n <= 10; n++) {
+    const s = J.init(n, 7 + n, { rules: {} });
+    assert.equal(s.roles.filter((r) => r === 'wolf').length, wolfCount(n, 'auto'));
+    assert.equal(s.roles.filter((r) => r === 'seer').length, 1);
+    assert.equal(s.roles.filter((r) => r === 'knight').length, n >= 5 ? 1 : 0);
+    assert.notEqual(s.roles[s.seen[0].to], 'wolf', '始めに知る人は人狼ではない');
+  }
+  // 決めた役で投票と夜を確かめる: 0 人狼・1 占い師・2 騎士・3〜5 村人
+  const base = { ...J.init(6, 1, { rules: {} }), roles: ['wolf', 'seer', 'knight', 'villager', 'villager', 'villager'] };
+  base.roles = ['wolf', 'seer', 'knight', 'villager', 'villager', 'villager'];
+  let s = J.apply(base, { p: 3, t: 'say', text: 'こんにちは', k: 1 });
+  assert.equal(s.chat.length, 1);
+  assert.equal(J.apply(s, { p: 3, t: 'say', text: 'こんにちは', k: 1 }), null, '同じ発言が2回届いても1回');
+  s = J.apply(s, { p: 1, t: 'tovote', d: 1 });
+  assert.equal(s.phase, 'vote');
+  assert.equal(J.apply(s, { p: 1, t: 'vote', to: 1, v: 1, d: 1 }), null, '自分には入れられない');
+  // 3 が3票・4 が2票・5 が1票 → 3 が追放
+  for (const [p, to] of [[0, 3], [1, 3], [2, 3], [3, 4], [4, 5], [5, 4]]) s = J.apply(s, { p, t: 'vote', to, v: 1, d: 1 });
+  assert.equal(s.phase, 'night');
+  assert.equal(s.alive[3], false);
+  // 3 と 4 が2票ずつで並んだ場合
+  let t = J.apply(base, { p: 1, t: 'tovote', d: 1 });
+  for (const [p, to] of [[0, 3], [1, 3], [2, 4], [3, 4], [4, 5], [5, 2]]) t = J.apply(t, { p, t: 'vote', to, v: 1, d: 1 });
+  assert.equal(t.phase, 'vote', '並んだらもう一度');
+  assert.equal(t.vote, 2);
+  assert.deepEqual(t.cands, [3, 4]);
+  assert.equal(J.apply(t, { p: 0, t: 'vote', to: 5, v: 2, d: 1 }), null, 'もう一度のときは並んだ人にだけ');
+  const t2 = J.apply(t, { p: -1, t: 'votetime', d: 1, v: 2 });
+  assert.equal(t2.phase, 'night', '時間切れ（票なし）ならだれも追放しない');
+  assert.ok(t2.alive.every((x) => x));
+  // 夜: 騎士が守った人は死なない／守らなければ死ぬ
+  let n = J.apply(t2, { p: 0, t: 'bite', to: 4, d: 1 });
+  assert.equal(J.apply(t2, { p: 0, t: 'bite', to: 0, d: 1 }), null);
+  assert.equal(J.apply(t2, { p: 2, t: 'guard', to: 2, d: 1 }), null, '騎士は自分を守れない');
+  n = J.apply(n, { p: 1, t: 'see', to: 0, d: 1 });
+  assert.equal(n.seen.at(-1).wolf, true);
+  const guarded = J.apply(n, { p: 2, t: 'guard', to: 4, d: 1 });
+  assert.equal(guarded.phase, 'day', '全員が選んだら朝');
+  assert.equal(guarded.day, 2);
+  assert.ok(guarded.alive[4], '守られた人は死なない');
+  const bitten = J.apply(n, { p: 2, t: 'guard', to: 5, d: 1 });
+  assert.equal(bitten.alive[4], false);
+  assert.equal(J.apply(bitten, { p: 4, t: 'say', text: 'あ', k: 1 }), null, 'やられた人は話せない');
+  // 人狼を追放したら村人チームの勝ち
+  let w = J.apply(bitten, { p: 1, t: 'tovote', d: 2 });
+  for (const p of [0, 1, 2, 3, 5]) w = J.apply(w, { p, t: 'vote', to: p === 0 ? 1 : 0, v: 1, d: 2 });
+  assert.equal(w.phase, 'end');
+  assert.equal(J.result(w).team, 'village');
+  assert.deepEqual(J.result(w).winners, [1, 2, 3, 4, 5]);
+  // CPU どうしで最後まで（時間切れはホストの手で進める）
+  const realRandom = Math.random;
+  try {
+    let seed = 5;
+    Math.random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    let wins = { village: 0, wolf: 0 };
+    for (let g = 0; g < 60; g++) {
+      const np = 4 + (g % 7);
+      let st = J.init(np, 100 + g, { rules: { knight: g % 2 === 0 } });
+      let steps = 0;
+      while (!J.result(st)) {
+        let moved = false;
+        for (let p = 0; p < np && !moved; p++) {
+          if (!J.canAct(st, p)) continue;
+          const m = J.cpu(st, p);
+          if (!m || st.phase === 'day') continue;
+          const next = J.apply(st, { ...m, p });
+          assert.ok(next, '人狼の CPU が反則の手を出した');
+          st = next;
+          moved = true;
+        }
+        if (!moved) st = J.apply(st, { p: -1, ...J.referee(st).move });
+        assert.ok(st);
+        if (++steps > 500) throw new Error('人狼が終わらない');
+      }
+      wins[J.result(st).team] += 1;
+    }
+    assert.ok(wins.village > 5 && wins.wolf > 5, '人狼: どちらのチームもそれなりに勝つ ' + JSON.stringify(wins));
+  } finally {
+    Math.random = realRandom;
+  }
+  console.log('jinro OK');
+}
+
 console.log('ALL OK');
