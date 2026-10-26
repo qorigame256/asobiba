@@ -9,13 +9,20 @@
 // 当たった人はライフが1減る（何人に当てられても、1回に減るのは1つ。Claude の判断）。ライフが0になった人は抜ける。
 // 最後の1人が残ったらその人の勝ち。残っていた人が同じ回に全員抜けたら引き分け。LIMIT 回を超えたら引き分け（ガードだけで終わらないとき）。
 // 手: { p, t: 'act', r: 何回目か, a: 'charge'|'guard'|'beam'|'big', to: 撃つ相手（ビーム・大ビームのときだけ） }
+// 詳細設定「選ぶ時間」（time。2026-10-26 本人の依頼）: 5・10・20秒にすると、ホストが時間を計って { p: -1, t: 'timeout', r } を足し、
+//   まだ選んでいない人を「ため」にして開く（いちばん無難な技なので。Claude の判断）。なしのときは rules に time を入れず、前と同じ形。
+// 当たって lives が0になることを画面では「やられた」と言う（2026-10-26 本人の依頼で「抜けた」から替えた）。
 //   r と「この回はもう選んだか」で、同じ手が2回来ても2回目は反則になる。
+
+import { timeBar } from './party.js';
 
 const COST = { charge: 0, guard: 0, beam: 1, big: 3 };
 const POWER = { beam: 1, big: 2 };
 const LABEL = { charge: 'ため', guard: 'ガード', beam: 'ビーム', big: '大ビーム' };
 const ICON = { charge: '🔋', guard: '🛡️', beam: '⚡', big: '💥' };
 const LIMIT = 100;
+const TIMES = [5, 10, 20];
+const GRACE_MS = 1000; // ゲストの手が届くのを待つ分
 
 const clone = (s) => ({ ...s, life: s.life.slice(), charge: s.charge.slice(), picks: s.picks.slice(), outAt: s.outAt.slice() });
 const active = (s, p) => s.life[p] > 0;
@@ -42,6 +49,22 @@ function resolve(s, picks) {
   return { hit: [...hit], ev };
 }
 
+// 全員の技がそろったら一斉に開く（s を書き換える）
+function settle(s, s0) {
+  const picks = s.picks;
+  const { hit, ev } = resolve(s, picks);
+  for (const q of activeList(s)) s.charge[q] += picks[q].a === 'charge' ? 1 : -COST[picks[q].a];
+  s.last = { round: s.round, picks, charge: s0.charge.slice(), hit, ev, out: [] };
+  for (const q of hit) {
+    s.life[q] -= 1;
+    if (!s.life[q]) { s.outAt[q] = s.round; s.last.out.push(q); }
+  }
+  if (activeList(s).length === 0) s.draw = true; // 残っていた人が同じ回に全員やられた
+  else if (s.round >= LIMIT && activeList(s).length > 1) s.draw = true;
+  s.round += 1;
+  s.picks = Array(s.n).fill(null);
+}
+
 /* ---------- 画面 ---------- */
 
 let sel = { key: null, a: null }; // 撃つ相手を選んでいる途中の技（通信で描き直されても消えないように外に持つ）
@@ -57,12 +80,14 @@ export default {
   minPlayers: 2,
   maxPlayers: 6,
   settings: [
-    { key: 'lives', label: 'ライフ', desc: '何回当たったら抜けるか', def: 1, choices: [[1, '1（当たったら負け）'], [3, '3']] },
+    { key: 'lives', label: 'ライフ', desc: '何回当たったらやられるか', def: 1, choices: [[1, '1（当たったら負け）'], [3, '3']] },
+    { key: 'time', label: '選ぶ時間', desc: '時間内に選ばなかった人は自動で「ため」になる', def: 0, choices: [[0, 'なし'], [5, '5秒'], [10, '10秒'], [20, '20秒']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const lives = rules.lives === 3 ? 3 : 1;
-    return { n, rules: { lives }, life: Array(n).fill(lives), charge: Array(n).fill(0), round: 1, picks: Array(n).fill(null), outAt: Array(n).fill(0), draw: false, last: null, step: 0 };
+    const time = TIMES.includes(rules.time) ? rules.time : 0;
+    return { n, ...(time ? { seed } : {}), rules: time ? { lives, time } : { lives }, life: Array(n).fill(lives), charge: Array(n).fill(0), round: 1, picks: Array(n).fill(null), outAt: Array(n).fill(0), draw: false, last: null, step: 0 };
   },
 
   turn() { return null; },
@@ -83,6 +108,11 @@ export default {
     return { winner: null, draw: true, ranking };
   },
   cpuDelay() { return 900; },
+  // 選ぶ時間があるとき、締め切りの手をホストが足す（main.js の scheduleReferee）
+  referee(s) {
+    if (!s.rules.time || ended(s)) return null;
+    return { key: 'r' + s.round, ms: s.rules.time * 1000 + GRACE_MS, move: { t: 'timeout', r: s.round } };
+  },
 
   resultText(res, me, pn) {
     if (res.draw) return '決着が付かず引き分け！';
@@ -96,6 +126,14 @@ export default {
   },
 
   apply(s0, m) {
+    if (m && m.p === -1 && m.t === 'timeout') {
+      if (!s0.rules.time || ended(s0) || m.r !== s0.round) return null;
+      const s = clone(s0);
+      s.step += 1;
+      for (const q of activeList(s)) if (s.picks[q] === null) s.picks[q] = { a: 'charge', auto: true };
+      settle(s, s0);
+      return s;
+    }
     if (!m || m.t !== 'act' || !Number.isInteger(m.p) || m.p < 0 || m.p >= s0.n) return null;
     const p = m.p;
     if (!this.canAct(s0, p) || m.r !== s0.round || !(m.a in COST)) return null;
@@ -106,20 +144,7 @@ export default {
     const s = clone(s0);
     s.step += 1;
     s.picks[p] = isAttack(m.a) ? { a: m.a, to: m.to } : { a: m.a };
-    if (activeList(s).every((q) => s.picks[q] !== null)) {
-      const picks = s.picks;
-      const { hit, ev } = resolve(s, picks);
-      for (const q of activeList(s)) s.charge[q] += picks[q].a === 'charge' ? 1 : -COST[picks[q].a];
-      s.last = { round: s.round, picks, charge: s0.charge.slice(), hit, ev, out: [] };
-      for (const q of hit) {
-        s.life[q] -= 1;
-        if (!s.life[q]) { s.outAt[q] = s.round; s.last.out.push(q); }
-      }
-      if (activeList(s).length === 0) s.draw = true; // 残っていた人が同じ回に全員抜けた
-      else if (s.round >= LIMIT && activeList(s).length > 1) s.draw = true;
-      s.round += 1;
-      s.picks = Array(s.n).fill(null);
-    }
+    if (activeList(s).every((q) => s.picks[q] !== null)) settle(s, s0);
     return s;
   },
 
@@ -155,6 +180,8 @@ export default {
     const res = this.result(s);
     const L = s.last;
     const lives = s.rules.lives;
+    // 動き（開いた回の帯・揺れ）は、一斉に開いた直後だけ。だれかが選んだだけの描き直しでは動かさない（2026-10-26 本人の声）
+    const anim = o.fresh && s.picks.every((x) => x === null);
 
     root.innerHTML = '';
     root.className = 'board tb';
@@ -162,7 +189,7 @@ export default {
     // 前の回に起きたこと
     if (L) {
       const banner = document.createElement('div');
-      banner.className = 'tb-last' + (L.hit.length ? ' hit' : '') + (o.fresh ? ' pop' : '');
+      banner.className = 'tb-last' + (L.hit.length ? ' hit' : '') + (anim ? ' pop' : '');
       const head = document.createElement('div');
       head.className = 'tb-last-head';
       head.textContent = `${L.round}回目`;
@@ -175,7 +202,8 @@ export default {
         return `${a} → ${nameP(e.to)}の大ビームに負けた`;
       });
       if (!lines.length) lines.push('だれも撃たなかった');
-      for (const q of L.out) lines.push(`${nameP(q)}は抜けた`);
+      for (const q of L.picks.map((x, q) => (x?.auto ? q : -1)).filter((q) => q >= 0)) lines.push(`${nameP(q)}は時間切れで「ため」`);
+      for (const q of L.out) lines.push(`${nameP(q)}はやられた`);
       for (const t of lines) {
         const d = document.createElement('div');
         d.textContent = t;
@@ -188,19 +216,19 @@ export default {
     const grid = document.createElement('div');
     grid.className = 'tb-players';
     const seats = me === null ? Array.from({ length: s.n }, (_, p) => p) : Array.from({ length: s.n }, (_, k) => (me + k) % s.n);
-    // 順位: 自分より上（残っている・自分より後の回に抜けた）人の数 + 1。同じ回に抜けた人は同じ順位
+    // 順位: 自分より上（残っている・自分より後の回にやられた）人の数 + 1。同じ回にやられた人は同じ順位
     const later = (q, p) => (active(s, q) ? !active(s, p) : !active(s, p) && s.outAt[q] > s.outAt[p]);
     const rankOf = (p) => s.life.filter((_, q) => later(q, p)).length + 1;
     for (const p of seats) {
       const box = document.createElement('div');
       const out = !active(s, p);
-      box.className = 'tb-player' + (p === me ? ' mine' : '') + (out ? ' out' : '') + (L && L.hit.includes(p) && o.fresh ? ' shake' : '');
+      box.className = 'tb-player' + (p === me ? ' mine' : '') + (out ? ' out' : '') + (L && L.hit.includes(p) && anim ? ' shake' : '');
       const head = document.createElement('div');
       head.className = 'tb-name';
       head.textContent = nameP(p);
       const tags = [];
       if (res && !res.draw) tags.push(['rank', `${rankOf(p)}位`]);
-      else if (out) tags.push(['rank', '抜けた']);
+      else if (out) tags.push(['rank', 'やられた']);
       if (!res && !out) tags.push(s.picks[p] !== null ? ['ok', '選んだ✓'] : ['away', '考え中…']);
       if (o.away[p]) tags.push(['away', '応答なし']);
       else if (o.sub?.[p]) tags.push(['away', 'CPU が代わりに']);
@@ -213,7 +241,7 @@ export default {
       box.append(head);
       // 前の回に出した技
       const act = document.createElement('div');
-      act.className = 'tb-act' + (o.fresh ? ' pop' : '');
+      act.className = 'tb-act' + (anim ? ' pop' : '');
       const pk = L && L.picks[p];
       act.textContent = pk ? `${ICON[pk.a]} ${LABEL[pk.a]}${isAttack(pk.a) ? ` → ${nameP(pk.to)}` : ''}` : '　';
       box.append(act);
@@ -225,11 +253,14 @@ export default {
     }
     root.append(grid);
 
+    // 選ぶ時間の帯（各自の画面に出てからの時間。締め切りはホストの時計）
+    if (s.rules.time && !res) root.append(timeBar(`tb:${s.seed}:${s.round}`, s.rules.time * 1000, { secs: true }));
+
     if (me === null || res) return;
     if (!active(s, me)) {
       const p = document.createElement('p');
       p.className = 'cc-log';
-      p.textContent = '抜けました。ほかの人が終わるまで見ていてください';
+      p.textContent = 'やられました。ほかの人が終わるまで見ていてください';
       root.append(p);
       return;
     }

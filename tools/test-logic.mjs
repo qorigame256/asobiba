@@ -2051,6 +2051,18 @@ assert.equal(TB.result(u).draw, true, '全員同時に抜けたら引き分け')
 s = { ...TB.init(3, 0, { rules: { lives: 3 } }), charge: [1, 1, 0] };
 u = tbRound(s, [['beam', 2], ['beam', 2], ['charge']]);
 assert.deepEqual(u.life, [3, 3, 2], 'ライフ3なら1回で抜けない・1回に1つだけ減る');
+// 選ぶ時間: 締め切りで選んでいない人は「ため」になって開く。なしのときは締め切りの手を受け付けない
+assert.equal(TB.referee(TB.init(2, 0, { rules: {} })), null, '選ぶ時間なしなら締め切りは無い');
+assert.equal(TB.apply(TB.init(2, 0, { rules: {} }), { p: -1, t: 'timeout', r: 1 }), null, '選ぶ時間なしなら締め切りの手は反則');
+s = { ...TB.init(3, 7, { rules: { time: 10 } }), charge: [1, 0, 0] };
+assert.equal(TB.referee(s).ms, 11000, '10秒＋待ち1秒');
+t = TB.apply(s, { p: 0, t: 'act', r: 1, a: 'beam', to: 1 });
+assert.equal(TB.apply(t, { p: -1, t: 'timeout', r: 2 }), null, 'ほかの回の締め切りは反則');
+u = TB.apply(t, { p: -1, t: 'timeout', r: 1 });
+assert.equal(u.round, 2, '締め切りで開く');
+assert.deepEqual(u.charge, [0, 1, 1], '選ばなかった人はため');
+assert.deepEqual(u.life, [1, 0, 1], 'ためていた人に当たる');
+assert.equal(u.last.picks[2].auto, true, '自動で選んだ印');
 // CPU どうしで最後まで
 let tbRounds = 0;
 for (let k = 0; k < 300; k++) {

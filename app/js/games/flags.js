@@ -175,6 +175,30 @@ function speak(text) {
   } catch { /* 読み上げが使えない端末 */ }
 }
 
+// ほかの人の旗（2026-10-26 本人の依頼）。小さな旗で、いまの形（まだ動かしていなければ始めの形）を出す。
+// 答えは手の一覧で全員に届いているので、送るものは増やしていない。脱落した人は薄くする
+function othersEl(s, o, me, keys, shown) {
+  const box = document.createElement('div');
+  box.className = 'fl-others';
+  for (let p = 0; p < s.n; p++) {
+    if (p === me) continue;
+    const pose = s.ans[p] ?? startPose(s);
+    const e = document.createElement('div');
+    e.className = 'fl-o' + (isOut(s, p) && (!shown || s.out[p] < s.q) ? ' gone' : '') + (shown && s.last?.[p] ? (s.last[p].ok ? ' ok' : ' ng') : '');
+    const name = document.createElement('span');
+    name.className = 'fl-on';
+    name.textContent = o.names[p] ?? `プレイヤー${p + 1}`;
+    e.append(name);
+    for (const c of keys) {
+      const m = document.createElement('span');
+      m.className = `fl-m ${c}${pose[c] === 1 ? ' up' : ''}`;
+      e.append(m);
+    }
+    box.append(e);
+  }
+  return box;
+}
+
 function flagEl(color, up) {
   const e = document.createElement('div');
   e.className = `fl-flag ${color}${up ? ' up' : ''}`;
@@ -445,6 +469,7 @@ export default {
       flags.append(b);
     }
     root.append(flags);
+    root.append(othersEl(s, o, me, keys, shown));
 
     const msg = document.createElement('p');
     msg.className = 'cc-log';

@@ -1268,6 +1268,20 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .board button.fl-btn.playable { cursor: pointer; border-color: var(--accent); }
 .board button.fl-btn.playable:active { transform: scale(.97); }
 .fl-flag { position: relative; width: 100px; height: 170px; }
+/* ほかの人の旗（小さな旗。上げていると布が上に来る） */
+.fl-others { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.fl-o { display: flex; align-items: center; gap: 5px; padding: 4px 9px; border: 1.5px solid var(--line); border-radius: 999px; background: var(--panel); font-size: .82rem; }
+.fl-o.gone { opacity: .4; }
+.fl-o.ok { border-color: #2e9e55; }
+.fl-o.ng { border-color: #d9443a; }
+.fl-on { max-width: 7em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fl-m { position: relative; display: inline-block; width: 13px; height: 24px; }
+.fl-m::after { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: #8a7a66; }
+.fl-m::before { content: ''; position: absolute; left: 2px; top: 14px; width: 11px; height: 9px; border: 1px solid #8a7a66; box-sizing: border-box; transition: top .12s; }
+.fl-m.up::before { top: 0; }
+.fl-m.r::before { background: #e0342b; }
+.fl-m.w::before { background: #fff; }
+.fl-m.y::before { background: #f2c12e; }
 .fl-arm { position: absolute; left: 47px; bottom: 85px; width: 46px; height: 80px; transform-origin: 3px 100%; transform: rotate(155deg); transition: transform .15s; }
 .fl-pole { position: absolute; left: 0; top: 0; width: 6px; height: 80px; background: #8a6a43; border-radius: 3px; }
 .fl-cloth { position: absolute; left: 6px; top: 2px; width: 40px; height: 30px; border-radius: 0 3px 3px 0; }

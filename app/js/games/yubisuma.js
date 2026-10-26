@@ -117,6 +117,8 @@ export default {
     if (sel.key !== key) sel = { key, up: null, call: null };
     const res = this.result(s);
     const L = s.last;
+    // 動き（結果の帯・親指）は、一斉に開いた直後だけ。だれかが選んだだけの描き直しでは動かさない（2026-10-26 本人の声）
+    const anim = o.fresh && s.picks.every((x) => x === null);
 
     root.innerHTML = '';
     root.className = 'board ys';
@@ -124,7 +126,7 @@ export default {
     // 前の回の結果
     if (L) {
       const banner = document.createElement('div');
-      banner.className = 'ys-last' + (L.hit ? ' hit' : '') + (o.fresh ? ' pop' : '');
+      banner.className = 'ys-last' + (L.hit ? ' hit' : '') + (anim ? ' pop' : '');
       const parent = nameP(L.parent);
       let text = `${L.round}回目: 親の${parent}が「${L.call}」→ 上がった親指は ${L.total}本。`;
       if (!L.hit) text += 'はずれ';
@@ -161,7 +163,7 @@ export default {
       box.append(head);
       // 前の回に上げた親指（👍）と下げた手（✊）。抜けた人は何も出さない
       const thumbs = document.createElement('div');
-      thumbs.className = 'ys-thumbs' + (o.fresh ? ' pop' : '');
+      thumbs.className = 'ys-thumbs' + (anim ? ' pop' : '');
       const hands = L && L.ups[p] !== null ? L.hands[p] : s.hands[p];
       const up = L && L.ups[p] !== null ? L.ups[p] : 0;
       thumbs.textContent = hands ? '👍'.repeat(up) + '✊'.repeat(hands - up) : '🙌';

@@ -3,6 +3,7 @@
 // 的が1つも出ていないときに押すと −1点（あてずっぽうの連打を防ぐ）。
 // 的の出る時刻・場所・種類は seed から全員同じに作る。速さは各自の端末で「その的が出てから押すまで」を測る。
 // 同じ的を何人も押したら、測った時間がいちばん短い人のもの（通信で遅れて届いても、速ければ取り返せる）。
+// ほかの人が押した的も、自分の画面で的が出てからその人の時間がたつまでは消さない（loop の lost。2026-10-26）。
 //
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready →(3秒)→ go → play →(時間＋待ち)→ end
 // 詳細設定「動く的」（2026-10-06 本人の決定。最初はなし）: 的が出ている間ゆっくり動き、場のふちで跳ね返る。
@@ -145,7 +146,11 @@ function loop(token) {
   for (const tg of s.targets) {
     const mineGone = ui.tapped.has(tg.id);
     const best = s.best[tg.id];
-    const live = t >= tg.at && t < tg.at + tg.life && !best && !mineGone && s.phase === 'play';
+    // ほかの人が先に押していても、自分の画面でその人の速さ（best.ms）を過ぎるまでは的を残す（2026-10-26 本人の声「ホストが圧倒的に有利」）。
+    // 前は押した知らせが届いたらすぐ消していたので、通信の遅れ方によってはゲストの画面では出てすぐ消え、押す機会が無かった。
+    // 速さは各自の画面で的が出てからの時間で比べるので、残っている間に押せば取り返せる（apply が速い方を残す）
+    const lost = !!best && (best.p === me || t - tg.at > best.ms);
+    const live = t >= tg.at && t < tg.at + tg.life && !lost && !mineGone && s.phase === 'play';
     let e = ui.els.get(tg.id);
     if (live) {
       visible += 1;
