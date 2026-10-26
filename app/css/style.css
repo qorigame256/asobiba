@@ -1515,6 +1515,11 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .mc-pit.sown { box-shadow: inset 0 3px 6px rgba(0, 0, 0, .45), 0 0 0 2px #fff8; }
 .mc-pit.from { box-shadow: inset 0 3px 6px rgba(0, 0, 0, .45), 0 0 0 2px var(--accent); }
 .mc-pit.cap { box-shadow: inset 0 3px 6px rgba(0, 0, 0, .45), 0 0 0 3px #e04b3c; }
+/* 2回押して決める（2026-10-26）: 選んだ穴・石が入る穴・最後の石・とれる相手の穴 */
+.board .mc-pit.pv-from, .board button.mc-pit.pv-from { box-shadow: inset 0 3px 6px rgba(0, 0, 0, .45), 0 0 0 4px #ffd54a; transform: scale(1.06); }
+.board .mc-pit.pv-sown, .board button.mc-pit.pv-sown { box-shadow: inset 0 3px 6px rgba(0, 0, 0, .45), 0 0 0 3px #8fd3ff; }
+.board .mc-pit.pv-end, .board button.mc-pit.pv-end { box-shadow: inset 0 3px 6px rgba(0, 0, 0, .45), 0 0 0 5px #1e88e5; }
+.board .mc-pit.pv-cap, .board button.mc-pit.pv-cap { box-shadow: inset 0 3px 6px rgba(0, 0, 0, .45), 0 0 0 5px #e04b3c; }
 .mc-stones { display: flex; flex-wrap: wrap; justify-content: center; align-content: center; gap: 2px; width: 70%; height: 70%; }
 .mc-stones i { width: 22%; aspect-ratio: 1; border-radius: 50%; background: hsl(var(--h), 55%, 62%); box-shadow: inset -1px -1px 2px rgba(0, 0, 0, .3); }
 .mc-num { position: absolute; bottom: -2px; right: -2px; background: #fff; color: #2d2a26; border-radius: 999px; min-width: 1.6em; padding: 0 4px; font-size: .78rem; font-weight: 800; line-height: 1.5; text-align: center; }
@@ -1525,13 +1530,15 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 /* ---------- お絵描き当て ---------- */
 [data-game="oekaki"] .board { width: min(100%, 560px); }
 .oe { display: flex; flex-direction: column; gap: 10px; }
-.oe-topic { background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 8px 12px; text-align: center; }
+.oe-topic { background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 8px 12px; text-align: center; position: sticky; top: env(safe-area-inset-top); z-index: 5; } /* お題はスクロールしても上に残す（2026-10-26 本人の依頼） */
 .oe-topic small { color: var(--muted); }
 .oe-word { font-size: 1.6rem; font-weight: 800; }
 .oe-hint { font-size: 1.3rem; letter-spacing: .2em; color: var(--muted); }
 .oe-wrap { width: min(100%, max(260px, calc(100dvh - 330px))); margin: 0 auto; }
 .oe-canvas { display: block; width: 100%; aspect-ratio: 1; background: #fff; border: 1.5px solid var(--line); border-radius: 10px; touch-action: none; }
 .oe-canvas.drawing { cursor: crosshair; border-color: var(--accent); }
+/* 描く人でなければ、絵の上を指でなぞっても画面が動く（2026-10-26 本人の依頼。描く人だけ none のまま） */
+.oe-canvas:not(.drawing) { touch-action: pan-y; }
 .oe-tools { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px 14px; }
 .oe-ink { display: flex; align-items: center; gap: 8px; max-width: 520px; margin: 6px auto; font-size: .85rem; color: var(--muted); } /* インクの量（詳細設定） */
 .oe-ink[hidden] { display: none; }

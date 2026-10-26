@@ -29,6 +29,17 @@ const side = (s, p) => s.pits.slice(pitOf(s, p, 0), storeOf(s, p));
 const legal = (s) => Array.from({ length: holesOf(s) }, (_, k) => k).filter((k) => s.pits[pitOf(s, s.turn, k)] > 0);
 const HOLES = [6, 5, 4];
 
+let pick = { key: null, k: null }; // 2回押して決める: 1回目に選んだ穴（局面の鍵と、その人の何番目の穴か）
+
+// 選んだ穴の行き先の説明（石の数を隠す遊び方では出さない）
+function pickNote(s, pv) {
+  if (!pv) return '';
+  if (s.hide) return '　もう一度押すと決まります';
+  const l = pv.last;
+  const tail = l.extra ? '最後の石はゴールに入り、もう1回打てます' : l.capture ? `最後の石で${l.capture.got - 1}個とれます（赤い穴）` : '最後の石は太い枠の穴に入ります';
+  return `　👉 ${tail}。もう一度押すと決まります`;
+}
+
 const game = {
   id: 'mancala',
   name: 'マンカラ',
@@ -164,6 +175,16 @@ const game = {
   render(root, s, o) {
     const res = this.result(s);
     const np = nOf(s);
+    // 2回押して決める（2026-10-26 本人の依頼）: 1回目で選び、石の行き先（最後の石が入る穴）ととれる相手の穴を見せる。同じ穴をもう一度押すと打つ。
+    // 選びはこの端末だけ（局面が変わったら消す）。石の数を隠す遊び方では、行き先を見せると数が分かるので、選んだ穴だけ光らせる（Claude の判断）
+    const sKey = `${s.count}:${s.turn}:${s.pits.join()}`;
+    if (pick.key !== sKey) pick = { key: sKey, k: null };
+    const pv = pick.k !== null && o.canMove && !res ? this.apply(s, pick.k) : null;
+    const pvSown = new Set(pv && !s.hide ? pv.last.sown : []);
+    const pvEnd = pv && !s.hide ? pv.last.sown.at(-1) : null;
+    const pvCap = new Set(pv && !s.hide && pv.last.capture ? [pv.last.capture.at, ...pv.last.capture.opp] : []);
+    const pvFrom = pv ? pitOf(s, s.turn, pick.k) : null;
+    const redraw = () => this.render(root, s, o);
     const bottom = Number.isInteger(o.view) && o.view >= 0 && o.view < np ? o.view : Number.isInteger(o.me) && o.me > 0 && o.me < np ? o.me : 0; // 自分の側を下に。盤の向きを変えた（⇅）ときは o.view の人が下
     const top = 1 - bottom;
     root.innerHTML = '';
@@ -179,11 +200,16 @@ const game = {
       const e = document.createElement(can ? 'button' : 'div');
       if (can) {
         e.type = 'button';
-        e.onclick = () => o.onMove(k);
+        e.onclick = () => {
+          if (pick.k === k) { pick = { key: null, k: null }; o.onMove(k); return; }
+          pick = { key: sKey, k };
+          redraw();
+        };
         e.setAttribute('aria-label', hide ? `${k + 1}番目の穴` : `${k + 1}番目の穴（石${s.pits[i]}個）`);
       }
       e.className = 'mc-pit p' + owner + (store ? ' store' : '') + (can ? ' playable' : '') + (sown.has(i) ? ' sown' : '')
-        + (s.last?.from === i ? ' from' : '') + (s.last?.capture && (s.last.capture.at === i || [s.last.capture.opp].flat().includes(i)) ? ' cap' : '');
+        + (s.last?.from === i ? ' from' : '') + (s.last?.capture && (s.last.capture.at === i || [s.last.capture.opp].flat().includes(i)) ? ' cap' : '')
+        + (i === pvFrom ? ' pv-from' : '') + (pvSown.has(i) ? ' pv-sown' : '') + (i === pvEnd ? ' pv-end' : '') + (pvCap.has(i) && i !== pv?.last.capture?.at ? ' pv-cap' : '');
       const stones = document.createElement('div');
       stones.className = 'mc-stones';
       const shown = hide ? s.pits[i] : Math.min(s.pits[i], store ? 0 : 12);
@@ -243,7 +269,7 @@ const game = {
         put(pitEl(storeOf(s, owner), owner), to, 13.5);
       });
       root.append(tri);
-      if (!res) note.textContent = `下の辺が${meName}の穴、右下の角がゴール。石は反時計回りに配ります（ほかの人のゴールは飛ばす）${secret}`;
+      if (!res) note.textContent = pv ? pickNote(s, pv).trim() : `下の辺が${meName}の穴、右下の角がゴール。石は反時計回りに配ります（ほかの人のゴールは飛ばす）${secret}`;
       root.append(note);
       return;
     }
@@ -263,7 +289,7 @@ const game = {
     mid.append(rowTop, rowBottom);
     wrap.append(mid, pitEl(storeOf(s, bottom), bottom)); // 右はし = 下の人のゴール
     root.append(wrap);
-    if (!res) note.textContent = `下の列が${meName}の穴、右はしがゴール。石は反時計回りに配ります${secret}`;
+    if (!res) note.textContent = pv ? pickNote(s, pv).trim() : `下の列が${meName}の穴、右はしがゴール。石は反時計回りに配ります${secret}`;
     root.append(note);
   },
 };

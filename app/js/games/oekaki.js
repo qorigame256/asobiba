@@ -461,7 +461,8 @@ function build(root, s, key, res) {
     b.style.setProperty('--c', col);
     b.title = COLOR_NAMES[i];
     b.setAttribute('aria-label', COLOR_NAMES[i]);
-    if (i === COLORS.length - 1) b.textContent = '🧽';
+    // 消しゴムは消しゴムの絵（2026-10-26 本人の依頼。前はスポンジの絵文字 🧽 だった）。絵文字に消しゴムが無いので SVG で描く
+    if (i === COLORS.length - 1) b.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><g transform="rotate(-35 12 12)"><rect x="3" y="8" width="18" height="8" rx="2" fill="#f48fb1" stroke="#555" stroke-width="1.2"/><rect x="3" y="8" width="7" height="8" rx="2" fill="#cfe8ff" stroke="#555" stroke-width="1.2"/></g></svg>';
     b.onclick = () => { ui.c = i; syncTools(); };
     colors.append(b);
   });
@@ -511,6 +512,9 @@ function build(root, s, key, res) {
   ok.type = 'submit';
   ok.className = 'btn primary';
   ok.textContent = '答える';
+  // 「答える」を押しても入力欄から外れないようにする（2026-10-26 本人の声「誤答したあと、キーボードで再入力ができない」。
+  // スマホではボタンに移るとキーボードが閉じるため。mousedown を止めると、押してもフォーカスが入力欄に残る）
+  ok.addEventListener('mousedown', (e) => e.preventDefault());
   ui.form.append(input, ok);
   ui.form.onsubmit = (e) => {
     e.preventDefault();

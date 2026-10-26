@@ -1571,10 +1571,12 @@ function turnBand(game, st, res) {
     const label = !game.multi ? game.players?.[i] : null;
     const mark = document.createElement('span');
     mark.className = 'turn-mark';
-    mark.textContent = label ? (COLOR_DOT[label] ?? label) : String(i + 1);
+    // 印は色の丸か短い記号（○・× など）。「先手」のような言葉は席の番号にし、同じ画面の対局では名前の所に言葉を出す
+    const sym = label ? COLOR_DOT[label] ?? ([...label].length <= 1 ? label : null) : null;
+    mark.textContent = sym ?? String(i + 1);
     const who = document.createElement('span');
     who.className = 'turn-name';
-    who.textContent = S.mode === 'online' ? (i === me ? 'あなた' : nameOf(S.order[i])) : label ?? `${i + 1}番`;
+    who.textContent = S.mode === 'online' ? (i === me ? 'あなた' : nameOf(S.order[i])) : label && label !== sym ? label : `${i + 1}番`;
     card.append(mark, who);
     band.append(card);
   });

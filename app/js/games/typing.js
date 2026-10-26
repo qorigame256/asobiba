@@ -46,7 +46,8 @@ export function pointsOf(times) {
 const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice() });
 
 const cpuPlan = new Map();
-let ui = null; // { mount, wrap, chips, note, input, yomi }
+let ui = null; // { base, wrap, chips, card, note, form, input, mount, cur, sentQ, last, paint }
+const PREDICT_JUMP = 3; // 1回の入力でこれだけ増えたら予測変換と見る
 
 export default {
   id: 'typing',
@@ -78,7 +79,7 @@ export default {
   sound(a, b, m, me) {
     if (m.p === -1) return m.t === 'next' ? 'question' : (b.last.pts[me] ?? 0) === 3 ? 'correct' : 'pop';
     if (m.p === me) return 'correct';
-    return null;
+    return 'pop'; // ほかの人の正解（2026-10-26 本人の依頼。前は鳴らさなかった）
   },
   resultText(res, me, pn) { return winnersText(res.winners, me, pn); },
   phaseText(s) {
@@ -146,45 +147,123 @@ export default {
     return { t: 'type', q: s.q, text: s.qs[s.q][1][0], ms: Math.round(plan.at) };
   },
 
+  // 2026-10-26 本人の依頼で組み直した:
+  //   キーボードを開きっぱなしに: 入力欄は対局の間ずっと同じものを使い、問題が変わっても作り直さない・隠さない・押せなくしない（正解のあとと締め切りのあとは readOnly）。
+  //     スマホは入力欄が消えたり押せなくなったりするとキーボードが閉じるため。
+  //   打ち終わりの秒数を正解したらすぐ出す（点数の札の「正解！ 2.34秒」）。
+  //   予測変換が強すぎる: 1回の入力で3文字以上増えたら予測変換（候補から選んだ）と見て、入れる前に戻す（PREDICT_JUMP。Claude の判断。
+  //     ふつうに打つと1回に増えるのは1〜2文字。漢字に変換すると文字は減るので引っかからない。貼り付けも同じく戻る）。
   render(root, s, o) {
     const me = o.me >= 0 ? o.me : null;
     const shown = s.phase === 'shown' || s.phase === 'end';
     const won = s.phase === 'end' ? leaders(s.scores) : [];
     const extra = (p) => {
-      if (s.phase === 'open') return s.solved[p] !== null ? '<span class="pt-ok">正解！</span>' : '';
+      if (s.phase === 'open') return s.solved[p] !== null ? `<span class="pt-ok">正解！ ${secText(s.solved[p])}</span>` : '';
       if (!shown || !s.last || s.q < 0) return '';
       if (s.solved[p] === null) return '<span class="pt-ng">―</span>';
       const pt = s.last.pts[p];
       return `<span class="pt-ok">${secText(s.solved[p])}${pt ? ' +' + pt : ''}</span>`;
     };
     const chips = scoreChips(o, s.scores, { won, extra });
-    const mount = `${s.seed}:${s.q}:${s.phase}:${me}:${me !== null && s.solved[me] !== null}`;
-    // 同じ問題・同じ場面なら、点数の札だけ差し替える（入力欄を作り直すとスマホのキーボードが閉じる）
-    if (ui?.mount === mount && root.contains(ui.wrap)) {
+
+    // 対局（種）と自分の席が同じなら、入れ物と入力欄はそのまま使う
+    const base = `${s.seed}:${me}`;
+    if (ui?.base === base && root.contains(ui.wrap)) {
       ui.chips.replaceWith(chips);
       ui.chips = chips;
-      this.note(s, me);
-      return;
+    } else {
+      root.innerHTML = '';
+      root.className = 'board kj';
+      const wrap = document.createElement('div');
+      wrap.className = 'kj-wrap';
+      const card = document.createElement('div');
+      card.className = 'kj-card';
+      const note = document.createElement('p');
+      note.className = 'cc-log';
+      wrap.append(chips, card);
+      ui = { base, wrap, chips, card, note, mount: null, form: null, input: null, cur: null, sentQ: -1, last: '' };
+      if (me !== null) {
+        const form = document.createElement('form');
+        form.className = 'kj-form';
+        form.innerHTML = '<input type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="send" maxlength="80" placeholder="ここに打つ"><button type="submit" class="btn primary">送る</button>';
+        const input = form.querySelector('input');
+        const btn = form.querySelector('button');
+        btn.addEventListener('mousedown', (e) => e.preventDefault()); // 押しても入力欄から外れない（キーボードを閉じない）
+        input.oninput = () => {
+          const grew = [...input.value].length - [...ui.last].length;
+          if (grew >= PREDICT_JUMP) {
+            input.value = ui.last;
+            ui.note.textContent = '予測変換（候補から選ぶ）は使えません。1文字ずつ打ってください';
+            return;
+          }
+          ui.last = input.value;
+          ui.paint?.(input.value);
+          trySend(false);
+        };
+        form.onsubmit = (e) => { e.preventDefault(); trySend(true); };
+        ui.form = form;
+        ui.input = input;
+        wrap.append(form);
+      }
+      wrap.append(note);
+      root.append(wrap);
     }
 
-    root.innerHTML = '';
-    root.className = 'board kj';
-    const wrap = document.createElement('div');
-    wrap.className = 'kj-wrap';
-    wrap.append(chips);
-    ui = { mount, wrap, chips };
-    const card = document.createElement('div');
-    card.className = 'kj-card';
-    wrap.append(card);
-    root.append(wrap);
+    // 場面（何問目・どの段階・自分が正解したか）が変わったら、お題の札と入力欄の状態を替える
+    const mine = me !== null && s.solved[me] !== null;
+    const mount = `${s.q}:${s.phase}:${mine}`;
+    ui.cur = { s, o, me };
+    if (ui.mount !== mount) {
+      const newQ = !ui.mount || ui.mount.split(':')[0] !== String(s.q);
+      ui.mount = mount;
+      this.card(s, me);
+      if (ui.input) {
+        if (newQ) { ui.input.value = ''; ui.last = ''; ui.note.textContent = ''; }
+        ui.input.readOnly = !(s.phase === 'open' && !mine);
+        ui.form.querySelector('button').disabled = ui.input.readOnly;
+        ui.form.hidden = s.phase === 'end'; // 終わったら隠す（もうキーボードは要らない）
+        if (s.phase === 'open' && !mine) {
+          const q = s.q;
+          const key = qKey(s);
+          setTimeout(() => {
+            if (!ui?.input || ui.cur.s.q !== q || ui.cur.s.phase !== 'open' || ui.sentQ === q) return;
+            ui.input.readOnly = true;
+            ui.form.querySelector('button').disabled = true;
+            ui.note.textContent = '時間切れ！';
+          }, Math.max(0, limitOf(s) - since(key)));
+        }
+      }
+    }
+    this.note(s, me);
+    // スマホは勝手にキーボードを出さない（最初に入力欄を押してもらえば、そのあとは開いたまま）。「ゲームを変える」の一覧を開いているときも取り上げない（一覧が閉じる）
+    if (ui.input && !ui.input.readOnly && !matchMedia('(pointer: coarse)').matches && document.activeElement?.tagName !== 'SELECT') ui.input.focus();
 
+    function trySend(byEnter) {
+      const { s: cur, o: co } = ui.cur;
+      if (cur.phase !== 'open' || ui.sentQ === cur.q || ui.input.readOnly) return;
+      const text = ui.input.value;
+      const ms = Math.round(since(qKey(cur)));
+      if (ms > limitOf(cur)) return;
+      if (isRight(cur.qs[cur.q], text)) {
+        ui.sentQ = cur.q;
+        ui.input.readOnly = true;
+        co.onMove({ t: 'type', q: cur.q, text: text.slice(0, 80), ms });
+      } else if (byEnter && text.trim()) {
+        ui.note.textContent = 'ちがうところがあります。直してください';
+      }
+    }
+  },
+
+  // お題の札（漢字まじりの文・読み・残り時間）
+  card(s, me) {
+    const card = ui.card;
+    ui.paint = null;
     if (s.phase === 'ready') {
-      card.innerHTML = '<div class="kj-word small">よーい…</div><div class="kj-sub">ひらがなでも漢字でも、正しく打てたら自動で送られます</div>';
+      card.innerHTML = '<div class="kj-word small">よーい…</div><div class="kj-sub">ひらがなでも漢字でも、正しく打てたら自動で送られます。入力欄を一度押しておくと、キーボードが出たままになります</div>';
       return;
     }
     const [word, yomis] = s.qs[s.q];
     const key = qKey(s);
-    const limit = limitOf(s);
     card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${TOTAL}</div><div class="ty-word"></div><div class="ty-yomi"></div>`;
     card.querySelector('.ty-word').textContent = word;
     const yomiEl = card.querySelector('.ty-yomi');
@@ -198,50 +277,12 @@ export default {
       ok.textContent = yomi.slice(0, k);
       yomiEl.append(ok, yomi.slice(k));
     };
-    paintYomi('');
+    paintYomi(s.phase === 'open' && ui.input ? ui.input.value : '');
     if (s.phase === 'open') {
+      ui.paint = paintYomi;
       since(key); // 画面に出た時刻を覚える
-      card.append(timeBar(key, limit));
+      card.append(timeBar(key, limitOf(s)));
     }
-
-    const note = document.createElement('p');
-    note.className = 'cc-log';
-    ui.note = note;
-
-    if (s.phase === 'open' && me !== null && s.solved[me] === null) {
-      const form = document.createElement('form');
-      form.className = 'kj-form';
-      form.innerHTML = '<input type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="send" maxlength="80" placeholder="ここに打つ"><button type="submit" class="btn primary">送る</button>';
-      const input = form.querySelector('input');
-      let sent = false;
-      const trySend = (byEnter) => {
-        if (sent) return;
-        const text = input.value;
-        const ms = Math.round(since(key));
-        if (ms > limit) return;
-        if (isRight(s.qs[s.q], text)) {
-          sent = true;
-          input.disabled = true;
-          o.onMove({ t: 'type', q: s.q, text: text.slice(0, 80), ms });
-        } else if (byEnter && text.trim()) {
-          note.textContent = 'ちがうところがあります。直してください';
-        }
-      };
-      input.oninput = () => { paintYomi(input.value); trySend(false); };
-      form.onsubmit = (e) => { e.preventDefault(); trySend(true); };
-      ui.input = input;
-      wrap.append(form);
-      setTimeout(() => {
-        if (!form.isConnected || sent) return;
-        input.disabled = true;
-        form.querySelector('button').disabled = true;
-        note.textContent = '時間切れ！';
-      }, Math.max(0, limit - since(key)));
-    }
-    wrap.append(note);
-    this.note(s, me);
-    // スマホは勝手にキーボードを出さない。「ゲームを変える」の一覧を開いているときも取り上げない（一覧が閉じる）
-    if (ui.input && !matchMedia('(pointer: coarse)').matches && document.activeElement?.tagName !== 'SELECT') ui.input.focus();
   },
 
   // 入力欄の下の案内
