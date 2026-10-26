@@ -58,6 +58,13 @@ const E_WALL = 0.9;
 const E_HIT = 0.9;
 const STEP = 1 / 240;
 const SEND_MS = 40; // オンラインで位置を送る間隔
+// 2026-10-26 本人の声「3人だととても重い」への対策（Claude の判断。本物の中継サーバーでは測れていない）:
+//   パックを1つも持っていない端末は、マレットの位置を SEND_IDLE_MS おきにしか送らない（ほかの陣地のマレットは見た目だけで、当たりには使わないため）。
+//   3人では送る端末が3台になり、中継サーバーを通る数が2人の1.5倍以上になるので、まずそれを減らす。
+//   ほかの端末が持っているパックの位置は、届くたびに飛び移らず、差の半分ずつ寄せる（SMOOTH。遠く離れていたら飛び移る）。
+const SEND_IDLE_MS = 90;
+const SMOOTH = 0.5;
+const SNAP_DIST = 0.15;
 const GOAL_PAUSE = 1.2;
 
 // 3人の六角形の盤（中心が原点。角は 0°・60°…の向きで、上下の辺が平ら）。
@@ -1145,7 +1152,15 @@ function mount(root, opts) {
         // 持ち主を渡された・持ち主から位置が届いた（自分が持ち主の間は、ほかから届いた位置を使わない）
         if (!dv.includes(net.owners[i]) && (dv.includes(o) || by.includes(o))) {
           net.owners[i] = o;
-          st.pucks[i] = advance({ x: e[0], y: e[1], vx: e[2], vy: e[3] }, lead());
+          const next = advance({ x: e[0], y: e[1], vx: e[2], vy: e[3] }, lead());
+          const q = st.pucks[i];
+          // 持ち主から届いた位置へは、差の半分ずつ寄せる（届く間隔のゆれでパックが飛んで見えないように）。渡されたとき・遠いときはそのまま
+          if (!dv.includes(o) && q && Math.hypot(next.x - q.x, next.y - q.y) < SNAP_DIST) {
+            q.x += (next.x - q.x) * SMOOTH;
+            q.y += (next.y - q.y) * SMOOTH;
+            q.vx = next.vx;
+            q.vy = next.vy;
+          } else st.pucks[i] = next;
         }
       });
     }
@@ -1200,7 +1215,8 @@ function mount(root, opts) {
       }
     }
     bumpSound(ev);
-    if (dv.length && now - net.lastSend > SEND_MS) sendState(now, false, dv);
+    const holding = net.owners.some((o, i) => dv.includes(o) || (net.handed[i] === o && net.said[o]?.[i] !== o));
+    if (dv.length && now - net.lastSend > (holding ? SEND_MS : SEND_IDLE_MS)) sendState(now, false, dv);
   }
 
   function sendState(now, handoff, dv) {
