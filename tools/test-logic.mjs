@@ -5658,6 +5658,46 @@ assert.ok(sonarUsed >= 40, 'CPU もソナーを使う: ' + sonarUsed);
   }
   assert.ok(salvoMoves > 300, 'サルボの手を数えた: ' + salvoMoves);
 }
+// 海戦ゲームの3人（2026-10-26）: 1発で残っている2人の海の同じマスに当たる。全部沈められた人は脱落し、最後に残った人の勝ち
+{
+  assert.equal(KS.seatCount({ players: 3 }), 3);
+  assert.equal(KS.seatCount({}), 2);
+  assert.equal(KS.init({ rules: {} }).np, undefined, '2人の局面は前と同じ形');
+  const fleet = [[0, 0, false], [1, 0, false], [2, 0, false], [3, 0, false], [4, 0, false]]; // 5・4・3・3・2 を左上から1段ずつ
+  const other = [[5, 0, false], [6, 0, false], [7, 0, false], [8, 0, false], [9, 0, false]];
+  let k3 = KS.init({ rules: { players: 3 } });
+  k3 = KS.apply(k3, { t: 'place', ships: fleet });
+  k3 = KS.apply(k3, { t: 'place', ships: fleet });
+  assert.equal(k3.phase, 'place', '3人目が並べるまで撃てない');
+  k3 = KS.apply(k3, { t: 'place', ships: other });
+  assert.equal(k3.phase, 'fire');
+  let t3 = KS.apply(k3, 0); // 0 が (0,0) を撃つ: 1 の海は当たり、2 の海ははずれ
+  assert.deepEqual(t3.last.hits, [1], '同じマスを残っている2人の海に撃つ');
+  assert.equal(t3.turn, 1);
+  assert.equal(KS.apply(t3, 0) !== null, true, 'ほかの人は同じマスを撃てる');
+  // 1 と 2 の船を全部沈めると 0 の勝ち（1発で2人とも脱落したら同じ順位）
+  let w3 = { ...k3, grid: [k3.grid[0], k3.grid[0], k3.grid[0]] };
+  const cells = k3.grid[0].map((g, i) => (g >= 0 ? i : -1)).filter((i) => i >= 0);
+  for (const c of cells.slice(0, -1)) w3 = { ...w3, shots: [w3.shots[0].map((x, i) => x || i === c), w3.shots[1], w3.shots[2]] };
+  w3 = KS.apply({ ...w3, turn: 0 }, cells[cells.length - 1]);
+  assert.equal(w3.won, 0, '1発で2人とも脱落させたら撃った人の勝ち');
+  assert.deepEqual(KS.result(w3).place, [1, 2, 2], '同じ手で脱落した2人は同じ順位');
+  // CPU どうしで最後まで（反則なし・必ず決着・勝った人だけが残る）
+  for (let g = 0; g < 12; g++) {
+    let st = KS.init({ rules: { players: 3, size: g % 2 ? 8 : 10, apart: g % 3 ? 'off' : 'on' } });
+    let steps = 0;
+    while (!KS.result(st)) {
+      const m = KS.cpu(st, st.turn, { cpu: ['weak', 'normal', 'strong'][g % 3] });
+      const next = KS.apply(st, m);
+      assert.ok(next, '海戦ゲーム（3人）の CPU が反則の手を出した');
+      st = next;
+      if (++steps > 1000) throw new Error('海戦ゲーム（3人）が終わらない');
+    }
+    const r = KS.result(st);
+    assert.equal(st.out.filter((x) => !x).length, 1, '残るのは1人');
+    assert.equal(r.place[r.winner], 1);
+  }
+}
 console.log('kaisen OK');
 
 // ---------- 弾幕回避 ----------
