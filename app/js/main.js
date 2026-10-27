@@ -1048,7 +1048,7 @@ const READING = {
   hitblow: 'ひっとあんどぶろー すうじ', sensou: 'せんそう わりばし ゆび てあそび', yubisuma: 'ゆびすま てあそび', tamebeam: 'ためてびーむ てあそび', memory: 'しんけいすいじゃく ' + CARD_WORDS,
   yacht: 'よっと さいころ', seri: 'せりあい ' + CARD_WORDS, nim: 'いしとりげーむ', flags: 'はたあげ', kanji: 'なんどくかんじ くいず', make10: 'てんぱずる めいくてん すうじ けいさん さんすう', targets: 'まとのはやおし まとあて',
   pittari: 'ぴったりすとっぷ', kioku: 'きおくりれー', typing: 'たいぴんぐはやうち', danmaku: 'だんまくかいひ あくしょん', tamaire: 'たまいれ あくしょん', machigai: 'まちがいさがし',
-  bombs: 'にしょくばくだんさばいばる あくしょん', umigame: 'うみがめのすーぷ くいず', wordwolf: 'わーどうるふ', ishin: 'いしんでんしん くいず', jinro: 'じんろう', oekaki: 'おえかきあて え', hockey: 'えあほっけー あくしょん',
+  bombs: 'にしょくばくだんさばいばる あくしょん', umigame: 'うみがめのすーぷ くいず', wordwolf: 'わーどうるふ', ishin: 'いしんでんしん くいず', karuta: 'ことわざかるた はやとり', acchi: 'あっちむいてほい じゃんけん てあそび', daruma: 'だるまさんがころんだ あくしょん', slide: 'じゅうごぱずる すらいどぱずる すうじ', nanpure: 'なんぷれ なんばーぷれーす すうじ ぱずる', jinro: 'じんろう', oekaki: 'おえかきあて え', hockey: 'えあほっけー あくしょん',
   hasami: 'はさみしょうぎ ばん', shogi: 'しょうぎ ばん', mahjong: 'まーじゃん',
 };
 const toHira = (t) => String(t ?? '').toLowerCase().replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60)).replace(/\s+/g, '');

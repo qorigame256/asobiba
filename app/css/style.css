@@ -1339,6 +1339,49 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .mk-rv-ex { color: #2f8a4a; font-weight: 700; overflow-wrap: anywhere; }
 .mk-rv-ex small { color: var(--muted); font-weight: 400; margin-left: 4px; }
 .mk-rv-who { font-size: .75rem; color: var(--muted); margin-left: auto; }
+
+/* ---------- ことわざかるた・15パズル早解き・ナンプレ早解き・だるまさんがころんだ・あっち向いてホイ（2026-10-28） ---------- */
+:is([data-game="karuta"], [data-game="slide"], [data-game="nanpure"], [data-game="daruma"]) .board { width: min(100%, 560px); }
+.kr-top { font-size: clamp(1.6rem, 8vw, 2.4rem); font-weight: 800; min-height: 1.5em; margin: 4px 0 6px; font-family: "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", serif; }
+.kr-field { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; touch-action: manipulation; }
+@media (max-width: 480px) { .kr-field { grid-template-columns: repeat(2, 1fr); } }
+.board button.kr-card { min-height: 64px; padding: 8px 6px; border-radius: 10px; border: 2px solid #b9a88a; background: #fffaf0; color: #2d2a26; font: inherit; font-size: 1.05rem; font-weight: 700; line-height: 1.35; cursor: pointer; font-family: "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", serif; }
+.board button.kr-card:disabled { cursor: default; }
+.board button.kr-card.empty { visibility: hidden; }
+.board button.kr-card.hit { background: #d8f2df; border-color: #2f8a4a; }
+.board button.kr-card.miss { background: #f8d9d4; border-color: #c0392b; }
+.ac-choices { gap: 10px; }
+.board button.ac-choice { min-width: 64px; height: 64px; font-size: 2rem; }
+.sl-grid { --n: 4; display: grid; grid-template-columns: repeat(var(--n), 1fr); gap: 6px; width: min(100%, 360px); margin: 0 auto; touch-action: manipulation; }
+.board button.sl-tile { aspect-ratio: 1; border-radius: 10px; border: 2px solid var(--line); background: var(--field); color: var(--ink); font: inherit; font-size: clamp(1.3rem, 7vw, 2rem); font-weight: 800; cursor: pointer; }
+.board button.sl-tile.ok { border-color: #2f8a4a; }
+.board button.sl-tile.blank { visibility: hidden; }
+.board button.sl-tile:disabled { cursor: default; }
+.np-grid { --n: 9; display: grid; grid-template-columns: repeat(var(--n), 1fr); width: min(100%, 420px); margin: 0 auto; border: 2.5px solid var(--ink); touch-action: manipulation; }
+.board button.np-cell { aspect-ratio: 1; padding: 0; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--field); color: var(--accent); font: inherit; font-size: clamp(1rem, 5vw, 1.5rem); font-weight: 700; cursor: pointer; min-width: 0; }
+.board button.np-cell.given { color: var(--ink); font-weight: 800; }
+.board button.np-cell.br { border-right: 2.5px solid var(--ink); }
+.board button.np-cell.bb { border-bottom: 2.5px solid var(--ink); }
+.board button.np-cell.near { background: var(--cool, #eef3f8); }
+.board button.np-cell.same { background: var(--hi, #fff1c2); }
+.board button.np-cell.sel { background: var(--soft, #ffd9c7); }
+.board button.np-cell:disabled { cursor: default; }
+.np-pad { --n: 10; display: grid; grid-template-columns: repeat(var(--n), 1fr); gap: 5px; touch-action: manipulation; }
+.board .np-key { min-height: 48px; padding: 4px 0; font-size: 1.3rem; font-weight: 800; border-radius: 10px; }
+.dr-oni { display: flex; align-items: center; justify-content: center; gap: 12px; background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 10px; }
+.dr-face { font-size: 2.6rem; line-height: 1; transition: transform .15s; }
+.dr-face.look { transform: scale(1.25); }
+.dr-words { font-size: 1.3rem; font-weight: 800; min-width: 10em; }
+.dr-lanes { display: flex; flex-direction: column; gap: 6px; }
+.dr-lane { display: grid; grid-template-columns: 5.5em 1fr; align-items: center; gap: 8px; }
+.dr-lane.mine .dr-name { font-weight: 800; }
+.dr-name { font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dr-track { position: relative; height: 34px; background: var(--field); border: 1.5px solid var(--line); border-radius: 17px; margin-right: 26px; }
+.dr-track::after { content: "🧍"; position: absolute; right: -26px; top: 50%; transform: translateY(-50%); font-size: 1.3rem; }
+.dr-man { position: absolute; top: 50%; transform: translate(-50%, -50%) scaleX(-1); font-size: 1.5rem; transition: left .12s linear; }
+.dr-man.out { filter: grayscale(1); opacity: .5; }
+.board .dr-btn { min-height: 76px; font-size: 1.35rem; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: none; }
+.board .dr-btn.on { filter: brightness(.85); transform: scale(.98); }
 .is-topic { font-size: clamp(1.4rem, 6.5vw, 2rem); font-weight: 800; line-height: 1.4; margin: 4px 0 6px; }
 .is-groups { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; text-align: left; }
 .is-group { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 6px 10px; border: 1.5px solid var(--line); border-radius: 10px; }

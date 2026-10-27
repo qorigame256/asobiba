@@ -6415,4 +6415,197 @@ for (const id of GAME_ORDER) {
   console.log('ishin OK');
 }
 
+// 2026-10-28 の5つ（ことわざかるた・あっち向いてホイ・だるまさんがころんだ・15パズル早解き・ナンプレ早解き）
+// CPU どうしで最後まで: CPU の時計（performance.now）を進め、ホストと同じく鍵ごとに ms たってから進行の手を足す
+function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
+  const realNow = performance.now.bind(performance);
+  let fake = 0;
+  performance.now = () => fake;
+  try {
+    let st = G.init(n, seed, { rules });
+    let rk = null, rAt = 0;
+    for (let guard = 0; guard < guardMax && !G.result(st); guard++) {
+      fake += stepMs;
+      for (let p = 0; p < n; p++) { if (!G.canAct(st, p)) continue; const m = G.cpu(st, p); if (m) st = G.apply(st, { ...m, p }) ?? st; }
+      const r = G.referee?.(st);
+      if (r && r.key !== rk) { rk = r.key; rAt = fake; }
+      if (r && fake - rAt >= r.ms) st = G.apply(st, { ...r.move, p: -1 });
+    }
+    return st;
+  } finally {
+    performance.now = realNow;
+  }
+}
+
+// ことわざかるた: 札の後半が重ならない・読む札はいつも場にある・取るのはいちばん速い正解・お手つき・CPU どうしで最後まで
+{
+  const K = GAMES.karuta;
+  const { KOTOWAZA } = await import('../app/js/games/karuta-data.js');
+  const { deal } = await import('../app/js/games/karuta.js');
+  assert.equal(new Set(KOTOWAZA.map((x) => x[1])).size, KOTOWAZA.length, 'かるた: 同じ後半の札が2枚');
+  assert.ok(KOTOWAZA.length >= 20 && KOTOWAZA.every((x) => x.length === 3 && x.every((y) => typeof y === 'string' && y)), 'かるた: 札の形');
+  for (let seed = 0; seed < 30; seed++) {
+    const { reads, fields } = deal(seed, 20);
+    assert.equal(new Set(reads).size, 20, 'かるた: 同じ札を2回読まない');
+    reads.forEach((c, q) => { assert.ok(fields[q].includes(c), 'かるた: 読む札が場にある'); assert.equal(fields[q].length, 8); });
+  }
+  assert.deepEqual(K.init(3, 7, { rules: {} }), K.init(3, 7, { rules: {} }), '同じ種なら同じ札');
+  let s = K.init(3, 7, { rules: {} });
+  assert.equal(s.reads.length, 15);
+  s = K.apply(s, { p: -1, t: 'next' });
+  const right = s.reads[0];
+  const wrong = s.fields[0].find((c) => c !== null && c !== right);
+  s = K.apply(s, { p: 0, t: 'take', q: 0, c: wrong, ms: 500 });
+  assert.equal(s.miss[0], true, 'お手つき');
+  assert.equal(K.apply(s, { p: 0, t: 'take', q: 0, c: right, ms: 900 }), null, 'お手つきのあとは押せない');
+  s = K.apply(s, { p: 1, t: 'take', q: 0, c: right, ms: 2500 });
+  assert.equal(K.apply(s, { p: 1, t: 'take', q: 0, c: right, ms: 2500 }), null, '同じ手が2回届いても1回');
+  assert.equal(K.referee(s).ms, 1500, '正解が出たら1.5秒で締め切る');
+  s = K.apply(s, { p: 2, t: 'take', q: 0, c: right, ms: 1800 }); // あとから届いたが速い（席の番号も後ろ）
+  s = K.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [0, 0, 1], 'いちばん速い正解の人が取る（届いた順・席の順でない）');
+  const st = runCpus(K, 4, 3, { rounds: 10 }, 400);
+  assert.ok(K.result(st), 'かるた: CPU どうしで最後まで');
+  assert.equal(st.log.length, 10);
+  assert.ok(st.scores.reduce((a, b) => a + b, 0) >= 5, 'かるた: CPU も札を取る');
+  console.log('karuta OK');
+}
+
+// あっち向いてホイ: じゃんけんの勝ち負け・あいこ・指と同じ向きで指した人に1点・目標の点で終わり
+{
+  const A = GAMES.acchi;
+  const { jankenWinner } = await import('../app/js/games/acchi.js');
+  assert.equal(jankenWinner(['g', 'c']), 'g');
+  assert.equal(jankenWinner(['c', 'p', 'p']), 'c');
+  assert.equal(jankenWinner(['p', 'g']), 'p');
+  assert.equal(jankenWinner(['g', 'g']), null, '全員同じはあいこ');
+  assert.equal(jankenWinner(['g', 'c', 'p']), null, '3種類ともはあいこ');
+  let s = A.init(3, 1, { rules: {} });
+  s = A.apply(s, { p: 0, t: 'pick', r: 1, v: 'g' });
+  assert.equal(A.apply(s, { p: 0, t: 'pick', r: 1, v: 'c' }), null, '同じ回に2回は選べない');
+  assert.equal(A.apply(s, { p: 1, t: 'pick', r: 1, v: 'u' }), null, 'じゃんけんで向きは出せない');
+  s = A.apply(s, { p: 1, t: 'pick', r: 1, v: 'g' });
+  s = A.apply(s, { p: 2, t: 'pick', r: 1, v: 'c' });
+  assert.equal(s.phase, 'hoi');
+  assert.equal(s.r, 2);
+  s = A.apply(s, { p: 0, t: 'pick', r: 2, v: 'l' });
+  s = A.apply(s, { p: 1, t: 'pick', r: 2, v: 'u' });
+  s = A.apply(s, { p: 2, t: 'pick', r: 2, v: 'l' });
+  assert.deepEqual(s.scores, [1, 0, 0], '指と同じ向きを向かせた人に1点');
+  assert.equal(s.phase, 'janken');
+  // あいこ
+  let t = A.init(2, 1, { rules: {} });
+  t = A.apply(A.apply(t, { p: 0, t: 'pick', r: 1, v: 'p' }), { p: 1, t: 'pick', r: 1, v: 'p' });
+  assert.equal(t.phase, 'janken', 'あいこならもう一度じゃんけん');
+  assert.equal(t.last.win, null);
+  const st = runCpus(A, 4, 5, { goal: 5 }, 1000);
+  assert.ok(A.result(st) && Math.max(...st.scores) >= 5, 'あっち向いてホイ: CPU どうしで5点まで');
+  console.log('acchi OK');
+}
+
+// だるまさんがころんだ: 1回の長さは種で決まる・見つかったらスタート・進む長さの上限・着いたら終わり・CPU どうしで最後まで
+{
+  const D = GAMES.daruma;
+  const { cycleOf } = await import('../app/js/games/daruma.js');
+  assert.deepEqual(cycleOf(5, 3), cycleOf(5, 3));
+  for (let k = 0; k < 50; k++) {
+    const c = cycleOf(9, k);
+    assert.ok(c.walk >= 1800 && c.walk <= 5000 && c.look >= 1500 && c.look <= 3000, 'だるま: 1回の長さ');
+  }
+  let s = D.init(3, 4, { rules: { length: 'short' } });
+  s = D.apply(s, { p: -1, t: 'next' });
+  assert.equal(s.phase, 'run');
+  const max = Math.floor((cycleOf(4, 0).walk * 10) / 1000) + 1;
+  assert.equal(D.apply(s, { p: 0, t: 'cyc', k: 0, d: max + 1, out: false }), null, '鬼が言っている間より長くは進めない');
+  s = D.apply(s, { p: 0, t: 'cyc', k: 0, d: 20, out: false });
+  assert.equal(D.apply(s, { p: 0, t: 'cyc', k: 0, d: 20, out: false }), null, '同じ回に2回送れない');
+  s = D.apply(s, { p: 1, t: 'cyc', k: 0, d: 25, out: true });
+  s = D.apply(s, { p: -1, t: 'next' });
+  assert.deepEqual(s.pos, [20, 0, 0], '見つかった人は進まずスタート・送らなかった人は進まない');
+  s = D.apply(s, { p: 1, t: 'cyc', k: 1, d: 15, out: false });
+  s = D.apply(s, { p: -1, t: 'next' });
+  s = D.apply(s, { p: 1, t: 'cyc', k: 2, d: 10, out: true });
+  s = D.apply(s, { p: -1, t: 'next' });
+  assert.deepEqual(s.pos, [20, 0, 0], '進んでいても見つかったらスタートに戻る');
+  for (let k = 3; !D.result(s); k++) {
+    s = D.apply(s, { p: 0, t: 'cyc', k, d: 15, out: false });
+    s = D.apply(s, { p: -1, t: 'next' });
+  }
+  assert.deepEqual(D.result(s).winners, [0], '着いた人の勝ち');
+  assert.equal(s.pos[0], 60, 'ゴールより先には行かない');
+  const st = runCpus(D, 5, 8, {}, 500);
+  assert.ok(D.result(st), 'だるま: CPU どうしで最後まで');
+  console.log('daruma OK');
+}
+
+// 15パズル早解き: 混ぜた盤は逆にたどればそろう・送った動きで本当にそろうかを確かめる・CPU どうしで最後まで
+{
+  const P = GAMES.slide;
+  const { scramble, undoPath, replay, isSolved, solvedBoard } = await import('../app/js/games/slide.js');
+  const { mulberry32 } = await import('../app/js/games/util.js');
+  for (const n of [3, 4]) {
+    const rnd = mulberry32(n);
+    for (let k = 0; k < 20; k++) {
+      const { board, path } = scramble(n, 40, rnd);
+      assert.ok(!isSolved(board), '15パズル: 混ぜたらそろっていない');
+      assert.ok(isSolved(replay(board, n, undoPath(path))), '15パズル: 逆にたどればそろう');
+    }
+  }
+  assert.equal(replay(solvedBoard(4), 4, 'D'), null, 'はしより外へは動けない');
+  assert.equal(replay(solvedBoard(4), 4, 'X'), null);
+  let s = P.init(3, 2, { rules: {} });
+  assert.equal(s.qs.length, 3);
+  assert.deepEqual(P.init(3, 2, { rules: {} }), s, '同じ種なら同じ並び');
+  s = P.apply(s, { p: -1, t: 'next' });
+  const seq = undoPath(s.qs[0].path);
+  assert.equal(P.apply(s, { p: 0, t: 'done', q: 0, seq: seq.slice(1), ms: 5000 }), null, '途中で動けない動きは受け付けない');
+  assert.equal(P.apply(s, { p: 0, t: 'done', q: 0, seq: '', ms: 5000 }), null, 'そろっていない動きは受け付けない');
+  assert.equal(P.apply(s, { p: 0, t: 'done', q: 0, seq: seq.slice(0, -1), ms: 5000 }), null, 'あと1手でそろう所では受け付けない');
+  s = P.apply(s, { p: 1, t: 'done', q: 0, seq, ms: 9000 });
+  assert.equal(P.apply(s, { p: 1, t: 'done', q: 0, seq, ms: 9000 }), null, '同じ手が2回届いても1回');
+  assert.equal(P.referee(s).ms, 20000, '最初にそろってから20秒');
+  s = P.apply(s, { p: 0, t: 'done', q: 0, seq: seq + 'UD', ms: 7000 }); // 寄り道してもそろえばよい（空きが右下にある間なら U・D で戻る）
+  s = P.apply(s, { p: 2, t: 'pass', q: 0 });
+  s = P.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [3, 2, 0]);
+  const st = runCpus(P, 4, 6, { size: '3', rounds: 3 }, 3000);
+  assert.ok(P.result(st), '15パズル: CPU どうしで最後まで');
+  assert.equal(st.log.length, 3);
+  console.log('slide OK');
+}
+
+// ナンプレ早解き: 書き出した問題はどれも答えが1つだけで、書いてある答えと同じ・答えちがいは受け付けない・順位・CPU どうしで最後まで
+{
+  const N = GAMES.nanpure;
+  const { PUZZLES, SHAPES, countSolutions, placesOf } = await import('../app/js/games/nanpure.js');
+  assert.equal(PUZZLES.filter((x) => x.size === 9).length, 40);
+  assert.equal(PUZZLES.filter((x) => x.size === 6).length, 40);
+  for (const pz of PUZZLES) {
+    const sh = SHAPES[pz.size];
+    assert.equal(countSolutions(pz.puzzle, sh, 2), 1, 'ナンプレ: 答えが1つだけ');
+    const first = [];
+    countSolutions(pz.puzzle, sh, 1, null, first);
+    assert.deepEqual(first, pz.answer, 'ナンプレ: 書いてある答えが正しい');
+    assert.equal(pz.puzzle.filter(Boolean).length, sh.givens);
+  }
+  assert.deepEqual(placesOf([5000, null, 3000, 5000]), [2, 4, 1, 2]);
+  let s = N.init(3, 4, { rules: { size: '6' } });
+  assert.equal(s.size, 6);
+  s = N.apply(s, { p: -1, t: 'next' });
+  const ans = s.answer.join('');
+  const hole = s.puzzle.indexOf(0);
+  const bad = s.answer.map((v, i) => (i === hole ? (v % 6) + 1 : v)).join('');
+  assert.equal(N.apply(s, { p: 0, t: 'done', grid: bad, ms: 1000 }), null, '答えちがいは受け付けない');
+  s = N.apply(s, { p: 0, t: 'done', grid: ans, ms: 60000 });
+  s = N.apply(s, { p: 1, t: 'done', grid: ans, ms: 40000 });
+  s = N.apply(s, { p: 2, t: 'pass' });
+  assert.equal(N.referee(s).ms, 1500);
+  s = N.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(N.result(s).winners, [1]);
+  assert.deepEqual(N.result(s).place, [2, 1, 3]);
+  const st = runCpus(N, 4, 9, { size: '6' }, 10000);
+  assert.ok(N.result(st), 'ナンプレ: CPU どうしで最後まで');
+  console.log('nanpure OK');
+}
+
 console.log('ALL OK');
