@@ -1,4 +1,4 @@
-// 広告と追跡（App Store 版だけ。2026-10-17・10-22 本人の決定。CLAUDE.md の「App Store 版」の 3）。ウェブ版では何もしない。
+// 広告と追跡（App Store 版だけ。2026-10-17・10-22 本人の決定。.claude/rules/appstore.md の「本人が決めたこと」の 3）。ウェブ版では何もしない。
 // 広告は Google の AdMob を、Capacitor の部品 @capacitor-community/admob（native/package.json）で出す。
 // 部品は殻の中の本物の画面（ウェブの画面の上）に描くので、帯広告の高さだけウェブの画面の下をあける（CSS の --ad-h）。
 // - 帯広告: ホーム画面と待合室の一番下だけ（対局の画面には出さない。Google の決まりで、遊んでいる画面とボタンのすぐ横は不可）。
