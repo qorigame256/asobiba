@@ -6292,4 +6292,127 @@ for (const id of GAME_ORDER) {
   console.log('jinro OK');
 }
 
+// 10を作れ（2026-10-27）: 式の計算・正解の判定・書き出した問題の一覧が計算し直したものと同じ・進行と点・CPU どうしで最後まで
+{
+  const M = GAMES.make10;
+  const { evalExpr, isRight, buildPuzzles, PUZZLES, poolOf, pointsOf } = await import('../app/js/games/make10.js');
+  assert.deepEqual(evalExpr('(1+3)*4-6').v, [10, 1]);
+  assert.deepEqual(evalExpr('8/3*3').v, [8, 1], '割り算の途中は分数のまま');
+  assert.equal(evalExpr('1/(2-2)'), null, '0で割る');
+  assert.equal(evalExpr('12-2'), null, '数字をつなげない');
+  assert.equal(evalExpr('-1+11'), null, '数の前の − はなし');
+  assert.equal(evalExpr('(1+3'), null);
+  assert.ok(isRight([1, 3, 4, 6], '(1+3)*4-6'));
+  assert.ok(isRight([1, 1, 9, 9], '(1+1/9)*9'));
+  assert.ok(!isRight([1, 3, 4, 6], '(1+3)*4-6+1'), '数字を5つ使っている');
+  assert.ok(!isRight([1, 3, 4, 6], '6+4'), '2つしか使っていない');
+  assert.ok(!isRight([1, 3, 4, 6], '(1+3)*6-4'), '10でない');
+  // 書き出した一覧（make10-data.js）が今の計算と同じ。違ったら node tools/make-make10.mjs で作り直す
+  assert.deepEqual(PUZZLES, buildPuzzles(), 'make10-data.js が古い（node tools/make-make10.mjs）');
+  assert.ok(PUZZLES.length === 447 && PUZZLES.every((p) => isRight(p.nums, p.ex)), '答えの例はどれも正解');
+  assert.ok(poolOf('easy').length >= 100 && poolOf('hard').length >= 100 && poolOf('mix').length === PUZZLES.length);
+  assert.ok(poolOf('hard').some((p) => p.nums.join('') === '1199'));
+  assert.deepEqual(pointsOf([3000, null, 1000, 1000, 5000]), [1, 0, 3, 3, 1], "同じ速さの2人が3点なら次は1点（難読漢字と同じ）");
+  let s = M.init(3, 5, { rules: {} });
+  assert.equal(s.qs.length, 10);
+  assert.ok(s.qs.every((q) => q.nums.length === 4 && isRight(q.nums, q.ex)));
+  assert.deepEqual(M.init(3, 5, { rules: {} }), s, '同じ種なら同じ問題');
+  s = M.apply(s, { p: -1, t: 'next' });
+  assert.equal(s.phase, 'open');
+  const ex = s.qs[0].ex;
+  assert.equal(M.apply(s, { p: 0, t: 'try', q: 0, text: '1+2', ms: 900 }), null, 'まちがった式は受け付けない');
+  s = M.apply(s, { p: 1, t: 'try', q: 0, text: ex, ms: 4000 });
+  assert.equal(M.apply(s, { p: 1, t: 'try', q: 0, text: ex, ms: 4000 }), null, '同じ手が2回届いても1回');
+  s = M.apply(s, { p: 2, t: 'pass', q: 0 });
+  assert.equal(M.referee(s).ms, 10000, '誰かが正解したら10秒で締め切る');
+  s = M.apply(s, { p: 0, t: 'try', q: 0, text: ex, ms: 2000 });
+  assert.equal(M.referee(s).ms, 1500, '全員が正解かパスなら1.5秒');
+  s = M.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [3, 2, 0]);
+  // CPU どうしで最後まで（CPU の時計を進めて、全部の問題を締め切る）
+  const realNow = performance.now.bind(performance);
+  let fake = 0;
+  performance.now = () => fake;
+  try {
+    let st = M.init(4, 11, { rules: { level: 'hard', rounds: 5 } });
+    let rk = null, rAt = 0;
+    for (let guard = 0; guard < 500 && !M.result(st); guard++) {
+      fake += 5000;
+      for (let p = 0; p < 4; p++) { const m = M.cpu(st, p); if (m) st = M.apply(st, { ...m, p }) ?? st; }
+      const r = M.referee(st); // ホストと同じく、鍵ごとに ms たってから進行の手を足す
+      if (r && r.key !== rk) { rk = r.key; rAt = fake; }
+      if (r && fake - rAt >= r.ms) st = M.apply(st, { ...r.move, p: -1 });
+    }
+    assert.ok(M.result(st), '10を作れ: CPU どうしで最後まで');
+    assert.equal(st.log.length, 5);
+    assert.ok(st.scores.some((v) => v > 0), '10を作れ: CPU も正解する');
+  } finally {
+    performance.now = realNow;
+  }
+  console.log('make10 OK');
+}
+
+// 以心伝心（2026-10-27）: 答えのまとめ方・一番多い答えだけ1点（並んだら両方・1人ずつなら0点）・進行・CPU どうしで最後まで
+{
+  const I = GAMES.ishin;
+  const { tally, groupKey } = await import('../app/js/games/ishin.js');
+  const { TOPICS } = await import('../app/js/games/ishin-data.js');
+  const { kana } = await import('../app/js/games/party.js');
+  const apple = TOPICS.find((t) => t[0] === '赤い果物といえば？');
+  assert.equal(groupKey(apple, 'リンゴ'), groupKey(apple, '林檎'));
+  assert.equal(groupKey(apple, ' りんご '), '#0');
+  assert.equal(groupKey(apple, 'トマト'), 'とまと', 'よくある答えにない答えはそのまま');
+  assert.deepEqual(tally(apple, ['りんご', '林檎', 'いちご', '']).pts, [1, 1, 0, 0]);
+  assert.deepEqual(tally(apple, ['りんご', '林檎', 'いちご', '苺']).pts, [1, 1, 1, 1], '並んだら両方');
+  assert.deepEqual(tally(apple, ['りんご', 'いちご', 'トマト', '']).pts, [0, 0, 0, 0], 'みんなばらばらなら0点');
+  assert.deepEqual(tally(apple, ['トマト', 'とまと', 'りんご']).pts, [1, 1, 0], 'よくある答えにない答えでもそろえば点');
+  // お題の書き方: 同じお題の中で、1つの書き方が2つのまとまりに入っていない・お題は重ならない
+  assert.equal(new Set(TOPICS.map((t) => t[0])).size, TOPICS.length, '以心伝心: 同じお題が2つ');
+  for (const [q, groups] of TOPICS) {
+    const seen = new Map();
+    assert.ok(groups.length >= 1, q);
+    groups.forEach((names, i) => names.forEach((x) => {
+      const k = kana(x);
+      assert.ok(k, q + ' の空の書き方');
+      assert.ok(!seen.has(k) || seen.get(k) === i, `${q} の「${x}」が2つのまとまりに入っている`);
+      seen.set(k, i);
+    }));
+  }
+  let s = I.init(3, 9, { rules: {} });
+  assert.equal(s.qs.length, 10);
+  assert.equal(new Set(s.qs).size, 10, '同じお題は出さない');
+  s = I.apply(s, { p: -1, t: 'next' });
+  s = I.apply(s, { p: 0, t: 'ans', q: 0, text: 'ねこ' });
+  assert.equal(I.apply(s, { p: 0, t: 'ans', q: 0, text: 'いぬ' }), null, '書き直しはできない');
+  assert.equal(I.apply(s, { p: 1, t: 'ans', q: 0, text: '  ' }), null, '空の答え');
+  assert.equal(I.apply(s, { p: 1, t: 'ans', q: 0, text: 'あ'.repeat(21) }), null, '長すぎる答え');
+  assert.equal(I.referee(s).key, 'open0');
+  s = I.apply(s, { p: 1, t: 'ans', q: 0, text: 'ネコ' });
+  s = I.apply(s, { p: 2, t: 'ans', q: 0, text: 'いぬ' });
+  assert.equal(I.referee(s).ms, 1500, '全員書いたら1.5秒');
+  s = I.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [1, 1, 0]);
+  const realNow = performance.now.bind(performance);
+  let fake = 0;
+  performance.now = () => fake;
+  try {
+    let st = I.init(5, 3, { rules: { rounds: 5 } });
+    let rk = null, rAt = 0;
+    let got = 0;
+    for (let guard = 0; guard < 500 && !I.result(st); guard++) {
+      fake += 4000;
+      for (let p = 0; p < 5; p++) { const m = I.cpu(st, p); if (m) st = I.apply(st, { ...m, p }) ?? st; }
+      const r = I.referee(st); // ホストと同じく、鍵ごとに ms たってから進行の手を足す
+      if (r && r.key !== rk) { rk = r.key; rAt = fake; }
+      if (r && fake - rAt >= r.ms) st = I.apply(st, { ...r.move, p: -1 });
+    }
+    got = st.scores.reduce((a, b) => a + b, 0);
+    assert.ok(I.result(st), '以心伝心: CPU どうしで最後まで');
+    assert.ok(got > 0, '以心伝心: CPU どうしでも答えがそろうことがある');
+  } finally {
+    performance.now = realNow;
+  }
+  console.log('ishin OK');
+}
+
 console.log('ALL OK');

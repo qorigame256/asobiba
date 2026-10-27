@@ -1314,6 +1314,41 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .kj-form input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
 .board .kj-form .btn { flex: none; }
 
+/* ---------- 10を作れ・以心伝心（難読漢字の札と入力欄を使う） ---------- */
+:is([data-game="make10"], [data-game="ishin"]) .board { width: min(100%, 560px); }
+.mk-nums { display: flex; justify-content: center; gap: 10px; margin: 6px 0 8px; }
+.mk-num { width: 2.6em; height: 2.6em; display: grid; place-items: center; font-size: clamp(1.6rem, 8vw, 2.2rem); font-weight: 800; border: 2px solid var(--line); border-radius: 12px; background: var(--field); }
+.mk-pad { display: flex; flex-direction: column; gap: 8px; touch-action: manipulation; }
+.mk-line { min-height: 2.2em; padding: 6px 12px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--field); font-size: 1.5rem; font-weight: 700; text-align: center; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.mk-line.empty { font-size: .95rem; font-weight: 400; color: var(--muted); line-height: 2.2; }
+.mk-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.mk-row.nums { grid-template-columns: repeat(4, 1fr); }
+.mk-row:last-of-type { grid-template-columns: 1fr 1fr 1.4fr; }
+/* .board button.btn は丸い小さめのボタンなので、押しやすい大きさの四角にする */
+.board .mk-key { min-height: 48px; padding: 6px 4px; border-radius: 12px; font-size: 1.25rem; }
+.board .mk-n { min-height: 58px; font-size: 1.6rem; font-weight: 800; }
+.board .mk-op { font-size: 1.4rem; font-weight: 800; }
+.board .mk-key:disabled { opacity: .35; }
+.mk-who { margin-top: 6px; font-size: .9rem; color: var(--muted); }
+.mk-review { background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 8px 12px; }
+.mk-review summary { cursor: pointer; font-weight: 700; }
+.mk-review ol { list-style: none; margin: 6px 0 0; padding: 0; }
+.mk-review li { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; padding: 5px 0; border-top: 1px solid var(--line); }
+.mk-rv-n { font-size: .78rem; color: var(--muted); min-width: 1.4em; text-align: right; }
+.mk-rv-nums { font-weight: 800; letter-spacing: .1em; }
+.mk-rv-ex { color: #2f8a4a; font-weight: 700; overflow-wrap: anywhere; }
+.mk-rv-ex small { color: var(--muted); font-weight: 400; margin-left: 4px; }
+.mk-rv-who { font-size: .75rem; color: var(--muted); margin-left: auto; }
+.is-topic { font-size: clamp(1.4rem, 6.5vw, 2rem); font-weight: 800; line-height: 1.4; margin: 4px 0 6px; }
+.is-groups { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; text-align: left; }
+.is-group { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 6px 10px; border: 1.5px solid var(--line); border-radius: 10px; }
+.is-group.top { border-color: #2f8a4a; background: var(--soft, #eef8f0); }
+.is-group.none { color: var(--muted); border-style: dashed; }
+.is-ans { font-weight: 800; font-size: 1.15rem; overflow-wrap: anywhere; }
+.is-cnt { font-weight: 700; color: var(--muted); }
+.is-names { font-size: .85rem; color: var(--muted); }
+.is-rv-topic { font-weight: 700; }
+
 /* ---------- ぴったりストップ・タイピング早打ち ---------- */
 .pz-target { font-size: 1.3rem; font-weight: 700; margin-top: 4px; }
 .pz-target b { font-size: 2.4rem; margin-right: 2px; }

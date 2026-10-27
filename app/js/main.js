@@ -1046,10 +1046,10 @@ const READING = {
   kaisen: 'かいせんげーむ ばん', colors: 'いろあわせ ' + CARD_WORDS, daifugo: 'だいふごう だいひんみん ' + CARD_WORDS, poker: 'ぽーかー ' + CARD_WORDS, speed: 'すぴーど ' + CARD_WORDS,
   babanuki: 'ばばぬき ' + CARD_WORDS, doubt: 'だうと ' + CARD_WORDS, sevens: 'しちならべ ' + CARD_WORDS, blackjack: 'ぶらっくじゃっく ' + CARD_WORDS, hitai: 'ひたいかーど ' + CARD_WORDS,
   hitblow: 'ひっとあんどぶろー すうじ', sensou: 'せんそう わりばし ゆび てあそび', yubisuma: 'ゆびすま てあそび', tamebeam: 'ためてびーむ てあそび', memory: 'しんけいすいじゃく ' + CARD_WORDS,
-  yacht: 'よっと さいころ', seri: 'せりあい ' + CARD_WORDS, nim: 'いしとりげーむ', flags: 'はたあげ', kanji: 'なんどくかんじ くいず', targets: 'まとのはやおし まとあて',
+  yacht: 'よっと さいころ', seri: 'せりあい ' + CARD_WORDS, nim: 'いしとりげーむ', flags: 'はたあげ', kanji: 'なんどくかんじ くいず', make10: 'てんぱずる めいくてん すうじ けいさん さんすう', targets: 'まとのはやおし まとあて',
   pittari: 'ぴったりすとっぷ', kioku: 'きおくりれー', typing: 'たいぴんぐはやうち', danmaku: 'だんまくかいひ あくしょん', tamaire: 'たまいれ あくしょん', machigai: 'まちがいさがし',
-  bombs: 'にしょくばくだんさばいばる あくしょん', umigame: 'うみがめのすーぷ くいず', wordwolf: 'わーどうるふ', jinro: 'じんろう', oekaki: 'おえかきあて え', hockey: 'えあほっけー あくしょん',
-  hasami: 'はさみしょうぎ ばん', shogi: 'しょうぎ ばん', mahjong: 'まーじゃん', jinro: 'じんろう',
+  bombs: 'にしょくばくだんさばいばる あくしょん', umigame: 'うみがめのすーぷ くいず', wordwolf: 'わーどうるふ', ishin: 'いしんでんしん くいず', jinro: 'じんろう', oekaki: 'おえかきあて え', hockey: 'えあほっけー あくしょん',
+  hasami: 'はさみしょうぎ ばん', shogi: 'しょうぎ ばん', mahjong: 'まーじゃん',
 };
 const toHira = (t) => String(t ?? '').toLowerCase().replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60)).replace(/\s+/g, '');
 const gameHay = (id) => toHira(`${GAMES[id].name}${READING[id] ?? ''}${GAMES[id].desc ?? ''}`);
@@ -2647,7 +2647,7 @@ function pushMove(move) {
 
 // 汚い言葉のふるい（2026-10-21 本人の決定）: 人が自由に打った言葉は送る前に確かめる。ゲームの id → [手の中の欄, 一覧の種類]。
 // 受け取った側では、各ゲームが filter.js の shown で当たった所を隠す（ゲームを足したら両方に足す）。
-const FREE_TEXT = { umigame: [['text', 'sentence'], ['q', 'sentence'], ['a', 'sentence']], oekaki: [['text', 'short']], wordwolf: [['text', 'short']], jinro: [['text', 'sentence']] };
+const FREE_TEXT = { umigame: [['text', 'sentence'], ['q', 'sentence'], ['a', 'sentence']], oekaki: [['text', 'short']], wordwolf: [['text', 'short']], ishin: [['text', 'short']], jinro: [['text', 'sentence']] };
 const badText = (move) => (FREE_TEXT[S.gameId] ?? []).some(([k, kind]) => typeof move?.[k] === 'string' && isBad(move[k], kind));
 
 function onBoardMove(move) {
