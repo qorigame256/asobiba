@@ -162,10 +162,11 @@ export default {
 
   render(root, s, o) {
     bindKeys();
-    const me = o.me >= 0 ? o.me : null;
+    // 観戦の人が「見る画面」でほかの人を選んでいても、その人の席として扱わない（前はボタンが押せて、同じ席に入るとその分まで送っていた。2026-10-28 Codex の点検の指摘）
+    const me = o.me >= 0 && !o.watching ? o.me : null;
     const L = lenOf(s);
     const mount = `${s.seed}:${s.k}:${s.phase}:${me}`;
-    const chips = scoreChips(o, s.pos.map(() => 0), { won: this.result(s)?.winners ?? [], extra: (p) => (s.phase === 'run' && s.sub[p] ? '<span class="pt-ok">✓</span>' : '') });
+    const chips = scoreChips(me === null ? { ...o, me: -1 } : o, s.pos.map(() => 0), { won: this.result(s)?.winners ?? [], extra: (p) => (s.phase === 'run' && s.sub[p] ? '<span class="pt-ok">✓</span>' : '') });
     chips.querySelectorAll('.pt-score').forEach((x, p) => { x.innerHTML = `${Math.floor((Math.min(L, s.pos[p]) / L) * 100)}<small>%</small>`; });
     if (ui?.mount === mount && root.contains(ui.wrap)) {
       ui.chips.replaceWith(chips);

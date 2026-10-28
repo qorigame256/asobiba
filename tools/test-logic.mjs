@@ -6635,6 +6635,9 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   for (const rules of [{}, { mode: 'survive' }, { mode: 'survive', feint: true }, { rounds: 10, feint: true }]) {
     const st = runCpus(M, 5, 9, rules, 50, 20000);
     assert.ok(M.result(st), `見切り: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+    // 締め切りだけでも最後まで行くので、CPU が実際に押したことも見る（2026-10-28 Codex の点検の指摘）
+    if (rules.mode === 'survive') assert.ok(st.r < 60 && M.result(st).winners.length === 1, `見切り: CPU が押して1人に決まる ${JSON.stringify(rules)}`);
+    else assert.ok(st.pts.reduce((a, b) => a + b, 0) > 0, `見切り: CPU が押して点が入る ${JSON.stringify(rules)}`);
   }
   console.log('mikiri OK');
 }

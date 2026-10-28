@@ -20,11 +20,13 @@
 //   result(局面) → null | { winner: p, …ゲームが使う情報 }（3人以上で順位が付くゲームは、成績表の順位で点のため順位が分かる欄も持つ。下の seatPoints）,
 //   cpu(局面, p) → p の手（p は付けなくてよい。いまは何もしないなら null）。ホストの端末だけで動く,
 //   render(要素, 局面, { me: 自分の番号（観戦は -1）, names: 各プレイヤーの名前, cpu: CPU が操作中か, sub: 部屋を出た人の席を CPU が代わりに打っているか,
-//     away: 応答が無いか, canMove, onMove, fresh })。names は外から来た文字なので textContent で出すか esc() を通す。
+//     away: 応答が無いか, canMove, onMove, fresh, watching: 観戦の人が「見る画面」でほかの人を選んでいるか（me はその人の番号になる。自分の席として扱わないこと） })。
+//     names は外から来た文字なので textContent で出すか esc() を通す。
 //   任意: settings（詳細設定 [{ key, label, desc, def, choices?: [[値, 表示名]…] }]。choices が無ければ はい/いいえ）, carry(局面, p)（次の対局へ持ち越す値。終局後に呼ばれる）,
 //     resultText(result, 自分の番号, 名前→HTML) / phaseText(局面, 自分の番号, 名前→HTML)（手番が null のときの状態表示）,
 //     cpuDelay(局面, p)（CPU が打つまでの待ち時間 ms。結果を見せたいときに長くする）,
 //     seats(rules) → 人数（詳細設定で人数が決まるゲーム。待合室の足りない席はすべて CPU）,
+//     quietCpu: true（対局の途中の CPU のひとことを出さない。CPU が動いたことを結果の前に知られたくないゲーム。見切り）,
 //     noCpu: true（CPU を入れないゲーム。人が minPlayers そろうまで始められない。部屋を出た人の席だけ cpu() が動く）,
 //     referee(局面) → null | { key, ms, move }（時間で進むゲーム。ホストが key ごとに ms 計って move を p = -1 として足す。
 //     締め切りや次の問題へ進むのに使う。apply は p = -1 の手をこの進行役の手として受け付ける）,

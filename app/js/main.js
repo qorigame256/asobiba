@@ -1556,6 +1556,7 @@ function renderPage() {
       sub: S.order.map((id) => !isCpu(id) && cpuControlled(id)), // 部屋を出た人の席を CPU が代わりに打っている
       away: S.order.map((id) => !isCpu(id) && S.members.includes(id) && !alive(id)),
       hidden: S.order.map((id) => !!S.hidden?.includes(id)), // 「この人を隠す」を押した人の席（その人の言葉と絵を出さない）
+      watching: myPlayer() === SPECTATOR && opts.me !== SPECTATOR, // 観戦の人がほかの人の画面を見ている（me はその人の番号）
       // 見た目だけの中身（ほかの人の位置など）を送りっぱなしにする。届いた側ではゲームの onStream が受け取る
       stream: (d) => { if (S.mode === 'online') send({ type: 'stream', gameId: S.gameId, round: S.round, d }, 0); },
     });
@@ -2683,7 +2684,7 @@ function scheduleCpu(game, st, res) {
       const m = now && !game.result(now) && canAct(now, p) ? game.cpu(now, p, rulesOf(S.gameId, S.rules)) : null; // null = いまは何もしない
       const move = game.multi && m ? { ...m, p } : m; // 盤のゲームの手には p を付けない（手が 0 のこともある）
       const after = move !== null ? game.apply(now, move) : null;
-      if (after) { pushMove(move); if (!game.result(after)) cpuMidSay(S.order[p]); } // 決着した手では、決着のひとことだけにする
+      if (after) { pushMove(move); if (!game.result(after) && !game.quietCpu) cpuMidSay(S.order[p]); } // 決着した手では、決着のひとことだけにする
       else render(); // 打てなかったら予約し直す
     }, game.cpuDelay?.(st, p) ?? CPU_DELAY_MS);
   }

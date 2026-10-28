@@ -41,6 +41,8 @@ const roundsOf = (s) => Number(s.rules.rounds) || 5;
 const introOf = (r) => (r === 1 ? 1500 : 3000);
 const keyOf = (s) => `mikiri:${s.seed}:${s.r}`;
 const alives = (s) => [...Array(s.n).keys()].filter((p) => s.alive[p]);
+// 自分の席（観戦の人が「見る画面」でほかの人を選んでいるときは、その人の席として扱わない。結果の前にその人のタイムが見えてしまうため）
+const seatOf = (o) => (o.me >= 0 && !o.watching ? o.me : null);
 const clone = (s) => ({ ...s, alive: s.alive.slice(), acts: s.acts.slice(), pts: s.pts.slice(), warn: s.warn.slice(), wins: s.wins.slice(), outAt: s.outAt.slice() });
 
 // その回の「！」の時刻（かまえからの ms）とフェイント。乱数を使う数はフェイントの有無で変えない（あり・なしで「！」の時刻を同じにする）
@@ -106,7 +108,7 @@ function resolve(s) {
 
 /* ---------- 画面 ---------- */
 
-let ui = null; // { mount, field, sign, msg, shownAt, sent, cur: { s, o } }
+let ui = null; // { mount, rk: その回の鍵, field, sign, msg, shownAt, sent, cur: { s, o } }
 const cpuPlan = new Map();
 
 function planOf(s, p) {
@@ -130,7 +132,7 @@ const secs = (ms) => (ms / 1000).toFixed(3) + '秒';
 function press() {
   if (!ui || ui.sent || !ui.field.isConnected) return;
   const { s, o } = ui.cur;
-  if (s.phase !== 'wait' || !o.canMove || o.me < 0) return;
+  if (s.phase !== 'wait' || !o.canMove || seatOf(o) === null) return;
   const tm = timing(s);
   const t = since(keyOf(s));
   if (t < tm.intro + IGNORE_MS) return;
@@ -160,7 +162,7 @@ if (typeof window !== 'undefined') {
 // 合図の場の中身を、いまの時刻に合わせて描く
 function draw() {
   const { s, o } = ui.cur;
-  const me = o.me >= 0 ? o.me : null;
+  const me = seatOf(o);
   const tm = timing(s);
   const t = since(keyOf(s));
   const f = ui.field;
@@ -187,7 +189,7 @@ function draw() {
     else msg = 'かまえ…「！」が出たら押す';
   }
   if (ui.sign.textContent !== sign) ui.sign.textContent = sign;
-  ui.sign.className = 'mk-sign ' + cls;
+  ui.sign.className = 'mq-sign ' + cls;
   if (ui.msg.textContent !== msg) ui.msg.textContent = msg;
 }
 
@@ -199,12 +201,12 @@ function loop(token) {
 
 // 前の回の結果の表
 function resultBox(s, o, L) {
-  const me = o.me >= 0 ? o.me : null;
+  const me = seatOf(o);
   const name = (p) => (p === me ? 'あなた' : o.names[p]);
   const box = document.createElement('div');
-  box.className = 'mk-result';
+  box.className = 'mq-result';
   const head = document.createElement('div');
-  head.className = 'mk-result-head';
+  head.className = 'mq-result-head';
   let title = `${L.r}回目`;
   if (L.redo) title += ' … やり直し！';
   else if (L.duelWin !== null) title += ` … ${name(L.duelWin)}の1勝`;
@@ -217,15 +219,15 @@ function resultBox(s, o, L) {
   for (const p of order) {
     const row = document.createElement('div');
     const v = L.acts[p];
-    row.className = 'mk-line' + (p === me ? ' me' : '') + (L.out.includes(p) ? ' out' : '');
+    row.className = 'mq-line' + (p === me ? ' me' : '') + (L.out.includes(p) ? ' out' : '');
     const n = document.createElement('span');
-    n.className = 'mk-name';
+    n.className = 'mq-name';
     n.textContent = name(p);
     const tm = document.createElement('span');
-    tm.className = 'mk-time';
+    tm.className = 'mq-time';
     tm.textContent = v === null ? '押さず' : v === -1 ? 'フライング' : secs(v);
     const tag = document.createElement('span');
-    tag.className = 'mk-tag';
+    tag.className = 'mq-tag';
     if (!isSurvive(s)) tag.textContent = L.gain[p] ? `+${L.gain[p]}点` : '';
     else if (L.out.includes(p)) tag.textContent = '脱落';
     else if (v === -1) tag.textContent = `警告${s.warn[p] >= 2 ? 2 : s.warn[p]}`;
@@ -243,6 +245,7 @@ export default {
   ready: true,
   multi: true,
   realtime: true,
+  quietCpu: true, // CPU が押したあとの「ここだ！」などのひとことで、結果の前に押したことが分かってしまうため（2026-10-28 Codex の点検の指摘）
   minPlayers: 2,
   maxPlayers: 10,
   settings: [
@@ -323,44 +326,48 @@ export default {
   },
 
   render(root, s, o) {
-    const me = o.me >= 0 ? o.me : null;
+    const me = seatOf(o);
     const mount = `${s.seed}:${s.r}:${s.phase}:${me}`;
     const fresh = ui?.mount !== mount || !root.contains(ui.field);
     const sent = fresh ? null : ui.sent;
-    const shownAt = fresh ? null : ui.shownAt;
+    // 「！」が出た時刻は、席が変わっても（観戦から空いた席に入った）その回のあいだ覚えておく。席に入った時から測り直すと、
+    // 観戦中に「！」を見てから入った人のタイムが短くなっていた（2026-10-28 Codex の点検の指摘）
+    const rk = keyOf(s);
+    const shownAt = ui?.rk === rk && s.phase === 'wait' ? ui.shownAt : null;
 
     root.innerHTML = '';
-    root.className = 'board mk';
+    root.className = 'board mq';
     // 参加者の札（点数戦は点、勝ち抜き戦は残っているか・警告・決勝の勝ち）
     const row = document.createElement('div');
-    row.className = 'mk-players';
+    row.className = 'mq-players';
     const top = Math.max(...s.pts);
     const duel = isSurvive(s) && alives(s).length === 2;
     for (let p = 0; p < s.n; p++) {
       const c = document.createElement('div');
-      c.className = 'mk-chip' + (p === me ? ' me' : '') + (s.alive[p] ? '' : ' out');
+      c.className = 'mq-chip' + (p === me ? ' me' : '') + (s.alive[p] ? '' : ' out');
       const nm = document.createElement('span');
-      nm.className = 'mk-chip-name';
+      nm.className = 'mq-chip-name';
       nm.textContent = p === me ? 'あなた' : o.names[p];
       const v = document.createElement('span');
-      v.className = 'mk-chip-val';
+      v.className = 'mq-chip-val';
       if (!isSurvive(s)) v.textContent = `${s.pts[p]}点${s.pts[p] === top && top > 0 ? ' 👑' : ''}`;
       else v.textContent = !s.alive[p] ? '脱落' : (duel ? '★'.repeat(s.wins[p]) + '☆'.repeat(2 - s.wins[p]) : '') + '⚠️'.repeat(s.warn[p]);
       c.append(nm, v);
-      if (o.away[p]) c.title = '応答なし';
+      const away = o.away[p] ? '応答なし' : o.sub?.[p] ? 'CPU が代わりに' : '';
+      if (away) { const tg = document.createElement('span'); tg.className = 'mq-chip-tag'; tg.textContent = away; c.append(tg); }
       row.append(c);
     }
     root.append(row);
 
     const field = document.createElement('div');
-    field.className = 'mk-field' + (s.phase === 'wait' && me !== null && o.canMove ? ' live' : '');
+    field.className = 'mq-field' + (s.phase === 'wait' && me !== null && o.canMove ? ' live' : '');
     const sign = document.createElement('div');
-    sign.className = 'mk-sign';
+    sign.className = 'mq-sign';
     const msg = document.createElement('div');
-    msg.className = 'mk-msg';
+    msg.className = 'mq-msg';
     field.append(sign, msg);
     root.append(field);
-    ui = { mount, field, sign, msg, shownAt, sent, cur: { s, o } };
+    ui = { mount, rk, field, sign, msg, shownAt, sent, cur: { s, o } };
 
     // 前の回の結果（次の回のかまえまでの間と、終わったあと）
     if (s.last && (s.phase === 'end' || since(keyOf(s)) < introOf(s.r))) {
@@ -369,13 +376,13 @@ export default {
       if (s.phase === 'wait') setTimeout(() => box.remove(), Math.max(0, introOf(s.r) - since(keyOf(s))));
     }
     const note = document.createElement('p');
-    note.className = 'mk-note';
+    note.className = 'mq-note';
     note.textContent = isSurvive(s)
       ? '毎回いちばん遅い人が抜ける。フライングは2回で脱落（1回目はやり直し）。残り2人は先に2勝'
       : `速い順に3・2・1点。フライングはその回だけ0点。${roundsOf(s)}回で点の多い人の勝ち`;
     root.append(note);
 
-    if (s.phase !== 'wait') { sign.textContent = 'おしまい'; sign.className = 'mk-sign small'; return; }
+    if (s.phase !== 'wait') { sign.textContent = 'おしまい'; sign.className = 'mq-sign small'; return; }
     since(keyOf(s)); // この回が自分の画面に出た時刻を覚える（ここから「！」までを数える）
     if (me !== null && o.canMove) {
       field.onpointerdown = (ev) => { ev.preventDefault(); press(); };
