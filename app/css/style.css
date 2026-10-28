@@ -692,6 +692,9 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .mj .mj-hand-tile.drawn { position: absolute; right: 0; bottom: calc(100% + 6px); width: var(--hw); }
 .mj .mj-hand-tile.selected { transform: translateY(-10px); }
 .mj .mj-hand-tile.dim { opacity: .45; }
+.mj .mj-hand-tile.safe { position: relative; }
+.mj .mj-hand-tile.safe::after { content: '✓'; position: absolute; left: 50%; bottom: 100%; transform: translate(-50%, -1px); font-size: max(10px, calc(var(--hw) * .45)); font-weight: 900; line-height: 1; color: #fff; background: #2e7d32; border-radius: 99px; padding: 1px 4px; pointer-events: none; }
+.mj .mj-hand-tile.safe.drawn { position: absolute; } /* ツモった牌は上の段に置くまま */
 .mj button.mj-hand-tile { cursor: pointer; }
 .mj { touch-action: manipulation; } /* 牌は2回タップで切るので、iPhone のダブルタップでの拡大・移動を止める */
 .mj-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
@@ -1317,6 +1320,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 /* ---------- 10を作れ・以心伝心（難読漢字の札と入力欄を使う） ---------- */
 :is([data-game="make10"], [data-game="ishin"]) .board { width: min(100%, 560px); }
 .mk-nums { display: flex; justify-content: center; gap: 10px; margin: 6px 0 8px; }
+.mk-goal { font-size: 1.3rem; font-weight: 800; color: var(--accent); margin: 2px 0 6px; }
 .mk-num { width: 2.6em; height: 2.6em; display: grid; place-items: center; font-size: clamp(1.6rem, 8vw, 2.2rem); font-weight: 800; border: 2px solid var(--line); border-radius: 12px; background: var(--field); }
 .mk-pad { display: flex; flex-direction: column; gap: 8px; touch-action: manipulation; }
 .mk-line { min-height: 2.2em; padding: 6px 12px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--field); font-size: 1.5rem; font-weight: 700; text-align: center; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
@@ -1365,6 +1369,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .board button.np-cell.near { background: var(--cool, #eef3f8); }
 .board button.np-cell.same { background: var(--hi, #fff1c2); }
 .board button.np-cell.sel { background: var(--soft, #ffd9c7); }
+.board button.np-cell.bad { color: #d32f2f; text-decoration: underline wavy #d32f2f; }
 .board button.np-cell:disabled { cursor: default; }
 .np-pad { --n: 10; display: grid; grid-template-columns: repeat(var(--n), 1fr); gap: 5px; touch-action: manipulation; }
 .board .np-key { min-height: 48px; padding: 4px 0; font-size: 1.3rem; font-weight: 800; border-radius: 10px; }

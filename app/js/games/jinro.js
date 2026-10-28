@@ -12,6 +12,11 @@
 //   追放・襲われた人の役は、終わるまで見せない。やられた人は話し合い・投票・夜の行動ができない（見ているだけ）。
 //   手札と同じ簡易の隠し方（全員の端末が全員の役を知っている。開発用の道具で覗ける）。
 //   CPU: 昼はたまに決まり文句を言うだけ（話し合いはできない）。投票は、人狼なら人狼以外から、占い師なら見つけた人狼、ほかは適当。夜の行動も適当。
+// 2026-10-28 の29回目の案（本人が選んだ。分かれ目は Claude の判断）: 詳細設定で役を2つ足せる（どちらも なし（最初）・あり）。
+//   狂人: 人狼チームの味方の人間（7人以上のとき1人）。人狼がだれかは知らず、夜の行動も無い。占われると「人狼ではない」と出る。
+//     勝ち負けは人狼チーム（人狼が勝てば狂人も勝ち）。人狼の数を数えるときは人間の側に数える（よくある決まり）。
+//   霊媒師: 投票で追放された人が人狼だったかどうかが分かる（5人以上のとき1人）。分かるのは追放のときに霊媒師が生きていたときだけ。夜の行動は無い。
+//   なしのときは役の配り方・乱数の使い方・局面の形を前と同じにしてある（霊媒師がいるときだけ局面に medium を持つ）。CPU の狂人・霊媒師の投票は村人と同じく適当。
 // 手: { p, t: 'say', text, k: その人の何回目の発言か, d: 何日目か } / { p, t: 'tovote', d } / { p, t: 'vote', to, v: 何回目の投票か, d: 何日目か }
 //   / { p, t: 'bite' | 'see' | 'guard', to, d } / { p: -1, t: 'tovote' | 'votetime' | 'dawn', d }（ホストの時間切れ）。
 //   k・v・d で、同じ手が2回届いても2回目は反則になる（realtime。main.js の rebase）。
@@ -24,16 +29,18 @@ const MAX_TEXT = 60;
 const VOTE_MS = 60000;
 const NIGHT_MS = 45000;
 const GRACE_MS = 1500; // ゲストの手が届くのを待つ分
-export const ROLE = { wolf: '人狼', seer: '占い師', knight: '騎士', villager: '村人' };
-const ICON = { wolf: '🐺', seer: '🔮', knight: '🛡️', villager: '🧑‍🌾' };
+export const ROLE = { wolf: '人狼', seer: '占い師', knight: '騎士', villager: '村人', mad: '狂人', medium: '霊媒師' };
+const ICON = { wolf: '🐺', seer: '🔮', knight: '🛡️', villager: '🧑‍🌾', mad: '🤪', medium: '👻' };
+const NIGHT_ROLES = new Set(['wolf', 'seer', 'knight']); // 夜に行動する役
+const wolfTeam = (role) => role === 'wolf' || role === 'mad';
 const CPU_LINES = ['うーん、まだ分からないな', 'みんなの意見を聞きたい', 'ぼくは村人だよ', '怪しい人はいる？', 'よく考えよう', 'さっきの発言が気になる'];
 
 const range = (n) => Array.from({ length: n }, (_, i) => i);
 const aliveList = (s) => range(s.n).filter((p) => s.alive[p]);
 const wolvesAlive = (s) => aliveList(s).filter((p) => s.roles[p] === 'wolf');
-const clone = (s) => ({ ...s, alive: s.alive.slice(), said: s.said.slice(), chat: s.chat.slice(), votes: { ...s.votes }, night: { ...s.night, bite: { ...s.night.bite } }, seen: s.seen.slice(), log: s.log.slice() });
+const clone = (s) => ({ ...s, alive: s.alive.slice(), said: s.said.slice(), chat: s.chat.slice(), votes: { ...s.votes }, night: { ...s.night, bite: { ...s.night.bite } }, seen: s.seen.slice(), log: s.log.slice(), ...(s.medium ? { medium: s.medium.slice() } : {}) });
 // 夜に行動する人（生きている人狼・占い師・騎士）
-const nightActors = (s) => aliveList(s).filter((p) => s.roles[p] !== 'villager');
+const nightActors = (s) => aliveList(s).filter((p) => NIGHT_ROLES.has(s.roles[p]));
 const acted = (s, p) => (s.roles[p] === 'wolf' ? p in s.night.bite : s.roles[p] === 'seer' ? s.night.see !== null : s.night.guard !== null);
 
 export function wolfCount(n, choice) {
@@ -72,6 +79,8 @@ function settleVote(s) {
   if (tied.length === 1) {
     s.alive[tied[0]] = false;
     s.log.push({ d: s.day, kind: 'exec', who: tied[0] });
+    // 霊媒師が生きていれば、追放された人が人狼だったかが分かる
+    if (s.medium && s.roles.some((r, p) => r === 'medium' && s.alive[p])) s.medium.push({ d: s.day, to: tied[0], wolf: s.roles[tied[0]] === 'wolf' });
   } else s.log.push({ d: s.day, kind: 'novote' });
   if (!checkWin(s)) toNight(s);
 }
@@ -124,23 +133,28 @@ export default {
     { key: 'time', label: '話し合いの時間', desc: '昼の話し合いの長さ。時間が来たら投票に進む（その前に「投票へ」を押してもよい）', def: 3, choices: [[2, '2分'], [3, '3分'], [5, '5分']] },
     { key: 'wolves', label: '人狼の数', desc: 'おまかせは 4〜6人で1人・7〜9人で2人・10人で3人', def: 'auto', choices: [['auto', 'おまかせ'], [1, '1人'], [2, '2人']] },
     { key: 'knight', label: '騎士', desc: '夜に1人を人狼の襲撃から守れる役（5人以上のとき）', def: true },
+    { key: 'medium', label: '霊媒師', desc: '投票で追放された人が人狼だったかどうかが分かる役（5人以上のとき）', def: false },
+    { key: 'mad', label: '狂人', desc: '人狼チームの味方をする人間（7人以上のとき）。人狼がだれかは知らない', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const rng = mulberry32(seed >>> 0);
     const w = wolfCount(n, rules.wolves);
     const knight = rules.knight !== false && n >= 5;
-    const deck = [...Array(w).fill('wolf'), 'seer', ...(knight ? ['knight'] : [])];
+    const medium = rules.medium === true && n >= 5;
+    const mad = rules.mad === true && n >= 7;
+    const deck = [...Array(w).fill('wolf'), 'seer', ...(knight ? ['knight'] : []), ...(medium ? ['medium'] : []), ...(mad ? ['mad'] : [])];
     while (deck.length < n) deck.push('villager');
     const roles = shuffle(deck, rng);
     // 占い師は始めに1人だけ「人狼ではない」人を知っている
     const seer = roles.indexOf('seer');
-    const whites = range(n).filter((p) => p !== seer && roles[p] !== 'wolf');
+    const whites = range(n).filter((p) => p !== seer && roles[p] !== 'wolf' && roles[p] !== 'mad'); // 狂人は「白」として教えない（村人の側だと思わせないため）
     const first = whites[Math.floor(rng() * whites.length)];
     const minutes = [2, 3, 5].includes(rules.time) ? rules.time : 3;
     return {
       n, seed, minutes, roles, alive: Array(n).fill(true), day: 1, phase: 'day', said: Array(n).fill(0), chat: [],
       vote: 1, cands: [], votes: {}, night: { bite: {}, see: null, guard: null }, seen: [{ d: 0, to: first, wolf: false }], log: [], winner: null, step: 0,
+      ...(medium ? { medium: [] } : {}),
     };
   },
 
@@ -149,11 +163,11 @@ export default {
     if (s.phase === 'end' || !s.alive[p]) return false;
     if (s.phase === 'day') return true;
     if (s.phase === 'vote') return !(p in s.votes);
-    return s.roles[p] !== 'villager' && !acted(s, p);
+    return NIGHT_ROLES.has(s.roles[p]) && !acted(s, p);
   },
   result(s) {
     if (s.phase !== 'end') return null;
-    const winners = range(s.n).filter((p) => (s.winner === 'wolf') === (s.roles[p] === 'wolf'));
+    const winners = range(s.n).filter((p) => (s.winner === 'wolf') === wolfTeam(s.roles[p]));
     return { winners, team: s.winner };
   },
   resultText(res, me) {
@@ -317,6 +331,11 @@ export default {
         html += `<div class="jr-role-sub">夜に1人を占って、人狼かどうかが分かります。<br>${s.seen.map((x) => `${x.d ? `${x.d}日目の夜` : '始め'}: ${esc(nameP(x.to))} は <b>${x.wolf ? '人狼 🐺' : '人狼ではない'}</b>`).join('<br>')}</div>`;
       } else if (role === 'knight') {
         html += '<div class="jr-role-sub">夜に1人を人狼の襲撃から守れます（自分は守れません）</div>';
+      } else if (role === 'mad') {
+        html += '<div class="jr-role-sub">人間ですが、<b>人狼チームの味方</b>です（人狼が勝てばあなたも勝ち）。人狼がだれかは知りません。占われても「人狼ではない」と出ます。村人をまどわせましょう</div>';
+      } else if (role === 'medium') {
+        const ms = s.medium ?? [];
+        html += `<div class="jr-role-sub">投票で追放された人が人狼だったかどうかが分かります。${ms.length ? '<br>' + ms.map((x) => `${x.d}日目に追放: ${esc(nameP(x.to))} は <b>${x.wolf ? '人狼 🐺' : '人狼ではない'}</b>`).join('<br>') : ''}</div>`;
       } else html += '<div class="jr-role-sub">特別な力はありません。話し合いで人狼を見つけましょう</div>';
       card.innerHTML = html;
       top.append(card);
@@ -326,7 +345,7 @@ export default {
     chips.className = 'cc-opps';
     for (const p of range(s.n)) {
       const chip = document.createElement('div');
-      chip.className = 'cc-opp' + (s.alive[p] ? '' : ' out') + (over && s.winner && (s.winner === 'wolf') === (s.roles[p] === 'wolf') ? ' won' : '');
+      chip.className = 'cc-opp' + (s.alive[p] ? '' : ' out') + (over && s.winner && (s.winner === 'wolf') === wolfTeam(s.roles[p]) ? ' won' : '');
       const name = document.createElement('div');
       name.className = 'cc-opp-name';
       name.textContent = nameP(p);
@@ -417,7 +436,7 @@ export default {
         const t = { wolf: 'bite', seer: 'see', knight: 'guard' }[role];
         note({ wolf: '襲う人を選んでください', seer: '占う人を選んでください', knight: '守る人を選んでください' }[role]);
         row(others.map((q) => button(nameP(q), 'primary', () => o.onMove({ t, to: q, d: s.day }))));
-      } else if (me !== null && s.alive[me] && role !== 'villager') {
+      } else if (me !== null && s.alive[me] && NIGHT_ROLES.has(role)) {
         const done = role === 'wolf' ? s.night.bite[me] : role === 'seer' ? s.night.see : s.night.guard;
         note(`${nameP(done)}を${{ wolf: '襲う', seer: '占った', knight: '守る' }[role]}ことにしました。朝を待っています…`);
       } else note('夜です。朝になるのを待っています…');

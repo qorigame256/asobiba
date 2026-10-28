@@ -8,6 +8,9 @@
 //   - 誰かが正解したら10秒待って締め切る（難読漢字は5秒。式を組むのは読みを打つより時間がかかるため）。全員が正解かパスなら1.5秒で締め切る。
 //   - 詳細設定「難しさ」: ふつう（解き方が多い組）・むずかしい（解き方が少ない組）・ぜんぶまぜる。解き方の数は SOLVE で数えた式の数（同じ形の言い換えも数えるので目安）。
 //   - 答えを見せる場面と、終わったあとのふりかえりで「答えの例」を出す。
+// 2026-10-28 の29回目の案「作る数」（本人が選んだ。分かれ目は Claude の判断）: 詳細設定で 10（最初）・毎回ばらばら（5〜20）。
+//   ばらばらのときは問題ごとに作る数と4つの数字を種から引き、答えのある組だけ出す（10 も出る）。1つの組だけなら計算は一瞬なので、一覧は作らずその場で解く。
+//   難しさの分け方は10と同じ（解き方の数が HARD_MAX 以下ならむずかしい）。問題に goal を持つのはばらばらのときだけ（10 のときの局面の形は前と同じ）。
 // 進行は難読漢字と同じ（ホストが時間を計って p = -1 の手を足す）: ready → next → open →（正解が出たら10秒 / 全員済み1.5秒 / 制限時間）→ close → shown → next …
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'try', q: 問題番号, text: 式（数字と + - * / ( ) だけ）, ms } / { p, t: 'pass', q }
 
@@ -38,11 +41,11 @@ const OPS = {
 };
 
 // 4つの数字で10になる式を全部（同じ式の文字は1つに）。式は外側にもかっこを付けた形（例: ((1+3)*(6-4))）
-export function solveAll(nums) {
+export function solveAll(nums, goal = GOAL) {
   const out = new Set();
   const rec = (items) => {
     if (items.length === 1) {
-      if (items[0].v[0] === GOAL && items[0].v[1] === 1) out.add(items[0].e);
+      if (items[0].v[0] === goal && items[0].v[1] === 1) out.add(items[0].e);
       return;
     }
     for (let i = 0; i < items.length; i++) {
@@ -69,10 +72,28 @@ export function buildPuzzles() {
     const sols = solveAll([a, b, c, d]);
     if (!sols.length) continue;
     // 答えの例は、かっこを外して短くなった式のうち一番短いもの（同じ長さなら文字の順）。全部を短くすると読み込みが遅いので最初の30個から
-    const ex = sols.slice(0, 30).map(trim).sort((x, y) => x.length - y.length || (x < y ? -1 : 1))[0];
-    list.push({ nums: [a, b, c, d], count: sols.length, ex });
+    list.push({ nums: [a, b, c, d], count: sols.length, ex: exampleOf(sols) });
   }
   return list;
+}
+// 答えの例は、かっこを外して短くなった式のうち一番短いもの（同じ長さなら文字の順）。全部を短くすると読み込みが遅いので最初の30個から
+function exampleOf(sols, goal = GOAL) {
+  return sols.slice(0, 30).map((e) => trim(e, goal)).sort((x, y) => x.length - y.length || (x < y ? -1 : 1))[0];
+}
+// 作る数が毎回ばらばらのときの1問（作る数 5〜20 と 1〜9 の4つを種から引き、難しさに合う答えのある組が出るまで引き直す）
+export function randomQuestion(level, rnd, seen = new Set()) {
+  for (let k = 0; ; k++) {
+    const goal = 5 + Math.floor(rnd() * 16);
+    const nums = [0, 0, 0, 0].map(() => 1 + Math.floor(rnd() * 9));
+    const id = goal + ':' + nums.slice().sort((a, b) => a - b).join('');
+    if (seen.has(id)) continue;
+    const sols = solveAll(nums, goal);
+    if (!sols.length) continue;
+    const fits = level === 'mix' || (level === 'hard' ? sols.length <= HARD_MAX : sols.length > HARD_MAX);
+    if (!fits && k < 2000) continue;
+    seen.add(id);
+    return { nums, ex: exampleOf(sols, goal), goal };
+  }
 }
 // make10-data.js の1行（「1199:1:9*(1+1/9)」）を { nums, count, ex } に
 export const PUZZLES = MAKE10.trim().split(/\s+/).map((row) => {
@@ -81,7 +102,7 @@ export const PUZZLES = MAKE10.trim().split(/\s+/).map((row) => {
 });
 
 // 要らないかっこを外す（答えの例を見せるときだけ）。外しても使う数字は同じなので、10のままなら正しい答えのまま
-function trim(e) {
+function trim(e, goal = GOAL) {
   let s = e;
   for (let changed = true; changed;) {
     changed = false;
@@ -91,7 +112,7 @@ function trim(e) {
       for (; j < s.length; j++) { if (s[j] === '(') depth++; else if (s[j] === ')' && --depth === 0) break; }
       const t = s.slice(0, i) + s.slice(i + 1, j) + s.slice(j + 1);
       const b = evalExpr(t);
-      if (b && b.v[0] === GOAL && b.v[1] === 1) { s = t; changed = true; break; }
+      if (b && b.v[0] === goal && b.v[1] === 1) { s = t; changed = true; break; }
     }
   }
   return s;
@@ -135,10 +156,10 @@ export function evalExpr(text) {
   return { v, nums: nums.sort((a, b) => a - b) };
 }
 
-// 式がその問題の正解か（4つの数字をちょうど1回ずつ使って10）
-export function isRight(nums, text) {
+// 式がその問題の正解か（4つの数字をちょうど1回ずつ使って goal。ふつうは10）
+export function isRight(nums, text, goal = GOAL) {
   const r = evalExpr(text);
-  if (!r || r.v[0] !== GOAL || r.v[1] !== 1) return false;
+  if (!r || r.v[0] !== goal || r.v[1] !== 1) return false;
   const want = nums.slice().sort((a, b) => a - b);
   return r.nums.length === 4 && r.nums.every((n, k) => n === want[k]);
 }
@@ -150,6 +171,7 @@ export const pretty = (text) => String(text).replace(/\*/g, '×').replace(/\//g,
 const limitOf = (s) => Number(s.rules.time) * 1000;
 const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 10);
 const qKey = (s, q = s.q) => `make10:${s.seed}:${q}`;
+const goalOf = (q) => q.goal ?? GOAL;
 const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice(), said: s.said.slice(), passed: s.passed.slice() });
 const doneOf = (s, p) => s.solved[p] !== null || s.passed[p];
 // 締め切りのとき、正解した人の点（速い順に PTS、それより後ろは1点。同じ速さは同じ点）
@@ -194,13 +216,16 @@ export default {
     { key: 'level', label: '難しさ', desc: 'ふつうは解き方が多い組、むずかしいは解き方が少ない組（1・1・9・9 など）', def: 'easy', choices: Object.entries(LEVELS) },
     { key: 'time', label: '制限時間', desc: '1問あたりの時間', def: '60', choices: [['30', '30秒'], ['60', '60秒'], ['90', '90秒']] },
     { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 10, choices: ROUNDS },
+    { key: 'goal', label: '作る数', desc: 'ばらばらは問題ごとに作る数が 5〜20 のどれかに変わる', def: '10', choices: [['10', '10'], ['mix', '毎回ばらばら（5〜20）']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const r = { level: 'easy', time: '60', rounds: 10, ...rules };
     const rnd = mulberry32(seed);
     // 数字の並びも種からまぜる（小さい順のままだと答えが見えやすい）
-    const qs = shuffle(poolOf(r.level), rnd).slice(0, roundsOf(r)).map((p) => ({ nums: shuffle(p.nums, rnd), ex: p.ex }));
+    const seen = new Set();
+    const qs = r.goal === 'mix' ? Array.from({ length: roundsOf(r) }, () => randomQuestion(r.level, rnd, seen))
+      : shuffle(poolOf(r.level), rnd).slice(0, roundsOf(r)).map((p) => ({ nums: shuffle(p.nums, rnd), ex: p.ex }));
     return {
       n, seed, rules: r, qs, q: -1, phase: 'ready',
       solved: Array(n).fill(null), said: Array(n).fill(''), passed: Array(n).fill(false), scores: Array(n).fill(0), last: null, log: [], step: 0,
@@ -270,7 +295,7 @@ export default {
       return s;
     }
     if (m.t !== 'try' || typeof m.ms !== 'number' || !(m.ms >= 0) || m.ms > limitOf(s0) + 500) return null;
-    if (!isRight(s0.qs[s0.q].nums, m.text)) return null; // 送るのは正しい式だけ（改造した端末から来たものもここで弾く）
+    if (!isRight(s0.qs[s0.q].nums, m.text, goalOf(s0.qs[s0.q]))) return null; // 送るのは正しい式だけ（改造した端末から来たものもここで弾く）
     const s = clone(s0);
     s.step += 1;
     s.solved[m.p] = m.ms;
@@ -333,22 +358,23 @@ export default {
     const card = document.createElement('div');
     card.className = 'kj-card';
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">難しさ: ${LEVELS[s.rules.level] ?? ''}・全${s.qs.length}問・1問 ${s.rules.time}秒</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">難しさ: ${LEVELS[s.rules.level] ?? ''}${s.rules.goal === 'mix' ? '・作る数は毎回ちがう' : ''}・全${s.qs.length}問・1問 ${s.rules.time}秒</div>`;
       wrap.append(card);
       root.append(wrap);
       return;
     }
     const { nums, ex } = s.qs[s.q];
+    const goal = goalOf(s.qs[s.q]);
     const key = qKey(s);
     const limit = limitOf(s);
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div><div class="mk-nums">${nums.map((n) => `<span class="mk-num">${n}</span>`).join('')}</div>`;
+    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>${s.qs[s.q].goal ? `<div class="mk-goal">${goal} を作れ！</div>` : ''}<div class="mk-nums">${nums.map((n) => `<span class="mk-num">${n}</span>`).join('')}</div>`;
     if (s.phase === 'open') {
       since(key);
       card.append(timeBar(key, limit, { secs: true }));
     } else {
       const ans = document.createElement('div');
       ans.className = 'kj-answer';
-      ans.textContent = `答えの例: ${pretty(ex)} = 10`;
+      ans.textContent = `答えの例: ${pretty(ex)} = ${goal}`;
       card.append(ans);
       // 正解した人の式（自分で組んだ式なので外から来た文字ではないが、数字と記号以外は apply で弾いている）
       const who = s.solved.map((v, p) => (v === null ? null : p)).filter((p) => p !== null);
@@ -364,14 +390,14 @@ export default {
     const note = document.createElement('p');
     note.className = 'cc-log';
     ui.note = note;
-    if (s.phase === 'open' && me !== null && !doneOf(s, me)) wrap.append(this.pad(s, o, nums, key, limit, note));
+    if (s.phase === 'open' && me !== null && !doneOf(s, me)) wrap.append(this.pad(s, o, nums, key, limit, note, goal));
     wrap.append(note);
     root.append(wrap);
     this.note(s, me);
   },
 
   // 式を組むボタン。数字のボタンは押したら使えなくなり、⌫ で戻ると使えるようになる
-  pad(s, o, nums, key, limit, note) {
+  pad(s, o, nums, key, limit, note, goal = GOAL) {
     const box = document.createElement('div');
     box.className = 'mk-pad';
     const line = document.createElement('div');
@@ -403,9 +429,9 @@ export default {
       if (toks.filter((t) => t.k === 'n').length < 4) { note.textContent = '4つの数字を全部使ってください'; return; }
       const r = evalExpr(text);
       if (!r) { note.textContent = '式の形がちがいます（かっこや記号を見直してください）'; return; }
-      if (!isRight(nums, text)) {
+      if (!isRight(nums, text, goal)) {
         const v = r.v[1] === 1 ? String(r.v[0]) : `${r.v[0]}/${r.v[1]}`;
-        note.textContent = `10になりません（いまは ${pretty(v)}）`;
+        note.textContent = `${goal}になりません（いまは ${pretty(v)}）`;
         return;
       }
       sent = true;
@@ -465,7 +491,7 @@ export default {
       const fast = r.x.winners.map((p) => (p === me ? 'あなた' : o.names?.[p] ?? `プレイヤー${p + 1}`));
       li.innerHTML = `<span class="mk-rv-n">${k + 1}</span>`
         + (me !== null ? `<span>${r.x.solved[me] !== null ? '⭕' : '❌'}</span>` : '')
-        + `<span class="mk-rv-nums">${r.q.nums.join(' ')}</span><span class="mk-rv-ex">${esc(pretty(r.q.ex))}</span>`
+        + `<span class="mk-rv-nums">${r.q.nums.join(' ')}${r.q.goal ? ` → ${r.q.goal}` : ''}</span><span class="mk-rv-ex">${esc(pretty(r.q.ex))}</span>`
         + `<span class="mk-rv-who">${fast.length ? '⚡' + esc(fast.join('・')) : '―'}</span>`;
       list.append(li);
     });
@@ -482,7 +508,7 @@ export default {
       else if (me !== null && s.passed[me]) note.textContent = 'パスしました。ほかの人を待っています';
       else if (me === null) note.textContent = '観戦中';
       else if (someone) note.textContent = 'ほかの人が正解しました。10秒で締め切り！ 正解すれば点がもらえます';
-      else if (!note.textContent) note.textContent = '4つの数字を1回ずつ使って10を作ろう';
+      else if (!note.textContent) note.textContent = `4つの数字を1回ずつ使って${goalOf(s.qs[s.q])}を作ろう`;
     } else if (s.phase === 'shown' && s.last) {
       note.textContent = s.last.winners.length ? '' : '正解した人はいませんでした';
     } else {

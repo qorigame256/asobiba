@@ -259,6 +259,21 @@ if (!TESTDATA || !fs.existsSync(TESTDATA)) {
     s.h.hands[0] = t2.h.hands[0];
     check('和了りの形は -1', T.shantenView(t2, 0).n === -1, JSON.stringify(T.shantenView(t2, 0)));
   }
+  // 詳細設定「安全な牌に印」（2026-10-28）。リーチした人全員の現物だけ。リーチがいなければ null。自分のリーチは数えない
+  {
+    check('安全な牌に印は最初は「なし」', mj.init(4, 1, { rules: {} }).rules.safe === undefined && mj.init(4, 1, { rules: { safe: true } }).rules.safe === true);
+    const s = table(['234m234p567p678s59s', '19m19p19s1234567z', '19m19p19s1234567z', '19m19p19s1234567z']);
+    const k = (str) => E.kindOf(str);
+    const riv = (p, str) => { s.h.rivers[p] = ids(str, new Set()).map((id) => ({ id, riichi: false, taken: false, tsumogiri: false })); };
+    riv(1, '29m1z'); riv(2, '9m3p'); riv(3, '1z');
+    check('リーチがいなければ印は無い', T.safeKinds(s, 0) === null);
+    s.h.riichi[0] = 1;
+    check('自分のリーチは数えない', T.safeKinds(s, 0) === null);
+    s.h.riichi[1] = 1;
+    check('リーチした人の河の牌が安全', [...T.safeKinds(s, 0)].sort().join() === [k('2m'), k('9m'), k('1z')].sort().join());
+    s.h.riichi[2] = 1;
+    check('2人リーチなら両方の現物だけ', [...T.safeKinds(s, 0)].join() === String(k('9m')));
+  }
   // 詳細設定「待ち牌の表示」（2026-10-07）。見せるだけの waitView
   {
     check('ツモ切りの表示は最初は「なし」', mj.init(4, 1, { rules: {} }).rules.tsumogiri === false && mj.init(4, 1, { rules: { tsumogiri: true } }).rules.tsumogiri === true);

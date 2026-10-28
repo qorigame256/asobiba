@@ -6258,6 +6258,42 @@ for (const id of GAME_ORDER) {
   assert.equal(w.phase, 'end');
   assert.equal(J.result(w).team, 'village');
   assert.deepEqual(J.result(w).winners, [1, 2, 3, 4, 5]);
+  // 霊媒師・狂人（29回目の案）: 人数の条件・霊媒師は追放された人が人狼かが分かる・狂人は人狼チームで勝つ・占うと人狼ではない・夜の行動は無い
+  for (let n = 4; n <= 10; n++) {
+    const s2 = J.init(n, 7 + n, { rules: { medium: true, mad: true } });
+    assert.equal(s2.roles.filter((r) => r === 'medium').length, n >= 5 ? 1 : 0);
+    assert.equal(s2.roles.filter((r) => r === 'mad').length, n >= 7 ? 1 : 0);
+    assert.equal(s2.roles.filter((r) => r === 'wolf').length, wolfCount(n, 'auto'));
+    assert.ok(!['wolf', 'mad'].includes(s2.roles[s2.seen[0].to]), '始めに知る人は人狼でも狂人でもない');
+    assert.equal(!!s2.medium, n >= 5);
+  }
+  assert.equal(J.init(6, 1, { rules: {} }).medium, undefined, 'なしのときは局面に medium を持たない');
+  {
+    // 0 人狼・1 占い師・2 霊媒師・3 狂人・4〜6 村人
+    const b = { ...J.init(7, 1, { rules: { medium: true, mad: true } }), roles: ['wolf', 'seer', 'medium', 'mad', 'villager', 'villager', 'villager'], medium: [] };
+    let m = J.apply(b, { p: 1, t: 'tovote', d: 1 });
+    for (const [p, to] of [[0, 4], [1, 4], [2, 4], [3, 5], [4, 5], [5, 6], [6, 0]]) m = J.apply(m, { p, t: 'vote', to, v: 1, d: 1 });
+    assert.equal(m.alive[4], false);
+    assert.deepEqual(m.medium, [{ d: 1, to: 4, wolf: false }], '霊媒師に追放された人が人狼でないと分かる');
+    assert.ok(!J.canAct(m, 2) && !J.canAct(m, 3), '霊媒師・狂人は夜に行動しない');
+    assert.equal(J.apply(m, { p: 3, t: 'bite', to: 5, d: 1 }), null, '狂人は襲えない');
+    m = J.apply(m, { p: 1, t: 'see', to: 3, d: 1 });
+    assert.equal(m.seen.at(-1).wolf, false, '狂人を占うと人狼ではない');
+    m = J.apply(m, { p: 0, t: 'bite', to: 2, d: 1 });
+    assert.equal(m.phase, 'day', '人狼と占い師が選んだら朝（霊媒師・狂人は待たない）');
+    // 残りは 0 人狼・1 占い師・3 狂人・5・6 村人。2日目に 1 を追放して 5 を襲い、3日目に 6 を追放すると 人狼1・狂人1 で人狼チームの勝ち（狂人は人間に数える）
+    m = J.apply(m, { p: 1, t: 'tovote', d: 2 });
+    for (const [p, to] of [[0, 1], [1, 5], [3, 1], [5, 1], [6, 5]]) m = J.apply(m, { p, t: 'vote', to, v: 1, d: 2 });
+    assert.equal(m.alive[1], false);
+    assert.equal(m.medium.length, 1, '霊媒師がやられたあとの追放は分からない');
+    m = J.apply(m, { p: 0, t: 'bite', to: 5, d: 2 });
+    assert.equal(m.phase, 'day');
+    m = J.apply(m, { p: 3, t: 'tovote', d: 3 });
+    for (const [p, to] of [[0, 6], [3, 6], [6, 3]]) m = J.apply(m, { p, t: 'vote', to, v: 1, d: 3 });
+    assert.equal(m.phase, 'end');
+    assert.equal(J.result(m).team, 'wolf');
+    assert.deepEqual(J.result(m).winners, [0, 3], '狂人も人狼チームとして勝つ');
+  }
   // CPU どうしで最後まで（時間切れはホストの手で進める）
   const realRandom = Math.random;
   try {
@@ -6266,7 +6302,7 @@ for (const id of GAME_ORDER) {
     let wins = { village: 0, wolf: 0 };
     for (let g = 0; g < 60; g++) {
       const np = 4 + (g % 7);
-      let st = J.init(np, 100 + g, { rules: { knight: g % 2 === 0 } });
+      let st = J.init(np, 100 + g, { rules: { knight: g % 2 === 0, medium: g % 3 === 0, mad: g % 4 < 2 } });
       let steps = 0;
       while (!J.result(st)) {
         let moved = false;
@@ -6295,7 +6331,7 @@ for (const id of GAME_ORDER) {
 // 10を作れ（2026-10-27）: 式の計算・正解の判定・書き出した問題の一覧が計算し直したものと同じ・進行と点・CPU どうしで最後まで
 {
   const M = GAMES.make10;
-  const { evalExpr, isRight, buildPuzzles, PUZZLES, poolOf, pointsOf } = await import('../app/js/games/make10.js');
+  const { evalExpr, isRight, buildPuzzles, PUZZLES, poolOf, pointsOf, solveAll } = await import('../app/js/games/make10.js');
   assert.deepEqual(evalExpr('(1+3)*4-6').v, [10, 1]);
   assert.deepEqual(evalExpr('8/3*3').v, [8, 1], '割り算の途中は分数のまま');
   assert.equal(evalExpr('1/(2-2)'), null, '0で割る');
@@ -6317,6 +6353,36 @@ for (const id of GAME_ORDER) {
   assert.equal(s.qs.length, 10);
   assert.ok(s.qs.every((q) => q.nums.length === 4 && isRight(q.nums, q.ex)));
   assert.deepEqual(M.init(3, 5, { rules: {} }), s, '同じ種なら同じ問題');
+  // 作る数「毎回ばらばら」: どの問題も 5〜20 のどれかで、答えの例はその数の正解。同じ種なら同じ。10 のときは goal を持たない
+  assert.ok(s.qs.every((q) => q.goal === undefined));
+  for (const level of ['easy', 'hard', 'mix']) {
+    const g = M.init(3, 8, { rules: { goal: 'mix', level, rounds: 15 } });
+    assert.ok(g.qs.every((q) => q.goal >= 5 && q.goal <= 20 && isRight(q.nums, q.ex, q.goal)), '作る数: 答えの例が正解');
+    assert.deepEqual(M.init(3, 8, { rules: { goal: 'mix', level, rounds: 15 } }), g, '作る数: 同じ種なら同じ問題');
+    assert.ok(new Set(g.qs.map((q) => q.goal)).size >= 4, '作る数: いろいろな数が出る');
+  }
+  {
+    let g = M.init(2, 8, { rules: { goal: 'mix' } });
+    g = M.apply(g, { p: -1, t: 'next' });
+    const q0 = g.qs[0];
+    assert.ok(M.apply(g, { p: 0, t: 'try', q: 0, text: q0.ex, ms: 900 }), '作る数: その数の式なら正解');
+    const bad = [3, 5, 7, 9, 11].map((sd) => M.init(2, sd, { rules: { goal: 'mix' } })).flatMap((x) => x.qs).find((q) => q.goal !== 10 && solveAll(q.nums).length);
+    assert.ok(bad && !isRight(bad.nums, solveAll(bad.nums)[0], bad.goal), '作る数: 10 になる式は正解にならない');
+    let st = M.init(3, 12, { rules: { goal: 'mix', rounds: 5 } });
+    const realNow = performance.now.bind(performance);
+    let fake = 0, rk = null, rAt = 0;
+    performance.now = () => fake;
+    try {
+      for (let guard = 0; guard < 500 && !M.result(st); guard++) {
+        fake += 5000;
+        for (let p = 0; p < 3; p++) { const m = M.cpu(st, p); if (m) st = M.apply(st, { ...m, p }) ?? st; }
+        const r = M.referee(st);
+        if (r && r.key !== rk) { rk = r.key; rAt = fake; }
+        if (r && fake - rAt >= r.ms) st = M.apply(st, { ...r.move, p: -1 });
+      }
+    } finally { performance.now = realNow; }
+    assert.ok(M.result(st) && st.scores.some((v) => v > 0), '作る数: CPU どうしで最後まで・CPU も正解する');
+  }
   s = M.apply(s, { p: -1, t: 'next' });
   assert.equal(s.phase, 'open');
   const ex = s.qs[0].ex;
@@ -6605,6 +6671,26 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.deepEqual(N.result(s).place, [2, 1, 3]);
   const st = runCpus(N, 4, 9, { size: '6' }, 10000);
   assert.ok(N.result(st), 'ナンプレ: CPU どうしで最後まで');
+  // 問題の数（3問は 6×6 だけ）: 1問目から順に解き、3問目を解いた時間で順位。9×9 は1問のまま。1問のときの局面は前と同じ形
+  assert.equal(N.init(3, 4, { rules: { size: '9', rounds: 3 } }).qs, undefined, 'ナンプレ: 9×9 は1問のまま');
+  assert.deepEqual(Object.keys(N.init(3, 4, { rules: { size: '6' } })).sort(), ['answer', 'n', 'passed', 'phase', 'puzzle', 'rules', 'seed', 'size', 'solved', 'step']);
+  let t3 = N.init(2, 5, { rules: { size: '6', rounds: 3 } });
+  assert.equal(t3.qs.length, 3);
+  assert.equal(new Set(t3.qs.map((x) => x.puzzle.join(''))).size, 3, 'ナンプレ: 3問はちがう問題');
+  t3 = N.apply(t3, { p: -1, t: 'next' });
+  const a3 = (k) => t3.qs[k].answer.join('');
+  assert.equal(N.apply(t3, { p: 0, t: 'done', k: 1, grid: a3(1), ms: 100 }), null, 'ナンプレ: 2問目を先に解けない');
+  assert.equal(N.apply(t3, { p: 0, t: 'done', k: 1, grid: a3(0), ms: 100 }), null, 'ナンプレ: 何問目かがちがう手は受け付けない');
+  assert.equal(N.apply(t3, { p: 0, t: 'done', k: 0, grid: a3(1), ms: 100 }), null, 'ナンプレ: 別の問題の答えは受け付けない');
+  for (let k = 0; k < 3; k++) t3 = N.apply(t3, { p: 0, t: 'done', k, grid: a3(k), ms: 1000 * (k + 1) });
+  assert.deepEqual(t3.prog, [3, 0]);
+  assert.equal(t3.solved[0], 3000, 'ナンプレ: 3問目を解いた時間が記録');
+  t3 = N.apply(t3, { p: 0, t: 'done', k: 0, grid: a3(0), ms: 300 }) ?? t3;
+  for (let k = 0; k < 2; k++) t3 = N.apply(t3, { p: 1, t: 'done', k, grid: a3(k), ms: 500 * (k + 1) });
+  assert.equal(t3.solved[1], null, 'ナンプレ: 2問だけでは解いたことにならない');
+  t3 = N.apply(t3, { p: -1, t: 'close' });
+  assert.deepEqual(N.result(t3).winners, [0]);
+  assert.ok(N.result(runCpus(N, 4, 9, { size: '6', rounds: 3 }, 10000)), 'ナンプレ: 3問も CPU どうしで最後まで');
   console.log('nanpure OK');
 }
 

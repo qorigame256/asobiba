@@ -22,6 +22,10 @@
 // 詳細設定「ツモ切りの表示」（2026-10-07 本人の決定。最初は「なし」）: 河の牌のうち、引いた牌をそのまま捨てたもの（ツモ切り）を少し暗く描く。
 //   相手の手を読む手がかり。河にはもとから tsumogiri を覚えているので、描き方だけ変える（riverEl。手の一覧・apply は変えない）。
 //   鳴いたあとの打牌は引いていないので手出し。リーチ中の自動の打牌はツモ切り。
+// 詳細設定「安全な牌に印」（2026-10-28 の29回目の案。本人が選んだ。分かれ目は Claude の判断。最初は「なし」）: ほかの人がリーチしている間、
+//   自分の手牌のうち、リーチした人が前に捨てた牌と同じ種類の牌（現物。フリテンなのでその人にはロンされない）に緑の ✓ を付ける。
+//   リーチが2人以上なら、全員の現物になっている牌だけ。リーチのあとにほかの人が通した牌（同巡・見逃し）は数えない（局面に通った順を持っていないため）。
+//   見せるだけで、手の一覧・apply は変えない（safeKinds）。初めての人向けの手伝いなので、待合室のおまかせでは抽選しない（main.js の KEEP_KEYS）。
 // 役の早見表（2026-10-07 本人の決定。詳細設定ではなく、いつも出す）: 場の情報の段の「📖 役」で、和了れる役の一覧を盤の上に重ねて開く。
 //   観戦の人も見られる。見せるだけ（YAKU_GUIDE・yakuPanel）。表の役の名前と翻数は tools/test-mahjong.mjs がエンジンと突き合わせる。
 // 鳴きなし（2026-10-24 本人の決定。詳細設定ではなく、各自が手牌の下のボタンで付け外しする）: 付けている間は、ロンできない確認（鳴けるだけ）を
@@ -181,6 +185,15 @@ const furiten = (s, p) => {
   const h = s.h;
   return h.furitenTemp[p] || h.furitenRiichi[p] || h.rivers[p].some((x) => h.waits[p].includes(kindOf(x.id)));
 };
+
+// 詳細設定「安全な牌に印」: ほかの人がリーチしているとき、その全員の現物になっている牌の種類（リーチがいなければ null）
+function safeKinds(s, p) {
+  const h = s.h;
+  const rs = [...Array(s.n).keys()].filter((q) => q !== p && h.riichi[q]);
+  if (!rs.length) return null;
+  const sets = rs.map((q) => new Set(h.rivers[q].map((x) => kindOf(x.id))));
+  return new Set([...sets[0]].filter((k) => sets.every((x) => x.has(k))));
+}
 
 // 詳細設定「待ち牌の表示」で自分の画面に出す中身（見せるだけ。局面は変えない）。
 // 13枚の形（打ったあと・ほかの人の番）は局面に入っている待ち（h.waits）。リーチ中も切る牌が決まっているので同じ。
@@ -1107,12 +1120,14 @@ function render(root, s, o) {
   hand.append(row);
   const ids = sortHand(h.hands[me].filter((id) => !(h.turn === me && id === h.drawn)));
   if (h.turn === me && h.drawn !== null && h.hands[me].includes(h.drawn)) ids.push(h.drawn);
+  const safe = s.rules.safe && !watching ? safeKinds(s, me) : null;
   ids.forEach((id) => {
     const isDrawn = h.turn === me && id === h.drawn;
     if (watching) { row.append(tileEl(id, { back: true })); return; }
     const ok = myTurn && canDiscard(s, id) && (!ui.riichi || opts.riichi.includes(kindOf(id)));
     const b = document.createElement(ok ? 'button' : 'span');
-    b.className = 'mj-hand-tile' + (isDrawn ? ' drawn' : '') + (ui.sel === id ? ' selected' : '') + (ok ? ' playable' : '') + (myTurn && !ok ? ' dim' : '');
+    b.className = 'mj-hand-tile' + (isDrawn ? ' drawn' : '') + (ui.sel === id ? ' selected' : '') + (ok ? ' playable' : '') + (myTurn && !ok ? ' dim' : '') + (safe?.has(kindOf(id)) ? ' safe' : '');
+    if (safe?.has(kindOf(id))) b.title = 'リーチした人の現物（ロンされない牌）';
     b.append(tileEl(id));
     if (ok) {
       b.type = 'button';
@@ -1214,6 +1229,7 @@ export default {
     { key: 'waits', label: '待ち牌の表示', desc: '聴牌したら、何で和了れるか（待ちの牌）を自分の画面に出す。初めての人向け', def: false },
     { key: 'shanten', label: 'テンパイまであと何枚', desc: '自分の手が、あと何枚でテンパイになるか（向聴数）を自分の画面に出す。切る牌を選ぶと、それを切ったときの枚数になる。初めての人向け', def: false },
     { key: 'tobi', label: 'トビ', desc: '持ち点が0点を下回った人が出たら、その局で対局が終わる。なし では、マイナスのまま最後の局まで続ける（だれも途中で抜けない）', def: true },
+    { key: 'safe', label: '安全な牌に印', desc: 'ほかの人がリーチしたら、自分の手牌のうち、その人が前に捨てた牌と同じ牌（ロンされない牌）に ✓ を付ける。初めての人向け', def: false },
     { key: 'tsumogiri', label: 'ツモ切りの表示', desc: '引いた牌をそのまま捨てた牌（ツモ切り）を、河で少し暗く出す。相手の手を読む手がかりになる', def: false },
     { key: 'players', label: '人数', desc: '3人麻雀は二萬〜八萬を抜いた108枚・チーなし・北は抜きドラ。5人麻雀は5人目に自風がなく、ツモは4人から受け取る', def: 4, choices: [[4, '4人'], [3, '3人（三人麻雀）'], [5, '5人（五人麻雀）']] },
   ],
@@ -1221,7 +1237,7 @@ export default {
 
   init(n, seed, { rules = {} } = {}) {
     const s = {
-      n, seed, rules: { length: ['south', 'one'].includes(rules.length) ? rules.length : 'east', red: rules.red !== false, kuitan: rules.kuitan !== false, waits: rules.waits === true, tsumogiri: rules.tsumogiri === true, shanten: rules.shanten === true, tobi: rules.tobi !== false }, scores: Array(n).fill(n === 3 ? 35000 : 25000),
+      n, seed, rules: { length: ['south', 'one'].includes(rules.length) ? rules.length : 'east', red: rules.red !== false, kuitan: rules.kuitan !== false, waits: rules.waits === true, tsumogiri: rules.tsumogiri === true, shanten: rules.shanten === true, tobi: rules.tobi !== false, ...(rules.safe === true ? { safe: true } : {}) }, scores: Array(n).fill(n === 3 ? 35000 : 25000),
       kyoku: 0, honba: 0, kyotaku: 0, handNo: 0, seq: 0, over: false, ranking: null, h: null,
     };
     startHand(s);
@@ -1278,4 +1294,4 @@ export default {
 };
 
 // テスト用
-export const _test = { turnOptions, claimOptions, winResult, waitsOf, waitView, shantenView, liveLeft, kindOf, chiOptions, seatWind, YAKU_GUIDE, yakuGuide };
+export const _test = { turnOptions, claimOptions, winResult, waitsOf, waitView, shantenView, safeKinds, liveLeft, kindOf, chiOptions, seatWind, YAKU_GUIDE, yakuGuide };

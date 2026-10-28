@@ -8,8 +8,14 @@
 //   - 制限時間は 9×9 が20分、6×6 が8分。全員が解くかあきらめたら1.5秒で締め切る。解けなかった人は同じ最下位。
 //   - 送るのは解いた盤（数字の文字列）。apply で答えと同じかを確かめる。進み具合は見た目だけ送りっぱなし（o.stream）。
 //   - 同じ数字・選んだマスの段と列と枠を薄く光らせる（まちがいの場所は光らせない）。PC は数字キー・矢印キー・Backspace でも入れられる。
+// 2026-10-28 の29回目の案（本人が選んだ。分かれ目は Claude の判断）:
+//   - 「まちがいの知らせ」（鍵は hint。なし（最初）・あり）: 答えとちがう数字を入れたら赤く出す（たて・よこのぶつかりではなく、答えとちがうか）。
+//     手伝いの好みなので、待合室のおまかせでは抽選しない（main.js の KEEP_KEYS の hint）。
+//   - 「問題の数」（鍵は rounds。1問（最初）・3問）: 3問は 6×6 のときだけ（9×9 は1問で10分以上かかるため、9×9 では1問のまま）。
+//     全員に同じ3問を同じ順で出し、各自が解いたらすぐ次の問題へ進む（ほかの人を待たない）。3問ぜんぶ解くまでの時間で順位。制限時間は15分。
+//     1問のときの局面の形と問題の選び方は前と同じ（3問のときも puzzle・answer は1問目）。
 // 進行: ready →（3秒）open →（全員済み1.5秒 / 制限時間）end
-// 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', grid, ms } / { p, t: 'pass' }
+// 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', grid, ms, k?（3問のとき何問目か。0 から） } / { p, t: 'pass' }
 
 import { mulberry32, shuffle } from './util.js';
 import { NANPURE } from './nanpure-data.js';
@@ -86,9 +92,12 @@ export const PUZZLES = NANPURE.trim().split(/\s+/).map((row) => {
 });
 
 const sizeOf = (r) => (Number(r.size) === 6 ? 6 : 9);
-const limitOf = (s) => (s.size === 6 ? 8 : 20) * 60000;
+const countOf = (s) => s.qs?.length ?? 1;
+const limitOf = (s) => (s.size === 6 ? (countOf(s) > 1 ? 15 : 8) : 20) * 60000;
 const KEY = (s) => `nanpure:${s.seed}`;
-const clone = (s) => ({ ...s, solved: s.solved.slice(), passed: s.passed.slice() });
+const clone = (s) => ({ ...s, solved: s.solved.slice(), passed: s.passed.slice(), ...(s.qs ? { prog: s.prog.slice() } : {}) });
+const progOf = (s, p) => (s.qs ? s.prog[p] : s.solved[p] !== null ? 1 : 0); // 解いた問題の数
+const qOf = (s, k) => (s.qs ? s.qs[k] : s); // k 問目の { puzzle, answer }
 const doneOf = (s, p) => s.solved[p] !== null || s.passed[p];
 // 順位（1 から）。解いた人は速い順、解けなかった人は全員同じ最下位
 export function placesOf(solved) {
@@ -123,14 +132,21 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'size', label: '大きさ', desc: '9×9 は1問10分前後。6×6 は数分で解ける短い版', def: '9', choices: [['9', '9×9'], ['6', '6×6（短い版）']] },
+    { key: 'rounds', label: '問題の数', desc: '3問は 6×6 のときだけ。続けて解き、3問ぜんぶ解くまでの時間で順位', def: 1, choices: [[1, '1問'], [3, '3問（6×6 のとき）']] },
+    { key: 'hint', label: 'まちがいの知らせ', desc: '答えとちがう数字を入れたら赤く出す', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const r = { size: '9', ...rules };
     const size = sizeOf(r);
     const pool = PUZZLES.filter((x) => x.size === size);
+    const base = { n, seed, rules: r, size, phase: 'ready', solved: Array(n).fill(null), passed: Array(n).fill(false), step: 0 };
+    if (size === 6 && Number(r.rounds) === 3) {
+      const qs = shuffle(pool, mulberry32(seed)).slice(0, 3).map((x) => ({ puzzle: x.puzzle, answer: x.answer }));
+      return { ...base, puzzle: qs[0].puzzle, answer: qs[0].answer, qs, prog: Array(n).fill(0) };
+    }
     const pz = pool[mulberry32(seed)() * pool.length | 0];
-    return { n, seed, rules: r, size, puzzle: pz.puzzle, answer: pz.answer, phase: 'ready', solved: Array(n).fill(null), passed: Array(n).fill(false), step: 0 };
+    return { ...base, puzzle: pz.puzzle, answer: pz.answer };
   },
 
   turn() { return null; },
@@ -168,9 +184,11 @@ export default {
     if (s0.phase !== 'open' || !Number.isInteger(m.p) || m.p < 0 || m.p >= s0.n || doneOf(s0, m.p)) return null;
     if (m.t === 'pass') { const s = clone(s0); s.step += 1; s.passed[m.p] = true; return s; }
     if (m.t !== 'done' || typeof m.ms !== 'number' || !(m.ms >= 0) || m.ms > limitOf(s0) + 500) return null;
-    if (m.grid !== s0.answer.join('')) return null;
+    const k = progOf(s0, m.p);
+    if ((m.k ?? 0) !== k || m.grid !== qOf(s0, k).answer.join('')) return null;
     const s = clone(s0);
     s.step += 1;
+    if (s.qs) { s.prog[m.p] += 1; if (s.prog[m.p] < s.qs.length) return s; }
     s.solved[m.p] = Math.round(m.ms);
     return s;
   },
@@ -187,9 +205,12 @@ export default {
       if (cpuPlan.size > 100) cpuPlan.delete(cpuPlan.keys().next().value);
     }
     const t = since(KEY(s));
-    if (plan.done || t < plan.at) return null;
-    plan.done = true;
-    return plan.ok ? { t: 'done', grid: s.answer.join(''), ms: Math.round(t) } : { t: 'pass' };
+    const k = progOf(s, p), cnt = countOf(s);
+    // 3問のときは、決めたころまでに等しい間を空けて1問ずつ解く（あきらめるときは決めたころに）
+    if (plan.done || t < (plan.ok ? (plan.at * (k + 1)) / cnt : plan.at)) return null;
+    if (!plan.ok) { plan.done = true; return { t: 'pass' }; }
+    if (k + 1 >= cnt) plan.done = true;
+    return { t: 'done', grid: qOf(s, k).answer.join(''), ms: Math.round(t), ...(s.qs ? { k } : {}) };
   },
 
   onStream(d, from) { if (d && Number.isInteger(d.f)) { progress.set(from, d.f); if (ui?.refresh) ui.refresh(); } },
@@ -201,7 +222,8 @@ export default {
     const sh = SHAPES[s.size];
     const N = sh.n;
     const key = KEY(s);
-    const blanks = s.puzzle.filter((v) => !v).length;
+    const blanks = s.puzzle.filter((v) => !v).length; // 1問ぶん（同じ大きさならどの問題も同じ）
+    const cnt = countOf(s);
     const res = this.result(s);
     const chipsOf = () => {
       const s = ui?.s ?? s0;
@@ -210,14 +232,16 @@ export default {
         if (res) return s.solved[p] !== null ? `<span class="pt-ok">${res.place[p]}位 ${secText(s.solved[p])}</span>` : '<span class="pt-ng">―</span>';
         if (s.solved[p] !== null) return `<span class="pt-ok">解いた！ ${secText(s.solved[p])}</span>`;
         if (s.passed[p]) return '<span class="pt-ng">あきらめ</span>';
-        if (p === me) return '';
-        return progress.has(p) ? `<span>${Math.floor((progress.get(p) / blanks) * 100)}%</span>` : '';
+        const done = cnt > 1 ? `${progOf(s, p)}/${cnt}問` : '';
+        if (p === me || !progress.has(p)) return done ? `<span>${done}</span>` : '';
+        return `<span>${done ? done + ' ' : ''}${Math.floor((Math.max(0, progress.get(p) - progOf(s, p) * blanks) / blanks) * 100)}%</span>`;
       };
       const c = scoreChips(o, s.solved.map(() => 0), { won: res?.winners ?? [], extra });
       c.querySelectorAll('.pt-score').forEach((x) => x.remove());
       return c;
     };
-    const mount = `${s.seed}:${s.phase}:${me}:${me !== null && doneOf(s, me)}`;
+    const mine = me !== null ? Math.min(progOf(s, me), cnt - 1) : 0; // この端末が解いている問題
+    const mount = `${s.seed}:${s.phase}:${me}:${me !== null && doneOf(s, me)}:${mine}`;
     if (ui?.mount === mount && root.contains(ui.wrap)) { ui.s = s; ui.refresh(); return; }
 
     root.innerHTML = '';
@@ -234,15 +258,20 @@ export default {
     wrap.append(card);
     if (s.phase === 'ready') {
       progress.clear();
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">${N}×${N}・${limitOf(s) / 60000}分まで。たて・よこ・太い枠のどれにも 1〜${N} が1つずつ入るように埋める</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">${N}×${N}${cnt > 1 ? `・${cnt}問続けて` : ''}・${limitOf(s) / 60000}分まで。たて・よこ・太い枠のどれにも 1〜${N} が1つずつ入るように埋める</div>`;
       return;
     }
-    if (s.phase === 'open') { since(key); card.append(timeBar(key, limitOf(s), { secs: true })); }
-    else card.innerHTML = '<div class="kj-sub">答え</div>';
+    if (s.phase === 'open') {
+      since(key);
+      if (cnt > 1) card.insertAdjacentHTML('beforeend', `<div class="kj-num">第${mine + 1}問 / ${cnt}</div>`);
+      card.append(timeBar(key, limitOf(s), { secs: true }));
+    } else card.innerHTML = `<div class="kj-sub">答え${cnt > 1 ? `（第${mine + 1}問）` : ''}</div>`;
 
-    if (loc?.key !== key) loc = { key, cells: s.puzzle.slice(), sel: -1, sent: false };
+    const q = qOf(s, mine);
+    const lkey = key + ':' + mine;
+    if (loc?.key !== lkey) loc = { key: lkey, cells: q.puzzle.slice(), sel: -1, sent: false };
     const playing = s.phase === 'open' && me !== null && !doneOf(s, me) && !loc.sent;
-    const showCells = s.phase === 'end' ? s.answer : me === null ? s.puzzle : loc.cells;
+    const showCells = s.phase === 'end' ? q.answer : me === null ? q.puzzle : loc.cells;
     const grid = document.createElement('div');
     grid.className = 'np-grid';
     grid.style.setProperty('--n', N);
@@ -258,15 +287,16 @@ export default {
         const v = showCells[i];
         t.textContent = v || '';
         const same = sel >= 0 && (r === sr || c === sc || (Math.floor(r / sh.br) === Math.floor(sr / sh.br) && Math.floor(c / sh.bc) === Math.floor(sc / sh.bc)));
-        t.className = 'np-cell' + (s.puzzle[i] ? ' given' : '') + (i === sel ? ' sel' : same ? ' near' : '') + (v && v === sv && i !== sel ? ' same' : '')
+        t.className = 'np-cell' + (q.puzzle[i] ? ' given' : '') + (i === sel ? ' sel' : same ? ' near' : '') + (v && v === sv && i !== sel ? ' same' : '')
+          + (s.rules.hint && s.phase === 'open' && me !== null && v && !q.puzzle[i] && v !== q.answer[i] ? ' bad' : '')
           + (c % sh.bc === sh.bc - 1 && c < N - 1 ? ' br' : '') + (r % sh.br === sh.br - 1 && r < N - 1 ? ' bb' : '');
       });
-      const filled = loc.cells.filter((v, i) => v && !s.puzzle[i]).length;
+      const filled = loc.cells.filter((v, i) => v && !q.puzzle[i]).length;
       if (s.phase !== 'open') note.textContent = '';
       else if (me === null) note.textContent = '観戦中';
       else if (s.solved[me] !== null) note.textContent = `解けた！（${secText(s.solved[me])}）ほかの人を待っています`;
       else if (s.passed[me]) note.textContent = 'あきらめました。ほかの人を待っています';
-      else if (filled === blanks) note.textContent = '全部埋まったけれど、どこかがちがいます（まちがいの場所は教えません）';
+      else if (filled === blanks) note.textContent = s.rules.hint ? '全部埋まったけれど、赤い数字がちがいます' : '全部埋まったけれど、どこかがちがいます（まちがいの場所は教えません）';
       else note.textContent = `マスを選んで下の数字を押す（${filled} / ${blanks}マス）`;
     };
     for (let i = 0; i < N * N; i++) {
@@ -279,15 +309,15 @@ export default {
     }
     let lastSend = -1e9;
     const put = (v) => {
-      if (!playing || loc.sent || loc.sel < 0 || s.puzzle[loc.sel]) return;
+      if (!playing || loc.sent || loc.sel < 0 || q.puzzle[loc.sel]) return;
       loc.cells[loc.sel] = v;
-      const filled = loc.cells.filter((x, i) => x && !s.puzzle[i]).length;
+      const filled = loc.cells.filter((x, i) => x && !q.puzzle[i]).length;
       const now = performance.now();
-      if (o.stream && (now - lastSend > 400 || filled === blanks)) { lastSend = now; o.stream({ f: filled }); }
+      if (o.stream && (now - lastSend > 400 || filled === blanks)) { lastSend = now; o.stream({ f: mine * blanks + filled }); }
       draw();
-      if (loc.cells.join('') === s.answer.join('')) {
+      if (loc.cells.join('') === q.answer.join('')) {
         const ms = Math.round(since(key));
-        if (ms < limitOf(s)) { loc.sent = true; o.onMove({ t: 'done', grid: loc.cells.join(''), ms }); }
+        if (ms < limitOf(s)) { loc.sent = true; o.onMove({ t: 'done', grid: loc.cells.join(''), ms, ...(s.qs ? { k: mine } : {}) }); }
       }
     };
     wrap.append(grid, note);
