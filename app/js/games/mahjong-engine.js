@@ -170,19 +170,23 @@ export const YAKU_NAMES = [
   '国士無双', '四暗刻', '大三元', '字一色', '小四喜', '大四喜',
   '緑一色', '清老頭', '九蓮宝燈', '四槓子', '天和', '地和', '人和',
   '役牌 北',
+  // 2026-10-22 に元のアプリへ足された2つ（カードのある卓だけの役。このゲームでは ctx.openRiichi・openRiichiDealIn を立てないので付かない。
+  // 対照表と全件突き合わせるために写した。番号は元のアプリと同じく末尾）
+  'オープン立直', 'オープン立直放銃',
 ];
 const Y = Object.fromEntries(['riichi', 'double', 'ippatsu', 'tsumo', 'pinfu', 'tanyao', 'iipeiko', 'haku', 'hatsu', 'chun', 'round', 'seat',
   'rinshan', 'chankan', 'haitei', 'houtei', 'chiitoi', 'toitoi', 'sanankou', 'doukou', 'doujun', 'ittsu', 'chanta', 'sankantsu',
   'shousangen', 'honroutou', 'ryanpeiko', 'junchan', 'honitsu', 'chinitsu', 'kokushi', 'suuankou', 'daisangen', 'tsuuiisou',
-  'shousuushii', 'daisuushii', 'ryuuiisou', 'chinroutou', 'chuuren', 'suukantsu', 'tenho', 'chiho', 'renho', 'north'].map((k, i) => [k, i]));
+  'shousuushii', 'daisuushii', 'ryuuiisou', 'chinroutou', 'chuuren', 'suukantsu', 'tenho', 'chiho', 'renho', 'north', 'openRiichi', 'openDealIn'].map((k, i) => [k, i]));
 const YAKU_COUNT = YAKU_NAMES.length;
-// 並べる順: 役牌 北 は 役牌 自風 のすぐ後ろ
+// 並べる順: 役牌 北 は 役牌 自風 のすぐ後ろ、オープン立直は ダブル立直 のすぐ後ろ（オープン立直放銃は番号の順のまま役満の最後）
 const YAKU_ORDER = (() => {
   const out = [];
   for (let i = 0; i < YAKU_COUNT; i++) {
-    if (i === Y.north) continue;
+    if (i === Y.north || i === Y.openRiichi) continue;
     out.push(i);
     if (i === Y.seat) out.push(Y.north);
+    if (i === Y.double) out.push(Y.openRiichi);
   }
   return out;
 })();
@@ -190,7 +194,8 @@ const DOUBLE_NAMES = { [Y.suuankou]: '四暗刻単騎', [Y.kokushi]: '国士無�
 export const yakuName = (h) => (h.yakuman >= 2 && DOUBLE_NAMES[h.id]) || YAKU_NAMES[h.id];
 export const YAKUMAN_HAN = 13;
 
-// ctx = { tsumo, roundWind, seatWind, riichi, doubleRiichi, ippatsu, rinshan, chankan, haitei, houtei, tenho, chiho, renho, northYakuhai }
+// ctx = { tsumo, roundWind, seatWind, riichi, doubleRiichi, ippatsu, rinshan, chankan, haitei, houtei, tenho, chiho, renho, northYakuhai,
+//         openRiichi, openRiichiDealIn（この2つは元のアプリのカードのある卓だけ。このゲームでは渡さない） }
 export function evaluateYaku(s, p, win, ctx) {
   const f = facts(s, p, win, ctx);
   const ym = evaluateYakuman(f);
@@ -251,6 +256,8 @@ function evaluateYakuman(f) {
     times[Y.chuuren] = isJunseiChuuren(f.tiles, f.numberSuit, f.win) ? 2 : 1;
   }
   if (f.kans === 4) times[Y.suukantsu] = 1;
+  // オープン立直放銃（オープンリーチの人のロンでだけ。矛盾した印が来てもここで守る）
+  if (f.menzen && (ctx.riichi || ctx.doubleRiichi) && ctx.openRiichi && ctx.openRiichiDealIn && !ctx.tsumo) times[Y.openDealIn] = 1;
   const out = [];
   for (let i = 0; i < YAKU_COUNT; i++) if (times[i]) out.push({ id: i, han: YAKUMAN_HAN * times[i], yakuman: times[i] });
   return out;
@@ -280,6 +287,7 @@ function evaluateNormal(f) {
     if (ctx.doubleRiichi) han[Y.double] = 2;
     else if (ctx.riichi) han[Y.riichi] = 1;
     if ((ctx.riichi || ctx.doubleRiichi) && ctx.ippatsu) han[Y.ippatsu] = 1;
+    if ((ctx.riichi || ctx.doubleRiichi) && ctx.openRiichi) han[Y.openRiichi] = 1; // オープン立直（リーチに足して1翻）
     if (ctx.tsumo) han[Y.tsumo] = 1;
   }
   if (ctx.rinshan && ctx.tsumo) han[Y.rinshan] = 1;

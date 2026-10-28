@@ -34,7 +34,7 @@ function toCtx(c = {}) {
   return {
     tsumo: !!c.tsumo, riichi: !!c.riichi, doubleRiichi: !!c.double_riichi, ippatsu: !!c.ippatsu, rinshan: !!c.rinshan,
     chankan: !!c.chankan, haitei: !!c.haitei, houtei: !!c.houtei, tenho: !!c.tenho, chiho: !!c.chiho, renho: !!c.renho,
-    northYakuhai: !!c.north_yakuhai, roundWind: wind(c.round, E.EAST), seatWind: wind(c.seat, E.EAST + 1),
+    northYakuhai: !!c.north_yakuhai, openRiichi: !!c.open_riichi, openRiichiDealIn: !!c.open_riichi_deal_in, roundWind: wind(c.round, E.EAST), seatWind: wind(c.seat, E.EAST + 1),
   };
 }
 const formatHits = (hits) => hits.map((h) => (h.yakuman === 1 ? `${E.YAKU_NAMES[h.id]}:役満`
@@ -82,7 +82,7 @@ if (!TESTDATA || !fs.existsSync(TESTDATA)) {
     }
   }
   for (const tc of score.hands) {
-    const ctx = toCtx({ tsumo: tc.ctx?.tsumo, round: tc.ctx?.round, seat: tc.ctx?.seat });
+    const ctx = toCtx(tc.ctx);
     const r = E.bestHand(E.parseCounts(tc.concealed), parseMelds(tc.open), E.kindOf(tc.win), ctx, tc.dora);
     if (!!r !== tc.win_ok) { check(tc.id, false, '和了の可否が違う'); continue; }
     if (!r) { check(tc.id, true); continue; }
@@ -327,8 +327,11 @@ if (!TESTDATA || !fs.existsSync(TESTDATA)) {
   {
     const G = T.YAKU_GUIDE;
     const names = G.flatMap((r) => r.names);
-    check('表の役はエンジンの役と同じ（多すぎも足りなさもない）', names.length === E.YAKU_NAMES.length && E.YAKU_NAMES.every((n) => names.filter((x) => x === n).length === 1),
-      `表だけ: ${names.filter((n) => !E.YAKU_NAMES.includes(n))} / 表に無い: ${E.YAKU_NAMES.filter((n) => !names.includes(n))}`);
+    // 元のアプリのカードのある卓だけの役（このゲームでは付かないので表に載せない。mahjong-engine.js の YAKU_NAMES の末尾）
+    const NOT_HERE = ['オープン立直', 'オープン立直放銃'];
+    const here = E.YAKU_NAMES.filter((n) => !NOT_HERE.includes(n));
+    check('表の役はエンジンの役と同じ（多すぎも足りなさもない）', names.length === here.length && here.every((n) => names.filter((x) => x === n).length === 1),
+      `表だけ: ${names.filter((n) => !here.includes(n))} / 表に無い: ${here.filter((n) => !names.includes(n))}`);
     const order = G.map((r) => (r.yakuman ? 100 : r.han));
     check('翻数の少ない順で、役満は最後', order.every((x, i) => i === 0 || order[i - 1] <= x));
     check('ひとこと説明は短い（20字まで）', G.every((r) => r.desc.length <= 20), G.filter((r) => r.desc.length > 20).map((r) => r.label).join());
