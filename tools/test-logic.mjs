@@ -6426,7 +6426,10 @@ for (const id of GAME_ORDER) {
   const { kana } = await import('../app/js/games/party.js');
   const apple = TOPICS.find((t) => t[0] === '赤い果物といえば？');
   assert.equal(groupKey(apple, 'リンゴ'), groupKey(apple, '林檎'));
-  assert.equal(groupKey(apple, ' りんご '), '#0');
+  assert.equal(groupKey(apple, ' りんご '), groupKey(apple, 'りんご'));
+  // 「#3」のような答えがお題の番号に化けない（前は無い番号で集計が止まり、#0 はよくある答えの1つ目にまとまった。2026-10-28 Codex の点検の指摘）
+  for (const odd of ['#-1', '#0', '#99', '#1.5']) assert.doesNotThrow(() => tally(apple, [odd, odd, 'りんご']), `以心伝心: ${odd} と答えても集計が止まらない`);
+  assert.deepEqual(tally(apple, ['#0', 'りんご', 'りんご']).pts, [0, 1, 1], '以心伝心: #0 はよくある答えにまとめない');
   assert.equal(groupKey(apple, 'トマト'), 'とまと', 'よくある答えにない答えはそのまま');
   assert.deepEqual(tally(apple, ['りんご', '林檎', 'いちご', '']).pts, [1, 1, 0, 0]);
   assert.deepEqual(tally(apple, ['りんご', '林檎', 'いちご', '苺']).pts, [1, 1, 1, 1], '並んだら両方');
@@ -6513,7 +6516,8 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   for (let seed = 0; seed < 30; seed++) {
     const { reads, fields } = deal(seed, 20);
     assert.equal(new Set(reads).size, 20, 'かるた: 同じ札を2回読まない');
-    reads.forEach((c, q) => { assert.ok(fields[q].includes(c), 'かるた: 読む札が場にある'); assert.equal(fields[q].length, 8); });
+    // 最後の札まで場は8枚のまま（空いた所が無い。2026-10-28 Codex の点検の指摘で、後半に場が減っていたのを直した）
+    reads.forEach((c, q) => { assert.ok(fields[q].includes(c), 'かるた: 読む札が場にある'); assert.equal(fields[q].filter((x) => x !== null).length, 8, `かるた: ${q + 1}枚目も場は8枚`); });
   }
   assert.deepEqual(K.init(3, 7, { rules: {} }), K.init(3, 7, { rules: {} }), '同じ種なら同じ札');
   let s = K.init(3, 7, { rules: {} });

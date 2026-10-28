@@ -230,7 +230,8 @@ export default {
     // いまの回
     const key = rKey(s);
     const c = cycleOf(s.seed, s.k);
-    if (run?.key !== key) { run = { key, walked: 0, holding: spaceHeld, press: false, out: false, sent: s.sub[me] !== null, turned: false }; live = new Map(); }
+    // 席が変わったら（観戦から空いた席に入ったなど）測り直す。鍵だけで見ると、観戦中の「送った」のまま押せなかった（2026-10-28 Codex の点検の指摘）
+    if (run?.key !== key || run.me !== me) { run = { key, me, walked: 0, holding: spaceHeld, press: false, out: false, sent: s.sub[me] !== null, turned: false }; live = new Map(); }
     since(key);
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -253,7 +254,8 @@ export default {
       if (me !== null && run.key === key && !run.sent) {
         const room = ((L - cur.pos[me]) * 1000) / SPEED; // ゴールまでに押せる長さ（ms）
         if (run.holding && t < c.walk) run.walked = Math.min(run.walked + Math.min(dt, c.walk - (t - dt)), room);
-        if (run.holding && t >= c.walk + REACT_MS && looking) run.out = true;
+        // 鬼の所まで着いたら、押したままでも見つからない（前は着いたあとに押し続けるとスタートに戻された。2026-10-28 Codex の点検の指摘）
+        if (run.holding && t >= c.walk + REACT_MS && looking && run.walked < room) run.out = true;
         if (t >= c.walk + c.look) {
           run.sent = true;
           o.onMove({ t: 'cyc', k: s.k, d: Math.min(maxD(c.walk), Math.floor((run.walked * SPEED) / 1000)), out: run.out });

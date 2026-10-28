@@ -106,6 +106,7 @@ export function placesOf(solved) {
 }
 
 let loc = null; // { key, cells, sel, sent }
+const locs = new Map(); // 問題ごとの loc（鍵は loc.key）
 let ui = null;
 const progress = new Map(); // 席 → 埋めたマスの数（見た目だけ）
 const cpuPlan = new Map();
@@ -241,7 +242,7 @@ export default {
       return c;
     };
     const mine = me !== null ? Math.min(progOf(s, me), cnt - 1) : 0; // この端末が解いている問題
-    const mount = `${s.seed}:${s.phase}:${me}:${me !== null && doneOf(s, me)}:${mine}`;
+    const mount = `${s.seed}:${s.phase}:${me}:${me !== null && doneOf(s, me)}:${mine}:${!!o.canMove}`; // 動かせるかが変わったら作り直す（観戦から席に入ったとき）
     if (ui?.mount === mount && root.contains(ui.wrap)) { ui.s = s; ui.refresh(); return; }
 
     root.innerHTML = '';
@@ -269,8 +270,16 @@ export default {
 
     const q = qOf(s, mine);
     const lkey = key + ':' + mine;
-    if (loc?.key !== lkey) loc = { key: lkey, cells: q.puzzle.slice(), sel: -1, sent: false };
-    const playing = s.phase === 'open' && me !== null && !doneOf(s, me) && !loc.sent;
+    // 問題ごとに埋めた分を覚えておく（3問のとき、通信の行き違いで一度前の問題に戻ってからまた進むと、埋めた数字が消えていた。2026-10-28 Codex の点検の指摘）
+    loc = locs.get(lkey);
+    if (!loc) {
+      loc = { key: lkey, cells: q.puzzle.slice(), sel: -1, sent: false };
+      locs.set(lkey, loc);
+      if (locs.size > 30) locs.delete(locs.keys().next().value);
+    }
+    // o.canMove も見る: 観戦の人がほかの人の画面を選ぶと me にその席が来るので、見ているだけで埋められて「送った」が残り、
+    // あとでその席に入ると解いても送れなかった（2026-10-28 Codex の点検の指摘）
+    const playing = s.phase === 'open' && me !== null && o.canMove && !doneOf(s, me) && !loc.sent;
     const showCells = s.phase === 'end' ? q.answer : me === null ? q.puzzle : loc.cells;
     const grid = document.createElement('div');
     grid.className = 'np-grid';

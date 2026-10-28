@@ -29,12 +29,13 @@ const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 10);
 const qKey = (s, q = s.q) => `ishin:${s.seed}:${q}`;
 const clone = (s) => ({ ...s, scores: s.scores.slice(), said: s.said.slice() });
 
-// 答えをまとめる鍵。お題の「同じとみなす書き方」に当たれば '#何番目'、ほかは kana でそろえた文字
+// 答えをまとめる鍵。お題の「同じとみなす書き方」に当たれば '\n何番目'、ほかは kana でそろえた文字
+// （印は kana が必ず消す空白の文字にする。'#' だと「#3」と打った答えがお題の番号に化け、無い番号なら集計が止まった。2026-10-28 Codex の点検の指摘）
 export function groupKey(topic, text) {
   const k = kana(text);
   if (!k) return '';
   const i = topic[1].findIndex((names) => names.some((x) => kana(x) === k));
-  return i >= 0 ? '#' + i : k;
+  return i >= 0 ? '\n' + i : k;
 }
 
 // 締め切りのときの答えのまとまり。{ groups: [{ key, who: [席…], label }]（多い順）, top: 一番多いまとまりの鍵の一覧（1人だけなら空）, pts: 席ごとの点 }
@@ -43,7 +44,7 @@ export function tally(topic, said) {
   said.forEach((text, p) => {
     const key = groupKey(topic, text);
     if (!key) return;
-    if (!map.has(key)) map.set(key, { key, who: [], label: key[0] === '#' ? topic[1][Number(key.slice(1))][0] : null });
+    if (!map.has(key)) map.set(key, { key, who: [], label: key[0] === '\n' ? topic[1][Number(key.slice(1))][0] : null });
     map.get(key).who.push(p);
   });
   const groups = [...map.values()].sort((a, b) => b.who.length - a.who.length || a.who[0] - b.who[0]);
@@ -159,7 +160,8 @@ export default {
 
   render(root, s, o) {
     const me = o.me >= 0 ? o.me : null;
-    const mount = `${s.seed}:${s.q}:${s.phase}:${me}:${me !== null && !!s.said[me]}`;
+    // 答えを見せた後は「この人を隠す」が変わったら作り直す（書いている間は入力欄を残すため入れない）
+    const mount = `${s.seed}:${s.q}:${s.phase}:${me}:${me !== null && !!s.said[me]}:${s.phase === 'open' ? '' : (o.hidden ?? []).join()}`;
     const won = s.phase === 'end' ? leaders(s.scores) : [];
     const shownPhase = s.phase === 'shown';
     const extra = (p) => {
@@ -171,7 +173,7 @@ export default {
     if (ui?.mount === mount && root.contains(ui.wrap)) {
       ui.chips.replaceWith(chips);
       ui.chips = chips;
-      this.note(s, me);
+      this.note(s, me, o);
       return;
     }
 
@@ -233,7 +235,7 @@ export default {
     }
     wrap.append(note);
     root.append(wrap);
-    this.note(s, me);
+    this.note(s, me, o);
     if (ui.input && !matchMedia('(pointer: coarse)').matches && document.activeElement?.tagName !== 'SELECT') ui.input.focus();
   },
 
@@ -284,11 +286,11 @@ export default {
     return box;
   },
 
-  note(s, me) {
+  note(s, me, o) {
     const note = ui?.note;
     if (!note) return;
     if (s.phase === 'open') {
-      if (me !== null && s.said[me]) note.textContent = `「${s.said[me]}」と書きました。ほかの人を待っています`;
+      if (me !== null && s.said[me]) note.textContent = `「${filtered(s.said[me], o.hidden?.[me])}」と書きました。ほかの人を待っています`;
       else if (me === null) note.textContent = '観戦中';
       else if (!note.textContent) note.textContent = '一番多くの人が書きそうな答えを1つ（書き直しはできません）';
     } else if (s.phase === 'shown' && s.last) {

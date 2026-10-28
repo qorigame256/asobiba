@@ -195,7 +195,8 @@ export default {
   render(root, s, o) {
     bindKeys();
     const me = o.me >= 0 ? o.me : null;
-    const mount = `${s.seed}:${s.q}:${s.phase}:${me}:${me !== null && doneOf(s, me)}`;
+    // だれかがそろえた（締め切りの表示が変わる）・動かせるかが変わったときも作り直す（動かしかけの盤は loc に残る）
+    const mount = `${s.seed}:${s.q}:${s.phase}:${me}:${me !== null && doneOf(s, me)}:${s.solved.some((v) => v !== null)}:${!!o.canMove}`;
     const won = s.phase === 'end' ? leaders(s.scores) : [];
     const extra = (p) => {
       if (s.phase === 'open') return s.solved[p] !== null ? '<span class="pt-ok">そろった！</span>' : s.passed[p] ? '<span class="pt-ng">あきらめ</span>' : '';
@@ -224,7 +225,14 @@ export default {
     const key = qKey(s);
     const limit = limitOf(s);
     card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>`;
-    if (s.phase === 'open') { since(key); card.append(timeBar(key, limit, { secs: true })); }
+    if (s.phase === 'open') {
+      since(key);
+      // だれかがそろえたら、ホストが締め切るまでの20秒を出す（前は締め切られるまで「残り130秒」などのままだった。2026-10-28 Codex の点検の指摘）
+      if (s.solved.some((v) => v !== null)) {
+        card.insertAdjacentHTML('beforeend', '<div class="kj-sub">だれかがそろえた！ もうすぐ締め切り</div>');
+        card.append(timeBar(key + ':after', AFTER_MS, { secs: true }));
+      } else card.append(timeBar(key, limit, { secs: true }));
+    }
     else {
       const t = document.createElement('div');
       t.className = 'kj-sub';
@@ -235,7 +243,9 @@ export default {
     const n = s.size;
     const start = s.qs[s.q].board;
     if (loc?.key !== key) loc = { key, board: start.slice(), seq: '', sent: false };
-    const playing = s.phase === 'open' && me !== null && !doneOf(s, me) && !loc.sent;
+    // o.canMove も見る: 観戦の人がほかの人の画面を選ぶと me にその席が来るので、見ているだけで動かせて「送った」が残り、
+    // あとでその席に入るとそろえても送れなかった（2026-10-28 Codex の点検の指摘）
+    const playing = s.phase === 'open' && me !== null && o.canMove && !doneOf(s, me) && !loc.sent;
     const grid = document.createElement('div');
     grid.className = 'sl-grid';
     grid.style.setProperty('--n', n);

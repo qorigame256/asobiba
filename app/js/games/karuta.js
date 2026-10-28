@@ -30,9 +30,11 @@ const clone = (s) => ({ ...s, scores: s.scores.slice(), got: s.got.slice(), miss
 const doneOf = (s, p) => s.got[p] !== null || s.miss[p];
 
 // 読む順と、各問の場の札（8枚）。札は読まれたら抜け、山の次の札が同じ場所に入る
+// 山には読む札の数より7枚多く入れ、最後の札まで場が8枚のままにする（読まれない札も混ざる。前は読む札だけで、
+// 後半は場が7枚・6枚…と減り、最後は残った1枚を押すだけになった。2026-10-28 Codex の点検の指摘）
 export function deal(seed, count) {
   const rnd = mulberry32(seed);
-  const deck = shuffle([...KOTOWAZA.keys()], rnd).slice(0, count);
+  const deck = shuffle([...KOTOWAZA.keys()], rnd).slice(0, count + FIELD - 1);
   const field = deck.slice(0, FIELD);
   const pile = deck.slice(FIELD);
   const reads = [], fields = [];
@@ -223,7 +225,12 @@ export default {
       b.textContent = KOTOWAZA[c][1];
       if (s.phase === 'shown' && c === s.reads[s.q]) b.classList.add('hit');
       b.disabled = !mine;
-      b.onclick = () => {
+      // 押した瞬間に取る（pointerdown）。CPU を待つ間ホストの画面は何度も描き直されるので、click だと押して離す間に札が作り直されて押せないことがあった
+      // （2026-10-28 Codex の点検の指摘）。キーボード用に click も残し、2回目は disabled で弾く
+      b.onpointerdown = (e) => { e.preventDefault(); take(); };
+      b.onclick = (e) => { if (e.detail === 0) take(); };
+      const take = () => {
+        if (b.disabled) return;
         const ms = Math.round(since(key));
         if (ms >= limitOf(s)) return;
         grid.querySelectorAll('button').forEach((x) => { x.disabled = true; });
