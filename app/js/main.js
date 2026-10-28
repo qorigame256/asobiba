@@ -1046,7 +1046,7 @@ const READING = {
   kaisen: 'かいせんげーむ ばん', colors: 'いろあわせ ' + CARD_WORDS, daifugo: 'だいふごう だいひんみん ' + CARD_WORDS, poker: 'ぽーかー ' + CARD_WORDS, speed: 'すぴーど ' + CARD_WORDS,
   babanuki: 'ばばぬき ' + CARD_WORDS, doubt: 'だうと ' + CARD_WORDS, sevens: 'しちならべ ' + CARD_WORDS, blackjack: 'ぶらっくじゃっく ' + CARD_WORDS, hitai: 'ひたいかーど ' + CARD_WORDS,
   hitblow: 'ひっとあんどぶろー すうじ', sensou: 'せんそう わりばし ゆび てあそび', yubisuma: 'ゆびすま てあそび', tamebeam: 'ためてびーむ てあそび', memory: 'しんけいすいじゃく ' + CARD_WORDS,
-  yacht: 'よっと さいころ', seri: 'せりあい ' + CARD_WORDS, nim: 'いしとりげーむ', flags: 'はたあげ', kanji: 'なんどくかんじ くいず', make10: 'てんぱずる めいくてん すうじ けいさん さんすう', targets: 'まとのはやおし まとあて',
+  yacht: 'よっと さいころ', seri: 'せりあい ' + CARD_WORDS, nim: 'いしとりげーむ', flags: 'はたあげ', kanji: 'なんどくかんじ くいず', make10: 'てんぱずる めいくてん すうじ けいさん さんすう', targets: 'まとのはやおし まとあて', mikiri: 'みきり はやおし せつなのみきり いあい',
   pittari: 'ぴったりすとっぷ', kioku: 'きおくりれー', typing: 'たいぴんぐはやうち', danmaku: 'だんまくかいひ あくしょん', tamaire: 'たまいれ あくしょん', machigai: 'まちがいさがし',
   bombs: 'にしょくばくだんさばいばる あくしょん', umigame: 'うみがめのすーぷ くいず', wordwolf: 'わーどうるふ', ishin: 'いしんでんしん くいず', karuta: 'ことわざかるた はやとり', acchi: 'あっちむいてほい じゃんけん てあそび', daruma: 'だるまさんがころんだ あくしょん', slide: 'じゅうごぱずる すらいどぱずる すうじ', nanpure: 'なんぷれ なんばーぷれーす すうじ ぱずる', jinro: 'じんろう', oekaki: 'おえかきあて え', hockey: 'えあほっけー あくしょん',
   hasami: 'はさみしょうぎ ばん', shogi: 'しょうぎ ばん', mahjong: 'まーじゃん',

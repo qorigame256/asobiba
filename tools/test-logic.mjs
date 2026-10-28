@@ -6573,6 +6573,72 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('acchi OK');
 }
 
+// 見切り: 点数戦の 3・2・1点・フライング・締め切り・回数で終わり、勝ち抜き戦の脱落・やり直し・2回目のフライング・決勝の2勝、CPU どうしで最後まで
+{
+  const M = GAMES.mikiri;
+  const { timing } = await import('../app/js/games/mikiri.js');
+  const hit = (s, p, ms) => M.apply(s, { p, t: 'hit', r: s.r, ms });
+  const fly = (s, p) => M.apply(s, { p, t: 'fly', r: s.r });
+  // 「！」の時刻はフェイントのあり・なしで変わらない
+  for (let r = 1; r <= 20; r++) {
+    const a = timing(M.init(3, 77, { rules: {} }), r), b = timing(M.init(3, 77, { rules: { feint: true } }), r);
+    assert.equal(a.wait, b.wait);
+    assert.ok(a.wait >= 2000 && a.wait <= 6000 && a.fake === null);
+    if (b.fake !== null) assert.ok(b.fake >= 900 && b.fake + 450 < b.wait + 1, 'フェイントは「！」より前に消える');
+  }
+  // 点数戦
+  let s = M.init(4, 1, { rules: { rounds: 3 } });
+  s = hit(s, 0, 420);
+  assert.equal(hit(s, 0, 300), null, '同じ回に2回は押せない');
+  assert.equal(M.apply(s, { p: 1, t: 'hit', r: 2, ms: 300 }), null, 'ちがう回の手は弾く');
+  assert.equal(hit(s, 1, 3001), null, '3秒より遅い手は弾く');
+  s = hit(s, 1, 250);
+  s = hit(s, 2, 50); // 0.1秒より速いのはフライング
+  assert.equal(s.r, 1, 'まだ押していない人がいる');
+  s = M.apply(s, { p: -1, t: 'close', r: 1 });
+  assert.deepEqual(s.pts, [2, 3, 0, 0], '速い順に3・2点、フライングと押さなかった人は0点');
+  assert.equal(s.last.acts[2], -1);
+  assert.equal(s.r, 2);
+  s = hit(hit(hit(hit(s, 0, 300), 1, 300), 2, 500), 3, 700);
+  assert.deepEqual(s.pts, [5, 6, 1, 0], '同じ速さは同じ点、3位に1点、4位は0点');
+  s = fly(fly(fly(fly(s, 0), 1), 2), 3);
+  assert.equal(s.phase, 'end');
+  assert.deepEqual(M.result(s).winners, [1]);
+  // 勝ち抜き戦（3人）
+  let u = M.init(3, 2, { rules: { mode: 'survive' } });
+  u = hit(hit(hit(u, 0, 300), 1, 400), 2, 500);
+  assert.deepEqual(u.alive, [true, true, false], 'いちばん遅い人が抜ける');
+  u = M.init(3, 2, { rules: { mode: 'survive' } });
+  u = hit(hit(fly(u, 0), 1, 400), 2, 500);
+  assert.deepEqual(u.alive, [true, true, true], '1回目のフライングはだれも抜けずにやり直し');
+  assert.deepEqual(u.warn, [1, 0, 0]);
+  assert.ok(u.last.redo);
+  u = hit(hit(fly(u, 0), 1, 400), 2, 500);
+  assert.deepEqual(u.alive, [false, true, true], '2回目のフライングはその人だけ抜ける');
+  assert.equal(M.canAct(u, 0), false, '抜けた人は押せない');
+  // 決勝: 先に2勝
+  u = hit(hit(u, 1, 300), 2, 280);
+  assert.deepEqual(u.wins, [0, 0, 1]);
+  u = M.apply(hit(u, 1, 300), { p: -1, t: 'close', r: u.r }); // 片方だけ押したら押した方の1勝
+  assert.deepEqual(u.wins, [0, 1, 1]);
+  u = hit(hit(u, 1, 300), 2, 300);
+  assert.ok(u.last.redo, '同じ速さはやり直し');
+  u = hit(hit(u, 1, 300), 2, 310);
+  assert.equal(u.phase, 'end');
+  const res = M.result(u);
+  assert.deepEqual(res.winners, [1]);
+  assert.deepEqual(res.place, [3, 1, 2], '早く抜けた人ほど下の順位');
+  // 3人以上で全員押さなかったらやり直し
+  let w = M.init(3, 3, { rules: { mode: 'survive' } });
+  w = M.apply(w, { p: -1, t: 'close', r: 1 });
+  assert.ok(w.last.redo && w.alive.every(Boolean));
+  for (const rules of [{}, { mode: 'survive' }, { mode: 'survive', feint: true }, { rounds: 10, feint: true }]) {
+    const st = runCpus(M, 5, 9, rules, 50, 20000);
+    assert.ok(M.result(st), `見切り: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('mikiri OK');
+}
+
 // だるまさんがころんだ: 1回の長さは種で決まる・見つかったらスタート・進む長さの上限・着いたら終わり・CPU どうしで最後まで
 {
   const D = GAMES.daruma;
