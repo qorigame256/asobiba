@@ -111,4 +111,7 @@ export function timeBar(key, limit, { secs = false } = {}) {
 }
 
 export const secText = (ms) => (ms / 1000).toFixed(2) + '秒';
+
+// 席ごとの色（10人ぶん。最初の4つは --p0〜--p3 と同じ）。迷路早抜け・すごろくのコマ。どのスキンでも変えない
+export const SEAT_COLORS = ['#d9643a', '#2f6fb3', '#2e9a52', '#8a4fc0', '#d4a20c', '#d24a8c', '#1a9aa0', '#7a5a3a', '#5a6470', '#9acd32'];
 export { esc };

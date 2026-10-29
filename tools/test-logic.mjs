@@ -6767,4 +6767,224 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('nanpure OK');
 }
 
+// ビンゴ: カードの形・自動で穴が開く・同時の上がり・自分で押す・3位まで・CPU どうしで最後まで
+{
+  const B = GAMES.bingo;
+  const { cardOf, linesOf } = await import('../app/js/games/bingo.js');
+  for (let p = 0; p < 6; p++) {
+    const c = cardOf(11, p);
+    assert.equal(c[12], 0, 'ビンゴ: 真ん中は FREE');
+    assert.equal(new Set(c).size, 25);
+    c.forEach((v, i) => { if (i !== 12) { const col = i % 5; assert.ok(v >= col * 15 + 1 && v <= col * 15 + 15, 'ビンゴ: 列ごとの数字の幅'); } });
+  }
+  assert.deepEqual(cardOf(11, 2), cardOf(11, 2));
+  assert.notDeepEqual(cardOf(11, 1), cardOf(11, 2), 'ビンゴ: 席ごとにちがうカード');
+  // 自動: 1列そろった最初の数字で上がり、1.5秒おいて終わる
+  let s = B.init(3, 5, { rules: {} });
+  assert.equal(B.referee(s).ms, 2000);
+  assert.equal(B.apply(s, { p: 0, t: 'mark', c: 0 }), null, 'ビンゴ: 自動のときは押せない');
+  while (!s.at.some((v) => v !== null)) s = B.apply(s, { p: -1, t: 'draw' });
+  const k = s.k;
+  for (let p = 0; p < 3; p++) {
+    const drawn = new Set(s.order.slice(0, k)), before = new Set(s.order.slice(0, k - 1));
+    const has = (d) => linesOf(s.cards[p].map((v) => v === 0 || d.has(v))).length > 0;
+    assert.equal(s.at[p] !== null, has(drawn), 'ビンゴ: そろった人だけ上がり');
+    assert.equal(has(before), false, 'ビンゴ: 前の数字ではまだそろっていない');
+  }
+  assert.equal(B.apply(s, { p: -1, t: 'draw' }), null, 'ビンゴ: 上がりが出たら次の数字を出さない');
+  assert.deepEqual(B.referee(s).move, { t: 'end' });
+  s = B.apply(s, { p: -1, t: 'end' });
+  const res = B.result(s);
+  assert.deepEqual(res.winners, s.at.map((v, p) => (v !== null ? p : -1)).filter((p) => p >= 0));
+  assert.ok(res.place.every((v, p) => (s.at[p] !== null ? v === 1 : v === res.winners.length + 1)));
+  // 同じ数字で同時なら同じ順位
+  const tie = B.result({ ...s, at: [9, 9, null] });
+  assert.deepEqual(tie.winners, [0, 1]);
+  assert.deepEqual(tie.place, [1, 1, 3]);
+  // 自分で押す: 出ていない数字は押せない・同じマスは2回押せない
+  let u = B.init(2, 6, { rules: { mark: 'self' } });
+  u = B.apply(u, { p: -1, t: 'draw' });
+  const v0 = u.order[0];
+  const idx = u.cards[0].indexOf(v0);
+  const other = u.cards[0].findIndex((v) => v !== 0 && v !== v0);
+  assert.equal(B.apply(u, { p: 0, t: 'mark', c: other }), null, 'ビンゴ: 出ていない数字は押せない');
+  if (idx >= 0) {
+    const u2 = B.apply(u, { p: 0, t: 'mark', c: idx });
+    assert.ok(u2.marks[0][idx]);
+    assert.equal(B.apply(u2, { p: 0, t: 'mark', c: idx }), null, 'ビンゴ: 同じマスを2回は押せない');
+  }
+  // 75個出きっても押さなければ8秒で終わる
+  let w = B.init(2, 7, { rules: { mark: 'self' } });
+  for (let i = 0; i < 75; i++) w = B.apply(w, { p: -1, t: 'draw' });
+  assert.equal(B.referee(w).ms, 8000);
+  w = B.apply(w, { p: -1, t: 'end' });
+  assert.deepEqual(B.result(w).winners, [], 'ビンゴ: だれも押さなければ上がりなし');
+  for (const rules of [{}, { mark: 'self' }, { until: 3 }, { mark: 'self', until: 3 }]) {
+    const st = runCpus(B, 5, 3, rules, 100, 20000);
+    const r = B.result(st);
+    assert.ok(r && r.winners.length >= 1, `ビンゴ: CPU どうしで上がりが出る ${JSON.stringify(rules)}`);
+    if (rules.until === 3) assert.ok(st.at.filter((x) => x !== null).length >= 3, 'ビンゴ: 3位まで続ける');
+  }
+  console.log('bingo OK');
+}
+
+// 迷路早抜け: 迷路は全部のマスがつながった1本道・壁は抜けられない・ゴールまでの動きで点・CPU どうしで最後まで
+{
+  const Z = GAMES.meiro;
+  const { makeMaze, walk, solve, stepOf } = await import('../app/js/games/meiro.js');
+  const { mulberry32 } = await import('../app/js/games/util.js');
+  for (const n of [7, 10, 14]) {
+    const m = makeMaze(n, mulberry32(n));
+    const bits = m.reduce((a, v) => a + [1, 2, 4, 8].filter((b) => v & b).length, 0);
+    assert.equal(bits / 2, n * n - 1, '迷路: 通り道の数がマスの数より1少ない（輪が無い）');
+    const seen = new Set([0]), q = [0];
+    while (q.length) { const c = q.pop(); for (const d of 'UDLR') { const x = stepOf(m, n, c, d); if (x >= 0 && !seen.has(x)) { seen.add(x); q.push(x); } } }
+    assert.equal(seen.size, n * n, '迷路: 全部のマスへ行ける');
+    for (let c = 0; c < n; c++) assert.equal(stepOf(m, n, c, 'U'), -1, '迷路: 外へは出られない');
+    assert.equal(walk(m, n, solve(m, n)), n * n - 1);
+  }
+  let s = Z.init(3, 9, { rules: { level: 's' } });
+  assert.equal(s.size, 7);
+  s = Z.apply(s, { p: -1, t: 'next' });
+  const path = solve(s.qs[0], 7);
+  const wall = 'UDLR'.split('').find((d) => stepOf(s.qs[0], 7, 0, d) < 0);
+  assert.equal(Z.apply(s, { p: 0, t: 'done', q: 0, seq: wall + path, ms: 1000 }), null, '迷路: 壁を抜ける動きは弾く');
+  assert.equal(Z.apply(s, { p: 0, t: 'done', q: 0, seq: path.slice(0, -1), ms: 1000 }), null, '迷路: ゴールに着かない動きは弾く');
+  s = Z.apply(s, { p: 1, t: 'done', q: 0, seq: path, ms: 9000 });
+  s = Z.apply(s, { p: 0, t: 'done', q: 0, seq: path, ms: 5000 });
+  assert.equal(Z.apply(s, { p: 0, t: 'done', q: 0, seq: path, ms: 4000 }), null, '迷路: 2回は送れない');
+  s = Z.apply(s, { p: 2, t: 'pass', q: 0 });
+  assert.equal(Z.referee(s).ms, 1500, '迷路: 全員終わったらすぐ締め切り');
+  s = Z.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [3, 2, 0]);
+  for (const level of ['s', 'm', 'l']) assert.ok(Z.result(runCpus(Z, 4, 5, { level }, 500, 3000)), `迷路: CPU どうしで最後まで ${level}`);
+  console.log('meiro OK');
+}
+
+// 色ちがい早押し: 字と色はちがう・あまのじゃくは3問・正解は速い順に点・まちがいは押せなくなる・CPU どうしで最後まで
+{
+  const I = GAMES.iroji;
+  const { answerOf } = await import('../app/js/games/iroji.js');
+  for (let seed = 0; seed < 20; seed++) {
+    const a = I.init(2, seed, { rules: {} }), b = I.init(2, seed, { rules: { rev: true } });
+    assert.ok(a.qs.every((x) => x.word !== x.ink && !x.rev), '色ちがい: 字と色はいつもちがう');
+    assert.equal(b.qs.filter((x) => x.rev).length, 3, '色ちがい: あまのじゃくは3問');
+    assert.equal(b.qs[0].rev, false, '色ちがい: 1問目はふつう');
+    assert.deepEqual(a.qs.map((x) => [x.word, x.ink]), b.qs.map((x) => [x.word, x.ink]), '色ちがい: あまのじゃくでも字と色は同じ');
+  }
+  let s = I.apply(I.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  const ans = answerOf(s.qs[0]);
+  const ng = (ans + 1) % 4;
+  s = I.apply(s, { p: 0, t: 'ans', q: 0, c: ng, ms: 300 });
+  assert.equal(I.apply(s, { p: 0, t: 'ans', q: 0, c: ans, ms: 400 }), null, '色ちがい: まちがえたらその問題はもう押せない');
+  s = I.apply(s, { p: 1, t: 'ans', q: 0, c: ans, ms: 900 });
+  s = I.apply(s, { p: 2, t: 'ans', q: 0, c: ans, ms: 700 });
+  assert.equal(I.referee(s).ms, 800);
+  s = I.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [0, 2, 3], '色ちがい: 速い順に3・2点、まちがいは0点（減らない）');
+  assert.equal(I.apply(I.apply(I.init(2, 4, { rules: {} }), { p: -1, t: 'next' }), { p: 0, t: 'ans', q: 0, c: 0, ms: 5400 }), null, '色ちがい: 5秒を過ぎた手は弾く');
+  for (const rules of [{}, { rev: true }]) {
+    const st = runCpus(I, 5, 8, rules, 100, 5000);
+    assert.ok(I.result(st) && st.scores.some((v) => v > 0), `色ちがい: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('iroji OK');
+}
+
+// すごろく: マスの置き方・さいころは種と回数で決まる・マスの働き・ぴったり・入れ替え・1回休み・CPU どうしで最後まで
+{
+  const G = GAMES.sugoroku;
+  const { makeBoard, diceOf, GOAL } = await import('../app/js/games/sugoroku.js');
+  for (let seed = 0; seed < 50; seed++) {
+    const b = makeBoard(seed);
+    const evs = b.map((c, i) => [c, i]).filter(([c]) => c);
+    assert.equal(evs.length, 12, 'すごろく: 12マスに働きがある');
+    assert.ok(evs.every(([c, i]) => i >= 2 && i <= 28 && (c.t !== 'fwd' || i + c.v <= GOAL - 1)), 'すごろく: 置く場所');
+    for (const t of ['fwd', 'back']) assert.equal(evs.filter(([c]) => c.t === t).length, 3);
+    for (const t of ['skip', 'again', 'swap']) assert.equal(evs.filter(([c]) => c.t === t).length, 2);
+  }
+  const s0 = G.init(3, 21, { rules: {} });
+  for (let k = 0; k < 40; k++) { const d = diceOf(s0, k); assert.ok(d >= 1 && d <= 6); assert.equal(d, diceOf(s0, k)); }
+  assert.equal(G.apply(s0, { p: 1, t: 'roll' }), null, 'すごろく: 番でない人は振れない');
+  // マスの働きを作った局面で確かめる
+  const at = (pos, cell, rules = {}) => {
+    const s = G.init(2, 1, { rules });
+    s.board = Array(GOAL + 1).fill(null);
+    s.pos = [pos, 0];
+    const d = diceOf(s);
+    if (cell) s.board[pos + d] = cell;
+    return { s: G.apply(s, { p: 0, t: 'roll' }), d };
+  };
+  let r = at(3, { t: 'fwd', v: 2 });
+  assert.equal(r.s.pos[0], 3 + r.d + 2, 'すごろく: 進むマス');
+  assert.equal(r.s.turn, 1);
+  r = at(3, { t: 'back', v: 3 });
+  assert.equal(r.s.pos[0], Math.max(0, 3 + r.d - 3), 'すごろく: 戻るマス');
+  r = at(3, { t: 'again' });
+  assert.equal(r.s.turn, 0, 'すごろく: もう1回振る');
+  r = at(3, { t: 'skip' });
+  assert.ok(r.s.rest[0]);
+  let q = G.apply(r.s, { p: 1, t: 'roll' });
+  assert.equal(q.turn, 1, 'すごろく: 1回休みの人は飛ばす');
+  assert.deepEqual(q.last.skipped, [0]);
+  assert.equal(q.rest[0], false);
+  r = at(3, { t: 'swap' });
+  assert.equal(r.s.phase, 'swap');
+  assert.equal(G.apply(r.s, { p: 0, t: 'swap', to: 0 }), null, 'すごろく: 自分とは入れ替えられない');
+  q = G.apply(r.s, { p: 0, t: 'swap', to: 1 });
+  assert.deepEqual(q.pos, [0, 3 + r.d], 'すごろく: 入れ替え');
+  assert.equal(q.turn, 1);
+  r = at(29, null);
+  assert.equal(r.s.phase, 'end', 'すごろく: ちょうどでなくてもゴール');
+  assert.deepEqual(G.result(r.s).winners, [0]);
+  r = at(29, null, { exact: true });
+  if (r.d > 1) { assert.equal(r.s.pos[0], GOAL - (29 + r.d - GOAL), 'すごろく: ぴったりでないと戻る'); assert.ok(r.s.last.bounce); }
+  const res = G.result({ ...s0, phase: 'end', pos: [GOAL, 12, 12] });
+  assert.deepEqual(res.place, [1, 2, 2], 'すごろく: 同じマスなら同じ順位');
+  for (const rules of [{}, { exact: true }]) {
+    for (let seed = 0; seed < 5; seed++) assert.ok(G.result(runCpus(G, 4, seed, rules, 100, 3000)), `すごろく: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('sugoroku OK');
+}
+
+// 海賊のたる: 当たりを刺したら負け・選んだ順に刺して当たりで止まる・3回勝負・CPU どうしで最後まで
+{
+  const T = GAMES.taru;
+  let s = T.init(3, 5, { rules: {} });
+  const safe = [...Array(24).keys()].filter((h) => h !== s.hit);
+  assert.equal(T.apply(s, { p: 0, t: 'stab', holes: [safe[0], safe[1]] }), null, 'たる: 1本だけのときは2本刺せない');
+  s = T.apply(s, { p: 0, t: 'stab', holes: [safe[0]] });
+  assert.equal(s.turn, 1);
+  assert.equal(T.apply(s, { p: 1, t: 'stab', holes: [safe[0]] }), null, 'たる: 刺した穴はもう刺せない');
+  s = T.apply(s, { p: 1, t: 'stab', holes: [s.hit] });
+  assert.equal(s.phase, 'end');
+  assert.equal(T.result(s).loser, 1);
+  let c = T.init(2, 6, { rules: { pick: 'choose' } });
+  const safe2 = [...Array(24).keys()].filter((h) => h !== c.hit);
+  assert.equal(T.apply(c, { p: 0, t: 'stab', holes: safe2.slice(0, 4) }), null, 'たる: 4本は刺せない');
+  assert.equal(T.apply(c, { p: 0, t: 'stab', holes: [safe2[0], safe2[0]] }), null, 'たる: 同じ穴を2回は選べない');
+  c = T.apply(c, { p: 0, t: 'stab', holes: [safe2[0], c.hit, safe2[1]] });
+  assert.deepEqual(c.last.holes, [safe2[0], c.hit], 'たる: 当たりを刺したらそこで止まる');
+  assert.equal(c.stabbed[safe2[1]], -1);
+  assert.deepEqual(T.result(c), { winner: 1, loser: 0 });
+  // 3回勝負: 負けた人から次の回、負けの少ない人が上
+  let m = T.init(3, 7, { rules: { rounds: 3 } });
+  m = T.apply(m, { p: 0, t: 'stab', holes: [m.hit] });
+  assert.equal(m.phase, 'shown');
+  m = T.apply(m, { p: -1, t: 'next' });
+  assert.equal(m.turn, 0, 'たる: 負けた人から次の回');
+  assert.equal(m.round, 1);
+  assert.ok(m.stabbed.every((v) => v === -1));
+  m = T.apply(m, { p: 0, t: 'stab', holes: [m.hit] });
+  m = T.apply(m, { p: -1, t: 'next' });
+  m = T.apply(m, { p: 0, t: 'stab', holes: [(m.hit + 1) % 24] });
+  m = T.apply(m, { p: 1, t: 'stab', holes: [m.hit] });
+  assert.equal(m.phase, 'end');
+  const tres = T.result(m);
+  assert.deepEqual(tres.losses, [2, 1, 0]);
+  assert.deepEqual(tres.winners, [2]);
+  assert.deepEqual(tres.place, [3, 2, 1]);
+  for (const rules of [{}, { pick: 'choose' }, { rounds: 3 }, { pick: 'choose', rounds: 3 }]) assert.ok(T.result(runCpus(T, 4, 3, rules, 500, 3000)), `たる: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  console.log('taru OK');
+}
+
 console.log('ALL OK');

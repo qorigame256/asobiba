@@ -1964,3 +1964,67 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .db-stamp { font-size: 2.6rem; font-weight: 900; text-align: center; letter-spacing: .1em; margin: 4px 0; }
 .db-stamp.lie { color: #c0392b; }
 .db-stamp.true { color: #2f8a4a; }
+
+/* ---------- 2026-10-29 に足した5つ（ビンゴ・迷路早抜け・色ちがい早押し・すごろく・海賊のたる） ---------- */
+:is([data-game="bingo"], [data-game="meiro"], [data-game="iroji"], [data-game="sugoroku"], [data-game="taru"]) .board { width: min(100%, 560px); }
+/* ビンゴ */
+.bg { display: flex; flex-direction: column; gap: 10px; }
+.bg-now { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.bg-ball { width: 4.6rem; height: 4.6rem; border-radius: 50%; display: grid; place-content: center; text-align: center; background: radial-gradient(circle at 35% 30%, #fff 0 18%, #f3c74b 60%, #d9963a); color: #2d2a26; font-size: 1.9rem; font-weight: 800; line-height: 1; box-shadow: 0 3px 8px rgba(0, 0, 0, .2); }
+.bg-ball small { font-size: .85rem; }
+.bg-ball.pop { animation: pop .3s ease-out; }
+.bg-prev { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; min-height: 1.6em; }
+.bg-prev span { min-width: 2em; padding: 1px 6px; border: 1px solid var(--line); border-radius: 999px; font-size: .85rem; color: var(--muted); background: var(--field); }
+.bg-card { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; width: min(100%, 360px); margin: 0 auto; touch-action: manipulation; }
+.bg-head { text-align: center; font-weight: 900; font-size: 1.2rem; color: var(--accent); }
+.board .bg-cell { aspect-ratio: 1; display: grid; place-items: center; border: 2px solid var(--line); border-radius: 10px; background: var(--field); color: var(--ink); font: inherit; font-size: clamp(1rem, 5.5vw, 1.45rem); font-weight: 800; padding: 0; }
+.board button.bg-cell { cursor: pointer; }
+.board button.bg-cell:disabled { cursor: default; }
+.board .bg-cell.open { background: #f08a5a; border-color: #d9643a; color: #fff; }
+.board .bg-cell.free { font-size: .75rem; }
+.board .bg-cell.line { background: #2f8a4a; border-color: #1f6a36; color: #fff; }
+.bg-cell.pop { animation: pop .3s ease-out; }
+.bg-reach { color: #c0392b; font-weight: 800; }
+/* 迷路早抜け */
+.mz-canvas { display: block; margin: 0 auto; border-radius: 8px; border: 2px solid var(--line); touch-action: none; }
+.mz-pad { display: grid; grid-template-columns: repeat(3, 3.4rem); grid-template-rows: repeat(3, 3rem); gap: 4px; justify-content: center; touch-action: manipulation; }
+.board .mz-pad .btn { padding: 0; font-size: 1.3rem; min-width: 0; }
+.mz-U { grid-column: 2; grid-row: 1; } .mz-L { grid-column: 1; grid-row: 2; } .mz-R { grid-column: 3; grid-row: 2; } .mz-D { grid-column: 2; grid-row: 3; }
+/* 色ちがい早押し */
+.ir-ask { font-weight: 700; margin-top: 4px; }
+.ir-ask.rev { color: #8a4fc0; }
+.ir-word { font-size: clamp(3.4rem, 22vw, 5.4rem); font-weight: 900; line-height: 1.2; margin: 4px 0; }
+.ir-pad { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: min(100%, 360px); margin: 0 auto; touch-action: manipulation; }
+.board button.ir-btn { min-height: 4.2rem; border: 0; border-radius: 14px; color: #fff; font: inherit; font-size: 1.5rem; font-weight: 800; text-shadow: 0 1px 2px rgba(0, 0, 0, .4); cursor: pointer; }
+.board button.ir-btn:disabled { opacity: .55; cursor: default; }
+.board button.ir-btn.ans { opacity: 1; box-shadow: 0 0 0 4px var(--win); }
+/* すごろく */
+.sgr-board { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; touch-action: manipulation; }
+.sgr-cell { position: relative; aspect-ratio: 1; min-width: 0; border: 1.5px solid var(--line); border-radius: 8px; background: var(--field); display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 1px; overflow: hidden; }
+.sgr-cell.none { visibility: hidden; }
+.sgr-cell.start, .sgr-cell.goal { background: var(--hi, #fff1c2); border-color: var(--win); }
+.sgr-cell.fwd { background: #dff3e3; } .sgr-cell.back { background: #fbe1dc; } .sgr-cell.skip { background: #e6e4f3; } .sgr-cell.again { background: #dcebfa; } .sgr-cell.swap { background: #fbf0d0; }
+.sgr-cell.ev { color: #2d2a26; }
+.sgr-cell.pop { animation: pop .3s ease-out; }
+.sgr-n { font-size: .6rem; line-height: 1.1; color: var(--muted); white-space: nowrap; }
+.sgr-cell.ev .sgr-n { color: #6b625a; }
+.sgr-ev { font-size: clamp(.7rem, 3.4vw, .95rem); line-height: 1.1; font-weight: 700; }
+.sgr-toks { display: flex; flex-wrap: wrap; gap: 1px; justify-content: center; margin-top: auto; }
+.sgr-dot { display: inline-grid; place-items: center; width: 1.05rem; height: 1.05rem; border-radius: 50%; color: #fff; font-size: .62rem; font-weight: 800; border: 1.5px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .25); }
+.cc-opp-name .sgr-dot { margin-right: 4px; vertical-align: -2px; }
+.sgr-legend { text-align: center; font-size: .8rem; color: var(--muted); margin: 4px 0; }
+.sgr-log { text-align: center; font-weight: 700; display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 3em; }
+.sgr-die { font-size: 2.6rem; line-height: 1; }
+.sgr-die.pop { animation: pop .3s ease-out; }
+/* 海賊のたる */
+.tr-barrel { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px; border-radius: 20px; background: linear-gradient(90deg, #8a5a2b, #b07a40 30%, #c48a4c 50%, #b07a40 70%, #8a5a2b); }
+.tr-pirate { font-size: 2.6rem; line-height: 1; transition: transform .3s; }
+.tr-pirate.jump { animation: trJump .7s ease-out forwards; }
+@keyframes trJump { 0% { transform: translateY(0); } 40% { transform: translateY(-40px) rotate(-20deg) scale(1.5); } 100% { transform: translateY(-20px) rotate(10deg) scale(1.3); } }
+.tr-holes { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; width: min(100%, 340px); touch-action: manipulation; }
+.board button.tr-hole { aspect-ratio: 1; border-radius: 50%; border: 3px solid #5a3a1a; background: radial-gradient(circle, #1e140b 0 55%, #3a2614); color: #fff; font-size: 1.1rem; padding: 0; cursor: pointer; }
+.board button.tr-hole:disabled { cursor: default; }
+.board button.tr-hole.done { background: #e9dcc6; }
+.board button.tr-hole.sel { box-shadow: 0 0 0 3px var(--win); }
+.board button.tr-hole.hit { background: #c0392b; box-shadow: 0 0 0 3px #fff; }
+.tr-hole.pop { animation: pop .25s ease-out; }
