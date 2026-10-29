@@ -3,9 +3,10 @@
 //   - 4つの色のボタンから「字の色」を押す。
 //   - 10問。正解した速い順に 3・2・1点。まちがえたらその問題はもう押せないが、点は減らない。
 //   - 詳細設定「あまのじゃく」（なし（最初）・あり）: ときどき「字の意味のほうを答えて」の問題が混じる。
+//   - 詳細設定「問題の数」（5・10（最初）・20問。2026-10-29 本人が選んだ案）。
 // Claude の判断:
 //   - 色は 赤・青・黄・緑 の4つ。字と色はいつもちがう組み合わせ。ボタンの並びは毎回同じ（並びが変わると色を探す時間の勝負になるため）。
-//   - あまのじゃくありでは、10問のうち3問（種から選ぶ）に「👿 字の意味を答えて！」の印を付ける。
+//   - あまのじゃくありでは、問題の3割（5問で2・10問で3・20問で6。種から選ぶ）に「👿 字の意味を答えて！」の印を付ける。
 //   - 1問の制限時間は5秒。全員が答えたら0.8秒で締め切る。結果を見せる間は2秒。速さは各自の画面に字が出てから押すまで。
 //   - CPU は0.7〜1.6秒で押し、85%（あまのじゃくの問題は70%）当てる。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …
@@ -16,8 +17,9 @@ import { since, scoreChips, leaders, winnersText, timeBar, secText } from './par
 import { pointsOf } from './make10.js';
 
 export const COLORS = [['赤', '#e04b3c', 'あか'], ['青', '#2f6fb3', 'あお'], ['黄', '#e8a913', 'きいろ'], ['緑', '#3a9d55', 'みどり']];
-const ROUNDS = 10;
-const REV = 3;
+const ROUNDS = [[5, '5問'], [10, '10問'], [20, '20問']];
+const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 10);
+const revOf = (k) => Math.round((k * 3) / 10); // あまのじゃくの問題の数（5問で2・10問で3・20問で6）
 const LIMIT = 5000;
 const READY_MS = 3000;
 const SHOWN_MS = 2000;
@@ -41,17 +43,19 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'rev', label: 'あまのじゃく', desc: 'ときどき「字の意味のほう」を答える問題が混じる', def: false },
+    { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 10, choices: ROUNDS },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { rev: false, ...rules };
+    const r = { rev: false, rounds: 10, ...rules };
+    const k = roundsOf(r);
     const rnd = mulberry32(seed);
-    const qs = Array.from({ length: ROUNDS }, () => {
+    const qs = Array.from({ length: k }, () => {
       const word = Math.floor(rnd() * 4);
       const ink = (word + 1 + Math.floor(rnd() * 3)) % 4;
       return { word, ink, rev: false };
     });
-    if (r.rev) for (const q of shuffle([...Array(ROUNDS).keys()].slice(1), rnd).slice(0, REV)) qs[q].rev = true; // 1問目はふつう
+    if (r.rev) for (const q of shuffle([...Array(k).keys()].slice(1), rnd).slice(0, revOf(k))) qs[q].rev = true; // 1問目はふつう
     return {
       n, seed, rules: r, qs, q: -1, phase: 'ready',
       solved: Array(n).fill(null), miss: Array(n).fill(false), scores: Array(n).fill(0), last: null, log: [], step: 0,

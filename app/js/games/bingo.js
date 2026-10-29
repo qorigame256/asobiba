@@ -4,6 +4,7 @@
 //   - 数字は3秒ごとに自動で出し、声でも読み上げる（🔊 に従う。詳細設定「読み上げ」で切れる）。
 //   - 穴は自動で開く。詳細設定「穴の開け方」で「自分で押す」も選べる。
 //   - 最初にそろった人が出たら終わり。同じ数字で同時にそろったら同じ順位。詳細設定「終わり方」で「3位まで続ける」も選べる。
+//   - 詳細設定「真ん中の FREE」（あり（最初）・なし。2026-10-29 本人が選んだ案）: なしは真ん中も N の列の数字になる。
 // Claude の判断:
 //   - カードと数字の出る順は種から作る（全員同じ）。カードは席ごとにちがう。
 //   - 最初の数字は始まってから2秒。そろう人が出たら、最後の数字を見せるため1.5秒おいて終わる。
@@ -42,12 +43,12 @@ const doneCount = (s) => s.at.filter((v) => v !== null).length;
 const drawnSet = (s) => new Set(s.order.slice(0, s.k));
 const clone = (s) => ({ ...s, at: s.at.slice(), marks: s.marks ? s.marks.map((m) => m.slice()) : null });
 
-// 席 p のカード（25マス。真ん中は 0 ＝ 最初から開いている）
-export function cardOf(seed, p) {
+// 席 p のカード（25マス。真ん中は 0 ＝ 最初から開いている。free が false なら真ん中も数字）
+export function cardOf(seed, p, free = true) {
   const rng = mulberry32((seed ^ Math.imul(p + 1, 0x9e3779b1)) >>> 0);
   const cols = [0, 1, 2, 3, 4].map((c) => shuffle(Array.from({ length: 15 }, (_, i) => c * 15 + i + 1), rng).slice(0, 5));
   const card = [];
-  for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) card.push(r === 2 && c === 2 ? 0 : cols[c][r]);
+  for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) card.push(free && r === 2 && c === 2 ? 0 : cols[c][r]);
   return card;
 }
 
@@ -76,11 +77,12 @@ export default {
     { key: 'mark', label: '穴の開け方', desc: '自分で押すと、押し忘れると遅れる', def: 'auto', choices: [['auto', '自動'], ['self', '自分で押す']] },
     { key: 'until', label: '終わり方', desc: '3位まで続けると、1人上がっても続く', def: 1, choices: [[1, '1人上がったら終わり'], [3, '3位まで続ける']] },
     { key: 'voice', label: '読み上げ', desc: '出た数字を声でも読む（🔇 のときは読まない）', def: true },
+    { key: 'free', label: '真ん中の FREE', desc: 'なしにすると真ん中も数字になり、そろいにくくなる', def: true },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { mark: 'auto', until: 1, voice: true, ...rules };
-    const cards = Array.from({ length: n }, (_, p) => cardOf(seed, p));
+    const r = { mark: 'auto', until: 1, voice: true, free: true, ...rules };
+    const cards = Array.from({ length: n }, (_, p) => cardOf(seed, p, r.free !== false));
     const order = shuffle(Array.from({ length: 75 }, (_, i) => i + 1), mulberry32((seed ^ 0x5bd1e995) >>> 0));
     return {
       n, seed, rules: r, cards, order, k: 0, phase: 'play', step: 0,

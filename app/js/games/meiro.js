@@ -4,7 +4,10 @@
 //   - 同じ迷路を3問。早く出た順に 3点・2点・それ以降は1点（15パズル早解きとそろえた）。
 //   - 迷路の大きさは詳細設定で 小・中（最初）・大。
 //   - ほかの人の位置が見える。
+//   - 詳細設定「暗やみ」（なし（最初）・あり。2026-10-29 本人が選んだ案）: 自分のまわりしか見えない。
 // Claude の判断:
+//   - 暗やみで見えるのは、自分のいるマスから縦横2マスずつ（5×5）と、一度通ったマス。🏁 とほかの人の丸は暗い所でも見える。
+//     ゴールしたか・あきらめたか・結果を見せる間は全部見える。観戦の人も全部見える。制限時間は1.5倍、CPU の目安の時間は1.3倍。
 //   - 迷路は種から作る（穴掘り法。行き止まりの多い1本道の迷路で、スタートからゴールへの道は1つだけ）。小 7×7・中 10×10・大 14×14。
 //   - 制限時間は 小60秒・中90秒・大150秒。最初に着いた人から20秒で締め切る。全員着くかあきらめたら1.5秒（15パズル早解きと同じ）。
 //   - 送るのはゴールまでの動き（U・D・L・R の文字列）。apply で壁を抜けずにゴールへ着くかを確かめる。
@@ -29,8 +32,9 @@ const CPU_BASE = { s: 20000, m: 35000, l: 60000 };
 const DIRS = { U: [0, -1, 1], R: [1, 0, 2], D: [0, 1, 4], L: [-1, 0, 8] }; // 動き・その向きに開いている印
 const BACK = { U: 'D', D: 'U', L: 'R', R: 'L' };
 
+const DARK_SEE = 2; // 暗やみで見える、自分のまわりのマスの数
 const levelOf = (r) => (SIZES[r.level] ? r.level : 'm');
-const limitOf = (s) => LIMITS[s.level];
+const limitOf = (s) => LIMITS[s.level] * (s.rules.dark ? 1.5 : 1);
 const qKey = (s, q = s.q) => `meiro:${s.seed}:${q}`;
 const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice(), passed: s.passed.slice() });
 const doneOf = (s, p) => s.solved[p] !== null || s.passed[p];
@@ -114,10 +118,11 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'level', label: '迷路の大きさ', desc: '大きいほど時間がかかる', def: 'm', choices: [['s', '小（7×7）'], ['m', '中（10×10）'], ['l', '大（14×14）']] },
+    { key: 'dark', label: '暗やみ', desc: '自分のまわり（と通った所）しか見えない。制限時間は1.5倍', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { level: 'm', ...rules };
+    const r = { level: 'm', dark: false, ...rules };
     const level = levelOf(r);
     const size = SIZES[level];
     const rnd = mulberry32(seed);
@@ -197,7 +202,7 @@ export default {
     const key = qKey(s) + ':' + p;
     let plan = cpuPlan.get(key);
     if (!plan) {
-      const at = Math.min(limitOf(s) * 0.9, CPU_BASE[s.level] * (0.5 + Math.random()));
+      const at = Math.min(limitOf(s) * 0.9, CPU_BASE[s.level] * (s.rules.dark ? 1.3 : 1) * (0.5 + Math.random()));
       plan = { at, ok: Math.random() < 0.9, done: false };
       cpuPlan.set(key, plan);
       if (cpuPlan.size > 200) cpuPlan.delete(cpuPlan.keys().next().value);
@@ -244,7 +249,7 @@ export default {
     wrap.append(card);
     const sizeText = `${s.size}×${s.size}`;
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">${sizeText}・全${s.qs.length}問・1問 ${limitOf(s) / 1000}秒まで</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">${sizeText}${s.rules.dark ? '・🔦 暗やみ' : ''}・全${s.qs.length}問・1問 ${limitOf(s) / 1000}秒まで</div>`;
       return;
     }
     const key = qKey(s);
@@ -309,6 +314,17 @@ export default {
         if (Math.floor(c / n) === n - 1 && !(maze[c] & 4)) { g.moveTo(x, y + u); g.lineTo(x + u, y + u); }
       }
       g.stroke();
+      // 暗やみ: 自分のまわりと通った所のほかを塗りつぶし、🏁 だけ描き直す
+      if (s.rules.dark && s.phase === 'open' && me !== null && !doneOf(s, me)) {
+        const x0 = loc.c % n, y0 = Math.floor(loc.c / n);
+        g.fillStyle = css.getPropertyValue('--ink').trim() || '#333'; // 透けると暗い所の壁が読めてしまうので不透明に塗る
+        for (let c = 0; c < n * n; c++) {
+          const x = c % n, y = Math.floor(c / n);
+          if (loc.trail.has(c) || (Math.abs(x - x0) <= DARK_SEE && Math.abs(y - y0) <= DARK_SEE)) continue;
+          g.fillRect(x * u - 0.5, y * u - 0.5, u + 1, u + 1);
+        }
+        g.fillText('🏁', ...at(goal));
+      }
       // ほかの人（小さい丸）と自分（大きい丸）
       for (const [p, v] of others) {
         if (v.key !== key || p === me || p >= s.n || s.solved[p] !== null) continue;

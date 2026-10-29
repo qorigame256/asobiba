@@ -6,6 +6,8 @@
 //   - 速さは各自の画面で前半が出てから押すまで（ms）で比べる（難読漢字と同じ）。最初の正解から1.5秒待って締め切り、いちばん速い人が取る。
 //   - 札は取られても取られなくても（だれも押さず時間切れでも）場から抜け、山から1枚足す。読む順と場の並びは種から前もって決めておく（apply が乱数を使わないように）。
 //   - 詳細設定: 札の数（10・15・20枚）・読み上げ（あり・なし）。読み上げは 🔇 のときも鳴らない。
+//   - 詳細設定「場の札の数」（8枚（最初）・12枚）と「お手つきは1回休み」（なし（最初）・あり）（どちらも 2026-10-29 本人が選んだ案）。
+//     1回休みは、お手つきをした次の札で押せない（休んだ札ではお手つきにならないので、続けて休むことはない）。最後の札のお手つきは休みなし。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open →（正解が出たら1.5秒 / 全員済み0.8秒 / 制限時間）→ close → shown → next …
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'take', q: 何問目, c: 押した札の番号, ms }
 
@@ -22,21 +24,23 @@ const AFTER_MS = 1500; // 最初の正解から締め切るまで（もっと速
 const GRACE_MS = 800;
 const OPEN_MS = 12000; // 前半が出きってからの時間
 const CARDS = [[10, '10枚'], [15, '15枚'], [20, '20枚']];
+const FIELDS = [[8, '8枚'], [12, '12枚']];
 
 const countOf = (r) => (CARDS.some(([v]) => v === r.rounds) ? r.rounds : 15);
+const fieldOf = (r) => (FIELDS.some(([v]) => v === r.field) ? r.field : FIELD);
 const limitOf = (s, q = s.q) => KOTOWAZA[s.reads[q]][0].length * CHAR_MS + OPEN_MS;
 const qKey = (s, q = s.q) => `karuta:${s.seed}:${q}`;
-const clone = (s) => ({ ...s, scores: s.scores.slice(), got: s.got.slice(), miss: s.miss.slice() });
-const doneOf = (s, p) => s.got[p] !== null || s.miss[p];
+const clone = (s) => ({ ...s, scores: s.scores.slice(), got: s.got.slice(), miss: s.miss.slice(), ...(s.rest ? { rest: s.rest.slice() } : {}) });
+const doneOf = (s, p) => s.got[p] !== null || s.miss[p] || !!s.rest?.[p];
 
-// 読む順と、各問の場の札（8枚）。札は読まれたら抜け、山の次の札が同じ場所に入る
+// 読む順と、各問の場の札（最初は8枚）。札は読まれたら抜け、山の次の札が同じ場所に入る
 // 山には読む札の数より7枚多く入れ、最後の札まで場が8枚のままにする（読まれない札も混ざる。前は読む札だけで、
 // 後半は場が7枚・6枚…と減り、最後は残った1枚を押すだけになった。2026-10-28 Codex の点検の指摘）
-export function deal(seed, count) {
+export function deal(seed, count, size = FIELD) {
   const rnd = mulberry32(seed);
-  const deck = shuffle([...KOTOWAZA.keys()], rnd).slice(0, count + FIELD - 1);
-  const field = deck.slice(0, FIELD);
-  const pile = deck.slice(FIELD);
+  const deck = shuffle([...KOTOWAZA.keys()], rnd).slice(0, count + size - 1);
+  const field = deck.slice(0, size);
+  const pile = deck.slice(size);
   const reads = [], fields = [];
   for (let q = 0; q < count; q++) {
     const live = field.filter((c) => c !== null);
@@ -64,14 +68,17 @@ export default {
   settings: [
     { key: 'rounds', label: '札の数', desc: '1回の対局で読む札の数', def: 15, choices: CARDS },
     { key: 'voice', label: '読み上げ', desc: 'ことわざの前半を声でも読む（🔇 のときは読まない）', def: true },
+    { key: 'field', label: '場の札の数', desc: '多いほど札を探すのが難しい', def: 8, choices: FIELDS },
+    { key: 'rest', label: 'お手つきは1回休み', desc: 'ちがう札を押したら、次の札でも押せない', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { rounds: 15, voice: true, ...rules };
-    const { reads, fields } = deal(seed, countOf(r));
+    const r = { rounds: 15, voice: true, field: 8, rest: false, ...rules };
+    const { reads, fields } = deal(seed, countOf(r), fieldOf(r));
     return {
       n, seed, rules: r, reads, fields, q: -1, phase: 'ready',
       got: Array(n).fill(null), miss: Array(n).fill(false), scores: Array(n).fill(0), last: null, log: [], step: 0,
+      ...(r.rest ? { rest: Array(n).fill(false) } : {}), // この札で休んでいる人
     };
   },
 
@@ -111,6 +118,7 @@ export default {
         s.q += 1;
         s.phase = 'open';
         s.got = Array(s.n).fill(null);
+        if (s.rest) s.rest = s0.miss.slice(); // 休んだ札ではお手つきできないので、続けて休むことはない
         s.miss = Array(s.n).fill(false);
         return s;
       }
@@ -162,7 +170,7 @@ export default {
     const me = o.me >= 0 ? o.me : null;
     const won = s.phase === 'end' ? leaders(s.scores) : [];
     const extra = (p) => {
-      if (s.phase === 'open') return s.got[p] !== null ? '<span class="pt-ok">押した！</span>' : s.miss[p] ? '<span class="pt-ng">お手つき</span>' : '';
+      if (s.phase === 'open') return s.got[p] !== null ? '<span class="pt-ok">押した！</span>' : s.miss[p] ? '<span class="pt-ng">お手つき</span>' : s.rest?.[p] ? '<span class="pt-ng">💤 休み</span>' : '';
       if (s.phase !== 'shown' || !s.last) return '';
       if (s.last.taker === p) return `<span class="pt-ok">🎴 ${secText(s.last.best)}</span>`;
       return s.miss[p] ? '<span class="pt-ng">お手つき</span>' : '';
@@ -179,7 +187,7 @@ export default {
     card.className = 'kj-card';
     wrap.append(card);
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">札 ${s.reads.length}枚。前半を聞いて、後半の札を早く押そう</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">札 ${s.reads.length}枚。前半を聞いて、後半の札を早く押そう${s.rest ? '（お手つきは1回休み）' : ''}</div>`;
       return;
     }
     const key = qKey(s);
@@ -245,7 +253,8 @@ export default {
     if (s.phase === 'open') {
       if (me === null) note.textContent = '観戦中';
       else if (s.got[me] !== null) note.textContent = `押した！（${secText(s.got[me])}）ほかの人より速ければあなたの札`;
-      else if (s.miss[me]) note.textContent = 'お手つき！ この札はもう押せません';
+      else if (s.miss[me]) note.textContent = s.rest && s.q + 1 < s.reads.length ? 'お手つき！ この札と次の札は押せません' : 'お手つき！ この札はもう押せません';
+      else if (s.rest?.[me]) note.textContent = '💤 お手つきの1回休み。この札は押せません';
       else note.textContent = '前半に合う後半の札を押そう';
     }
     wrap.append(note);

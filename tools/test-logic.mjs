@@ -6538,6 +6538,29 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.ok(K.result(st), 'かるた: CPU どうしで最後まで');
   assert.equal(st.log.length, 10);
   assert.ok(st.scores.reduce((a, b) => a + b, 0) >= 5, 'かるた: CPU も札を取る');
+  // 場の札の数（12枚）: 最後の札まで場は12枚のまま。8枚のときの札は前と同じ（2026-10-29）
+  assert.deepEqual(deal(7, 15, 8), deal(7, 15), 'かるた: 8枚のときは前と同じ配り方');
+  for (let seed = 0; seed < 20; seed++) {
+    const { reads, fields } = deal(seed, 20, 12);
+    assert.equal(new Set(reads).size, 20);
+    reads.forEach((c, q) => { assert.ok(fields[q].includes(c)); assert.equal(fields[q].filter((x) => x !== null).length, 12, `かるた: ${q + 1}枚目も場は12枚`); });
+  }
+  assert.equal(K.init(3, 7, { rules: { field: 12 } }).fields[0].length, 12);
+  assert.equal(K.init(3, 7, { rules: {} }).rest, undefined, 'かるた: 1回休みなしのときは局面の形が前と同じ');
+  // お手つきは1回休み: お手つきの次の札は押せない・休んだ札のあとは押せる・押していない人は休まない
+  let r = K.apply(K.init(3, 8, { rules: { rest: true } }), { p: -1, t: 'next' });
+  const ng = (t) => t.fields[t.q].find((c) => c !== null && c !== t.reads[t.q]);
+  r = K.apply(r, { p: 0, t: 'take', q: 0, c: ng(r), ms: 500 });
+  r = K.apply(K.apply(r, { p: -1, t: 'close' }), { p: -1, t: 'next' });
+  assert.deepEqual(r.rest, [true, false, false], 'かるた: お手つきの人だけ次の札で休み');
+  assert.equal(K.apply(r, { p: 0, t: 'take', q: 1, c: r.reads[1], ms: 900 }), null, 'かるた: 休みの札は押せない');
+  r = K.apply(r, { p: 1, t: 'take', q: 1, c: ng(r), ms: 900 });
+  r = K.apply(r, { p: 2, t: 'take', q: 1, c: r.reads[1], ms: 1000 });
+  assert.equal(K.referee(r).ms, 800, 'かるた: 休みの人も済んだことにして締め切る');
+  r = K.apply(K.apply(r, { p: -1, t: 'close' }), { p: -1, t: 'next' });
+  assert.deepEqual(r.rest, [false, true, false], 'かるた: 休んだ札のあとは押せる');
+  assert.ok(K.apply(r, { p: 0, t: 'take', q: 2, c: r.reads[2], ms: 900 }));
+  for (const rules of [{ rest: true, rounds: 10 }, { field: 12, rounds: 10 }]) assert.ok(K.result(runCpus(K, 4, 3, rules, 400)), `かるた: CPU どうしで最後まで ${JSON.stringify(rules)}`);
   console.log('karuta OK');
 }
 
@@ -6710,6 +6733,17 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   const st = runCpus(P, 4, 6, { size: '3', rounds: 3 }, 3000);
   assert.ok(P.result(st), '15パズル: CPU どうしで最後まで');
   assert.equal(st.log.length, 3);
+  // 5×5（2026-10-29）: 1〜24 の盤・逆にたどればそろう・4×4 と 3×3 は前と同じ並び
+  const f5 = P.init(2, 3, { rules: { size: '5' } });
+  assert.equal(f5.size, 5);
+  assert.equal(f5.qs[0].board.length, 25);
+  assert.equal(f5.qs[0].path.length, 70, '15パズル: 5×5 の軽めは70回混ぜる');
+  assert.ok(f5.qs.every((x) => isSolved(replay(x.board, 5, undoPath(x.path)))), '15パズル: 5×5 も逆にたどればそろう');
+  assert.equal(P.referee(P.apply(f5, { p: -1, t: 'next' })).ms, 300000 + 1500, '15パズル: 5×5 の軽めは300秒');
+  assert.equal(P.init(2, 3, { rules: { size: '5', level: 'full' } }).qs[0].path.length, 250);
+  assert.equal(P.init(2, 3, { rules: {} }).qs[0].path.length, 40, '15パズル: 4×4 の軽めは前と同じ40回');
+  assert.equal(P.init(2, 3, { rules: { size: '3', level: 'full' } }).qs[0].path.length, 60);
+  assert.ok(P.result(runCpus(P, 3, 6, { size: '5', rounds: 1 }, 10000)), '15パズル: 5×5 も CPU どうしで最後まで');
   console.log('slide OK');
 }
 
@@ -6825,6 +6859,17 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.ok(r && r.winners.length >= 1, `ビンゴ: CPU どうしで上がりが出る ${JSON.stringify(rules)}`);
     if (rules.until === 3) assert.ok(st.at.filter((x) => x !== null).length >= 3, 'ビンゴ: 3位まで続ける');
   }
+  // 真ん中の FREE なし（2026-10-29）: 真ん中も N の列の数字・ありのときのカードは前と同じ
+  for (let p = 0; p < 6; p++) {
+    const a = cardOf(11, p), b = cardOf(11, p, false);
+    assert.ok(b[12] >= 31 && b[12] <= 45, 'ビンゴ: FREE なしの真ん中は N の数字');
+    assert.equal(new Set(b).size, 25);
+    assert.deepEqual(a.filter((_, i) => i !== 12), b.filter((_, i) => i !== 12), 'ビンゴ: FREE なしでも真ん中のほかは同じ');
+  }
+  assert.deepEqual(B.init(3, 5, { rules: { free: false } }).cards[0], cardOf(5, 0, false));
+  let nf = B.init(3, 5, { rules: { free: false, mark: 'self' } });
+  assert.ok(nf.marks.every((m) => m.every((x) => !x)), 'ビンゴ: FREE なしは最初どこも開いていない');
+  for (const rules of [{ free: false }, { free: false, mark: 'self' }]) assert.ok(B.result(runCpus(B, 5, 3, rules, 100, 20000))?.winners.length, `ビンゴ: FREE なしも上がりが出る ${JSON.stringify(rules)}`);
   console.log('bingo OK');
 }
 
@@ -6858,6 +6903,12 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   s = Z.apply(s, { p: -1, t: 'close' });
   assert.deepEqual(s.scores, [3, 2, 0]);
   for (const level of ['s', 'm', 'l']) assert.ok(Z.result(runCpus(Z, 4, 5, { level }, 500, 3000)), `迷路: CPU どうしで最後まで ${level}`);
+  // 暗やみ（2026-10-29）: 迷路は同じで、制限時間だけ1.5倍
+  const zd = Z.init(3, 9, { rules: { level: 's', dark: true } });
+  assert.deepEqual(zd.qs, Z.init(3, 9, { rules: { level: 's' } }).qs, '迷路: 暗やみでも同じ迷路');
+  assert.equal(Z.referee(Z.apply(zd, { p: -1, t: 'next' })).ms, 90000 + 1500, '迷路: 暗やみは制限時間が1.5倍');
+  assert.equal(Z.referee(Z.apply(Z.init(3, 9, { rules: { level: 's' } }), { p: -1, t: 'next' })).ms, 60000 + 1500);
+  assert.ok(Z.result(runCpus(Z, 4, 5, { level: 'm', dark: true }, 500, 3000)), '迷路: 暗やみも CPU どうしで最後まで');
   console.log('meiro OK');
 }
 
@@ -6883,7 +6934,15 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   s = I.apply(s, { p: -1, t: 'close' });
   assert.deepEqual(s.scores, [0, 2, 3], '色ちがい: 速い順に3・2点、まちがいは0点（減らない）');
   assert.equal(I.apply(I.apply(I.init(2, 4, { rules: {} }), { p: -1, t: 'next' }), { p: 0, t: 'ans', q: 0, c: 0, ms: 5400 }), null, '色ちがい: 5秒を過ぎた手は弾く');
-  for (const rules of [{}, { rev: true }]) {
+  // 問題の数（2026-10-29）: 5・10・20問。あまのじゃくは3割。10問のときは前と同じ問題
+  for (const [k, rv] of [[5, 2], [10, 3], [20, 6]]) {
+    const a = I.init(2, 3, { rules: { rounds: k, rev: true } });
+    assert.equal(a.qs.length, k, `色ちがい: ${k}問`);
+    assert.equal(a.qs.filter((x) => x.rev).length, rv, `色ちがい: ${k}問のあまのじゃくは${rv}問`);
+  }
+  assert.deepEqual(I.init(2, 3, { rules: {} }).qs, I.init(2, 3, { rules: { rounds: 10 } }).qs);
+  assert.deepEqual(I.init(2, 3, { rules: { rounds: 20 } }).qs.slice(0, 10).map((x) => x.word), I.init(2, 3, { rules: {} }).qs.map((x) => x.word));
+  for (const rules of [{}, { rev: true }, { rounds: 5 }, { rounds: 20, rev: true }]) {
     const st = runCpus(I, 5, 8, rules, 100, 5000);
     assert.ok(I.result(st) && st.scores.some((v) => v > 0), `色ちがい: CPU どうしで最後まで ${JSON.stringify(rules)}`);
   }

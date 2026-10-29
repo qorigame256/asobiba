@@ -7,6 +7,8 @@
 //   - 同じ列・同じ段の札を押すと、空きマスまでの札をまとめて動かす（動きは1マスずつ数える）。PC は矢印キーでも動かせる。
 //   - 制限時間は 3×3 が90秒、4×4 は軽め180秒・しっかり300秒。最初にそろった人から20秒で締め切る。全員そろうかあきらめたら1.5秒。
 //   - 問題の数は 1・3（最初）・5問。
+//   - 5×5（1〜24。2026-10-29 本人が選んだ案）: 混ぜる回数は軽め70回・しっかり250回、制限時間は軽め300秒・しっかり480秒。
+//     CPU がそろえる割合は4×4 より1割低い。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（10を作れと同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, seq, ms } / { p, t: 'pass', q }
 
@@ -23,9 +25,12 @@ const STEP = { U: -1, D: 1, L: 0, R: 0 }; // 段の動き（列の動きは下�
 const DX = { U: 0, D: 0, L: -1, R: 1 };
 const BACK = { U: 'D', D: 'U', L: 'R', R: 'L' };
 
-const sizeOf = (r) => (Number(r.size) === 3 ? 3 : 4);
+const sizeOf = (r) => ([3, 5].includes(Number(r.size)) ? Number(r.size) : 4);
 const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 3);
-const limitOf = (s) => (s.size === 3 ? 90000 : s.rules.level === 'full' ? 300000 : 180000);
+const LIMITS = { 3: [90000, 90000], 4: [180000, 300000], 5: [300000, 480000] }; // 大きさごとの [軽め, しっかり]
+const MOVES = { 3: [20, 60], 4: [40, 150], 5: [70, 250] };
+const full = (s) => (s.rules.level === 'full' ? 1 : 0);
+const limitOf = (s) => LIMITS[s.size][full(s)];
 const qKey = (s, q = s.q) => `slide:${s.seed}:${q}`;
 const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice(), passed: s.passed.slice() });
 const doneOf = (s, p) => s.solved[p] !== null || s.passed[p];
@@ -92,7 +97,7 @@ export default {
   minPlayers: 2,
   maxPlayers: 10,
   settings: [
-    { key: 'size', label: '大きさ', desc: '3×3 は 1〜8 でかんたん', def: '4', choices: [['4', '4×4（15パズル）'], ['3', '3×3（8パズル）']] },
+    { key: 'size', label: '大きさ', desc: '3×3 は 1〜8 でかんたん、5×5 は 1〜24 で上級者向け', def: '4', choices: [['4', '4×4（15パズル）'], ['3', '3×3（8パズル）'], ['5', '5×5（24パズル）']] },
     { key: 'level', label: '混ぜ方', desc: 'しっかり混ぜると時間がかかる', def: 'light', choices: [['light', '軽め'], ['full', 'しっかり']] },
     { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 3, choices: ROUNDS },
   ],
@@ -101,7 +106,7 @@ export default {
     const r = { size: '4', level: 'light', rounds: 3, ...rules };
     const size = sizeOf(r);
     const rnd = mulberry32(seed);
-    const moves = r.level === 'full' ? (size === 3 ? 60 : 150) : size === 3 ? 20 : 40;
+    const moves = MOVES[size][r.level === 'full' ? 1 : 0];
     const qs = Array.from({ length: roundsOf(r) }, () => scramble(size, moves, rnd));
     return {
       n, seed, rules: r, size, qs, q: -1, phase: 'ready',
@@ -181,7 +186,7 @@ export default {
     let plan = cpuPlan.get(key);
     if (!plan) {
       const lim = s.size === 3 ? 90000 : limitOf(s);
-      plan = { at: lim * (0.2 + Math.random() * 0.5), ok: Math.random() < (s.rules.level === 'full' ? 0.4 : 0.6), done: false };
+      plan = { at: lim * (0.2 + Math.random() * 0.5), ok: Math.random() < (s.rules.level === 'full' ? 0.4 : 0.6) - (s.size === 5 ? 0.1 : 0), done: false };
       cpuPlan.set(key, plan);
       if (cpuPlan.size > 200) cpuPlan.delete(cpuPlan.keys().next().value);
     }
