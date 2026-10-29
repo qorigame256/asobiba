@@ -22,6 +22,7 @@ const SHOW_MS = 3000;
 const GRACE_MS = 1500;
 const ALL_FOUND_MS = 1200;
 const LOCK_MS = 1500;
+const TAP_MOVE = 12; // 指を離すまでにこれ（画面の点）より動いたら、押したことにしない
 const MORPH_MS = 10000; // じわじわ変わる: 1つの違いが変わり終えるまで
 const SEEN_AT = 0.3; // じわじわ変わる: 変わり始めてからこの割合を過ぎると見つけられる
 export const VW = 1000;
@@ -366,15 +367,25 @@ export default {
           svg.setAttribute('viewBox', `0 0 ${VW} ${VH}`);
           svg.setAttribute('class', 'mg-pic');
           svg.innerHTML = sideSvg(scene, side, mirror, slow);
+          // 押したかどうかは指を離したときに決める（触れた所から TAP_MOVE より動いたら、画面を動かしただけと見てお手つきにしない。2026-10-30 本人の報告）。
+          // 位置と時間は触れたときのものを使う（速さは今までどおり触れた瞬間で測る）
+          let down = null;
           svg.addEventListener('pointerdown', (e) => {
+            if (e.isPrimary === false) { down = null; return; } // 2本目の指（拡大しようとした）は押したことにしない
+            down = { id: e.pointerId, cx: e.clientX, cy: e.clientY, ms: since(playKey(ui.cur.s)), rect: svg.getBoundingClientRect() };
+          });
+          svg.addEventListener('pointercancel', () => { down = null; }); // ブラウザが画面を動かし始めた
+          svg.addEventListener('pointerup', (e) => {
+            const d = down;
+            down = null;
+            if (!d || d.id !== e.pointerId || Math.hypot(e.clientX - d.cx, e.clientY - d.cy) > TAP_MOVE) return;
             const { s: cur, o: co } = ui.cur;
             if (me === null || cur.phase !== 'play' || !co.canMove || cur.r !== s.r) return;
-            e.preventDefault();
-            const rect = svg.getBoundingClientRect();
-            const { x, y } = toScene(((e.clientX - rect.left) / rect.width) * VW, ((e.clientY - rect.top) / rect.height) * VH, flippedSide(side, mirror));
+            const rect = d.rect;
+            const { x, y } = toScene(((d.cx - rect.left) / rect.width) * VW, ((d.cy - rect.top) / rect.height) * VH, flippedSide(side, mirror));
             const now = performance.now();
             if (now < ui.lockUntil) return;
-            const ms = since(playKey(cur));
+            const ms = d.ms;
             if (ms > limitOf(cur)) return;
             const i = diffAt(scene, x, y, (j) => !!cur.best[`${cur.r}:${j}`] || cur.got[me].includes(`${cur.r}:${j}`)
               || (slow && ms < seenAt(planOf(cur), j))); // じわじわ変わる: まだ見えていない違いは外れ

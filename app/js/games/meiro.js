@@ -8,12 +8,14 @@
 // Claude の判断:
 //   - 暗やみで見えるのは、自分のいるマスから縦横2マスずつ（5×5）と、一度通ったマス。🏁 とほかの人の丸は暗い所でも見える。
 //     ゴールしたか・あきらめたか・結果を見せる間は全部見える。観戦の人も全部見える。制限時間は1.5倍、CPU の目安の時間は1.3倍。
-//   - 迷路は種から作る（穴掘り法。行き止まりの多い1本道の迷路で、スタートからゴールへの道は1つだけ）。小 7×7・中 10×10・大 14×14。
-//   - 制限時間は 小60秒・中90秒・大150秒。最初に着いた人から20秒で締め切る（制限時間のほうが先なら制限時間で）。全員着くかあきらめたら1.5秒（15パズル早解きと同じ）。
+//   - 迷路は種から作る（スタートからゴールへの道は1つだけ）。小 9×9・中 13×13・大 18×18。
+//     2026-10-30 本人の「簡単すぎる」で、小 7・中 10・大 14 から広げ、作り方も穴掘り法（長い1本道ができ、たどれば着く）から
+//     「伸ばす先を半分は一番新しいマス、半分は今までのマスから無作為に選ぶ」作り方に替えた（分かれ道と短い行き止まりが増え、道を目で追いにくい）。
+//   - 制限時間は 小75秒・中120秒・大200秒（2026-10-30 に 60・90・150秒から延ばした）。最初に着いた人から20秒で締め切る（制限時間のほうが先なら制限時間で）。全員着くかあきらめたら1.5秒（15パズル早解きと同じ）。
 //   - 送るのはゴールまでの動き（U・D・L・R の文字列）。apply で壁を抜けずにゴールへ着くかを確かめる。
 //   - ほかの人の位置は見た目だけなので手の一覧に入れず、動くたびに送りっぱなしにする（o.stream。0.12秒より短い間は1回にまとめる）。CPU の位置は出さない。
 //   - なぞるときは、指のあるマスへ向かって、壁に当たるまで1マスずつ進む。
-//   - CPU は大きさごとの目安の時間（小20秒・中35秒・大60秒）の半分〜1.5倍で着く。1割の問題はあきらめる。
+//   - CPU は大きさごとの目安の時間（小28秒・中50秒・大90秒。2026-10-30 に 20・35・60秒から）の半分〜1.5倍で着く。1割の問題はあきらめる。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（15パズル早解きと同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, seq, ms } / { p, t: 'pass', q }
 
@@ -26,9 +28,9 @@ const SHOWN_MS = 4000;
 const GRACE_MS = 1500;
 const AFTER_MS = 20000;
 const ROUNDS = 3;
-const SIZES = { s: 7, m: 10, l: 14 };
-const LIMITS = { s: 60000, m: 90000, l: 150000 };
-const CPU_BASE = { s: 20000, m: 35000, l: 60000 };
+const SIZES = { s: 9, m: 13, l: 18 };
+const LIMITS = { s: 75000, m: 120000, l: 200000 };
+const CPU_BASE = { s: 28000, m: 50000, l: 90000 };
 const DIRS = { U: [0, -1, 1], R: [1, 0, 2], D: [0, 1, 4], L: [-1, 0, 8] }; // 動き・その向きに開いている印
 const BACK = { U: 'D', D: 'U', L: 'R', R: 'L' };
 
@@ -43,16 +45,17 @@ const doneOf = (s, p) => s.solved[p] !== null || s.passed[p];
 export function makeMaze(n, rnd) {
   const open = Array(n * n).fill(0);
   const seen = Array(n * n).fill(false);
-  const stack = [0];
+  const stack = [0]; // 伸ばしている途中のマス
   seen[0] = true;
   while (stack.length) {
-    const c = stack[stack.length - 1];
+    const k = rnd() < 0.5 ? stack.length - 1 : Math.floor(rnd() * stack.length);
+    const c = stack[k];
     const x = c % n, y = Math.floor(c / n);
     const next = Object.entries(DIRS).filter(([, [dx, dy]]) => {
       const nx = x + dx, ny = y + dy;
       return nx >= 0 && ny >= 0 && nx < n && ny < n && !seen[ny * n + nx];
     });
-    if (!next.length) { stack.pop(); continue; }
+    if (!next.length) { stack.splice(k, 1); continue; }
     const [d, [dx, dy, bit]] = next[Math.floor(rnd() * next.length)];
     const to = (y + dy) * n + x + dx;
     open[c] |= bit;
@@ -117,7 +120,7 @@ export default {
   minPlayers: 2,
   maxPlayers: 10,
   settings: [
-    { key: 'level', label: '迷路の大きさ', desc: '大きいほど時間がかかる', def: 'm', choices: [['s', '小（7×7）'], ['m', '中（10×10）'], ['l', '大（14×14）']] },
+    { key: 'level', label: '迷路の大きさ', desc: '大きいほど時間がかかる', def: 'm', choices: [['s', '小（9×9）'], ['m', '中（13×13）'], ['l', '大（18×18）']] },
     { key: 'dark', label: '暗やみ', desc: '自分のまわり（と通った所）しか見えない。制限時間は1.5倍', def: false },
   ],
 

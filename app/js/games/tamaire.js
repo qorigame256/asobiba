@@ -32,7 +32,7 @@ export const HAND_Y = H - 0.30; // パチンコの位置（玉が飛び出す高
 const SLING_PULL = 0.2; // 引ける長さ（盤の横幅に対して）。いっぱいに引くと MAX_V の速さ
 const SLING_MIN = 0.025; // これより短いと飛ばさない（押しただけ）
 const RELOAD_MS = 280;
-const MAX_V = 3.4;
+const MAX_V = 2.3; // 2026-10-30 本人の依頼で 3.4 から下げた（いっぱいに引くと盤の上の外まで飛んでいた。いまはまっすぐ上でもカゴの少し上まで）
 export const TEAM = ['赤', '白'];
 const TEAM_COLOR = ['#e04b3c', '#f4f4f4'];
 const teamOf = (p) => p % 2;

@@ -148,7 +148,8 @@ export default {
   },
 
   // 2026-10-26 本人の依頼で組み直した:
-  //   キーボードを開きっぱなしに: 入力欄は対局の間ずっと同じものを使い、問題が変わっても作り直さない・隠さない・押せなくしない（正解のあとと締め切りのあとは readOnly）。
+  //   キーボードを開きっぱなしに: 入力欄は対局の間ずっと同じものを使い、問題が変わっても作り直さない・隠さない・押せなくしない（正解のあと・締め切りのあと・問題の間は ui.locked で打った字を戻すだけ。
+  //   readOnly にすると iPhone ではキーボードが閉じ、読むだけの欄を押してもキーボードが出なかった。2026-10-30 本人の報告「キーボードが出てこない」）。
   //     スマホは入力欄が消えたり押せなくなったりするとキーボードが閉じるため。
   //   打ち終わりの秒数を正解したらすぐ出す（点数の札の「正解！ 2.34秒」）。
   //   予測変換が強すぎる: 1回の入力で3文字以上増えたら予測変換（候補から選んだ）と見て、入れる前に戻す（PREDICT_JUMP。Claude の判断。
@@ -185,11 +186,12 @@ export default {
       if (me !== null) {
         const form = document.createElement('form');
         form.className = 'kj-form';
-        form.innerHTML = '<input type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="send" maxlength="80" placeholder="ここに打つ"><button type="submit" class="btn primary">送る</button>';
+        form.innerHTML = '<input type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="send" maxlength="80" placeholder="ここを押して打つ"><button type="submit" class="btn primary">送る</button>';
         const input = form.querySelector('input');
         const btn = form.querySelector('button');
         btn.addEventListener('mousedown', (e) => e.preventDefault()); // 押しても入力欄から外れない（キーボードを閉じない）
         input.oninput = () => {
+          if (ui.locked) { input.value = ui.last; return; } // 受け付けない間は打った字を戻す（キーボードは開いたまま）
           const grew = [...input.value].length - [...ui.last].length;
           if (grew >= PREDICT_JUMP) {
             input.value = ui.last;
@@ -219,15 +221,15 @@ export default {
       this.card(s, me);
       if (ui.input) {
         if (newQ) { ui.input.value = ''; ui.last = ''; ui.note.textContent = ''; }
-        ui.input.readOnly = !(s.phase === 'open' && !mine);
-        ui.form.querySelector('button').disabled = ui.input.readOnly;
+        ui.locked = !(s.phase === 'open' && !mine);
+        ui.form.querySelector('button').disabled = ui.locked;
         ui.form.hidden = s.phase === 'end'; // 終わったら隠す（もうキーボードは要らない）
         if (s.phase === 'open' && !mine) {
           const q = s.q;
           const key = qKey(s);
           setTimeout(() => {
             if (!ui?.input || ui.cur.s.q !== q || ui.cur.s.phase !== 'open' || ui.sentQ === q) return;
-            ui.input.readOnly = true;
+            ui.locked = true;
             ui.form.querySelector('button').disabled = true;
             ui.note.textContent = '時間切れ！';
           }, Math.max(0, limitOf(s) - since(key)));
@@ -236,17 +238,17 @@ export default {
     }
     this.note(s, me);
     // スマホは勝手にキーボードを出さない（最初に入力欄を押してもらえば、そのあとは開いたまま）。「ゲームを変える」の一覧を開いているときも取り上げない（一覧が閉じる）
-    if (ui.input && !ui.input.readOnly && !matchMedia('(pointer: coarse)').matches && document.activeElement?.tagName !== 'SELECT') ui.input.focus();
+    if (ui.input && !ui.locked && !matchMedia('(pointer: coarse)').matches && document.activeElement?.tagName !== 'SELECT') ui.input.focus();
 
     function trySend(byEnter) {
       const { s: cur, o: co } = ui.cur;
-      if (cur.phase !== 'open' || ui.sentQ === cur.q || ui.input.readOnly) return;
+      if (cur.phase !== 'open' || ui.sentQ === cur.q || ui.locked) return;
       const text = ui.input.value;
       const ms = Math.round(since(qKey(cur)));
       if (ms > limitOf(cur)) return;
       if (isRight(cur.qs[cur.q], text)) {
         ui.sentQ = cur.q;
-        ui.input.readOnly = true;
+        ui.locked = true;
         co.onMove({ t: 'type', q: cur.q, text: text.slice(0, 80), ms });
       } else if (byEnter && text.trim()) {
         ui.note.textContent = 'ちがうところがあります。直してください';

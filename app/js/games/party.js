@@ -46,9 +46,11 @@ export function winnersText(winners, me, pn) {
 }
 
 // 参加者の札（名前と点数）を並べる。extra(p) で名前の下に足す HTML（esc 済みのもの）を返せる
-export function scoreChips(o, scores, { turn = null, won = [], extra = null } = {}) {
+// steady = true: 札を1列に並べ（はみ出したら横に送る）、extra の行をいつも1行ぶん取っておく。札に字が入っても札の高さと段の数が変わらず、
+//   下のボタンが押し下げられない（2026-10-30 本人の依頼。ぴったりストップ・色ちがい早押し・ことわざかるた・ビンゴ）
+export function scoreChips(o, scores, { turn = null, won = [], extra = null, steady = false } = {}) {
   const box = document.createElement('div');
-  box.className = 'cc-opps';
+  box.className = 'cc-opps' + (steady ? ' cc-steady' : '');
   scores.forEach((v, p) => {
     const chip = document.createElement('div');
     chip.className = 'cc-opp' + (p === turn ? ' turn' : '') + (won.includes(p) ? ' won' : '') + (p === o.me ? ' me' : '');
@@ -61,7 +63,7 @@ export function scoreChips(o, scores, { turn = null, won = [], extra = null } = 
     chip.append(name, val);
     if (extra) {
       const x = extra(p);
-      if (x) {
+      if (x || steady) {
         const e = document.createElement('div');
         e.className = 'pt-extra';
         e.innerHTML = x;

@@ -2,7 +2,7 @@
 // 2026-10-29 本人の決定（Claude が出した案から本人が選んだ。分かれ目はすべて Claude の推奨を本人が承認）:
 //   - カードは 1〜75 の 5×5（B 1〜15・I 16〜30・N 31〜45・G 46〜60・O 61〜75）、真ん中は最初から開いている。
 //   - 数字は3秒ごとに自動で出し、声でも読み上げる（🔊 に従う。詳細設定「読み上げ」で切れる）。
-//   - 穴は自動で開く。詳細設定「穴の開け方」で「自分で押す」も選べる。
+//   - 穴は自分で押して開ける（2026-10-30 本人の依頼で最初の設定を「自動」から替えた）。詳細設定「穴の開け方」で「自動」も選べる。
 //   - 最初にそろった人が出たら終わり。同じ数字で同時にそろったら同じ順位。詳細設定「終わり方」で「3位まで続ける」も選べる。
 //   - 詳細設定「真ん中の FREE」（あり（最初）・なし。2026-10-29 本人が選んだ案）: なしは真ん中も N の列の数字になる。
 // Claude の判断:
@@ -74,14 +74,14 @@ export default {
   minPlayers: 2,
   maxPlayers: 10,
   settings: [
-    { key: 'mark', label: '穴の開け方', desc: '自分で押すと、押し忘れると遅れる', def: 'auto', choices: [['auto', '自動'], ['self', '自分で押す']] },
+    { key: 'mark', label: '穴の開け方', desc: '自分で押すと、押し忘れると遅れる', def: 'self', choices: [['self', '自分で押す'], ['auto', '自動']] },
     { key: 'until', label: '終わり方', desc: '3位まで続けると、1人上がっても続く', def: 1, choices: [[1, '1人上がったら終わり'], [3, '3位まで続ける']] },
     { key: 'voice', label: '読み上げ', desc: '出た数字を声でも読む（🔇 のときは読まない）', def: true },
     { key: 'free', label: '真ん中の FREE', desc: 'なしにすると真ん中も数字になり、そろいにくくなる', def: true },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { mark: 'auto', until: 1, voice: true, free: true, ...rules };
+    const r = { mark: 'self', until: 1, voice: true, free: true, ...rules };
     const cards = Array.from({ length: n }, (_, p) => cardOf(seed, p, r.free !== false));
     const order = shuffle(Array.from({ length: 75 }, (_, i) => i + 1), mulberry32((seed ^ 0x5bd1e995) >>> 0));
     return {
@@ -191,7 +191,7 @@ export default {
 
     // 名前の札（リーチ・ビンゴ）
     const chips = document.createElement('div');
-    chips.className = 'cc-opps';
+    chips.className = 'cc-opps cc-steady'; // 札の高さと段の数を変えない（party.js の scoreChips の steady と同じ）
     for (let p = 0; p < s.n; p++) {
       const open = openOf(s, p, drawn);
       const chip = document.createElement('div');
@@ -249,10 +249,13 @@ export default {
       if (canTap) {
         cell.type = 'button';
         cell.disabled = open[i];
-        cell.onclick = () => {
+        // 指が触れた瞬間に押したことにする（click を待つと、ほかの人や CPU の手でカードが作り直されたときに押したのが消えていた。2026-10-30 本人の報告）
+        const tap = () => {
           if (!drawn.has(v)) { note.textContent = `${v} はまだ出ていません`; return; }
           o.onMove({ t: 'mark', c: i });
         };
+        cell.onpointerdown = (e) => { if (e.button === 0) tap(); };
+        cell.onclick = (e) => { if (e.detail === 0) tap(); }; // キーボードで押したとき（指やマウスは上の pointerdown で済んでいる）
       }
       card.append(cell);
     });

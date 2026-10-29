@@ -1,5 +1,6 @@
 // ぴったりストップ。決められた秒数（5〜15秒）ちょうどで「ストップ」を押し、近い人ほど高い点。5回（詳細設定「回数」で10回も）。
 // 時計は最初の3秒だけ見えて、あとは消える（詳細設定「時計の見える時間」で 0秒・5秒にもできる。2026-10-06 本人の決定）。毎回、近い順に 3・2・1点（同じずれは同じ点。押さなかった人は0点）。
+// ピタリ賞（2026-10-30 本人の決定）: 画面の数字が「±0.00」になるずれ（PITA_MS ＝ 0.005秒より小さい）で止めたら、その回の点に +5点。
 // 時間は各自の端末で「画面に出てから押すまで」を測る（party.js の since）ので、通信の遅れで不利にならない。
 //
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open →（全員押した / 秒数＋5秒）→ close → shown → next …
@@ -18,6 +19,8 @@ const GRACE_MS = 1500;
 const PEEK_CHOICES = [[3, '3秒'], [0, '見えない'], [5, '5秒']]; // 時計が見えている秒数（詳細設定）
 const peekMs = (s) => (PEEK_CHOICES.some(([v]) => v === s.rules.peek) ? s.rules.peek : 3) * 1000;
 const EXTRA_MS = 5000; // 目標の秒数を過ぎても押せる時間
+export const PITA_MS = 5; // ずれがこれより小さければピタリ賞（小数2けたで出すと ±0.00 になる）
+export const PITA_PTS = 5;
 
 const qKey = (s, q = s.q) => `pittari:${s.seed}:${q}`;
 const limitOf = (s) => s.targets[s.q] * 1000 + EXTRA_MS;
@@ -62,7 +65,7 @@ export default {
   canAct(s, p) { return s.phase === 'open' && s.stops[p] === null; },
   result(s) { return s.phase === 'end' ? { winners: leaders(s.scores), scores: s.scores } : null; },
   sound(a, b, m, me) {
-    if (m.p === -1) return m.t === 'next' ? 'question' : (b.last.pts[me] ?? 0) === 3 ? 'correct' : 'pop';
+    if (m.p === -1) return m.t === 'next' ? 'question' : (b.last.pts[me] ?? 0) >= 3 ? 'correct' : 'pop';
     return m.p === me ? 'pop' : null;
   },
   resultText(res, me, pn) { return winnersText(res.winners, me, pn); },
@@ -98,9 +101,11 @@ export default {
         const s = clone(s0);
         s.step += 1;
         s.phase = 'shown';
-        const pts = pointsOf(s.stops.map((v, p) => diffOf(s, p)));
+        const diffs = s.stops.map((v, p) => diffOf(s, p));
+        const pita = diffs.map((d) => d < PITA_MS);
+        const pts = pointsOf(diffs).map((v, p) => v + (pita[p] ? PITA_PTS : 0));
         pts.forEach((v, p) => { s.scores[p] += v; });
-        s.last = { pts };
+        s.last = { pts, pita };
         return s;
       }
       return null;
@@ -139,9 +144,9 @@ export default {
       if (s.stops[p] === null) return '<span class="pt-ng">―</span>';
       const d = s.stops[p] - s.targets[s.q] * 1000;
       const pt = s.last.pts[p];
-      return `<span class="${pt ? 'pt-ok' : 'pt-ng'}">${sec(s.stops[p])}秒（${signed(d)}）${pt ? ' +' + pt : ''}</span>`;
+      return `<span class="${pt ? 'pt-ok' : 'pt-ng'}">${s.last.pita?.[p] ? '🎯' : ''}${sec(s.stops[p])}秒（${signed(d)}）${pt ? ' +' + pt : ''}</span>`;
     };
-    const chips = scoreChips(o, s.scores, { won, extra });
+    const chips = scoreChips(o, s.scores, { won, extra, steady: true });
     const mount = `${s.seed}:${s.q}:${s.phase}:${me}:${me !== null && s.stops[me] !== null}`;
     if (ui?.mount === mount && root.contains(ui.wrap)) {
       ui.chips.replaceWith(chips);
@@ -216,8 +221,11 @@ export default {
       }
     } else {
       clock.textContent = '';
-      const best = s.last ? s.last.pts.indexOf(3) : -1;
-      note.textContent = best < 0 ? 'だれも押しませんでした' : '';
+      const pita = s.last?.pita?.map((v, p) => (v ? p : -1)).filter((p) => p >= 0) ?? [];
+      if (s.phase === 'shown' && pita.length) {
+        note.textContent = `🎯 ピタリ賞！ ${pita.map((p) => (p === me && !o.watching ? 'あなた' : o.names[p])).join('・')}（+${PITA_PTS}点）`;
+        note.classList.add('pz-pita');
+      } else note.textContent = s.last && s.stops.some((v) => v !== null) ? '' : 'だれも押しませんでした';
     }
     wrap.append(note);
   },

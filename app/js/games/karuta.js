@@ -179,7 +179,7 @@ export default {
     root.className = 'board kj kr';
     const wrap = document.createElement('div');
     wrap.className = 'kj-wrap';
-    wrap.append(scoreChips(o, s.scores, { won, extra }));
+    wrap.append(scoreChips(o, s.scores, { won, extra, steady: true }));
     root.append(wrap);
     if (s.phase === 'end') { wrap.append(this.review(s, me, o)); return; }
 

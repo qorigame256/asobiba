@@ -9,8 +9,8 @@
 // 2人なら先に出し切った方の勝ち。3人なら2人が出し切るまで続ける（本人の決定）。同時に出し切ったら同じ順位。
 // 手: { p, t: 'play', card: 出す札, pile: 台札の番号 } / { p, t: 'flip' }（スピード！）
 // 札そのもので手を表すので、通信で同じ手が2回届いても2回目は反則として弾かれる（main.js の rebase が頼りにしている）。
-// スワイプ（2026-10-26 本人の依頼）: 自分の札を指で押したまま台札へ動かして離すと出せる（タップで出すのも残した）。
-//   離した所が出せる台札ならそこへ。台札の外で離したときは、上へ動かしていれば、離した所に横の位置がいちばん近い出せる台札へ（Claude の判断）。
+// スワイプ（2026-10-26 本人の依頼）: 自分の札を指で押したまま台札へ動かして離すと出せる。
+//   2026-10-30 本人の依頼で、出せる台札の上まで動かしてから離したときだけ出すようにした（タップで出す・台札の外で離しても近い台札へ出す、はやめた）。
 //   ほかの人の手が届くと画面を作り直すので、つかんでいる札は外（drag）に持ち、指の動きは window で受ける。
 //   スワイプの間ページが動かないよう、自分の札の列は touch-action: none（style.css の .sp-side.mine .sp-row）。
 
@@ -65,7 +65,6 @@ function checkEnd(s) {
 
 /* ---------- 画面 ---------- */
 
-let chosen = null; // 両方の台札に出せる札を選んだとき { step, card }
 
 export default {
   id: 'speed',
@@ -180,7 +179,6 @@ export default {
     const others = seats(s).filter((p) => p !== bottom).sort((a, b) => ((a - bottom + n) % n) - ((b - bottom + n) % n));
     const nameP = (p) => (p === me ? 'あなた' : o.names[p]);
     const can = o.canMove;
-    if (!can || chosen?.step !== s.step) chosen = null;
     const draw = () => this.render(root, s, o);
     const t = tops(s);
 
@@ -208,22 +206,16 @@ export default {
         }
         const piles = seats(s).filter((i) => fits(s, card, t[i]));
         const ok = mine && can && piles.length > 0;
-        const e = cardEl(card, ok ? 'button' : 'div');
+        const e = cardEl(card, 'div');
         e.dataset.card = card;
         if (ok) {
           e.classList.add('usable');
-          e.onclick = () => {
-            if (performance.now() - swipedAt < 400) return; // スワイプで出した直後のクリックは数えない
-            if (piles.length === 1) o.onMove({ t: 'play', card, pile: piles[0] });
-            else { chosen = { step: s.step, card }; draw(); }
-          };
           e.onpointerdown = (ev) => {
             if (ev.button > 0) return;
             drag = { id: ev.pointerId, card, x0: ev.clientX, y0: ev.clientY, dx: 0, dy: 0, moved: false };
           };
         }
         if (drag?.card === card && drag.moved) { e.classList.add('sp-drag'); e.style.transform = `translate(${drag.dx}px, ${drag.dy}px)`; }
-        if (chosen?.card === card) e.classList.add('selected');
         row.append(e);
       }
       box.append(head, row);
@@ -235,14 +227,9 @@ export default {
     const center = document.createElement('div');
     center.className = 'sp-center';
     seats(s).forEach((i) => {
-      const target = chosen && fits(s, chosen.card, t[i]);
-      const e = cardEl(t[i], target ? 'button' : 'div');
+      const e = cardEl(t[i], 'div');
       e.classList.add('sp-pile');
       e.dataset.pile = i;
-      if (target) {
-        e.classList.add('target');
-        e.onclick = () => { const card = chosen.card; chosen = null; o.onMove({ t: 'play', card, pile: i }); };
-      }
       if (o.fresh && s.last?.pile === i && s.last.t === 'play') e.classList.add('pop');
       if (n > 2) {
         const slot = document.createElement('div');
@@ -257,10 +244,9 @@ export default {
 
     const msg = document.createElement('p');
     msg.className = 'cc-log';
-    if (chosen) msg.textContent = `${cardLabel(chosen.card)} を${n > 2 ? 'どれ' : 'どちら'}に出しますか？ 光っている台札をタップ`;
-    else if (s.last?.t === 'flip') msg.textContent = `${nameP(s.last.p)}が「スピード！」`;
+    if (s.last?.t === 'flip') msg.textContent = `${nameP(s.last.p)}が「スピード！」`;
     else if (s.last) msg.textContent = `${nameP(s.last.p)}が ${cardLabel(s.last.card)} を出した`;
-    else msg.textContent = '光っている札をタップするか、台札へスワイプすると出せます';
+    else msg.textContent = '光っている札を、出せる台札の上まで動かして離すと出せます';
     root.append(msg);
 
     if (can && stuck(s)) {
@@ -283,7 +269,6 @@ export default {
 
 let cur = null; // いちばん新しい描き直しの { s, o, root }
 let drag = null; // つかんでいる札 { id, card, x0, y0, dx, dy, moved }
-let swipedAt = 0;
 
 function cardNode() { return drag && cur?.root.querySelector(`.sp-side.mine [data-card="${drag.card}"]`); }
 function endDrag() {
@@ -314,23 +299,10 @@ if (typeof window !== 'undefined') {
   });
   window.addEventListener('pointerup', (ev) => {
     if (!drag || ev.pointerId !== drag.id) return;
-    const { card, moved, dy } = drag;
-    let pile = moved ? pileAt(ev.clientX, ev.clientY) : -1;
-    if (moved && pile < 0 && dy < -30) {
-      // 台札の外で離した: 上へ動かしていれば、横の位置がいちばん近い出せる台札
-      let best = Infinity;
-      for (const el of cur.root.querySelectorAll('.sp-pile')) {
-        const i = Number(el.dataset.pile);
-        if (!fits(cur.s, card, tops(cur.s)[i])) continue;
-        const r = el.getBoundingClientRect();
-        const d = Math.abs(r.left + r.width / 2 - ev.clientX);
-        if (d < best) { best = d; pile = i; }
-      }
-    }
+    const { card, moved } = drag;
+    const pile = moved ? pileAt(ev.clientX, ev.clientY) : -1; // 出せる台札の上で離したときだけ出す
     endDrag();
-    if (!moved) return; // 動かしていなければタップ（onclick が扱う）
-    swipedAt = performance.now();
-    if (pile >= 0 && cur.o.canMove) { chosen = null; cur.o.onMove({ t: 'play', card, pile }); }
+    if (pile >= 0 && cur.o.canMove) cur.o.onMove({ t: 'play', card, pile });
   });
   window.addEventListener('pointercancel', (ev) => { if (drag && ev.pointerId === drag.id) endDrag(); });
 }

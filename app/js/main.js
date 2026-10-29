@@ -47,7 +47,7 @@ import { SKINS, shownSkins, needText, usable, currentSkin, setSkin, checkSkin, n
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 見間違えやすい I O 0 1 を除く
 const CODE_LEN = 5;
 const HEARTBEAT_MS = 5000;
-const LOST_MS = 20000;
+const LOST_MS = 40000; // 合図がこれより長く途切れたら抜けたと見る（2026-10-30 に20秒から延ばした。スマホで少し裏に回っただけで席が CPU に替わらないように）
 const MAX_MEMBERS = 10; // 部屋に入れる人数の上限（観戦を含む）
 const CPU_DELAY_MS = 600; // CPU が手を打つまでの間（速すぎると何が起きたか追えない）
 const NAME_KEY = 'bg-name';
@@ -720,7 +720,6 @@ function countResult(res, st, game) {
   S.history = [{ g: S.gameId, w: names }, ...(S.history ?? [])].slice(0, HISTORY_MAX);
   saveRoom();
   sendState();
-  cpuResultSay(res);
 }
 
 // 状態の欄に出す「🔥 ◯◯ 3連勝中」（2連勝から）
@@ -913,56 +912,7 @@ function toast(text) {
 
 /* ---------- リアクション（2026-10-06 本人の決定）: 対局中にだれでも短い言葉を送り、みんなの画面に少しだけ出す ---------- */
 
-/* ---------- CPU のひとこと（2026-10-07。21回目の案。Claude の案から本人が推奨どおり選んだ） ---------- */
-// CPU が、勝ったとき・負けたとき・引き分けのときと、たまに打ったあとに、リアクションと同じ吹き出しで短く言う（オンラインだけ）。
-// Claude の判断: 言うかどうかと言葉はホストの端末だけが決め、type: 'cpusay'（CPU の id・種類・何番目の言葉）を送りっぱなしにする（受け手はホストからの分だけ出す）。
-//   決着: CPU が勝てばその CPU が必ず1回。人が勝てば CPU の1人が7割で、引き分けは5割で言う（CPU が何人いても1つだけ。にぎやかすぎないように）。
-//   対局の途中: CPU が打ったあとに6%の見込みで、部屋の中で25秒に1回まで。言うのは本物の CPU だけ（部屋を出た人の代わりに打っている CPU は言わない）。
-//   エアホッケーは CPU が main.js を通らないので言わない。言葉は下の CPU_LINES だけ（外から来た番号は一覧にあるときだけ使う）。
-const CPU_LINES = {
-  win: ['やった〜、勝ったよ！', 'よしっ！', 'ふふん、どうだ！', 'うまくいった〜'],
-  lose: ['まいった〜', 'つよいね！', 'くやしい…', 'つぎは負けないぞ'],
-  draw: ['いい勝負だった！', '引き分けか〜'],
-  mid: ['うーん…', 'ここだ！', 'どうしようかな', 'ふむふむ', 'それっ'],
-};
-const CPU_MID_RATE = 0.06;
-const CPU_MID_GAP_MS = 25000;
-
-function cpuSay(id, kind) {
-  const list = CPU_LINES[kind];
-  if (!list || !isCpu(id)) return;
-  const w = Math.floor(Math.random() * list.length);
-  send({ type: 'cpusay', gameId: S.gameId, round: S.round, id, kind, w }, 0);
-  showBubble(nameOf(id), list[w], 'cpu');
-}
-
-// 決着のとき（ホストが countResult で1回だけ呼ぶ）
-function cpuResultSay(res) {
-  const cpus = S.order.filter(isCpu);
-  if (!cpus.length) return;
-  const won = winnersOf(res).map((p) => S.order[p]);
-  const pickOne = (a) => a[Math.floor(Math.random() * a.length)];
-  const wonCpu = won.filter(isCpu);
-  if (wonCpu.length) cpuSay(pickOne(wonCpu), 'win');
-  else if (won.length && Math.random() < 0.7) cpuSay(pickOne(cpus), 'lose');
-  else if (!won.length && Math.random() < 0.5) cpuSay(pickOne(cpus), 'draw');
-}
-
-// CPU が打ったあと（ホストの scheduleCpu から）
-function cpuMidSay(id) {
-  if (!isCpu(id) || Math.random() >= CPU_MID_RATE || Date.now() - (S.cpuSaidAt ?? 0) < CPU_MID_GAP_MS) return;
-  S.cpuSaidAt = Date.now();
-  cpuSay(id, 'mid');
-}
-
-// 受け取った cpusay。ホストから・いまの対局の CPU の分だけ
-function onCpuSay(msg) {
-  if (S.isHost || !S.members.length || msg.from !== S.members[0]) return;
-  if (msg.gameId !== S.gameId || msg.round !== S.round || !isCpu(msg.id) || !S.order?.includes(msg.id)) return;
-  const list = Object.hasOwn(CPU_LINES, msg.kind) ? CPU_LINES[msg.kind] : null;
-  if (!list || !Number.isInteger(msg.w) || !list[msg.w]) return;
-  showBubble(nameOf(msg.id), list[msg.w], 'cpu');
-}
+/* CPU のひとこと（2026-10-07 の21回目の案）は 2026-10-30 本人の依頼でやめた。古い版のホストが送る type: 'cpusay' は受け取っても何もしない。 */
 
 const REACTIONS = ['ナイス！', 'おしい！', 'えー！', 'やった！', 'まって！', 'ｗ']; // 言葉は本人が選んだ
 const REACT_GAP_MS = 1200; // 1人がこれより短い間に送った分は出さない（連打で画面が埋まらないように）
@@ -976,7 +926,7 @@ function showReaction(id, w) {
   showBubble(id === S?.myId ? 'あなた' : nameOf(id), REACTIONS[w]);
 }
 
-// 画面の上に名前と言葉の吹き出しを2.6秒出す（リアクションと CPU のひとこと）
+// 画面の上に名前と言葉の吹き出しを2.6秒出す（リアクション）
 function showBubble(name, text, cls = '') {
   let box = el('reactions');
   if (!box) {
@@ -1449,6 +1399,16 @@ const ctl = () => controlsEl;
 
 // 描き直しの間はページの長さを今のまま保つ。作り直しの途中でページが一瞬短くなると、下へスクロールしていた
 // 画面が上へ引き戻される（麻雀で牌を押すたびに起きた）
+// fn で描き直したあと、data-keep="key" の物が画面の同じ高さに来るようにスクロールを足し引きする（押したボタンが逃げないように）。
+// 描き直しが終わってから測るので、render の中で長さを測らない決まり（CLAUDE.md の「壊しやすい所」）には当たらない。
+function keepPlace(key, fn) {
+  const at = () => document.querySelector(`[data-keep="${key}"]`)?.getBoundingClientRect().top;
+  const before = at();
+  fn();
+  const after = at();
+  if (before !== undefined && after !== undefined && Math.abs(after - before) > 1) window.scrollBy(0, after - before);
+}
+
 function render() {
   if (!S) return;
   const body = document.body;
@@ -2128,7 +2088,8 @@ function moveSound(game, st, res, prevLen, mine) {
 // 声は 🔇 なら出さない（一言は出す）。Claude の判断: 「番が来た」音は残し、そのあとに声を足した（声が出ない端末でも気づけるように）。
 function sayTurn() {
   const name = myName();
-  speak(name ? `${name}さんのターン` : 'あなたのターン', 'turn-voice');
+  // 読み上げだけ「たーん」とひらがなで書く（カタカナの「ターン」を「トーン」と読む声があった。2026-10-30 本人の報告）
+  speak(name ? `${name}さんの たーん` : 'あなたの たーん', 'turn-voice');
 }
 
 const GREET = { start: 'よろしくお願いします', end: 'ありがとうございました' };
@@ -2189,11 +2150,14 @@ function renderLobby(game) {
   start.disabled = short;
   if (allReady() && !short) start.classList.add('ready-go');
   if (game.noCpu || seats) { controls.append(start, gameSelect(), rouletteButton()); return; }
-  const setCpus = (n) => { S.cpus = n; saveRoom(); sendState(); render(); };
+  // 押したボタンが指の下に残るようにする（一覧が1行のびて、下のボタンがずれていた。2026-10-30 本人の依頼）
+  const setCpus = (n, key) => keepPlace(key, () => { S.cpus = n; saveRoom(); sendState(); render(); });
   const step = game.evenTeams ? 2 : 1; // チームの人数をそろえるゲームは2人ずつ
-  const minus = makeButton('CPU を減らす', () => setCpus(cpus - step), 'secondary');
+  const minus = makeButton('CPU を減らす', () => setCpus(cpus - step, 'cpu-minus'), 'secondary');
+  minus.dataset.keep = 'cpu-minus';
   minus.disabled = humans.length + cpus - step < game.minPlayers || cpus < step;
-  const plus = makeButton('CPU を増やす', () => setCpus(cpus + step), 'secondary');
+  const plus = makeButton('CPU を増やす', () => setCpus(cpus + step, 'cpu-plus'), 'secondary');
+  plus.dataset.keep = 'cpu-plus';
   plus.disabled = humans.length + cpus + step > game.maxPlayers;
   controls.append(minus, plus, start, gameSelect(), rouletteButton());
 }
@@ -2677,15 +2641,18 @@ function scheduleCpu(game, st, res) {
     S.cpuKeys[p] = key;
     const session = S;
     const len = S.moves.length;
+    const gid = S.gameId, round = S.round;
     setTimeout(() => {
-      if (S !== session || S.cpuKeys[p] !== key || (!game.realtime && S.moves.length !== len)) return;
+      // 予約のあとでゲームか対局が替わったら何もしない（前のゲームの CPU が新しいゲームの局面で考えて例外になっていた。2026-10-30 に見つけた）
+      if (S !== session || S.gameId !== gid || S.round !== round) { if (S === session && S.cpuKeys[p] === key) S.cpuKeys[p] = null; return; }
+      if (S.cpuKeys[p] !== key || (!game.realtime && S.moves.length !== len)) return;
       S.cpuKeys[p] = null;
       if (!cpuControlled(S.order?.[p])) { render(); return; } // 予約のあとで、観戦の人がこの席に入った（途中から空いた席に入る）
       const now = replay(S);
       const m = now && !game.result(now) && canAct(now, p) ? game.cpu(now, p, rulesOf(S.gameId, S.rules)) : null; // null = いまは何もしない
       const move = game.multi && m ? { ...m, p } : m; // 盤のゲームの手には p を付けない（手が 0 のこともある）
       const after = move !== null ? game.apply(now, move) : null;
-      if (after) { pushMove(move); if (!game.result(after) && !game.quietCpu) cpuMidSay(S.order[p]); } // 決着した手では、決着のひとことだけにする
+      if (after) pushMove(move);
       else render(); // 打てなかったら予約し直す
     }, game.cpuDelay?.(st, p) ?? CPU_DELAY_MS);
   }
@@ -3405,6 +3372,21 @@ function openNet() {
   }
 }
 
+// 裏に回ったあと戻ったら、すぐつなぎ直す（2026-10-30 本人の依頼「少し裏に回るとすぐ切れる」）。
+// iPhone などは裏に回ると通信を黙って止めるが、mqtt.js は keepalive が切れるまで（最長45秒ほど）気づかないので、
+// 3秒より長く裏にいたら、古いつなぎ方を捨てて作り直す。つながると onConn('ready') が hello と state を送り直し、抜けていた手も取り戻す。
+const HIDDEN_RECONNECT_MS = 3000;
+let hiddenAt = null;
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
+  const long = hiddenAt !== null && Date.now() - hiddenAt > HIDDEN_RECONNECT_MS;
+  hiddenAt = null;
+  if (!long || S?.mode !== 'online' || !S.net) return;
+  const old = S.net;
+  openNet(); // 赤い帯は出さない（新しいつなぎ方が 'ready' を知らせたら hello を送り直す）
+  old.close();
+});
+
 function send(msg, qos) { S?.net?.send(msg, qos); }
 function sendState() {
   const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, undo, streak, beg } = S;
@@ -3435,10 +3417,7 @@ function onMessage(msg) {
     if (!wasAlive) render();
     return;
   }
-  if (msg.type === 'cpusay') { // CPU のひとこと。描き直さない
-    onCpuSay(msg);
-    return;
-  }
+  if (msg.type === 'cpusay') return; // CPU のひとこと（やめた）
   if (msg.type === 'react') { // リアクション。描き直さない。対局の画面でだけ出す（待合室へ戻った直後に遅れて届いた分は出さない）
     if (S.order) showReaction(msg.from, msg.w);
     if (!wasAlive) render();

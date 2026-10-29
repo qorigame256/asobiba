@@ -1103,7 +1103,6 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .react-bubble { background: var(--chip); color: var(--chip-ink); border-radius: 999px; padding: 6px 14px; display: flex; gap: 8px; align-items: baseline; box-shadow: 0 3px 10px rgba(0, 0, 0, .2); animation: react-in .25s ease-out, react-out .4s ease-in 2.2s forwards; }
 .react-bubble small { opacity: .75; max-width: 9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .react-bubble b { font-size: 1.1rem; }
-.react-bubble.cpu { background: #3d5a80; } /* CPU のひとこと（main.js の cpuSay） */
 @keyframes react-in { from { transform: translateY(-10px) scale(.8); opacity: 0; } }
 @keyframes react-out { to { opacity: 0; transform: translateY(-6px); } }
 .react-bar { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; width: 100%; }
@@ -1212,6 +1211,13 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .pt-score { font-size: 1.15rem; font-weight: 700; line-height: 1.2; }
 .pt-score small { font-size: .7rem; font-weight: 400; color: var(--muted); margin-left: 1px; }
 .pt-extra { font-size: .78rem; color: var(--muted); }
+/* 札に字が入っても高さと段の数を変えない（party.js の scoreChips の steady）。真ん中寄せは端の札の margin で（はみ出したとき左が切れないように） */
+.cc-steady { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; scrollbar-width: none; touch-action: pan-x; padding: 2px; }
+.cc-steady::-webkit-scrollbar { display: none; }
+.cc-steady > .cc-opp { flex: none; }
+.cc-steady > .cc-opp:first-child { margin-left: auto; }
+.cc-steady > .cc-opp:last-child { margin-right: auto; }
+.cc-steady .pt-extra { height: 1.5em; line-height: 1.5em; overflow: hidden; white-space: nowrap; }
 .pt-ok { color: #2f8a4a; font-weight: 700; }
 .pt-ng { color: #c0392b; font-weight: 700; }
 .pt-timebar { height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; margin-top: 10px; }
@@ -1357,10 +1363,10 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .ac-choices { gap: 10px; }
 .board button.ac-choice { min-width: 64px; height: 64px; font-size: 2rem; }
 .sl-grid { --n: 4; display: grid; grid-template-columns: repeat(var(--n), 1fr); gap: 6px; width: min(100%, 360px); margin: 0 auto; touch-action: manipulation; }
-.board button.sl-tile { aspect-ratio: 1; border-radius: 10px; border: 2px solid var(--line); background: var(--field); color: var(--ink); font: inherit; font-size: clamp(1.3rem, 7vw, 2rem); font-weight: 800; cursor: pointer; }
-.board button.sl-tile.ok { border-color: #2f8a4a; }
-.board button.sl-tile.blank { visibility: hidden; }
-.board button.sl-tile:disabled { cursor: default; }
+.board .sl-tile { display: grid; place-items: center; user-select: none; -webkit-user-select: none; aspect-ratio: 1; border-radius: 10px; border: 2px solid var(--line); background: var(--field); color: var(--ink); font: inherit; font-size: clamp(1.3rem, 7vw, 2rem); font-weight: 800; cursor: pointer; }
+.board .sl-tile.ok { border-color: #2f8a4a; }
+.board .sl-tile.blank { visibility: hidden; }
+.sl-grid.live { touch-action: none; cursor: grab; } /* なでて動かす間は、ページが動かないように（slide.js） */
 .np-grid { --n: 9; display: grid; grid-template-columns: repeat(var(--n), 1fr); width: min(100%, 420px); margin: 0 auto; border: 2.5px solid var(--ink); touch-action: manipulation; }
 .board button.np-cell { aspect-ratio: 1; padding: 0; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--field); color: var(--accent); font: inherit; font-size: clamp(1rem, 5vw, 1.5rem); font-weight: 700; cursor: pointer; min-width: 0; }
 .board button.np-cell.given { color: var(--ink); font-weight: 800; }
@@ -1371,8 +1377,12 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .board button.np-cell.sel { background: var(--soft, #ffd9c7); }
 .board button.np-cell.bad { color: #d32f2f; text-decoration: underline wavy #d32f2f; }
 .board button.np-cell:disabled { cursor: default; }
-.np-pad { --n: 10; display: grid; grid-template-columns: repeat(var(--n), 1fr); gap: 5px; touch-action: manipulation; }
-.board .np-key { min-height: 48px; padding: 4px 0; font-size: 1.3rem; font-weight: 800; border-radius: 10px; }
+/* 仮置き（nanpure.js）: マスの中に小さく 1〜N を並べる（--m は1段に並べる数） */
+.np-memo { display: grid; grid-template-columns: repeat(var(--m, 3), 1fr); width: 100%; height: 100%; padding: 1px; font-size: clamp(.45rem, 1.9vw, .7rem); font-weight: 600; color: var(--muted); line-height: 1; }
+.np-memo i { font-style: normal; display: grid; place-items: center; }
+.np-memo-btn { display: block; margin: 8px auto 0; }
+.np-pad { --n: 10; display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 5px; touch-action: manipulation; }
+.board .btn.np-key { min-width: 0; min-height: 48px; padding: 4px 0; font-size: 1.3rem; font-weight: 800; border-radius: 10px; }
 .dr-oni { display: flex; align-items: center; justify-content: center; gap: 12px; background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 10px; }
 .dr-face { font-size: 2.6rem; line-height: 1; transition: transform .15s; }
 .dr-face.look { transform: scale(1.25); }
@@ -1403,6 +1413,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .pz-clock { font-size: clamp(2.6rem, 14vw, 4rem); font-weight: 800; font-variant-numeric: tabular-nums; min-height: 1.3em; line-height: 1.3; }
 .pz-clock.hidden { color: var(--muted); }
 .pz-clock.done { color: #2f8a4a; }
+.cc-log.pz-pita { color: #b7860f; font-weight: 800; font-size: 1.1rem; } /* ピタリ賞（pittari.js） */
 .board .btn.pz-stop { font-size: 1.6rem; padding: 22px 0; width: 100%; touch-action: manipulation; }
 .ty-word { font-size: clamp(1.5rem, 7vw, 2.2rem); font-weight: 800; line-height: 1.4; word-break: break-all; margin-top: 4px; }
 .ty-yomi { font-size: 1rem; color: var(--muted); word-break: break-all; margin-top: 4px; }

@@ -15,7 +15,8 @@
 // 出し終えた数を比べる。開き直したときは、それまでに届いた分は出さない）。
 //
 // 2026-10-26 本人の依頼（作りは Claude の判断）:
-//   相手から届いた爆弾は、入り口からでなく上から降ってくる（横の位置はばらばら。降りきるまでは壁で跳ね返らない。fall）。
+//   相手から届いた爆弾は、入り口からでなく上から降ってくる（横の位置も、止まる高さ ty もばらばら。歩く場所の全体に散らばる。
+//   2026-10-30 本人の依頼で、止まる高さを上の端からばらばらに替えた。降りきるまでは壁で跳ね返らない。fall）。
 //   始まってから BOTTOM_AT 秒たつと、歩く場所の下にも入り口が開き、ふつうに出てくる爆弾の半分が下から出る（速さの設定によらず同じ時間）。
 //   爆発まで BLINK（3秒）を切った爆弾は、点滅に合わせて大きくなったり戻ったりし、つまめる範囲も広くなる（urgent）。
 //   爆弾どうしは、直径の75%より深くは重ならない（中心の間を MIN_GAP 以上に押し離す。つまんでいる爆弾は動かさない）。
@@ -95,7 +96,8 @@ function spawn(sec, incoming, bottom = false) {
   const c = Math.random() < 0.5 ? 0 : 1;
   if (incoming) {
     const x = FIELD.x0 + R + Math.random() * (FIELD.x1 - FIELD.x0 - 2 * R);
-    ui.bombs.push({ c, x, y: -R, vx: 0, vy: 0.45, born: sec, turn: sec + 1 + Math.random(), inc: true, fall: true });
+    const ty = FIELD.y0 + R + Math.random() * (FIELD.y1 - FIELD.y0 - 2 * R); // 止まる高さ
+    ui.bombs.push({ c, x, y: -R, ty, vx: 0, vy: 0.6, born: sec, turn: sec + 1 + Math.random(), inc: true, fall: true });
     return;
   }
   const a = (bottom ? -Math.PI / 2 : Math.PI / 2) + (Math.random() - 0.5) * 1.6;
@@ -151,9 +153,10 @@ function step() {
   }
   for (const b of ui.bombs) {
     if (b === ui.held) continue;
-    if (b.fall) { // 上から降っている間は、歩く場所に入るまでまっすぐ落ちる
+    if (b.fall) { // 上から降っている間は、決めた高さ ty までまっすぐ落ちる
       b.y += b.vy * dt;
-      if (b.y >= FIELD.y0 + R + 0.06) {
+      if (b.y >= (b.ty ?? FIELD.y0 + R + 0.06)) {
+        b.y = Math.min(b.y, FIELD.y1 - R);
         b.fall = false;
         const a = Math.random() * Math.PI * 2;
         const sp = 0.08 + Math.random() * 0.05;

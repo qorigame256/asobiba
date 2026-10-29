@@ -4,7 +4,9 @@
 // Claude の判断:
 //   - 混ぜ方はそろった形から空きマスを無作為に動かす回数（戻る動きはしない）。軽め: 4×4 は40回・3×3 は20回、しっかり: 150回・60回。
 //   - 送るのはそろえるまでの空きマスの動き（U・D・L・R の文字列）。apply で最初の並びから動かし直し、本当にそろうかを確かめる。
-//   - 同じ列・同じ段の札を押すと、空きマスまでの札をまとめて動かす（動きは1マスずつ数える）。PC は矢印キーでも動かせる。
+//   - 札は指でなでて（スワイプ）動かす（2026-10-30 本人の依頼で、押して動かすのから替えた）。なで始めた札と空きマスが同じ段・列で、なでた向きに空きがあれば
+//     空きマスまでの札をまとめて動かす。そうでなければ、空きマスのとなりの札を1つなでた向きへ動かす（どこをなでても動く）。動きは1マスずつ数える。
+//     マウスでも引っぱれば同じ。PC は矢印キーでも動かせる。
 //   - 制限時間は 3×3 が90秒、4×4 は軽め180秒・しっかり300秒。最初にそろった人から20秒で締め切る（制限時間のほうが先なら制限時間で）。全員そろうかあきらめたら1.5秒。
 //   - 問題の数は 1・3（最初）・5問。
 //   - 5×5（1〜24。2026-10-29 本人が選んだ案）: 混ぜる回数は軽め70回・しっかり250回、制限時間は軽め300秒・しっかり480秒。
@@ -24,6 +26,7 @@ const ROUNDS = [[1, '1問'], [3, '3問'], [5, '5問']];
 const STEP = { U: -1, D: 1, L: 0, R: 0 }; // 段の動き（列の動きは下の dx）
 const DX = { U: 0, D: 0, L: -1, R: 1 };
 const BACK = { U: 'D', D: 'U', L: 'R', R: 'L' };
+const SWIPE_MIN = 18; // これ（画面の点）より短い動きは、なでたことにしない
 
 const sizeOf = (r) => ([3, 5].includes(Number(r.size)) ? Number(r.size) : 4);
 const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 3);
@@ -260,12 +263,9 @@ export default {
       grid.innerHTML = '';
       const b = s.phase === 'open' && me !== null ? loc.board : solvedBoard(n);
       b.forEach((v, i) => {
-        const t = document.createElement('button');
-        t.type = 'button';
+        const t = document.createElement('div');
         t.className = 'sl-tile' + (v === 0 ? ' blank' : '') + (v !== 0 && v === i + 1 ? ' ok' : '');
         t.textContent = v || '';
-        t.disabled = !playing || v === 0;
-        t.onclick = () => slideTo(i);
         grid.append(t);
       });
       note.textContent = s.phase !== 'open' ? '' : me === null ? '観戦中' : s.solved[me] !== null ? `そろった！（${secText(s.solved[me])}）ほかの人を待っています`
@@ -297,6 +297,32 @@ export default {
       finish();
     };
     ui.press = (d) => { if (step(d)) { draw(); finish(); } };
+    // なでて動かす。札の向き（tile）は U・D・L・R、空きマスはその逆へ動く
+    let swipe = null;
+    grid.classList.toggle('live', playing);
+    grid.onpointerdown = (e) => {
+      if (!playing || e.isPrimary === false) return;
+      const r = grid.getBoundingClientRect();
+      const c = Math.floor(((e.clientX - r.left) / r.width) * n), rr = Math.floor(((e.clientY - r.top) / r.height) * n);
+      swipe = { id: e.pointerId, x: e.clientX, y: e.clientY, i: c >= 0 && c < n && rr >= 0 && rr < n ? rr * n + c : -1 };
+      try { grid.setPointerCapture?.(e.pointerId); } catch { /* 取り込めなくても、指を離した所で決める */ }
+    };
+    grid.onpointercancel = () => { swipe = null; };
+    grid.onpointerup = (e) => {
+      const sw = swipe;
+      swipe = null;
+      if (!sw || sw.id !== e.pointerId) return;
+      const dx = e.clientX - sw.x, dy = e.clientY - sw.y;
+      if (Math.hypot(dx, dy) < SWIPE_MIN) return;
+      const tile = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'R' : 'L') : dy > 0 ? 'D' : 'U';
+      const z = loc.board.indexOf(0);
+      if (sw.i >= 0 && sw.i !== z) {
+        const [zr, zc, r, c] = [Math.floor(z / n), z % n, Math.floor(sw.i / n), sw.i % n];
+        const toward = (tile === 'R' && zr === r && zc > c) || (tile === 'L' && zr === r && zc < c) || (tile === 'D' && zc === c && zr > r) || (tile === 'U' && zc === c && zr < r);
+        if (toward) { slideTo(sw.i); return; }
+      }
+      ui.press(BACK[tile]);
+    };
     draw();
     wrap.append(grid, note);
     if (playing) {

@@ -112,7 +112,16 @@ const clone = (s) => ({ ...s, best: { ...s.best }, hits: s.hits.map((h) => h.sli
 
 /* ---------- 画面 ---------- */
 
-let ui = null; // { mount, field, chips, els: Map(id → 要素), tapped: Set, n, cur: { s, o } }
+let ui = null;
+
+function centerField(field, spacer) {
+  if (!field.isConnected) return;
+  const r = field.getBoundingClientRect();
+  const want = window.scrollY + r.top + r.height / 2 - window.innerHeight / 2;
+  const max = document.documentElement.scrollHeight - window.innerHeight;
+  if (want > max) spacer.style.height = Math.ceil(want - max) + 'px';
+  window.scrollTo(0, Math.max(0, want));
+} // { mount, field, chips, els: Map(id → 要素), tapped: Set, n, cur: { s, o } }
 const cpuPlan = new Map();
 
 function float(field, x, y, text, cls) {
@@ -330,9 +339,12 @@ export default {
       + (s.rules.sizes ? '<br>赤と青の的は小さく出ると点が2倍・3倍' : '') + '<br>的が無いときに押すと −1点';
 
     ui = { mount, field, chips, clock, els: new Map(), tapped: new Set(), n: 0, visible: 0, cur: { s, o } };
+    const spacer = document.createElement('div'); // ページの下が足りずに真ん中まで送れないときの余白
     top.append(chips, clock);
-    root.append(top, field, legend);
-    if (s.phase !== 'end') window.scrollTo(0, 0); // 始まる前に上へ戻す（遊んでいる間はページを動かさない）
+    root.append(top, field, legend, spacer);
+    // 始まる前に、的の出る場所が画面の真ん中に来るように送る（遊んでいる間はページを動かさない。2026-10-30 本人の依頼で、上へ戻すのから替えた）。
+    // 描き直しの途中で長さを測らない決まり（CLAUDE.md の「壊しやすい所」）のため、描き終わってから測る
+    if (s.phase !== 'end') setTimeout(() => centerField(field, spacer), 0);
     fit();
 
     if (s.phase === 'ready') {

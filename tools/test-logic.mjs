@@ -3203,6 +3203,17 @@ assert.deepEqual(s.scores, [1, 3, 3], '前後どちらにずれても、近い�
 for (let i = 1; i < 5; i++) s = ref(PZ, ref(PZ, s, 'next'), 'close');
 s = ref(PZ, s, 'next');
 assert.ok(PZ.result(s), '5回で終わる');
+// ピタリ賞（2026-10-30）: ずれが 0.005秒より小さければ +5点（0.00秒と出るずれ）
+{
+  let t = ref(PZ, PZ.init(3, 5, { rules: {} }), 'next');
+  const T = t.targets[0] * 1000;
+  t = PZ.apply(t, { p: 0, t: 'stop', q: 0, ms: T + 4 });
+  t = PZ.apply(t, { p: 1, t: 'stop', q: 0, ms: T - 5 });
+  t = PZ.apply(t, { p: 2, t: 'stop', q: 0, ms: T + 300 });
+  t = ref(PZ, t, 'close');
+  assert.deepEqual(t.last.pita, [true, false, false], 'ずれ 0.004秒はピタリ賞、0.005秒はちがう');
+  assert.deepEqual(t.scores, [3 + 5, 2, 1], 'ピタリ賞は近い順の点に +5点');
+}
 // 詳細設定「回数」（2026-10-07 の16回目）: 5・10回。5回は前と全く同じ秒数・10回の始めの5回も同じ・選んだ数で終わる
 {
   const { createHash } = await import('node:crypto');
@@ -5834,16 +5845,17 @@ console.log('kaisen OK');
   assert.equal(T.result(t).draw, true, '同じ数なら引き分け');
   const TM = await import('../app/js/games/tamaire.js');
   const fly = (x, vx, vy) => { const b = { x, y: TM.HAND_Y, ...TM.launch(vx, vy) }; let q = null; for (let i = 0; i < 2400 && !q; i++) q = TM.stepBall(b, 1 / 240); return q; };
-  assert.equal(fly(0.15, 0.15, -3.7), 'in', '横から弧を描いて投げると入る');
+  assert.equal(fly(0.15, 0.35, -2.2), 'in', '横から弧を描いて投げると入る');
+  { const b = { x: 0.5, y: TM.HAND_Y, ...TM.launch(0, -9) }; let top = 9; for (let i = 0; i < 2400 && b.y < 2; i++) { b.vy += TM.G / 240; b.y += b.vy / 240; top = Math.min(top, b.y); } assert.ok(top > 0.05 && top < TM.RIM.y, 'いっぱいに引いても盤の上の外へは飛ばない（カゴの口より上までは届く。2026-10-30）'); }
   assert.notEqual(fly(0.5, 0, -3.5), 'in', 'カゴの真下からは入らない');
   // 動くカゴ
   assert.equal(TM.rimX(false, 1.5), 0.5, '止まっているカゴは真ん中');
   assert.equal(TM.rimX(true, 0), 0.5, '動くカゴも始まりは真ん中');
   assert.ok(Math.abs(TM.rimX(true, 1.5) - 0.7) < 1e-9 && Math.abs(TM.rimX(true, 4.5) - 0.3) < 1e-9, '左右に幅の2割ずつ・6秒で1往復');
   const flyAt = (rx, x, vx, vy) => { const b = { x, y: TM.HAND_Y, ...TM.launch(vx, vy) }; let q = null; for (let i = 0; i < 2400 && !q; i++) q = TM.stepBall(b, 1 / 240, rx); return q; };
-  assert.equal(flyAt(0.5, 0.15, 0.15, -3.7), 'in');
-  assert.notEqual(flyAt(0.7, 0.15, 0.15, -3.7), 'in', 'カゴが動くと同じ投げ方では入らない');
-  assert.equal(flyAt(0.7, 0.35, 0.15, -3.7), 'in', 'カゴと一緒にずらして投げれば入る');
+  assert.equal(flyAt(0.5, 0.15, 0.35, -2.2), 'in');
+  assert.notEqual(flyAt(0.7, 0.15, 0.35, -2.2), 'in', 'カゴが動くと同じ投げ方では入らない');
+  assert.equal(flyAt(0.7, 0.35, 0.35, -2.2), 'in', 'カゴと一緒にずらして投げれば入る');
   assert.equal(T.init(2, 1).rules.move, 'stay', '最初は止まっている');
   // ラスト10秒は2点（2026-10-07）
   assert.equal(T.init(2, 1).rules.last, 'off', '最初は なし');
@@ -6814,7 +6826,8 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.deepEqual(cardOf(11, 2), cardOf(11, 2));
   assert.notDeepEqual(cardOf(11, 1), cardOf(11, 2), 'ビンゴ: 席ごとにちがうカード');
   // 自動: 1列そろった最初の数字で上がり、1.5秒おいて終わる
-  let s = B.init(3, 5, { rules: {} });
+  assert.equal(B.init(3, 5, { rules: {} }).rules.mark, 'self', 'ビンゴ: 最初は自分で押す（2026-10-30）');
+  let s = B.init(3, 5, { rules: { mark: 'auto' } });
   assert.equal(B.referee(s).ms, 2000);
   assert.equal(B.apply(s, { p: 0, t: 'mark', c: 0 }), null, 'ビンゴ: 自動のときは押せない');
   while (!s.at.some((v) => v !== null)) s = B.apply(s, { p: -1, t: 'draw' });
@@ -6853,7 +6866,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.equal(B.referee(w).ms, 8000);
   w = B.apply(w, { p: -1, t: 'end' });
   assert.deepEqual(B.result(w).winners, [], 'ビンゴ: だれも押さなければ上がりなし');
-  for (const rules of [{}, { mark: 'self' }, { until: 3 }, { mark: 'self', until: 3 }]) {
+  for (const rules of [{}, { mark: 'auto' }, { until: 3 }, { mark: 'auto', until: 3 }]) {
     const st = runCpus(B, 5, 3, rules, 100, 20000);
     const r = B.result(st);
     assert.ok(r && r.winners.length >= 1, `ビンゴ: CPU どうしで上がりが出る ${JSON.stringify(rules)}`);
@@ -6878,7 +6891,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   const Z = GAMES.meiro;
   const { makeMaze, walk, solve, stepOf } = await import('../app/js/games/meiro.js');
   const { mulberry32 } = await import('../app/js/games/util.js');
-  for (const n of [7, 10, 14]) {
+  for (const n of [9, 13, 18]) {
     const m = makeMaze(n, mulberry32(n));
     const bits = m.reduce((a, v) => a + [1, 2, 4, 8].filter((b) => v & b).length, 0);
     assert.equal(bits / 2, n * n - 1, '迷路: 通り道の数がマスの数より1少ない（輪が無い）');
@@ -6889,10 +6902,10 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.equal(walk(m, n, solve(m, n)), n * n - 1);
   }
   let s = Z.init(3, 9, { rules: { level: 's' } });
-  assert.equal(s.size, 7);
+  assert.equal(s.size, 9);
   s = Z.apply(s, { p: -1, t: 'next' });
-  const path = solve(s.qs[0], 7);
-  const wall = 'UDLR'.split('').find((d) => stepOf(s.qs[0], 7, 0, d) < 0);
+  const path = solve(s.qs[0], 9);
+  const wall = 'UDLR'.split('').find((d) => stepOf(s.qs[0], 9, 0, d) < 0);
   assert.equal(Z.apply(s, { p: 0, t: 'done', q: 0, seq: wall + path, ms: 1000 }), null, '迷路: 壁を抜ける動きは弾く');
   assert.equal(Z.apply(s, { p: 0, t: 'done', q: 0, seq: path.slice(0, -1), ms: 1000 }), null, '迷路: ゴールに着かない動きは弾く');
   s = Z.apply(s, { p: 1, t: 'done', q: 0, seq: path, ms: 9000 });
@@ -6906,10 +6919,10 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   // 暗やみ（2026-10-29）: 迷路は同じで、制限時間だけ1.5倍
   const zd = Z.init(3, 9, { rules: { level: 's', dark: true } });
   assert.deepEqual(zd.qs, Z.init(3, 9, { rules: { level: 's' } }).qs, '迷路: 暗やみでも同じ迷路');
-  assert.equal(Z.referee(Z.apply(zd, { p: -1, t: 'next' })).ms, 90000 + 1500, '迷路: 暗やみは制限時間が1.5倍');
-  assert.equal(Z.referee(Z.apply(Z.init(3, 9, { rules: { level: 's' } }), { p: -1, t: 'next' })).ms, 60000 + 1500);
+  assert.equal(Z.referee(Z.apply(zd, { p: -1, t: 'next' })).ms, 112500 + 1500, '迷路: 暗やみは制限時間が1.5倍');
+  assert.equal(Z.referee(Z.apply(Z.init(3, 9, { rules: { level: 's' } }), { p: -1, t: 'next' })).ms, 75000 + 1500);
   assert.ok(Z.result(runCpus(Z, 4, 5, { level: 'm', dark: true }, 500, 3000)), '迷路: 暗やみも CPU どうしで最後まで');
-  // 締め切り: だれかが着いたら20秒。ただし1問の制限時間（小60秒）を越えては待たない（越えた答えは受け付けないため。2026-10-29 Codex の点検）
+  // 締め切り: だれかが着いたら20秒。ただし1問の制限時間（小75秒）を越えては待たない（越えた答えは受け付けないため。2026-10-29 Codex の点検）
   {
     const { since } = await import('../app/js/games/party.js');
     const realNow = performance.now;
@@ -6919,10 +6932,10 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
       let d = Z.apply(Z.init(2, 31, { rules: { level: 's' } }), { p: -1, t: 'next' });
       since('meiro:31:0'); // 画面に出た
       clock += 10000;
-      d = Z.apply(d, { p: 0, t: 'done', q: 0, seq: solve(d.qs[0], 7), ms: 10000 });
+      d = Z.apply(d, { p: 0, t: 'done', q: 0, seq: solve(d.qs[0], 9), ms: 10000 });
       assert.equal(Z.referee(d).ms, 20000, '迷路: 10秒で着いたら、締め切りは20秒後');
-      clock += 45000;
-      assert.equal(Z.referee(d).ms, 6500, '迷路: 55秒で着いたら、締め切りは制限時間（60秒＋1.5秒）まで');
+      clock += 60000;
+      assert.equal(Z.referee(d).ms, 6500, '迷路: 70秒で着いたら、締め切りは制限時間（75秒＋1.5秒）まで');
     } finally {
       Object.defineProperty(performance, 'now', { value: realNow, configurable: true, writable: true });
     }
