@@ -1,6 +1,6 @@
 // ゲームのルール（勝敗判定・置ける場所）の自動確認。使い方: node tools/test-logic.mjs
 import assert from 'node:assert/strict';
-const { GAMES } = await import('../app/js/games/index.js');
+const { GAMES, winnersOf } = await import('../app/js/games/index.js');
 const { tictactoe: T, connect4: C, reversi: R } = GAMES;
 
 function play(g, moves) { let s = g.init(); for (const m of moves) { s = g.apply(s, m); assert.ok(s, 'illegal ' + m); } return s; }
@@ -6909,6 +6909,24 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.equal(Z.referee(Z.apply(zd, { p: -1, t: 'next' })).ms, 90000 + 1500, '迷路: 暗やみは制限時間が1.5倍');
   assert.equal(Z.referee(Z.apply(Z.init(3, 9, { rules: { level: 's' } }), { p: -1, t: 'next' })).ms, 60000 + 1500);
   assert.ok(Z.result(runCpus(Z, 4, 5, { level: 'm', dark: true }, 500, 3000)), '迷路: 暗やみも CPU どうしで最後まで');
+  // 締め切り: だれかが着いたら20秒。ただし1問の制限時間（小60秒）を越えては待たない（越えた答えは受け付けないため。2026-10-29 Codex の点検）
+  {
+    const { since } = await import('../app/js/games/party.js');
+    const realNow = performance.now;
+    let clock = 5e8;
+    Object.defineProperty(performance, 'now', { value: () => clock, configurable: true, writable: true });
+    try {
+      let d = Z.apply(Z.init(2, 31, { rules: { level: 's' } }), { p: -1, t: 'next' });
+      since('meiro:31:0'); // 画面に出た
+      clock += 10000;
+      d = Z.apply(d, { p: 0, t: 'done', q: 0, seq: solve(d.qs[0], 7), ms: 10000 });
+      assert.equal(Z.referee(d).ms, 20000, '迷路: 10秒で着いたら、締め切りは20秒後');
+      clock += 45000;
+      assert.equal(Z.referee(d).ms, 6500, '迷路: 55秒で着いたら、締め切りは制限時間（60秒＋1.5秒）まで');
+    } finally {
+      Object.defineProperty(performance, 'now', { value: realNow, configurable: true, writable: true });
+    }
+  }
   console.log('meiro OK');
 }
 
@@ -7017,14 +7035,15 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   s = T.apply(s, { p: 1, t: 'stab', holes: [s.hit] });
   assert.equal(s.phase, 'end');
   assert.equal(T.result(s).loser, 1);
-  let c = T.init(2, 6, { rules: { pick: 'choose' } });
+  assert.deepEqual(winnersOf(T.result(s)), [0, 2], 'たる: 3人の1回勝負は、飛び出させた人以外が勝ち');
+  let c =T.init(2, 6, { rules: { pick: 'choose' } });
   const safe2 = [...Array(24).keys()].filter((h) => h !== c.hit);
   assert.equal(T.apply(c, { p: 0, t: 'stab', holes: safe2.slice(0, 4) }), null, 'たる: 4本は刺せない');
   assert.equal(T.apply(c, { p: 0, t: 'stab', holes: [safe2[0], safe2[0]] }), null, 'たる: 同じ穴を2回は選べない');
   c = T.apply(c, { p: 0, t: 'stab', holes: [safe2[0], c.hit, safe2[1]] });
   assert.deepEqual(c.last.holes, [safe2[0], c.hit], 'たる: 当たりを刺したらそこで止まる');
   assert.equal(c.stabbed[safe2[1]], -1);
-  assert.deepEqual(T.result(c), { winner: 1, loser: 0 });
+  assert.deepEqual(T.result(c), { winners: [1], loser: 0 });
   // 3回勝負: 負けた人から次の回、負けの少ない人が上
   let m = T.init(3, 7, { rules: { rounds: 3 } });
   m = T.apply(m, { p: 0, t: 'stab', holes: [m.hit] });

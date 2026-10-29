@@ -48,7 +48,8 @@ export default {
     if (s.phase !== 'end') return null;
     if (roundsOf(s) === 1) {
       const loser = s.last.p;
-      return s.n === 2 ? { winner: 1 - loser, loser } : { winner: null, loser };
+      // 3人以上でも、海賊を飛び出させた人以外は全員の勝ち（画面の「セーフ！あなたの勝ち」と、連勝・成績表の勝ちの数をそろえる）
+      return { winners: [...Array(s.n).keys()].filter((p) => p !== loser), loser };
     }
     const best = Math.min(...s.losses);
     const place = s.losses.map((v) => 1 + s.losses.filter((x) => x < v).length);

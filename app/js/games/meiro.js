@@ -9,7 +9,7 @@
 //   - 暗やみで見えるのは、自分のいるマスから縦横2マスずつ（5×5）と、一度通ったマス。🏁 とほかの人の丸は暗い所でも見える。
 //     ゴールしたか・あきらめたか・結果を見せる間は全部見える。観戦の人も全部見える。制限時間は1.5倍、CPU の目安の時間は1.3倍。
 //   - 迷路は種から作る（穴掘り法。行き止まりの多い1本道の迷路で、スタートからゴールへの道は1つだけ）。小 7×7・中 10×10・大 14×14。
-//   - 制限時間は 小60秒・中90秒・大150秒。最初に着いた人から20秒で締め切る。全員着くかあきらめたら1.5秒（15パズル早解きと同じ）。
+//   - 制限時間は 小60秒・中90秒・大150秒。最初に着いた人から20秒で締め切る（制限時間のほうが先なら制限時間で）。全員着くかあきらめたら1.5秒（15パズル早解きと同じ）。
 //   - 送るのはゴールまでの動き（U・D・L・R の文字列）。apply で壁を抜けずにゴールへ着くかを確かめる。
 //   - ほかの人の位置は見た目だけなので手の一覧に入れず、動くたびに送りっぱなしにする（o.stream。0.12秒より短い間は1回にまとめる）。CPU の位置は出さない。
 //   - なぞるときは、指のあるマスへ向かって、壁に当たるまで1マスずつ進む。
@@ -18,7 +18,7 @@
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, seq, ms } / { p, t: 'pass', q }
 
 import { mulberry32, esc } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, secText, SEAT_COLORS } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText, SEAT_COLORS } from './party.js';
 import { pointsOf } from './make10.js';
 
 const READY_MS = 3000;
@@ -151,7 +151,7 @@ export default {
     if (s.phase === 'ready') return { key: 'ready', ms: READY_MS, move: { t: 'next' } };
     if (s.phase === 'open') {
       if ([...Array(s.n).keys()].every((p) => doneOf(s, p))) return { key: 'all' + s.q, ms: GRACE_MS, move: { t: 'close' } };
-      if (s.solved.some((v) => v !== null)) return { key: 'solved' + s.q, ms: AFTER_MS, move: { t: 'close' } };
+      if (s.solved.some((v) => v !== null)) return { key: 'solved' + s.q, ms: afterMs(qKey(s), limitOf(s), AFTER_MS, GRACE_MS), move: { t: 'close' } };
       return { key: 'open' + s.q, ms: limitOf(s) + GRACE_MS, move: { t: 'close' } };
     }
     if (s.phase === 'shown') return { key: 'shown' + s.q, ms: SHOWN_MS, move: { t: 'next' } };
@@ -259,7 +259,7 @@ export default {
       since(key);
       if (s.solved.some((v) => v !== null)) {
         card.insertAdjacentHTML('beforeend', '<div class="kj-sub">だれかがゴール！ もうすぐ締め切り</div>');
-        card.append(timeBar(key + ':after', AFTER_MS, { secs: true }));
+        card.append(afterBar(key, limit, AFTER_MS));
       } else card.append(timeBar(key, limit, { secs: true }));
     } else {
       const t = document.createElement('div');

@@ -5,7 +5,7 @@
 //   - 混ぜ方はそろった形から空きマスを無作為に動かす回数（戻る動きはしない）。軽め: 4×4 は40回・3×3 は20回、しっかり: 150回・60回。
 //   - 送るのはそろえるまでの空きマスの動き（U・D・L・R の文字列）。apply で最初の並びから動かし直し、本当にそろうかを確かめる。
 //   - 同じ列・同じ段の札を押すと、空きマスまでの札をまとめて動かす（動きは1マスずつ数える）。PC は矢印キーでも動かせる。
-//   - 制限時間は 3×3 が90秒、4×4 は軽め180秒・しっかり300秒。最初にそろった人から20秒で締め切る。全員そろうかあきらめたら1.5秒。
+//   - 制限時間は 3×3 が90秒、4×4 は軽め180秒・しっかり300秒。最初にそろった人から20秒で締め切る（制限時間のほうが先なら制限時間で）。全員そろうかあきらめたら1.5秒。
 //   - 問題の数は 1・3（最初）・5問。
 //   - 5×5（1〜24。2026-10-29 本人が選んだ案）: 混ぜる回数は軽め70回・しっかり250回、制限時間は軽め300秒・しっかり480秒。
 //     CPU がそろえる割合は4×4 より1割低い。
@@ -13,7 +13,7 @@
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, seq, ms } / { p, t: 'pass', q }
 
 import { mulberry32, esc } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText } from './party.js';
 import { pointsOf } from './make10.js';
 
 const READY_MS = 3000;
@@ -132,7 +132,7 @@ export default {
     if (s.phase === 'ready') return { key: 'ready', ms: READY_MS, move: { t: 'next' } };
     if (s.phase === 'open') {
       if ([...Array(s.n).keys()].every((p) => doneOf(s, p))) return { key: 'all' + s.q, ms: GRACE_MS, move: { t: 'close' } };
-      if (s.solved.some((v) => v !== null)) return { key: 'solved' + s.q, ms: AFTER_MS, move: { t: 'close' } };
+      if (s.solved.some((v) => v !== null)) return { key: 'solved' + s.q, ms: afterMs(qKey(s), limitOf(s), AFTER_MS, GRACE_MS), move: { t: 'close' } };
       return { key: 'open' + s.q, ms: limitOf(s) + GRACE_MS, move: { t: 'close' } };
     }
     if (s.phase === 'shown') return { key: 'shown' + s.q, ms: SHOWN_MS, move: { t: 'next' } };
@@ -232,10 +232,10 @@ export default {
     card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>`;
     if (s.phase === 'open') {
       since(key);
-      // だれかがそろえたら、ホストが締め切るまでの20秒を出す（前は締め切られるまで「残り130秒」などのままだった。2026-10-28 Codex の点検の指摘）
+      // だれかがそろえたら、ホストが締め切るまでの20秒（制限時間のほうが先ならそちら）を出す（前は締め切られるまで「残り130秒」などのままだった。2026-10-28 Codex の点検の指摘）
       if (s.solved.some((v) => v !== null)) {
         card.insertAdjacentHTML('beforeend', '<div class="kj-sub">だれかがそろえた！ もうすぐ締め切り</div>');
-        card.append(timeBar(key + ':after', AFTER_MS, { secs: true }));
+        card.append(afterBar(key, limit, AFTER_MS));
       } else card.append(timeBar(key, limit, { secs: true }));
     }
     else {

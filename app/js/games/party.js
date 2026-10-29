@@ -54,7 +54,7 @@ export function scoreChips(o, scores, { turn = null, won = [], extra = null } = 
     chip.className = 'cc-opp' + (p === turn ? ' turn' : '') + (won.includes(p) ? ' won' : '') + (p === o.me ? ' me' : '');
     const name = document.createElement('div');
     name.className = 'cc-opp-name';
-    name.textContent = p === o.me ? 'あなた' : o.names[p];
+    name.textContent = p === o.me && !o.watching ? 'あなた' : o.names[p]; // 観戦で見ている人の札は、印だけ付けて名前で出す
     const val = document.createElement('div');
     val.className = 'pt-score';
     val.innerHTML = `${v}<small>点</small>`;
@@ -109,6 +109,14 @@ export function timeBar(key, limit, { secs = false } = {}) {
   box.append(bar, num);
   return box;
 }
+
+// だれかが解いたあと「after ミリ秒で締め切る」ゲーム（迷路早抜け・15パズル早解き）の帯と、ホストが締め切るまでの時間。
+// どちらも「after」と「もとの制限時間 limit までの残り」の短いほう（制限時間を過ぎた答えは受け付けないので、帯が残っていても着けなくなっていた。
+// 2026-10-29 Codex の点検の指摘。本人承認）。key は問題の since の鍵。残りは同じ速さで減るので、どちらの帯を出すかは途中で入れ替わらない
+export function afterBar(key, limit, after) {
+  return after - since(key + ':after') <= limit - since(key) ? timeBar(key + ':after', after, { secs: true }) : timeBar(key, limit, { secs: true });
+}
+export const afterMs = (key, limit, after, grace) => Math.round(Math.min(after, Math.max(0, limit + grace - since(key))));
 
 export const secText = (ms) => (ms / 1000).toFixed(2) + '秒';
 
