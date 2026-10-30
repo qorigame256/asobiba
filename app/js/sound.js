@@ -1,26 +1,27 @@
-// 効果音。音は app/sounds/<名前>.wav。CC0（著作権を放棄した素材）と OtoLogic（CC BY 4.0）の素材を片耳・22050Hz の WAV にしたもの
+// 効果音。音は app/sounds/<名前>.wav。CC0（著作権を放棄した素材）・OtoLogic（CC BY 4.0）・効果音ラボの素材を片耳・22050Hz の WAV にしたもの
 // （iPhone の Safari が ogg を鳴らせないことがあるため）。元の素材（素材集 / ファイル名）:
 //   Kenney（https://kenney.nl/）の casino-audio・impact-sounds・interface-sounds・music-jingles・digital-audio・rpg-audio、
 //   Juhani Junkala「512 Sound Effects (8-bit style)」（https://opengameart.org/content/512-sound-effects-8-bit-style）、
 //   rubberduck の「75 CC0 breaking / falling / hit sfx」「80 CC0 RPG SFX」（https://opengameart.org/users/rubberduck）、
-//   OtoLogic（https://otologic.jp/。CC BY 4.0 なので作者の表示が要る。main.js の LICENSES に出している）。
+//   OtoLogic（https://otologic.jp/。CC BY 4.0 なので作者の表示が要る。main.js の LICENSES に出している）、
+//   効果音ラボ（https://soundeffect-lab.info/。作者の表示は要らない。音のファイルが見える形で GitHub に置くのも同サイトの FAQ で許されている。
+//   音を自由に鳴らすだけの作り（効果音集のようなもの）にするのは再配布として禁止）。
 // どの音も前後の無音を切り、役割ごとの目標の大きさにそろえてある（tools/level-sound.mjs。何度も鳴る手の音は小さめ・勝ち負けや正解は大きめ）。
-// 2026-10-31 の見直しで本人が試聴ページで選び直した音（★）:
+// 2026-10-31 の見直しで、全部の音を本人が試聴ページで聞いて選び直した（4回に分けた。★）:
 //   ★place impact-sounds / impactGeneric_light_002   ★card casino-audio / card-place-2   ★draw casino-audio / card-slide-8
 //   ★shuffle casino-audio / card-fan-1               ★flip casino-audio / chip-lay-2（リバーシ）   ★drop casino-audio / chips-collide-1（四目並べ）
 //   ★dice casino-audio / dice-throw-3                ★smack impact-sounds / impactPlate_medium_000   ★wall impact-sounds / impactWood_heavy_002
 //   ★boom 512 / Explosions / sfx_exp_short_hard2     ★stab rpg-audio / drawKnife1（海賊のたる）
 //   ★tile rubberduck 75 breaking / bfh1_rock_hit_01（麻雀）   ★stone rubberduck 80 RPG / stones_04
 //   ★line Claude がプログラムで作った「シュッ」（帯域を絞ったノイズ。点と線）
-//   ★correct interface-sounds / confirmation_002   ★goal 512 / Coins / sfx_coin_cluster3
-//   ★chip casino-audio / chips-stack-1             ★hit interface-sounds / glass_001（この4つは前と同じ音。大きさだけそろえた）
 //   ★pop OtoLogic / 弾ける Onoma-Pop04-2(Mid-Dry)   ★punch OtoLogic / 叩く Motion-Slam05-1(Strong)
-// 次の音は見直しで合う候補がまだ見つかっていない（前と同じ音。大きさだけそろえた）:
-//   turn   512 / Pause Sounds / sfx_sounds_pause1_in   wrong interface-sounds / error_002
-//   question interface-sounds / question_002         call   interface-sounds / maximize_006
-//   win    interface-sounds / confirmation_004       lose   digital-audio / phaserDown1
-//   draw_game music-jingles / jingles_PIZZI08
-// 勝ち・負け・正解・不正解・番が来た・ゴール・和了は、本人が試聴ページで聞いて選んだ（2026-10-03）。
+//   ★pins 効果音ラボ / bowling-pin1（ボウリングのピンを倒す・ストライク。ボウリング）   ★wrong 効果音ラボ / beep4（ビープ音「ブブー」）
+//   次の10個は前と同じ音を選んだ（大きさだけそろえた）:
+//   ★correct interface-sounds / confirmation_002   ★goal 512 / Coins / sfx_coin_cluster3   ★chip casino-audio / chips-stack-1
+//   ★hit interface-sounds / glass_001              ★turn 512 / Pause Sounds / sfx_sounds_pause1_in   ★question interface-sounds / question_002
+//   ★call interface-sounds / maximize_006          ★win interface-sounds / confirmation_004   ★lose digital-audio / phaserDown1
+//   ★draw_game music-jingles / jingles_PIZZI08
+// 勝ち・負け・正解・番が来た・ゴールは、2026-10-03 にも本人が試聴ページで聞いて選んでいた。
 // 和了は音のファイルではなく、ブラウザの読み上げで「ロン！」「ツモ！」と言う（SAY。日本語の声で CC0 の素材が無かったため）。
 // リーチも読み上げで「リーチ！」と言う（2026-10-04 本人の決定。前は鐘の音 impact-sounds / impactBell_heavy_000）。
 // 将棋の王手も読み上げで「王手！」と言う（2026-10-07 詳細設定「王手の知らせ」。ありのときだけ）。
@@ -29,7 +30,7 @@
 // iPhone はマナーモード（消音スイッチ）のときは鳴らない。オン・オフはこの端末に覚える（localStorage）。
 
 const NAMES = ['place', 'card', 'draw', 'shuffle', 'chip', 'pop', 'punch', 'stone', 'turn', 'correct', 'wrong', 'question', 'hit',
-  'win', 'lose', 'draw_game', 'call', 'smack', 'wall', 'goal', 'flip', 'drop', 'dice', 'boom', 'stab', 'line', 'tile'];
+  'win', 'lose', 'draw_game', 'call', 'smack', 'wall', 'goal', 'flip', 'drop', 'dice', 'boom', 'stab', 'line', 'tile', 'pins'];
 // 読み上げで出す音（名前 → 言う言葉）。声は端末ごとに違う
 const SAY = { ron: 'ロン！', tsumo: 'ツモ！', riichi: 'リーチ！', oute: '王手！' }; // oute は将棋の「王手の知らせ」
 export const isVoice = (name) => name in SAY;

@@ -331,7 +331,7 @@ function finishSim() {
   const P = s.pl[ui.me];
   ui.msg = sim.gutter && !knocked.length ? 'ガター…' : !left ? (sim.standing === ALL ? 'ストライク！' : 'スペア！') : `${knocked.length}本`;
   ui.msgAt = performance.now();
-  if (!left) play('win'); else play(knocked.length ? 'punch' : 'wrong');
+  if (!left) play('win'); else play(knocked.length ? 'pins' : 'wrong');
   if (P.done || P.f !== sim.f || (P.frames[P.f]?.length ?? 0) !== sim.b) return; // その間に局面が進んだ（開き直したなど）
   ui.pending = { f: sim.f, b: sim.b, left };
   o.onMove({ t: 'roll', f: sim.f, b: sim.b, k: knocked });

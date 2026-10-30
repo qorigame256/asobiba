@@ -8,7 +8,7 @@
 // 役割ごとの目標（app/sounds の今の音はこれでそろえてある。本人が試聴ページで聞いて承認したつり合い）:
 //   small  -24  何度も鳴る手の音: place card draw chip flip drop line tile stone
 //               （pop と wall は -26、shuffle と dice は -21 にした。よく鳴る・長いため）
-//   normal -18  合図・当たり: question call hit punch smack boom stab
+//   normal -18  合図・当たり: question call hit punch smack boom stab pins
 //   big    -13  結果と知らせ: turn correct wrong win lose draw_game goal
 // sound.js は全部の音に同じ倍率（MASTER）を掛けるだけなので、音を足すときもこの道具でそろえてから置く。
 import { execFileSync } from 'node:child_process';
