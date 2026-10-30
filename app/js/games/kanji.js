@@ -112,7 +112,7 @@ export function reviewOf(s, me = null) {
 }
 
 // ふりかえりの見た目（style.css には入れず、使うときに足す）。1問1行。読みが長いときはその欄の中で折り返す
-const REVIEW_CSS = `
+export const REVIEW_CSS = `
 .kj-review { background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 8px 12px; }
 .kj-review summary { cursor: pointer; font-weight: 700; }
 .kj-review ol { list-style: none; margin: 6px 0 0; padding: 0; }

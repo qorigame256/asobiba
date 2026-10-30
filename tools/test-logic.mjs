@@ -7411,4 +7411,85 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('tsuna OK');
 }
 
+// 英単語クイズ: 単語集の形・意味当ての4つ・スペル打ちのそろえ方・点・パス・ふりかえり
+{
+  const E = GAMES.eitango;
+  const { EITANGO } = await import('../app/js/games/eitango-data.js');
+  const { choicesOf, norm, pointsOf, reviewOf, blanksOf } = await import('../app/js/games/eitango.js');
+  const seen = new Set();
+  for (const [level, list] of Object.entries(EITANGO)) {
+    assert.ok(list.length >= 40, `英単語: ${level} は40語以上`);
+    assert.equal(new Set(list.map(([, m]) => m)).size, list.length, `英単語: ${level} の中で意味がかぶらない`);
+    for (const [words, mean] of list) {
+      assert.ok(mean && !mean.includes(':'), `英単語: 意味がある ${words[0]}`);
+      for (const w of words) {
+        assert.match(w, /^[a-z]+$/, `英単語: つづりは小文字の英字だけ ${w}`);
+        assert.ok(!seen.has(w), `英単語: 同じ単語が2回 ${w}`);
+        seen.add(w);
+      }
+    }
+  }
+  assert.equal(norm(' Ａpple '), 'apple', '英単語: 全角・大文字・空白をそろえる');
+  assert.equal(blanksOf('apple'), '_ _ _ _ _');
+  assert.equal(blanksOf('apple', true), 'a _ _ _ _');
+  assert.deepEqual(pointsOf([900, null, 500, 1200, 500]), [1, 0, 3, 1, 3], '英単語: 速い順に3・2・1点、同じ速さは同じ点');
+  // 意味当て: 4つは別々で正しい意味を含み、同じ種なら同じ並び
+  for (let seed = 0; seed < 30; seed++) {
+    const s = E.init(3, seed, { rules: { level: 'mix', rounds: 20 } });
+    assert.equal(s.qs.length, 20);
+    s.qs.forEach((x, q) => {
+      const o = s.opts[q];
+      assert.equal(new Set(o).size, 4, '英単語: 4つは別々');
+      assert.ok(o.includes(x[1]), '英単語: 正しい意味が入っている');
+      assert.deepEqual(o, choicesOf(seed, q, x), '英単語: 同じ種なら同じ4つ');
+    });
+  }
+  {
+    let s = E.apply(E.init(3, 5), { p: -1, t: 'next' });
+    const [, mean] = s.qs[0];
+    const wrong = s.opts[0].find((x) => x !== mean);
+    assert.equal(E.apply(s, { p: 0, t: 'try', q: 0, text: 'ちがう意味', ms: 100, n: 1 }), null, '英単語: 4つ以外は弾く');
+    s = E.apply(s, { p: 0, t: 'try', q: 0, text: wrong, ms: 100, n: 1 });
+    assert.equal(s.solved[0], null);
+    assert.equal(E.apply(s, { p: 0, t: 'try', q: 0, text: mean, ms: 200, n: 2 }), null, '英単語: 意味当ては1問に1回だけ');
+    s = E.apply(s, { p: 1, t: 'try', q: 0, text: mean, ms: 300, n: 1 });
+    s = E.apply(s, { p: 2, t: 'pass', q: 0 });
+    assert.equal(E.referee(s).key, 'all0', '英単語: 全員が答えたら締め切り');
+    s = E.apply(s, { p: -1, t: 'close' });
+    assert.deepEqual(s.scores, [0, 3, 0]);
+    assert.deepEqual(reviewOf(s, 1).map((r) => r.mark), ['⭕']);
+  }
+  // スペル打ち: 何度でも打ち直せる・大文字や米英どちらのつづりでも正解・4つは作らない
+  {
+    const s0 = E.init(2, 1, { rules: { ask: 'spell', level: 'mid', rounds: 20 } });
+    assert.equal(s0.opts, undefined, '英単語: スペル打ちは4つを作らない');
+    const q = s0.qs.findIndex(([w]) => w.length > 1);
+    assert.ok(q >= 0, '英単語: 高校には2通りのつづりの単語がある');
+    let s = s0;
+    for (let i = 0; i <= q; i++) {
+      s = E.apply(s, { p: -1, t: 'next' });
+      if (i < q) s = E.apply(s, { p: -1, t: 'close' });
+    }
+    const words = s.qs[q][0];
+    s = E.apply(s, { p: 0, t: 'try', q, text: 'zzz', ms: 100, n: 1 });
+    assert.equal(s.solved[0], null);
+    s = E.apply(s, { p: 0, t: 'try', q, text: words[1].toUpperCase(), ms: 700, n: 2 });
+    assert.equal(s.solved[0], 700, '英単語: 2つ目のつづり・大文字でも正解');
+    s = E.apply(s, { p: 1, t: 'try', q, text: ' ' + words[0] + ' ', ms: 800, n: 1 });
+    assert.equal(s.solved[1], 800, '英単語: 前後の空白は無視');
+  }
+  for (const rules of [{}, { ask: 'spell' }, { ask: 'spell', level: 'hard', rounds: 20 }]) {
+    for (let seed = 0; seed < 3; seed++) {
+      let s = E.init(4, seed, { rules });
+      for (let guard = 0; guard < 200 && s.phase !== 'end'; guard++) {
+        const r = E.referee(s);
+        s = E.apply(s, { p: -1, ...r.move });
+      }
+      assert.equal(s.phase, 'end', `英単語: 最後まで進む ${JSON.stringify(rules)}`);
+      assert.equal(reviewOf(s).length, s.qs.length);
+    }
+  }
+  console.log('eitango OK');
+}
+
 console.log('ALL OK');

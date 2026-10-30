@@ -1321,6 +1321,10 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .km-life { color: #e04b3c; margin-right: 4px; }
 .kj-word { font-size: clamp(2.2rem, 12vw, 3.4rem); font-weight: 800; letter-spacing: .06em; line-height: 1.3; font-family: "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", serif; }
 .kj-word.small { font-size: 1.6rem; font-family: inherit; }
+/* 英単語クイズ: 英単語・意味は明朝にせず、長い単語・意味は折り返す。スペル打ちの文字数の線は等幅 */
+.et .kj-word.et-word, .et-review .kj-rv-word { font-family: inherit; letter-spacing: .02em; overflow-wrap: anywhere; }
+.et .kj-word.et-word { font-size: clamp(1.8rem, 9vw, 2.8rem); }
+.et-blanks { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 1.3rem; letter-spacing: .05em; }
 .kj-answer { font-size: 1.3rem; font-weight: 700; color: #2f8a4a; margin-top: 6px; }
 .kj-hint { margin-top: 6px; min-height: 1.4em; font-weight: 700; color: #b06a00; } /* 難読漢字のヒント（しばらくたつと読みの1文字目） */
 .kj-form { display: flex; gap: 8px; }
