@@ -175,7 +175,7 @@ export default {
   sound(a, b, m, me) {
     if (b.round > a.round) return 'turn';
     if (m.p !== me) return null;
-    return m.t === 'roll' ? 'stone' : 'pop';
+    return m.t === 'roll' ? 'dice' : 'pop';
   },
   cpuDelay() { return 700; },
 

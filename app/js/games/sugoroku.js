@@ -87,7 +87,7 @@ export default {
     const ev = b.last?.ev?.t;
     if (ev === 'fwd' || ev === 'again') return 'correct';
     if (ev === 'back' || ev === 'skip') return 'wrong';
-    return 'place';
+    return 'dice';
   },
 
   apply(s0, m) {

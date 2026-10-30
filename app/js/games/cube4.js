@@ -165,6 +165,8 @@ export default {
 
   turn(s) { return s.turn; },
 
+  sound(a, b) { return b.free ? 'place' : 'drop'; }, // 重力なしは落とさずに置くので「駒を置く」
+
   apply(s, m) {
     if (!Number.isInteger(m) || m < 0 || m >= (s.free ? CELLS : COLS) || s.won) return null;
     const i = s.free ? (s.grid[m] === null ? m : -1) : landing(s, m);

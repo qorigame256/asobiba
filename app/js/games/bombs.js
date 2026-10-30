@@ -421,7 +421,7 @@ export default {
   canAct(s, p) { return s.phase === 'play' && s.out[p] === null; },
   sound(a, b, m, me) {
     if (m.p === -1) return 'question';
-    if (m.t === 'boom') return m.p === me ? 'wrong' : null;
+    if (m.t === 'boom') return m.p === me ? 'boom' : null;
     if (m.t === 'send') return m.p === me || b.log.at(-1)?.to === me ? 'punch' : null;
     return null;
   },

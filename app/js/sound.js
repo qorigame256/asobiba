@@ -1,16 +1,23 @@
-// 効果音。音は app/sounds/<名前>.wav。どれも CC0（著作権を放棄した素材）を、片耳・22050Hz・最大音量 0.8 にそろえて WAV にしたもの
+// 効果音。音は app/sounds/<名前>.wav。どれも CC0（著作権を放棄した素材）を片耳・22050Hz の WAV にしたもの
 // （iPhone の Safari が ogg を鳴らせないことがあるため）。元の素材（素材集 / ファイル名）:
-//   Kenney（https://kenney.nl/）の casino-audio・impact-sounds・interface-sounds・music-jingles・digital-audio、
-//   Juhani Junkala「512 Sound Effects (8-bit style)」（https://opengameart.org/content/512-sound-effects-8-bit-style）の General Sounds。
-//   place  impact-sounds / impactWood_medium_000     card   casino-audio / card-place-1     draw  casino-audio / card-slide-1
-//   shuffle casino-audio / card-shuffle（1.2秒で切った） chip casino-audio / chips-stack-1   pop   interface-sounds / drop_002
-//   punch  impact-sounds / impactPunch_medium_000    stone  impact-sounds / impactGeneric_light_000
-//   turn   512 / Pause Sounds / sfx_sounds_pause1_in   correct interface-sounds / confirmation_002   wrong interface-sounds / error_002
+//   Kenney（https://kenney.nl/）の casino-audio・impact-sounds・interface-sounds・music-jingles・digital-audio・rpg-audio、
+//   Juhani Junkala「512 Sound Effects (8-bit style)」（https://opengameart.org/content/512-sound-effects-8-bit-style）、
+//   rubberduck の「75 CC0 breaking / falling / hit sfx」「80 CC0 RPG SFX」（https://opengameart.org/users/rubberduck）。
+// どの音も前後の無音を切り、役割ごとの目標の大きさにそろえてある（tools/level-sound.mjs。何度も鳴る手の音は小さめ・勝ち負けや正解は大きめ）。
+// 2026-10-31 の見直しで本人が試聴ページで選び直した音（★）:
+//   ★place impact-sounds / impactGeneric_light_002   ★card casino-audio / card-place-2   ★draw casino-audio / card-slide-8
+//   ★shuffle casino-audio / card-fan-1               ★flip casino-audio / chip-lay-2（リバーシ）   ★drop casino-audio / chips-collide-1（四目並べ）
+//   ★dice casino-audio / dice-throw-3                ★smack impact-sounds / impactPlate_medium_000   ★wall impact-sounds / impactWood_heavy_002
+//   ★boom 512 / Explosions / sfx_exp_short_hard2     ★stab rpg-audio / drawKnife1（海賊のたる）
+//   ★tile rubberduck 75 breaking / bfh1_rock_hit_01（麻雀）   ★stone rubberduck 80 RPG / stones_04
+//   ★line Claude がプログラムで作った「シュッ」（帯域を絞ったノイズ。点と線）
+//   ★correct interface-sounds / confirmation_002   ★goal 512 / Coins / sfx_coin_cluster3（この2つは前と同じ音。大きさだけそろえた）
+// 次の音は見直しで合う候補がまだ見つかっていない（前と同じ音。大きさだけそろえた）:
+//   chip   casino-audio / chips-stack-1    pop   interface-sounds / drop_002   punch  impact-sounds / impactPunch_medium_000
+//   turn   512 / Pause Sounds / sfx_sounds_pause1_in   wrong interface-sounds / error_002
 //   question interface-sounds / question_002         hit    interface-sounds / glass_001
 //   win    interface-sounds / confirmation_004       lose   digital-audio / phaserDown1
-//   draw_game music-jingles / jingles_PIZZI08
-//   call   interface-sounds / maximize_006
-//   smack  impact-sounds / impactPlate_light_000      wall   impact-sounds / impactSoft_medium_000   goal 512 / Coins / sfx_coin_cluster3
+//   draw_game music-jingles / jingles_PIZZI08         call   interface-sounds / maximize_006
 // 勝ち・負け・正解・不正解・番が来た・ゴール・和了は、本人が試聴ページで聞いて選んだ（2026-10-03）。
 // 和了は音のファイルではなく、ブラウザの読み上げで「ロン！」「ツモ！」と言う（SAY。日本語の声で CC0 の素材が無かったため）。
 // リーチも読み上げで「リーチ！」と言う（2026-10-04 本人の決定。前は鐘の音 impact-sounds / impactBell_heavy_000）。
@@ -20,13 +27,11 @@
 // iPhone はマナーモード（消音スイッチ）のときは鳴らない。オン・オフはこの端末に覚える（localStorage）。
 
 const NAMES = ['place', 'card', 'draw', 'shuffle', 'chip', 'pop', 'punch', 'stone', 'turn', 'correct', 'wrong', 'question', 'hit',
-  'win', 'lose', 'draw_game', 'call', 'smack', 'wall', 'goal'];
+  'win', 'lose', 'draw_game', 'call', 'smack', 'wall', 'goal', 'flip', 'drop', 'dice', 'boom', 'stab', 'line', 'tile'];
 // 読み上げで出す音（名前 → 言う言葉）。声は端末ごとに違う
 const SAY = { ron: 'ロン！', tsumo: 'ツモ！', riichi: 'リーチ！', oute: '王手！' }; // oute は将棋の「王手の知らせ」
 export const isVoice = (name) => name in SAY;
-// 音ごとの大きさ（素材の最大音量はそろえてあるので、耳ざわりなものを下げる）
-const GAIN = { pop: 0.5, stone: 0.6, wall: 0.4, turn: 0.6, question: 0.6, hit: 0.6, wrong: 0.6, shuffle: 0.7 };
-const MASTER = 0.6;
+const MASTER = 0.6; // 音ごとの大きさはファイルの中でそろえてあるので、ここでは全部に同じ倍率を掛けるだけ（前は音ごとの GAIN で下げていた）
 // 読み上げの大きさ（0〜1）。2026-10-26 本人の声「あなたの番ですの声が大きすぎる」で 0.9 から下げた。
 // iPhone の Safari は読み上げの大きさの指定を聞かないことがあり、その端末では本体の音量で決まる（未確認）
 const VOICE_VOL = 0.45;
@@ -109,7 +114,7 @@ export function play(name, vol = 1) {
   const src = ctx.createBufferSource();
   src.buffer = buffers[name];
   const g = ctx.createGain();
-  g.gain.value = MASTER * (GAIN[name] ?? 1) * Math.max(0, Math.min(1, vol));
+  g.gain.value = MASTER * Math.max(0, Math.min(1, vol));
   src.connect(g).connect(ctx.destination);
   src.start();
 }

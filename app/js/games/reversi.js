@@ -240,6 +240,8 @@ export default {
 
   turn(s) { return s.turn; },
 
+  sound() { return 'flip'; }, // 置くたびに石を裏返す
+
   apply(s, m) {
     if (s.over || !Number.isInteger(m) || m < 0 || m >= s.board.length) return null;
     if (s.n > 2) {

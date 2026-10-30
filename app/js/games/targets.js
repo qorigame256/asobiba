@@ -236,7 +236,7 @@ export default {
   sound(a, b, m, me) {
     if (m.p === -1) return 'question';
     if (m.p !== me) return null;
-    return m.t === 'miss' || b.targets[m.id].kind === 'bomb' ? 'wrong' : 'hit';
+    return m.t === 'miss' ? 'wrong' : b.targets[m.id].kind === 'bomb' ? 'boom' : 'hit';
   },
   result(s) {
     if (s.phase !== 'end') return null;

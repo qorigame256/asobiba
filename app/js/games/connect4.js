@@ -301,6 +301,8 @@ export default {
 
   turn(s) { return s.turn; },
 
+  sound() { return 'drop'; }, // コマが落ちる（ポップアウトで抜く手も同じ音）
+
   apply(s, col) {
     if (s.pop) return popApply(s, col);
     if (!Number.isInteger(col) || col < 0 || col >= s.w || s.won) return null;

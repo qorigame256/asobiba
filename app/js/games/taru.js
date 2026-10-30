@@ -70,7 +70,7 @@ export default {
   },
   sound(a, b, m) {
     if (m.p === -1) return 'question';
-    return b.last?.out ? 'punch' : 'place';
+    return b.last?.out ? 'punch' : 'stab';
   },
 
   referee(s) {

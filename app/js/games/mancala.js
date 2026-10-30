@@ -71,6 +71,8 @@ const game = {
 
   turn(s) { return s.turn; },
 
+  sound() { return 'stone'; }, // 石をまく
+
   apply(s, k) {
     const H = holesOf(s);
     if (s.over || !Number.isInteger(k) || k < 0 || k >= H) return null;

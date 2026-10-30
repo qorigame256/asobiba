@@ -1260,7 +1260,7 @@ export default {
     const melds = (s) => s.h.melds.reduce((n, x) => n + x.length, 0);
     if (m.a === 'ok' || m.a === 'next') return null; // 局の結果の画面での「次の局へ」
     if (melds(b) > melds(a) || m.a === 'nuki') return 'call';
-    if (m.a === 'd') return m.r ? 'riichi' : 'place';
+    if (m.a === 'd') return m.r ? 'riichi' : 'tile';
     return null; // 鳴きの見送りなど
   },
   cpu(s, p) {

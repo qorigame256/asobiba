@@ -166,6 +166,8 @@ export default {
 
   turn(s) { return s.turn; },
 
+  sound() { return 'line'; }, // 線を引く（四角を取った手も同じ音）
+
   apply(s0, i) {
     if (!Number.isInteger(i) || i < 0 || i >= s0.lines.length || s0.lines[i] !== null) return null;
     const s = { ...s0, lines: s0.lines.slice(), boxes: s0.boxes.slice(), last: i, count: s0.count + 1 };
