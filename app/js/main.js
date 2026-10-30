@@ -535,6 +535,7 @@ function appendLobbyExtras(board) {
 // 出した手は、全員が出すまで「✓」とだけ見せる（簡易な隠し方。開発用の道具では覗ける）。
 // ゲストは type: 'rps'（回の番号 n と手 h）を送り、ホストが S.rps（{ n, hands: 人の id → 手 }）に集めて state で送る。
 // 手を見せたあとにだれかが出すと、次の回（n + 1）が始まる。見せた直後に何人かが同時に出しても、1つ前の回の番号で届いた手は次の回に入れる。
+// 2026-10-30 本人の依頼（目立たないように）: 開け閉めできる欄にし、最初は閉じておく（開けたかは S.rpsOpen。端末ごと）。閉じている間も、だれかが出していれば見出しに人数を添える。
 const RPS = { g: '✊', c: '✌️', p: '✋' };
 const RPS_NAME = { g: 'グー', c: 'チョキ', p: 'パー' };
 const RPS_BEATS = { g: 'c', c: 'p', p: 'g' };
@@ -564,8 +565,10 @@ function rpsWinHand(hands) {
   return RPS_BEATS[kinds[0]] === kinds[1] ? kinds[0] : kinds[1];
 }
 function rpsPanel() {
-  const box = document.createElement('div');
+  const box = document.createElement('details');
   box.className = 'lobby-rps';
+  box.open = !!S.rpsOpen;
+  box.ontoggle = () => { S.rpsOpen = box.open; };
   const hands = rpsHands();
   const players = rpsPlayers();
   const shown = rpsShown();
@@ -590,7 +593,8 @@ function rpsPanel() {
       : (S.members.length < 2 ? 'CPU と勝負できます' : '全員が出したら「ぽん！」');
   }
   const mine = !shown && RPS[hands[S.myId]];
-  box.innerHTML = `<p>✊ じゃんけん（待っている間のおまけ）${mine ? ` <small>あなたは ${RPS[mine]}</small>` : ''}</p><p class="rps-line">${line}</p>`;
+  const put = shown ? 0 : players.filter((id) => RPS[hands[id]]).length;
+  box.innerHTML = `<summary>✊ じゃんけん（待っている間のおまけ）${mine ? ` <small>あなたは ${RPS[mine]}</small>` : put ? ` <small>${put}人が出した</small>` : ''}</summary><p class="rps-line">${line}</p>`;
   const row = document.createElement('div');
   row.className = 'rps-btns';
   for (const h of ['g', 'c', 'p']) {
@@ -1559,6 +1563,7 @@ function renderPage() {
   appendReactions();
   appendWatchSelect(game);
   if (S.mode === 'online' && !S.isHost) controls.append(makeButton('🏠 待合室へ', () => goAwayLobby(game, st, res), 'ghost small'));
+  if (S.mode === 'online' && S.isHost && !res) controls.append(lobbyAllButton());
   if (S.mode === 'online' && S.isHost) controls.append(gameSelect());
   appendMemberPanel();
   scheduleCpu(game, st, res);
@@ -1634,7 +1639,16 @@ function appendWatchSelect(game) {
 /* ---------- 対局から待合室へ（2026-10-26 本人の依頼） ---------- */
 // ゲスト（ホスト以外）が対局の画面の「🏠 待合室へ」を押すと、その人の画面だけ待合室の形（成績・対局の履歴・名前の変更・ランキング・次のゲームの投票）になる。
 // 対局している人なら、そのあいだ席は CPU が代わりに打つ（type: 'away' をホストが S.away に集めて state で送る。cpuControlled が見る）。「対局の画面に戻る」で戻る。
-// Claude の判断: ホストは CPU の手を考える端末なので、対局の途中には出さない（決着のあとの「🏠 みんなで待合室へ」で全員を戻す）。
+// Claude の判断: ホストは CPU の手を考える端末なので、自分だけ待合室へ行く形は出さない（代わりに下の「🏠 みんなで待合室へ」で全員を戻す）。
+// 2026-10-30 本人の依頼: ホストは対局の途中でも「🏠 みんなで待合室へ」で全員を待合室へ戻せる（自分だけ見に行く形との選択で、推奨を本人が承認）。
+// 確かめてから、ゲームを変えるときと同じ newRound(lobby) で戻す。途中の対局は決着していないので成績表・履歴に数えない（countResult は決着のときだけ）。
+// エアホッケーは決着が main.js から見えないので、いつも出す（確かめの文はどちらでも通じる形にした）。決着のあとは、広告を挟む前からのボタン（render の res の段）を使う。
+function lobbyAllButton() {
+  return makeButton('🏠 みんなで待合室へ', () => {
+    if (!confirm('みんなで待合室へ戻りますか？（途中の対局は成績に数えません）')) return;
+    newRound(S.gameId, { lobby: true });
+  }, 'ghost small');
+}
 function goAwayLobby(game, st, res) {
   const seated = S.order?.includes(S.myId);
   if (seated && !res && !confirm('待合室へ行くと、そのあいだ あなたの席は CPU が代わりに打ちます。行きますか？')) return;
@@ -1977,6 +1991,7 @@ function appendReview() {
 // Claude の判断: 選べるのは、対局の手が1巡する（打った手の数が対局する人数になる）まで。時間で進むゲームの進行役の手（p = -1）は数えない。
 // 1人1回・変えられない・自分を選んでもよい。送りっぱなし（type: 'pred'）で、受け取った端末がそれぞれ覚える（あとから入った人には届かない）。
 // 結果の画面に「予想が当たった人」を出す。オンラインの盤のゲームとカードゲームだけ（エアホッケーは結果が main.js を通らないので出さない）。
+// 2026-10-30 本人の依頼（目立たないように）: 押すまでは「🔮 予想」の小さなボタンだけにし、押すと名前が並ぶ（開けたかは S.predShow にその対局の predKey。端末ごと）。
 const predKey = () => `${S.gameId}:${S.round}`;
 const predsNow = () => (S.preds?.key === predKey() ? S.preds.by : {});
 function predOpen(game, res) {
@@ -1995,23 +2010,29 @@ function setPred(id, p) {
 function appendPredict(game, res) {
   if (!predOpen(game, res)) return;
   const mine = predsNow()[S.myId];
-  const bar = document.createElement('div');
-  bar.className = 'pred-bar';
   const label = document.createElement('span');
   if (mine !== undefined) {
+    label.className = 'pred-mine';
     label.textContent = `🔮 あなたの予想: ${nameOf(S.order[mine])}`;
-    bar.append(label);
-  } else {
-    label.textContent = '🔮 だれが勝つ？';
-    bar.append(label);
-    S.order.forEach((id, p) => {
-      bar.append(makeButton(id === S.myId ? 'あなた' : nameOf(id), () => {
-        if (!predOpen(game, null) || !setPred(S.myId, p)) return;
-        send({ type: 'pred', gameId: S.gameId, round: S.round, p });
-        render();
-      }, 'ghost small'));
-    });
+    ctl().append(label);
+    return;
   }
+  if (S.predShow !== predKey()) {
+    ctl().append(makeButton('🔮 予想', () => { S.predShow = predKey(); render(); }, 'ghost small'));
+    return;
+  }
+  const bar = document.createElement('div');
+  bar.className = 'pred-bar';
+  label.textContent = '🔮 だれが勝つ？';
+  bar.append(label);
+  S.order.forEach((id, p) => {
+    bar.append(makeButton(id === S.myId ? 'あなた' : nameOf(id), () => {
+      if (!predOpen(game, null) || !setPred(S.myId, p)) return;
+      send({ type: 'pred', gameId: S.gameId, round: S.round, p });
+      render();
+    }, 'ghost small'));
+  });
+  bar.append(makeButton('✕ とじる', () => { S.predShow = null; render(); }, 'ghost small'));
   ctl().append(bar);
 }
 // 結果の画面に出す「予想が当たった人」。だれも予想していなければ出さない
@@ -2793,7 +2814,7 @@ function renderLive(game) {
     });
   }
   appendReactions();
-  if (S.mode === 'online' && S.isHost) ctl().append(gameSelect());
+  if (S.mode === 'online' && S.isHost) ctl().append(lobbyAllButton(), gameSelect());
   if (S.mode === 'online') appendMemberPanel();
 }
 
