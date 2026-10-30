@@ -2039,3 +2039,99 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .board button.tr-hole.sel { box-shadow: 0 0 0 3px var(--win); }
 .board button.tr-hole.hit { background: #c0392b; box-shadow: 0 0 0 3px #fff; }
 .tr-hole.pop { animation: pop .25s ease-out; }
+
+/* ---------- 2026-10-30 に足した6つ（椅子取りゲーム・立体四目並べ・じゃんけん階段・後出しじゃんけん早押し・ボウリング・綱引き連打） ---------- */
+:is([data-game="isutori"], [data-game="kaidan"], [data-game="atodashi"], [data-game="tsuna"]) .board { width: min(100%, 560px); }
+/* 後出しじゃんけん早押し */
+.ad-hand { font-size: clamp(3.6rem, 22vw, 5.4rem); line-height: 1.15; margin-top: 4px; }
+.ad-order { display: inline-block; color: #fff; font-weight: 900; font-size: clamp(1.4rem, 7vw, 2rem); padding: 2px 18px; border-radius: 999px; margin: 2px 0 8px; text-shadow: 0 1px 2px rgba(0, 0, 0, .35); }
+.ad-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: min(100%, 380px); margin: 0 auto; touch-action: manipulation; }
+.board button.ad-btn { min-height: 5rem; border-radius: 14px; border: 2px solid var(--line); background: var(--field); color: var(--ink); font: inherit; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+.ad-btn span { font-size: 2.2rem; line-height: 1; }
+.ad-btn small { font-size: .85rem; font-weight: 700; }
+.board button.ad-btn:disabled { opacity: .55; cursor: default; }
+.board button.ad-btn.ans { opacity: 1; box-shadow: 0 0 0 4px var(--win); }
+/* じゃんけん階段 */
+.kd-stairs { display: flex; flex-direction: column; gap: 6px; background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 8px; }
+.kd-row { display: grid; grid-template-columns: 5.5em 1fr 4.2em; gap: 8px; align-items: center; font-size: .88rem; }
+.kd-row.mine { font-weight: 800; }
+.kd-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kd-track { position: relative; height: 16px; border-radius: 999px; background: repeating-linear-gradient(90deg, var(--field) 0 9px, var(--line) 9px 10px); border: 1px solid var(--line); overflow: hidden; }
+.kd-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; transition: width .6s ease-out; }
+.kd-fill.up { box-shadow: 0 0 8px var(--win); }
+.kd-goal { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); font-size: .8rem; }
+.kd-num { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.board button.kd-choice { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; height: 72px; }
+.kd-choice small { font-size: .72rem; font-weight: 700; }
+/* 椅子取りゲーム */
+.it-field {
+  position: relative; width: 100%; aspect-ratio: 1; max-height: 70vh; min-height: 260px; margin: 6px auto 0;
+  background: radial-gradient(circle, #fff3d6 0 30%, #f3c77a 70%, #d99a4a); border-radius: var(--radius); overflow: hidden;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none;
+}
+.it-field.live { cursor: pointer; }
+.it-ring { position: absolute; inset: 0 0 2.2em; }
+.board button.it-chair { position: absolute; transform: translate(-50%, -50%); width: 3.4rem; height: 3.4rem; border-radius: 50%; border: 3px solid transparent; background: rgba(255, 255, 255, .55); font-size: 1.9rem; line-height: 1; cursor: inherit; padding: 0; transition: box-shadow .08s; }
+.board button.it-chair.lit { border-color: #ffe14d; box-shadow: 0 0 0 4px rgba(255, 225, 77, .55), 0 0 18px #ffd200; background: #fffbe0; }
+.it-field.stopped .it-chair { border-color: #2e9a52; }
+.it-sign { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: clamp(1.8rem, 9vw, 3rem); font-weight: 900; color: #7a4a10; white-space: nowrap; }
+.it-sign.stop { color: #d02020; animation: pop .1s ease-out; }
+.it-sign.lock { color: #555; }
+.it-sign.small { font-size: 1.8rem; }
+.it-field .mq-msg { position: absolute; left: 0; right: 0; bottom: .5em; color: #4a2c08; text-shadow: none; }
+/* 立体四目並べ */
+[data-game="cube4"] .board { width: min(100%, 520px); }
+.cb { display: flex; flex-direction: column; gap: 12px; }
+.cb-top { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; width: min(100%, 340px); margin: 0 auto; padding: 8px; background: #2f5f9e; border-radius: 12px; touch-action: manipulation; }
+.board button.cb-col { aspect-ratio: 1; border: 0; border-radius: 10px; background: #e8eef6; padding: 4px; display: flex; flex-direction: column; gap: 3px; cursor: default; }
+.board button.cb-col.playable { cursor: pointer; }
+.board button.cb-col.playable:hover { background: #fff; }
+.cb-slot { flex: 1; border-radius: 4px; background: rgba(47, 95, 158, .14); }
+.cb-slot.p0 { background: #e2493b; }
+.cb-slot.p1 { background: #f4c430; }
+.cb-slot.next { outline: 2px dashed rgba(47, 95, 158, .55); outline-offset: -2px; }
+.cb-slot.last { box-shadow: inset 0 0 0 2px #fff; }
+.cb-slot.win { box-shadow: 0 0 0 2px var(--win); }
+.cb-layers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+@media (max-width: 520px) { .cb-layers { grid-template-columns: repeat(2, 1fr); } }
+.cb-layer { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 4px 6px 6px; }
+.cb-cap { text-align: center; font-size: .78rem; color: var(--muted); }
+.cb-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; }
+.cb-cell { position: relative; aspect-ratio: 1; background: #dfe7f1; border-radius: 3px; }
+.cb-disc { position: absolute; inset: 12%; border-radius: 50%; }
+.cb-disc.p0 { background: #e2493b; }
+.cb-disc.p1 { background: #f4c430; }
+.cb-disc.last::after { content: ""; position: absolute; inset: 32%; border-radius: 50%; background: rgba(255, 255, 255, .6); }
+.cb-disc.win { box-shadow: 0 0 0 2px var(--win); }
+/* ボウリング */
+[data-game="bowling"] .board { width: min(100%, 560px); }
+.bw { display: flex; flex-direction: column; gap: 8px; }
+.bw-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.bw-table table { border-collapse: collapse; margin: 0 auto; font-size: .78rem; font-variant-numeric: tabular-nums; }
+.bw-table th, .bw-table td { border: 1px solid var(--line); padding: 1px 3px; text-align: center; min-width: 2.2em; }
+.bw-table tr > th:first-child { max-width: 5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.bw-table tr.me { background: var(--soft, #fff4e6); font-weight: 700; }
+.bw-table td.now { box-shadow: inset 0 0 0 2px var(--accent, #e8833a); }
+.bw-mk { display: flex; justify-content: flex-end; gap: 2px; min-height: 1.2em; }
+.bw-mk span { min-width: .9em; }
+.bw-tot { min-height: 1.2em; }
+.bw-sum { font-weight: 800; }
+/* 綱引き連打 */
+.ts-field { background: linear-gradient(#bfe6ff, #e9f6ff 60%, #b9d98a 60%, #8fbf5a); border-radius: var(--radius); padding: 10px 0 18px; margin: 6px 0 10px; overflow: hidden; }
+.ts-info { text-align: center; font-weight: 800; font-size: 1.1rem; color: #234; min-height: 1.4em; }
+.ts-lane { position: relative; height: 90px; margin: 8px 10px 0; }
+.ts-end { position: absolute; top: 0; bottom: 0; width: 5%; display: grid; place-items: center; font-weight: 800; font-size: .8rem; border-radius: 6px; }
+.ts-end.red { left: 0; background: rgba(224, 75, 60, .8); color: #fff; }
+.ts-end.white { right: 0; background: rgba(255, 255, 255, .9); color: #555; border: 1px solid #bbb; }
+.ts-mid { position: absolute; left: 50%; top: 0; bottom: 0; border-left: 2px dashed rgba(0, 0, 0, .35); }
+.ts-rope { position: absolute; left: 0; right: 0; top: 50%; height: 8px; margin-top: -4px; background: repeating-linear-gradient(45deg, #c49a5a 0 6px, #a87b3c 6px 12px); border-radius: 4px; transition: transform .25s ease-out; }
+.ts-team { position: absolute; top: -26px; font-size: 1.4rem; }
+.ts-team.red { left: 12%; }
+.ts-team.white { right: 12%; }
+.ts-flag { position: absolute; top: 50%; transform: translate(-50%, -100%); font-size: 1.8rem; transition: left .25s ease-out; }
+.board button.ts-btn { display: block; width: min(100%, 360px); margin: 0 auto 6px; min-height: 5.5rem; border-radius: 18px; border: 0; font: inherit; font-size: 1.5rem; font-weight: 900; color: #fff; background: #777; cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.board button.ts-btn.t0 { background: #e04b3c; }
+.board button.ts-btn.t1 { background: #f4f4f4; color: #444; border: 2px solid #bbb; }
+.board button.ts-btn:disabled { opacity: .5; cursor: default; }
+.ts-btn.kick { animation: tsKick .12s ease-out; }
+@keyframes tsKick { from { transform: scale(.95); } }

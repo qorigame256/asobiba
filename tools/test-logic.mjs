@@ -7078,4 +7078,203 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('taru OK');
 }
 
+// 後出しじゃんけん早押し: 正しい手・あいこは設定があるときだけ・同じ問題が続かない・速い順に点・まちがいは押せなくなる・CPU どうしで最後まで
+{
+  const A = GAMES.atodashi;
+  const { answerOf } = await import('../app/js/games/atodashi.js');
+  assert.equal(answerOf({ x: 'g', o: 'win' }), 'p', '後出し: グーに勝つのはパー');
+  assert.equal(answerOf({ x: 'g', o: 'lose' }), 'c', '後出し: グーに負けるのはチョキ');
+  assert.equal(answerOf({ x: 'c', o: 'win' }), 'g');
+  assert.equal(answerOf({ x: 'c', o: 'lose' }), 'p');
+  assert.equal(answerOf({ x: 'p', o: 'win' }), 'c');
+  assert.equal(answerOf({ x: 'p', o: 'lose' }), 'g');
+  assert.equal(answerOf({ x: 'p', o: 'draw' }), 'p', '後出し: あいこは同じ手');
+  let draws = 0;
+  for (let seed = 0; seed < 30; seed++) {
+    const a = A.init(2, seed, { rules: {} }), b = A.init(2, seed, { rules: { draw: true } });
+    assert.equal(a.qs.length, 10);
+    assert.ok(a.qs.every((q) => q.o !== 'draw'), '後出し: あいこなしでは「あいこにしろ」は出ない');
+    assert.ok(a.qs.every((q, i) => i === 0 || q.x !== a.qs[i - 1].x || q.o !== a.qs[i - 1].o), '後出し: 同じ問題が2問続かない');
+    draws += b.qs.filter((q) => q.o === 'draw').length;
+  }
+  assert.ok(draws > 50, '後出し: あいこありでは「あいこにしろ」が出る');
+  let s = A.apply(A.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  const ans = answerOf(s.qs[0]);
+  const ng = ['g', 'c', 'p'].find((h) => h !== ans);
+  s = A.apply(s, { p: 0, t: 'ans', q: 0, h: ng, ms: 300 });
+  assert.equal(A.apply(s, { p: 0, t: 'ans', q: 0, h: ans, ms: 400 }), null, '後出し: まちがえたらその問題はもう押せない');
+  s = A.apply(s, { p: 1, t: 'ans', q: 0, h: ans, ms: 900 });
+  s = A.apply(s, { p: 2, t: 'ans', q: 0, h: ans, ms: 700 });
+  s = A.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [0, 2, 3], '後出し: 速い順に3・2点、まちがいは0点（減らない）');
+  assert.equal(A.apply(A.apply(A.init(2, 4, { rules: {} }), { p: -1, t: 'next' }), { p: 0, t: 'ans', q: 0, h: 'g', ms: 4400 }), null, '後出し: 4秒を過ぎた手は弾く');
+  for (const rules of [{}, { draw: true }]) {
+    const st = runCpus(A, 5, 8, rules, 100, 5000);
+    assert.ok(A.result(st) && st.scores.some((v) => v > 0), `後出し: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('atodashi OK');
+}
+
+// じゃんけん階段: 勝った手の人が全員進む・グー3段・チョキとパー6段・あいこ・ゴールと順位・CPU どうしで最後まで
+{
+  const K = GAMES.kaidan;
+  const pick = (s, hands) => hands.reduce((x, v, p) => K.apply(x, { p, t: 'pick', r: x.r, v }), s);
+  let s = K.init(3, 1, { rules: {} });
+  assert.equal(K.apply(s, { p: 0, t: 'pick', r: 2, v: 'g' }), null, '階段: ちがう回の手は弾く');
+  s = pick(s, ['g', 'g', 'c']);
+  assert.deepEqual(s.pos, [3, 3, 0], '階段: グーで勝った2人が3段');
+  assert.equal(K.apply(K.apply(s, { p: 0, t: 'pick', r: s.r, v: 'p' }), { p: 0, t: 'pick', r: s.r, v: 'p' }), null, '階段: 同じ回に2回は選べない');
+  s = pick(s, ['g', 'c', 'p']);
+  assert.deepEqual(s.pos, [3, 3, 0], '階段: 3種類ならあいこ');
+  assert.equal(s.last.win, null);
+  s = pick(s, ['c', 'p', 'p']);
+  assert.deepEqual(s.pos, [9, 3, 0], '階段: チョキで勝ったら6段');
+  s = pick(s, ['g', 'p', 'g']);
+  assert.deepEqual(s.pos, [9, 9, 0], '階段: パーで勝ったら6段');
+  // ゴール: ちょうどでなくてよい・同じ回なら同じ1位・ほかは段の順
+  let g = { ...K.init(3, 1, { rules: { goal: 20 } }), pos: [17, 18, 5] };
+  g = pick(g, ['c', 'c', 'p']);
+  assert.ok(K.result(g), '階段: ちょうどでなくてもゴール');
+  assert.deepEqual(K.result(g).winners, [0, 1], '階段: 同じ回なら同時に1位');
+  assert.deepEqual(K.result(g).place, [1, 1, 3]);
+  for (const rules of [{}, { goal: 20 }, { goal: 50 }]) {
+    for (let seed = 0; seed < 4; seed++) assert.ok(K.result(runCpus(K, 4, seed, rules, 100, 5000)), `階段: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('kaidan OK');
+}
+
+// 椅子取りゲーム: いちばん遅い人が抜ける・同じ速さはやり直し・押さなかった人が抜ける・止まる時刻は種で決まる・順位・CPU どうしで最後まで
+{
+  const I = GAMES.isutori;
+  const { timing } = await import('../app/js/games/isutori.js');
+  for (let seed = 0; seed < 30; seed++) {
+    const s = I.init(4, seed);
+    const t = timing(s);
+    assert.ok(t.wait >= 3000 && t.wait <= 8000, '椅子取り: 止まるのは3〜8秒後');
+    assert.deepEqual(timing(s), t, '椅子取り: 同じ種と回なら同じ時刻');
+  }
+  let s = I.init(4, 3);
+  assert.equal(I.apply(s, { p: 0, t: 'sit', r: 1, ms: 50 }), null, '椅子取り: 0.1秒より速いのは弾く');
+  for (const [p, ms] of [[0, 300], [1, 500], [2, 900]]) s = I.apply(s, { p, t: 'sit', r: 1, ms });
+  assert.equal(I.apply(s, { p: 0, t: 'sit', r: 1, ms: 400 }), null, '椅子取り: 同じ回に2回は押せない');
+  s = I.apply(s, { p: 3, t: 'sit', r: 1, ms: 700 });
+  assert.deepEqual(s.last.out, [2], '椅子取り: いちばん遅い人が抜ける');
+  assert.equal(s.r, 2);
+  for (const [p, ms] of [[0, 300], [1, 600], [3, 600]]) s = I.apply(s, { p, t: 'sit', r: 2, ms });
+  assert.ok(s.last.redo, '椅子取り: いちばん遅いのが同じ速さならやり直し');
+  assert.deepEqual(s.alive, [true, true, false, true]);
+  s = I.apply(s, { p: 0, t: 'sit', r: 3, ms: 300 });
+  s = I.apply(s, { p: -1, t: 'close', r: 3 });
+  assert.deepEqual(s.last.out, [1, 3], '椅子取り: 押さなかった人は抜ける');
+  assert.equal(s.phase, 'end');
+  assert.deepEqual(I.result(s).winners, [0]);
+  assert.deepEqual(I.result(s).place, [1, 2, 4, 2], '椅子取り: 抜けた回の遅い順に下の順位');
+  for (let seed = 0; seed < 4; seed++) {
+    const st = runCpus(I, 6, seed, {}, 50, 20000);
+    assert.ok(I.result(st) && I.result(st).winners.length === 1, '椅子取り: CPU どうしで最後まで');
+  }
+  console.log('isutori OK');
+}
+
+// 立体四目並べ: 並びは76本・下から積む・縦／段をまたぐ斜めで勝ち・満杯の柱には積めない・CPU が打てる
+{
+  const Q = GAMES.cube4;
+  const { LINES } = await import('../app/js/games/cube4.js');
+  assert.equal(LINES.length, 76, '立体四目: 4つ並びは76本');
+  assert.equal(new Set(LINES.map((l) => l.slice().sort((a, b) => a - b).join())).size, 76, '立体四目: 同じ並びを2回数えない');
+  const playQ = (moves) => moves.reduce((x, m) => { const y = Q.apply(x, m); assert.ok(y, 'illegal ' + m); return y; }, Q.init());
+  let s = playQ([0, 1, 0, 1, 0, 1]);
+  assert.equal(s.grid[32], 0, '立体四目: 下から積む');
+  s = Q.apply(s, 0);
+  assert.equal(Q.result(s).winner, 0, '立体四目: 1本の柱に4つで勝ち');
+  assert.equal(Q.apply(s, 2), null, '決着後は打てない');
+  // 段をまたぐ斜め: 柱 0,5,10,15 の 1〜4段目（0 + 0段, 5 + 1段, 10 + 2段, 15 + 3段）
+  // 赤（先手）: 柱0の1段目・柱5の2段目・柱10の3段目・柱15の4段目。1・2・3 は間を埋める手
+  s = playQ([0, 5, 5, 10, 1, 10, 10, 15, 15, 15, 2, 3]);
+  const red = [0, 16 + 5, 32 + 10, 48 + 15];
+  assert.deepEqual(red.map((i) => s.grid[i]), [0, 0, 0, null]);
+  assert.equal(Q.result(s), null);
+  s = Q.apply(s, 15);
+  assert.equal(Q.result(s).winner, 0, '立体四目: 段をまたぐ斜めで勝ち');
+  assert.deepEqual(Q.result(s).cells.slice().sort((a, b) => a - b), red);
+  const full = playQ([3, 3, 3, 3]);
+  assert.equal(Q.apply(full, 3), null, '立体四目: 4段積んだ柱には積めない');
+  for (const cpu of ['weak', 'normal', 'strong']) {
+    let x = Q.init();
+    for (let k = 0; k < 64 && !Q.result(x); k++) x = Q.apply(x, Q.cpu(x, x.turn, { cpu }));
+    assert.ok(Q.result(x), `立体四目: CPU（${cpu}）どうしで最後まで`);
+  }
+  console.log('cube4 OK');
+}
+
+// ボウリング: 点の数え方（パーフェクト300・オールスペア・9本ずつ）・投げる順・ピンの数・5フレーム・CPU どうしで最後まで
+{
+  const B = GAMES.bowling;
+  const { totalsOf, simulate } = await import('../app/js/games/bowling.js');
+  assert.equal(totalsOf([[10], [10], [10], [10], [10], [10], [10], [10], [10], [10, 10, 10]], 10)[9], 300, 'ボウリング: パーフェクトは300');
+  assert.equal(totalsOf(Array.from({ length: 9 }, () => [5, 5]).concat([[5, 5, 5]]), 10)[9], 150, 'ボウリング: オール5スペアは150');
+  assert.equal(totalsOf(Array.from({ length: 10 }, () => [9, 0]), 10)[9], 90);
+  assert.deepEqual(totalsOf([[10], [3, 4]], 10).slice(0, 2), [17, 24], 'ボウリング: ストライクは次の2投を足す');
+  assert.deepEqual(totalsOf([[10], [3]], 10).slice(0, 2), [null, null], 'ボウリング: ボーナス待ちは決まらない');
+  assert.deepEqual(totalsOf([[7, 3], [4, 2]], 10).slice(0, 2), [14, 20], 'ボウリング: スペアは次の1投を足す');
+  let s = B.init(2, 1, { rules: {} });
+  const all = [...Array(10).keys()];
+  assert.equal(B.apply(s, { p: 0, t: 'roll', f: 0, b: 1, k: [] }), null, 'ボウリング: 投げる順がちがう手は弾く');
+  assert.equal(B.apply(s, { p: 0, t: 'roll', f: 0, b: 0, k: [1, 1] }), null, 'ボウリング: 同じピンを2回は倒せない');
+  s = B.apply(s, { p: 0, t: 'roll', f: 0, b: 0, k: [0, 1, 2] });
+  assert.equal(B.apply(s, { p: 0, t: 'roll', f: 0, b: 1, k: [0] }), null, 'ボウリング: 倒れたピンはもう倒せない');
+  assert.equal(B.apply(s, { p: 0, t: 'roll', f: 0, b: 0, k: [3] }), null, 'ボウリング: 同じ手が2回届いても2回目は弾く');
+  s = B.apply(s, { p: 0, t: 'roll', f: 0, b: 1, k: [3, 4] });
+  assert.equal(s.pl[0].f, 1, 'ボウリング: 2投で次のフレーム');
+  assert.equal(s.pl[0].standing, 0x3ff);
+  s = B.apply(s, { p: 0, t: 'roll', f: 1, b: 0, k: all });
+  assert.equal(s.pl[0].f, 2, 'ボウリング: ストライクなら1投で次のフレーム');
+  assert.equal(s.pl[1].f, 0, 'ボウリング: ほかの人はそれぞれ投げる');
+  // 5フレーム: 最後のフレームでストライクなら並べ直して3投
+  let f5 = B.init(1, 2, { rules: { frames: 5 } });
+  for (let f = 0; f < 4; f++) f5 = B.apply(f5, { p: 0, t: 'roll', f, b: 0, k: all });
+  f5 = B.apply(f5, { p: 0, t: 'roll', f: 4, b: 0, k: all });
+  assert.equal(f5.pl[0].standing, 0x3ff, 'ボウリング: 最後のストライクは並べ直す');
+  f5 = B.apply(f5, { p: 0, t: 'roll', f: 4, b: 1, k: [0, 1] });
+  assert.ok(!f5.pl[0].done);
+  f5 = B.apply(f5, { p: 0, t: 'roll', f: 4, b: 2, k: [2] });
+  assert.ok(f5.pl[0].done && B.result(f5), 'ボウリング: 5フレームで終わる');
+  assert.equal(B.result(f5).scores[0], 30 + 30 + 30 + 22 + 13, 'ボウリング: 5フレームの点');
+  // 物の動き: まっすぐ真ん中は何本か倒れる・端すぎるとガター
+  const cnt = (m) => all.filter((i) => m & (1 << i)).length;
+  assert.ok(cnt(simulate(0x3ff, 0.5, 0, -2.5).down) >= 5, 'ボウリング: 真ん中に投げれば倒れる');
+  const gut = simulate(0x3ff, 0.2, -0.6, -2);
+  assert.ok(gut.gutter && cnt(gut.down) === 0, 'ボウリング: 外へ投げたらガター');
+  assert.equal(simulate(0b1, 0.8, 0, -2.5).down & ~0b1, 0, 'ボウリング: 立っていないピンは倒れたと数えない');
+  for (const rules of [{}, { frames: 5 }]) {
+    const st = runCpus(B, 4, 3, rules, 100, 3000);
+    const res = B.result(st);
+    assert.ok(res && res.scores.every((v) => v >= 0 && v <= 300), `ボウリング: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('bowling OK');
+}
+
+// 綱引き連打: 綱の位置・端まで来たらその場で終わり・30秒の終わりは寄っている方・一度に増やせる数・CPU どうしで最後まで
+{
+  const N = GAMES.tsuna;
+  const { ropeOf } = await import('../app/js/games/tsuna.js');
+  assert.equal(ropeOf(2, [10, 10]), 0);
+  assert.equal(ropeOf(2, [20, 10]), 0.5, '綱引き: 1対1は差20で端');
+  assert.equal(ropeOf(4, [20, 0, 20, 0]), 1, '綱引き: 2対2は差40で端');
+  let s = N.apply(N.init(2, 1), { p: -1, t: 'go' });
+  assert.equal(N.apply(s, { p: 0, t: 'tap', n: 41 }), null, '綱引き: 一度に41回は弾く');
+  s = N.apply(s, { p: 0, t: 'tap', n: 15 });
+  assert.equal(N.apply(s, { p: 0, t: 'tap', n: 15 }), null, '綱引き: 同じ合計が2回届いても2回目は弾く');
+  s = N.apply(s, { p: 1, t: 'tap', n: 5 });
+  s = N.apply(s, { p: -1, t: 'end' });
+  assert.deepEqual(N.result(s).winners, [0], '綱引き: 時間切れは寄っている方の勝ち');
+  let e = N.apply(N.init(2, 1), { p: -1, t: 'go' });
+  e = N.apply(e, { p: 1, t: 'tap', n: 20 });
+  assert.equal(e.phase, 'end', '綱引き: 端まで来たらその場で終わり');
+  assert.deepEqual(N.result(e).winners, [1]);
+  assert.ok(N.result({ ...N.init(2, 1), phase: 'end', pos: 0 }).draw, '綱引き: 真ん中ちょうどは引き分け');
+  for (let seed = 0; seed < 3; seed++) assert.ok(N.result(runCpus(N, 4, seed, {}, 100, 1000)), '綱引き: CPU どうしで最後まで');
+  console.log('tsuna OK');
+}
+
 console.log('ALL OK');
