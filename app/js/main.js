@@ -1413,8 +1413,14 @@ function render() {
   if (!S) return;
   const body = document.body;
   body.style.minHeight = document.documentElement.scrollHeight + 'px';
+  // 横に送れる名前の札（party.js の scoreChips の steady）は作り直されるので、送った位置を描き直しの前に覚えて後で戻す（並んでいる順で対応させる）
+  const chipsX = [...document.querySelectorAll('.cc-steady')].map((x) => x.scrollLeft);
   S.myTurnNow = false;
-  try { renderPage(); } finally { body.style.minHeight = ''; setTurnTitle(S?.myTurnNow); }
+  try { renderPage(); } finally {
+    body.style.minHeight = '';
+    setTurnTitle(S?.myTurnNow);
+    if (chipsX.some((x) => x > 0)) document.querySelectorAll('.cc-steady').forEach((x, i) => { if (chipsX[i]) x.scrollLeft = chipsX[i]; });
+  }
 }
 
 /* ---------- 番が来たらタブの名前で知らせる（2026-10-07。10回目の案。Claude の案から本人が推奨どおり選んだ） ---------- */
@@ -3404,6 +3410,9 @@ function onConn(status) {
     S.pingAt = null;
     send({ type: 'hello', isHost: S.isHost, name: myName(), beg: beginner, mark: myMark(), dev: myDev() });
     if (S.isHost) { setBeg(S.myId, beginner); setMark(S.myId, myMark()); sendState(); }
+    // ゲストは手の一覧も送り直す。裏から戻ってつなぎ方を作り直すと、まだ届いていなかった手は古いつなぎ方と一緒に捨てられるため
+    // （ホストが食い違いを見て手を足し直す。ホストのほうが正しければ state が返ってきて合わせる）
+    else if (S.order && S.moves.length) sendMoves();
   }
   render();
 }

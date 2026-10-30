@@ -372,13 +372,17 @@ export default {
           let down = null;
           svg.addEventListener('pointerdown', (e) => {
             if (e.isPrimary === false) { down = null; return; } // 2本目の指（拡大しようとした）は押したことにしない
-            down = { id: e.pointerId, cx: e.clientX, cy: e.clientY, ms: since(playKey(ui.cur.s)), rect: svg.getBoundingClientRect() };
+            down = { id: e.pointerId, cx: e.clientX, cy: e.clientY, far: 0, ms: since(playKey(ui.cur.s)), rect: svg.getBoundingClientRect() };
+          });
+          // 途中で一番遠くまで動いた距離も見る（なぞって元の所へ戻してから離したのを押したことにしない）
+          svg.addEventListener('pointermove', (e) => {
+            if (down && down.id === e.pointerId) down.far = Math.max(down.far, Math.hypot(e.clientX - down.cx, e.clientY - down.cy));
           });
           svg.addEventListener('pointercancel', () => { down = null; }); // ブラウザが画面を動かし始めた
           svg.addEventListener('pointerup', (e) => {
             const d = down;
             down = null;
-            if (!d || d.id !== e.pointerId || Math.hypot(e.clientX - d.cx, e.clientY - d.cy) > TAP_MOVE) return;
+            if (!d || d.id !== e.pointerId || Math.max(d.far, Math.hypot(e.clientX - d.cx, e.clientY - d.cy)) > TAP_MOVE) return;
             const { s: cur, o: co } = ui.cur;
             if (me === null || cur.phase !== 'play' || !co.canMove || cur.r !== s.r) return;
             const rect = d.rect;
