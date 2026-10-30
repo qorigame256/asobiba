@@ -13,6 +13,11 @@
 //   - CPU は物の動きを計算せず、腕前の見込みで倒すピンを決める（1投目は8%がストライク、ほかは4〜9本。2投目は25%で残りを全部。
 //     4000ゲームの試算で平均107点（真ん中の8割が88〜128点）。物の動きで真ん中あたりを適当に狙う人のまねは平均106点だった）。
 //     1投ごとに3.2〜5秒あけて投げる（人と同じくらいの速さで進むように。ブラウザで試したら、人は1投に4〜5秒かかった）。
+// 詳細設定（2026-10-30 の31回目の案。本人が選んだ。分かれ目は Claude の判断）:
+//   - ガードレール（bumper）: レーンの両わきに壁が立ち、玉はガターに落ちずに跳ね返る（横の速さを7割にして向きを返す）。ピンは壁に当たらない。
+//     CPU は物の動きを計算しないので、ガードレールでも腕前は変えない（もともとガターを出さない）。
+//   - 向きの線（guide）: なでている間、玉がそのまま進む道を点線で見せる（ピンに当たったあとの動きは見せない。ガードレールでは壁で折り返す。
+//     ガードレールなしでは、レーンの端に着いた所で止める）。向きは離したときと同じく左右25°までに収める。
 // 手: { p, t: 'roll', f: 何フレーム目（0 から）, b: そのフレームの何投目（0 から）, k: 倒したピンの番号の一覧 }
 //   f と b が局面のその人の今と同じときだけ受け付けるので、同じ手が2回届いても2回目は反則になる。
 // ピンの番号: 0 が一番手前（ヘッドピン）、1〜2 が2列目、3〜5 が3列目、6〜9 が一番奥（左から）。
@@ -97,7 +102,7 @@ function marks(fr, i, F) {
 /* ---------- 物の動き（投げた人の端末だけで計算する） ---------- */
 
 // 玉を (x, START_Y) から (vx, vy) で投げたとき、立っているピン standing のうち倒れるもの（ビット）と、絵に使う道のりを返す
-export function simulate(standing, x, vx, vy, { record = false } = {}) {
+export function simulate(standing, x, vx, vy, { record = false, bumper = false } = {}) {
   const ball = { x, y: START_Y, vx, vy, gutter: false };
   const pins = PINS.map((p, i) => ({ x: p.x, y: p.y, vx: 0, vy: 0, on: !!(standing & (1 << i)), hit: false }));
   const frames = [];
@@ -107,6 +112,12 @@ export function simulate(standing, x, vx, vy, { record = false } = {}) {
     if (!ball.gutter) {
       ball.x += ball.vx * dt;
       ball.y += ball.vy * dt;
+      // ガードレール: 壁で跳ね返る
+      if (bumper && (ball.x < LANE_L + BALL_R || ball.x > LANE_R - BALL_R)) {
+        const left = ball.x < LANE_L + BALL_R;
+        ball.x = left ? LANE_L + BALL_R : LANE_R - BALL_R;
+        ball.vx = (left ? 1 : -1) * Math.abs(ball.vx) * 0.7;
+      }
       // ピンより手前でレーンから外れたらガター（ピンに当たって跳ねた玉はそのまま奥へ）
       if (ball.y > HEAD_Y + PIN_R + BALL_R && (ball.x < LANE_L + BALL_R * 0.3 || ball.x > LANE_R - BALL_R * 0.3)) {
         ball.gutter = true;
@@ -178,6 +189,11 @@ function drawLane() {
   ctx.fillStyle = '#3d4248';
   ctx.fillRect((LANE_L - 0.1) * k, 0, 0.1 * k, H * k);
   ctx.fillRect(LANE_R * k, 0, 0.1 * k, H * k);
+  if (s.rules.bumper) {
+    ctx.fillStyle = '#f2c94c';
+    ctx.fillRect((LANE_L - 0.03) * k, 0, 0.03 * k, H * k);
+    ctx.fillRect(LANE_R * k, 0, 0.03 * k, H * k);
+  }
   // ファウルラインと目印の三角
   ctx.fillStyle = '#7a2e1a';
   ctx.fillRect(LANE_L * k, FOUL_Y * k, (LANE_R - LANE_L) * k, 0.008 * k);
@@ -228,6 +244,18 @@ function drawLane() {
     ctx.fillStyle = g;
     ctx.fill();
   }
+  // 向きの線（詳細設定）: なでている間、玉がそのまま進む道
+  if (ui.aim && s.rules.guide && ui.aim.y < 0) {
+    ctx.save();
+    ctx.setLineDash([k * 0.02, k * 0.025]);
+    ctx.strokeStyle = 'rgba(255,255,255,.75)';
+    ctx.lineWidth = Math.max(1.5, k * 0.006);
+    ctx.beginPath();
+    ctx.moveTo(ui.ballX * k, ui.ballY * k);
+    for (const [x, y] of guidePath(ui.ballX, ui.ballY, ui.aim, !!s.rules.bumper)) ctx.lineTo(x * k, y * k);
+    ctx.stroke();
+    ctx.restore();
+  }
   // なでている間の矢印
   if (ui.aim) {
     ctx.strokeStyle = 'rgba(255,255,255,.8)';
@@ -262,6 +290,27 @@ function drawLane() {
     ctx.font = `${Math.max(11, k * 0.035)}px sans-serif`;
     ctx.fillText('玉を押して、前へなでて離す', k / 2, (H - 0.03) * k);
   }
+}
+
+// 向きの線の折れ目（玉の真ん中の通り道。いちばん奥のピンの少し先まで）
+function guidePath(x, y, aim, bumper) {
+  const ang = clamp(Math.atan2(aim.x, -aim.y), -MAX_ANGLE, MAX_ANGLE);
+  let dx = Math.sin(ang);
+  const dy = -Math.cos(ang);
+  const lo = LANE_L + BALL_R, hi = LANE_R - BALL_R;
+  const endY = PINS[6].y - 0.08;
+  const pts = [];
+  for (let k = 0; k < 6 && y > endY; k++) {
+    // 次に壁へ着く所か、奥の端
+    const tWall = dx > 1e-9 ? (hi - x) / dx : dx < -1e-9 ? (lo - x) / dx : Infinity;
+    const tEnd = (endY - y) / dy;
+    if (tEnd <= tWall) { pts.push([x + dx * tEnd, endY]); break; }
+    x += dx * tWall; y += dy * tWall;
+    pts.push([x, y]);
+    if (!bumper) break;
+    dx = -dx * 0.7; // simulate と同じく横の速さを7割で返す（縦の速さは変えないので、向きが立つ）
+  }
+  return pts;
 }
 
 function loop(token) {
@@ -341,6 +390,8 @@ export default {
   maxPlayers: 6,
   settings: [
     { key: 'frames', label: 'フレーム', desc: '1ゲームのフレームの数（5フレームは短い版）', def: 10, choices: [[10, '10フレーム'], [5, '5フレーム']] },
+    { key: 'bumper', label: 'ガードレール', desc: 'レーンの両わきに壁が立ち、玉がガターに落ちずに跳ね返る', def: false },
+    { key: 'guide', label: '向きの線', desc: 'なでている間、玉がそのまま進む道を点線で見せる', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -490,7 +541,7 @@ export default {
       vy = -Math.cos(ang) * speed;
       const P = cs.pl[ui.me];
       const standing = P.standing;
-      const res = simulate(standing, ui.ballX, vx, vy, { record: true });
+      const res = simulate(standing, ui.ballX, vx, vy, { record: true, bumper: !!cs.rules.bumper });
       ui.sim = { ...res, standing, f: P.f, b: P.frames[P.f]?.length ?? 0, at: performance.now() };
       ui.ballY = START_Y;
       play('draw');

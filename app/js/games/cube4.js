@@ -8,7 +8,11 @@
 //   - 4段の板は小さく並べ、最後に置いた駒と勝ちの並びを光らせる（PC は横1列、スマホの幅では 2×2）。
 //   - CPU は何手先まで読むか（よわい2・ふつう3・つよい4）と、ときどき適当に打つ割合（35%・10%・0%）で強さを変える。
 //   - 64マス全部埋まって並ばなければ引き分け。
-// 手 = 柱の番号（上から見て 列 + 行×4。0〜15）。マスの番号は 段×16 + 柱（段0 が一番下）。
+// 詳細設定「重力なし」（free。2026-10-30 の31回目の案。本人が選んだ。分かれ目は Claude の判断）: どの段のマスにも直接置ける（もとの「立体四目」の遊び方）。
+//   - 上から見た盤は出さず、4段の板を大きくして、板のマスを押して置く。
+//   - 先手がかなり有利になる（完全に読めば先手必勝と知られている）が、もう一回で先手と後手が入れ替わるのでそのまま。
+//   - CPU は打てる所が16から64に増えるので、読む手数を1つずつ減らす（よわい1・ふつう2・つよい3）。ときどき適当に打つ割合は同じ。
+// 手 = 柱の番号（上から見て 列 + 行×4。0〜15）。重力なしではマスの番号（0〜63）。マスの番号は 段×16 + 柱（段0 が一番下）。
 
 import { CPU_SETTING, boardCpu } from './util.js';
 
@@ -46,7 +50,9 @@ const landing = (s, c) => {
 };
 // 打てる柱（真ん中の4本、ふち、角の順。読みは良い手から調べるほど速い）
 const ORDER = [5, 6, 9, 10, 0, 3, 12, 15, 1, 2, 4, 7, 8, 11, 13, 14];
-const legal = (s) => ORDER.filter((c) => s.grid[(N - 1) * COLS + c] === null);
+// 重力なしのマス: 並びの多いマス（角と真ん中の 2×2×2。7本ずつ）を先に
+const FREE_ORDER = [...Array(CELLS).keys()].sort((a, b) => BY_CELL[b].length - BY_CELL[a].length || a - b);
+const legal = (s) => (s.free ? FREE_ORDER.filter((i) => s.grid[i] === null) : ORDER.filter((c) => s.grid[(N - 1) * COLS + c] === null));
 
 // CPU の形勢判断: 窓ごとに、自分の駒だけ3つ・2つなら加点、相手の駒だけ3つ・2つなら減点
 function score(s, p) {
@@ -70,28 +76,33 @@ export default {
   desc: '4×4 の柱に下から積んで、立体のどの向きでも4つ並べたら勝ち',
   ready: true,
   players: ['赤', '黄'],
-  settings: [CPU_SETTING],
+  settings: [
+    CPU_SETTING,
+    { key: 'free', label: '重力なし', desc: '下から積まずに、どの段のマスにも直接置ける', def: false },
+  ],
 
   cpu(s, p, rules) {
     return boardCpu(this, s, rules, legal, score, {
-      depth: { weak: 2, normal: 3, strong: 4 }, mistake: { weak: 0.35, normal: 0.1, strong: 0 },
+      depth: s.free ? { weak: 1, normal: 2, strong: 3 } : { weak: 2, normal: 3, strong: 4 }, mistake: { weak: 0.35, normal: 0.1, strong: 0 },
     });
   },
 
-  init() {
-    return { grid: Array(CELLS).fill(null), turn: 0, last: null, won: null };
+  init({ rules } = {}) {
+    const s = { grid: Array(CELLS).fill(null), turn: 0, last: null, won: null };
+    return rules?.free ? { ...s, free: true } : s;
   },
 
   turn(s) { return s.turn; },
 
-  apply(s, col) {
-    if (!Number.isInteger(col) || col < 0 || col >= COLS || s.won) return null;
-    const i = landing(s, col);
+  apply(s, m) {
+    if (!Number.isInteger(m) || m < 0 || m >= (s.free ? CELLS : COLS) || s.won) return null;
+    const i = s.free ? (s.grid[m] === null ? m : -1) : landing(s, m);
     if (i < 0) return null;
     const grid = s.grid.slice();
     grid[i] = s.turn;
     const line = BY_CELL[i].map((li) => LINES[li]).find((ln) => ln.every((x) => grid[x] === s.turn));
-    return { grid, turn: 1 - s.turn, last: i, won: line ? { winner: s.turn, cells: line } : null };
+    const next = { grid, turn: 1 - s.turn, last: i, won: line ? { winner: s.turn, cells: line } : null };
+    return s.free ? { ...next, free: true } : next;
   },
 
   result(s) {
@@ -104,9 +115,9 @@ export default {
     const res = this.result(s);
     const win = new Set(res?.cells ?? []);
     root.innerHTML = '';
-    root.className = 'board cb';
+    root.className = 'board cb' + (s.free ? ' cb-free' : '');
 
-    // 上から見た盤（押すとその柱に積む）
+    // 上から見た盤（押すとその柱に積む。重力なしでは出さない）
     const top = document.createElement('div');
     top.className = 'cb-top';
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
@@ -131,7 +142,7 @@ export default {
       top.append(b);
     }
 
-    // 4段の板（見るだけ）
+    // 4段の板（重力なしでは押して置く。ふだんは見るだけ）
     const layers = document.createElement('div');
     layers.className = 'cb-layers';
     for (let z = 0; z < N; z++) {
@@ -144,9 +155,17 @@ export default {
       g.className = 'cb-grid';
       for (let c = 0; c < COLS; c++) {
         const i = z * COLS + c;
-        const cell = document.createElement('span');
-        cell.className = 'cb-cell';
         const v = s.grid[i];
+        const cell = document.createElement(s.free ? 'button' : 'span');
+        cell.className = 'cb-cell';
+        if (s.free) {
+          cell.type = 'button';
+          cell.setAttribute('aria-label', `${z + 1}段目 ${Math.floor(c / N) + 1}行${(c % N) + 1}列`);
+          if (o.canMove && v === null) {
+            cell.classList.add('playable', 'p' + s.turn);
+            cell.onclick = () => o.onMove(i);
+          } else cell.tabIndex = -1;
+        }
         if (v !== null) {
           const d = document.createElement('span');
           d.className = 'cb-disc p' + v + (win.has(i) ? ' win' : '') + (i === s.last ? ' last' : '');
@@ -157,6 +176,6 @@ export default {
       box.append(cap, g);
       layers.append(box);
     }
-    root.append(top, layers);
+    if (s.free) root.append(layers); else root.append(top, layers);
   },
 };

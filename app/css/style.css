@@ -2103,6 +2103,13 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .cb-disc.p1 { background: #f4c430; }
 .cb-disc.last::after { content: ""; position: absolute; inset: 32%; border-radius: 50%; background: rgba(255, 255, 255, .6); }
 .cb-disc.win { box-shadow: 0 0 0 2px var(--win); }
+/* 立体四目並べの重力なし: 4段の板を 2×2 で大きく出し、板のマスを押して置く */
+.cb-free .cb-layers { grid-template-columns: repeat(2, 1fr); width: min(100%, 560px); margin: 0 auto; touch-action: manipulation; }
+.cb-free .cb-cap { font-size: .9rem; }
+.cb-free .cb-grid { gap: 3px; }
+.board button.cb-cell { border: 0; padding: 0; cursor: default; background: #dfe7f1; border-radius: 4px; }
+.board button.cb-cell.playable { cursor: pointer; outline: 2px dashed rgba(47, 95, 158, .35); outline-offset: -3px; }
+.board button.cb-cell.playable:hover { background: #fff; }
 /* ボウリング */
 [data-game="bowling"] .board { width: min(100%, 560px); }
 .bw { display: flex; flex-direction: column; gap: 8px; }

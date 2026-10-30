@@ -2,6 +2,7 @@
 // 2026-10-30 本人の決定（Claude が出した案から本人が選んだ。分かれ目はすべて Claude の推奨を本人が承認）:
 //   - 指示は「勝て」「負けろ」の2つ。詳細設定「あいこ」（なし（最初）・あり）で「あいこにしろ」も混ぜる。
 //   - 点は色ちがい早押しと同じ: 10問。正解した速い順に 3・2・1点。まちがえたらその問題はもう押せないが、点は減らない。
+//   - 詳細設定「問題の数」（2026-10-30 の31回目の案。本人が選んだ）: 5問・10問（最初）・20問。選び方は色ちがい早押しと同じ（Claude の判断）。
 // Claude の判断:
 //   - 手のボタンの並びは毎回 グー・チョキ・パー の順（並びが変わると手を探す時間の勝負になるため。色ちがい早押しと同じ考え）。
 //   - 指示は問題ごとに種から選ぶ。あいこありでは3つから同じ見込みで選ぶ。同じ手と指示の組が2問続かないようにする。
@@ -19,7 +20,8 @@ const FACE = { g: '✊', c: '✌️', p: '✋' };
 const HAND_NAME = { g: 'グー', c: 'チョキ', p: 'パー' };
 const BEATS = { g: 'c', c: 'p', p: 'g' }; // 左が右に勝つ
 const ORDER = { win: ['勝て！', '#d9643a'], lose: ['負けろ！', '#2f6fb3'], draw: ['あいこにしろ！', '#2e9a52'] };
-const ROUNDS = 10;
+const ROUNDS = [[5, '5問'], [10, '10問'], [20, '20問']];
+const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 10);
 const LIMIT = 4000;
 const READY_MS = 3000;
 const SHOWN_MS = 2000;
@@ -49,14 +51,16 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'draw', label: 'あいこ', desc: '「あいこにしろ」の指示も混ぜる', def: false },
+    { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 10, choices: ROUNDS },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { draw: false, ...rules };
+    const r = { draw: false, rounds: 10, ...rules };
+    const k = roundsOf(r);
     const rnd = mulberry32(seed);
     const kinds = r.draw ? ['win', 'lose', 'draw'] : ['win', 'lose'];
     const qs = [];
-    while (qs.length < ROUNDS) {
+    while (qs.length < k) {
       const q = { x: HANDS[Math.floor(rnd() * 3)], o: kinds[Math.floor(rnd() * kinds.length)] };
       const prev = qs[qs.length - 1];
       if (prev && prev.x === q.x && prev.o === q.o) continue;

@@ -11,6 +11,8 @@
 //     1つの手で増やせるのは40回まで（作りかえた端末からの細工を少し防ぐ）。時間は各自の端末で「始まりの合図が届いてから」を測る。
 //   - 30秒たったら押せなくなり、ホストは30秒の1.5秒あとに締め切る（遅れて届く手を待つ）。綱が真ん中ちょうどなら引き分け。
 //   - CPU は1秒に4〜6回ほど押す（人が本気で押すより少し遅い）。
+//   - 詳細設定「綱の重さ」（2026-10-30 の31回目の案。本人が選んだ。分かれ目は Claude の判断）: 軽い・ふつう（最初）・重い。上の「×20」を 12・20・32 に変える
+//     （1秒に7回と5回の1対1で、およそ6秒・10秒・16秒で決まる見込み）。30秒の制限はどれも同じ。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready →(3秒)→ go → play →(30秒＋待ち)→ end（途中で端まで来たらそこで end）
 // 手: { p: -1, t: 'go' | 'end' } / { p, t: 'tap', n: その人がこれまでに押した合計 }（n が前より大きいときだけ受け付ける）
 
@@ -20,7 +22,8 @@ const READY_MS = 3000;
 const PLAY_MS = 30000;
 const GRACE_MS = 1500;
 const SEND_MS = 400;
-const PER_HEAD = 20; // 1チームの1人あたり、端まで引くのに要る連打の差
+const WEIGHTS = { light: 12, normal: 20, heavy: 32 }; // 1チームの1人あたり、端まで引くのに要る連打の差
+const perOf = (s) => WEIGHTS[s.rules?.weight] ?? WEIGHTS.normal;
 const MAX_STEP = 40;
 export const TEAM = ['赤', '白'];
 const teamOf = (p) => p % 2;
@@ -28,10 +31,10 @@ const goKey = (s) => `tsuna:${s.seed}:go`;
 const clone = (s) => ({ ...s, taps: s.taps.slice() });
 const headOf = (n) => Math.max(1, Math.floor(n / 2));
 // 綱の位置（−1〜1。正が赤の側）。taps を差し替えて画面の見込みにも使う
-export function ropeOf(n, taps) {
+export function ropeOf(n, taps, per = WEIGHTS.normal) {
   let d = 0;
   taps.forEach((v, p) => { d += teamOf(p) === 0 ? v : -v; });
-  return Math.max(-1, Math.min(1, d / (headOf(n) * PER_HEAD)));
+  return Math.max(-1, Math.min(1, d / (headOf(n) * per)));
 }
 export const teamTaps = (taps) => [0, 1].map((t) => taps.reduce((a, v, p) => a + (teamOf(p) === t ? v : 0), 0));
 
@@ -64,7 +67,7 @@ function draw() {
   const { s } = ui.cur;
   const taps = s.taps.slice();
   if (ui.me !== null && s.phase === 'play') taps[ui.me] = Math.max(taps[ui.me], ui.count);
-  const x = s.phase === 'end' ? s.pos : ropeOf(s.n, taps);
+  const x = s.phase === 'end' ? s.pos : ropeOf(s.n, taps, perOf(s));
   // 綱の印は x = 1 で左の端（赤の側）へ
   ui.flag.style.left = `${50 - x * 45}%`;
   ui.rope.style.transform = `translateX(${-x * 45}%)`;
@@ -108,9 +111,13 @@ export default {
   evenTeams: true,
   minPlayers: 2,
   maxPlayers: 10,
+  settings: [
+    { key: 'weight', label: '綱の重さ', desc: '重いほど、端まで引くのにたくさん連打が要る（長い勝負になる）', def: 'normal',
+      choices: [['light', '軽い'], ['normal', 'ふつう'], ['heavy', '重い']] },
+  ],
 
-  init(n, seed) {
-    return { n, seed, phase: 'ready', taps: Array(n).fill(0), pos: 0, step: 0 };
+  init(n, seed, { rules = {} } = {}) {
+    return { n, seed, rules: { weight: 'normal', ...rules }, phase: 'ready', taps: Array(n).fill(0), pos: 0, step: 0 };
   },
 
   turn() { return null; },
@@ -148,7 +155,7 @@ export default {
         const s = clone(s0);
         s.step += 1;
         s.phase = m.t === 'go' ? 'play' : 'end';
-        if (s.phase === 'end') s.pos = ropeOf(s.n, s.taps);
+        if (s.phase === 'end') s.pos = ropeOf(s.n, s.taps, perOf(s));
         return s;
       }
       return null;
@@ -158,7 +165,7 @@ export default {
     const s = clone(s0);
     s.step += 1;
     s.taps[m.p] = m.n;
-    const x = ropeOf(s.n, s.taps);
+    const x = ropeOf(s.n, s.taps, perOf(s));
     if (Math.abs(x) >= 1) { s.phase = 'end'; s.pos = x; }
     return s;
   },

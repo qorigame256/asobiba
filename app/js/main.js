@@ -762,7 +762,8 @@ function rulesOf(gameId, rules) {
 // 弾幕回避の残機・ウミガメの質問の数・2色爆弾と記憶リレーのライフも抽選する（2026-10-10 本人承認）。
 // マルバツ・将棋の size は盤の大きさでなく遊び方（スーパー・消える・5五将棋）なので抽選する。
 // ビンゴの終わり方（until。長さ）・ことわざかるたの場の札の数（field。難しさ）も抽選しない（2026-10-29 の Codex の点検。本人承認）。
-const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'safe', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check', 'mallet', 'stones', 'diffs', 'kind', 'tries', 'until', 'field', 'frames']);
+// 綱引き連打の綱の重さ（weight。長さ）・ボウリングのガードレール（bumper。ハンデ）と向きの線（guide。手助け）も抽選しない。立体四目並べの重力なし（free）は遊び方なので抽選する（31回目の案。Claude の判断）。
+const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'safe', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check', 'mallet', 'stones', 'diffs', 'kind', 'tries', 'until', 'field', 'frames', 'weight', 'bumper', 'guide']);
 const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
 
 // 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、エアホッケーは 2〜3。ほかは2）
