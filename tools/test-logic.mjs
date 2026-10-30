@@ -7235,6 +7235,90 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('cube4 OK');
 }
 
+// 3人の五目並べ・立体四目並べ・はさみ将棋（2026-10-30 本人の決定）
+{
+  const GM = GAMES.gomoku;
+  const Q = GAMES.cube4;
+  const HS = GAMES.hasami;
+  for (const g of [GM, Q, HS]) {
+    assert.equal(g.seatCount({}), 2, g.id + ': 最初は2人');
+    assert.equal(g.seatCount({ players: 3 }), 3, g.id + ': 3人も選べる');
+  }
+  const play = (g, x, moves) => moves.reduce((y, m) => { const z = g.apply(y, m); assert.ok(z, g.id + ' illegal ' + m); return z; }, x);
+  // 五目並べ: 黒・白・赤の順・4つで勝ち・禁じ手は切る・はさみ取りは同じ人の石2つだけ
+  const at = (r, c) => r * 15 + c;
+  let s = GM.init({ rules: { players: 3, renju: true } });
+  assert.equal(s.renju, false, '3人の五目並べは禁じ手を使わない');
+  s = play(GM, s, [at(7, 3), at(8, 3), at(9, 3), at(7, 4), at(8, 4), at(9, 4), at(7, 5), at(8, 5), at(9, 5)]);
+  assert.equal(s.turn, 0, '3人の五目並べ: 黒・白・赤で順番が回る');
+  assert.equal(GM.result(s), null, '3人の五目並べ: 3つではまだ');
+  s = GM.apply(s, at(7, 6));
+  assert.equal(GM.result(s).winner, 0, '3人の五目並べ: 4つ並べで勝ち');
+  assert.equal(GM.result(s).cells.length, 4);
+  s = play(GM, GM.init({ rules: { players: 3, capture: true } }), [at(0, 0), at(0, 1), at(5, 5), at(10, 10), at(0, 2), at(5, 8), at(0, 3)]);
+  assert.deepEqual([s.grid[1], s.grid[2], s.caps], [null, null, [1, 0, 0]], '3人のはさみ取り: 白の2つを黒ではさむと取れる');
+  s = play(GM, GM.init({ rules: { players: 3, capture: true } }), [at(0, 0), at(0, 1), at(0, 2), at(0, 3)]);
+  assert.deepEqual([s.grid[1], s.grid[2], s.caps], [1, 2, [0, 0, 0]], '3人のはさみ取り: 白と赤が1つずつなら取れない');
+  for (const cpu of ['weak', 'normal', 'strong']) {
+    let x = GM.init({ rules: { players: 3, size: 13 } });
+    for (let k = 0; k < 169 && !GM.result(x); k++) x = play(GM, x, [GM.cpu(x, x.turn, { cpu })]);
+    assert.ok(GM.result(x), `3人の五目並べ: CPU（${cpu}）どうしで最後まで`);
+  }
+
+  // 立体四目並べ: 赤・黄・緑の順・4つで勝ち・CPU どうしで最後まで（重力なしも）
+  let q = play(Q, Q.init({ rules: { players: 3 } }), [0, 1, 2, 0, 1, 2, 0, 1, 2]);
+  assert.equal(q.turn, 0, '3人の立体四目: 赤・黄・緑で順番が回る');
+  assert.equal(Q.result(q), null);
+  q = Q.apply(q, 0);
+  assert.equal(Q.result(q).winner, 0, '3人の立体四目: 柱に4つで勝ち');
+  for (const free of [false, true]) for (const cpu of ['weak', 'normal', 'strong']) {
+    let x = Q.init({ rules: { players: 3, free } });
+    for (let k = 0; k < 64 && !Q.result(x); k++) x = play(Q, x, [Q.cpu(x, x.turn, { cpu, free })]);
+    assert.ok(Q.result(x), `3人の立体四目: CPU（${cpu}・重力なし ${free}）どうしで最後まで`);
+  }
+
+  // はさみ将棋: 並べ方・順番・混ざった列をまとめて取る・全部取られたら脱落・動けなければ脱落・最後に残った人の勝ちと順位
+  const N = 9;
+  const C = N * N;
+  const sq = (r, c) => r * N + c;
+  let h = HS.init({ rules: { players: 3 } });
+  assert.deepEqual([0, 1, 2].map((p) => h.board.filter((v) => v === p).length), [7, 7, 7], '3人のはさみ将棋: 7個ずつ');
+  assert.deepEqual([sq(0, 0), sq(0, 8), sq(8, 0), sq(8, 8)].map((i) => h.board[i]), [null, null, null, null], '3人のはさみ将棋: 角は空き');
+  assert.ok(h.board.slice(0, N).every((v) => v === null), '3人のはさみ将棋: 上の辺は空き');
+  assert.deepEqual([h.board[sq(8, 4)], h.board[sq(4, 8)], h.board[sq(4, 0)]], [0, 1, 2], '3人のはさみ将棋: 下・右・左');
+  h = play(HS, h, [sq(8, 4) * C + sq(5, 4)]);
+  assert.equal(h.turn, 1, '3人のはさみ将棋: 下の次は右');
+  h = play(HS, h, [sq(4, 8) * C + sq(4, 6)]);
+  assert.equal(h.turn, 2, '3人のはさみ将棋: 右の次は左');
+  const custom = (cells, extra = {}) => {
+    const board = Array(C).fill(null);
+    for (const [i, v] of cells) board[i] = v;
+    return { ...HS.init({ rules: { players: 3 } }), board, ...extra };
+  };
+  // 歩が (4,2) にいて、と (4,3)・金 (4,4) の並びを、(6,5) から (4,5) へ動いてはさむ
+  h = HS.apply(custom([[sq(4, 2), 0], [sq(4, 3), 1], [sq(4, 4), 2], [sq(6, 5), 0], [sq(0, 3), 1], [sq(0, 6), 2]]), sq(6, 5) * C + sq(4, 5));
+  assert.deepEqual([h.board[sq(4, 3)], h.board[sq(4, 4)], h.taken], [null, null, [2, 0, 0]], '3人のはさみ将棋: ほかの2人の駒が混ざった列もまとめて取れる');
+  // と の駒が1つだけで、それを取ると と は脱落し、番は金へ
+  h = HS.apply(custom([[sq(4, 2), 0], [sq(4, 3), 1], [sq(6, 4), 0], [sq(0, 6), 2], [sq(1, 6), 2]]), sq(6, 4) * C + sq(4, 4));
+  assert.deepEqual([h.alive, h.out, h.turn, h.won], [[true, false, true], [{ p: 1, why: 'gone' }], 2, null], '3人のはさみ将棋: 全部取られたら脱落');
+  // 最後まで残った人の勝ち（全部の設定）: 金の最後の1つを取る
+  h = HS.apply({ ...h, turn: 0, board: (() => { const b = Array(C).fill(null); b[sq(4, 2)] = 0; b[sq(4, 3)] = 2; b[sq(6, 4)] = 0; return b; })() }, sq(6, 4) * C + sq(4, 4));
+  assert.equal(HS.result(h).winner, 0, '3人のはさみ将棋: 最後に残った人の勝ち');
+  assert.deepEqual(HS.result(h).place, [1, 3, 2], '3人のはさみ将棋: 先に脱落した と が3位・あとで脱落した金が2位');
+  // と が隅で金に囲まれて動けない → 歩が動いたあと、と は脱落して番は金へ
+  h = HS.apply(custom([[sq(0, 0), 1], [sq(0, 1), 2], [sq(1, 0), 2], [sq(8, 4), 0]]), sq(8, 4) * C + sq(7, 4));
+  assert.deepEqual([h.alive, h.out, h.turn], [[true, false, true], [{ p: 1, why: 'stuck' }], 2], '3人のはさみ将棋: 動かせる駒が無い人は脱落');
+  // 決めた個数を取ったら勝ち
+  h = HS.apply(custom([[sq(4, 2), 0], [sq(4, 3), 1], [sq(6, 4), 0], [sq(0, 3), 1], [sq(0, 6), 2]], { taken: [4, 0, 0] }), sq(6, 4) * C + sq(4, 4));
+  assert.equal(HS.result(h).winner, 0, '3人のはさみ将棋: 5個取ったら勝ち');
+  for (const rules of [{ players: 3 }, { players: 3, size: 7 }, { players: 3, goal: 'all' }]) for (const cpu of ['weak', 'normal', 'strong']) {
+    let x = HS.init({ rules });
+    for (let k = 0; k < 500 && !HS.result(x); k++) x = play(HS, x, [HS.cpu(x, x.turn, { ...rules, cpu })]);
+    assert.ok(HS.result(x), `3人のはさみ将棋: CPU（${cpu}・${JSON.stringify(rules)}）どうしで最後まで`);
+  }
+  console.log('3人の五目並べ・立体四目並べ・はさみ将棋 OK');
+}
+
 // ボウリング: 点の数え方（パーフェクト300・オールスペア・9本ずつ）・投げる順・ピンの数・5フレーム・CPU どうしで最後まで
 {
   const B = GAMES.bowling;

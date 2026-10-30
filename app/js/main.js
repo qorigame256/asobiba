@@ -7,7 +7,7 @@
 // 部屋: members = いま部屋にいる人の id（先頭がホスト）。人数の上限は MAX_MEMBERS。names = id → 表示名。
 // 対局の参加者（ゲームの中のプレイヤー番号 → 人の id）:
 //   盤のゲーム: 待合室でホストが先手と後手を選ぶ（pick。人か 'cpu'）。もう一回では先手と後手を入れ替える。
-//     席は2つ。詳細設定で人数が決まるゲーム（seatCount を持つマルバツ・コネクトフォー・リバーシ・点と線・将棋・マンカラ・エアホッケー）は人数ぶん選び、もう一回では打つ順番を1つずつ回す。
+//     席は2つ。詳細設定で人数が決まるゲーム（seatCount を持つマルバツ・コネクトフォー・リバーシ・点と線・将棋・マンカラ・海戦ゲーム・五目並べ・立体四目並べ・はさみ将棋・エアホッケー）は人数ぶん選び、もう一回では打つ順番を1つずつ回す。
 //     ほかの人は観戦。手には p を付けない（どちらの番かは局面で決まる）。
 //   カードゲーム（multi）: 対局を始めるときにホストが order を決める。
 //   オンラインでは、どちらも order が null の間は待合室。
@@ -766,7 +766,7 @@ function rulesOf(gameId, rules) {
 const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'safe', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check', 'mallet', 'stones', 'diffs', 'kind', 'tries', 'until', 'field', 'frames', 'weight', 'bumper', 'guide']);
 const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
 
-// 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、エアホッケーは 2〜3。ほかは2）
+// 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、将棋・マンカラ・海戦ゲーム・五目並べ・立体四目並べ・はさみ将棋・エアホッケーは 2〜3。ほかは2）
 const boardSeats = (gameId, rules) => GAMES[gameId]?.seatCount?.(rulesOf(gameId, rules)) ?? 2;
 
 // 盤のゲームの席の書き添え。呼び名に「先手」「後手」が入っているゲーム（将棋）では重ねて書かない。3人以上は「◯番目」

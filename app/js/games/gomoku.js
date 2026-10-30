@@ -14,6 +14,12 @@
 //   じゃま石どうしは縦・横・ななめに2マス以上あける（並ばない・すぐ近くに固まらない）。はさみ取りでは取れず、はさむ石にもならない。禁じ手では盤の外と同じに見る。
 //   CPU は置けない点・並びを切る石として見る（盤が空のときは真ん中に打つ。じゃま石のとなりを「石の近く」とは見ない）。
 // 盤は詳細設定で 15路（最初）か 13路。手 = 点の番号（段*路数+列。段0が一番上）。全部埋まったら引き分け。
+// 詳細設定「人数」（2026-10-30 本人の決定。どれも Claude の推奨を本人が承認）: 2人（最初）・3人。3人は 黒・白・赤 の順に置き、**4つ**並べたら勝ち。
+//   はじめ本人は「5つのまま」を選んだが、CPU どうしで測ると5つでは30局ほぼ全部が盤が埋まって引き分けになった（両端の空いた四を、
+//   自分の番が来る前にほかの2人が1つずつふさげるため）。結果を見せて、本人が4つに決め直した。ぴったり五目は3人では「ちょうど4つ」。
+//   Claude の判断: 3人では禁じ手を使わない（黒の先手の有利を消すための決まりなので。設定は残し、局面では切る）。
+//   はさみ取りは、ほかの1人の石がちょうど2つ並んだ両側を自分の石ではさむと取れる（2つは同じ人の石。違う人の石が混ざっていたら取れない）。
+//   2人のときの局面は前と全く同じ形（3人のときだけ np: 3）。CPU は2人と同じ考え方で、守りは次の番の人を重く見る。
 
 import { CPU_SETTING, mulberry32 } from './util.js';
 
@@ -21,6 +27,10 @@ const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
 const DIRS8 = [...DIRS, ...DIRS.map(([r, c]) => [-r, -c])];
 const CAP_GOAL = 5; // はさみ取り: この組数を取ったら勝ち
 const BLOCK = -1; // じゃま石（だれの物でもない）
+const foe = (v, p) => Number.isInteger(v) && v >= 0 && v !== p; // ほかの人の石か（空き・じゃま石・盤の外ではない）
+const np = (s) => s.np ?? 2;
+const need = (s) => (np(s) === 3 ? 4 : 5); // 何個並べたら勝ちか（3人は4つ）
+const others = (s, p) => Array.from({ length: np(s) - 1 }, (_, d) => (p + 1 + d) % np(s)); // 次の番の人から順に
 
 // じゃま石を置いた最初の盤（種から決める。乱数や時刻は使わない）
 function blockers(n, seed) {
@@ -60,7 +70,7 @@ function captures(grid, n, i, p) {
     const a = at(1, dr, dc);
     const b = at(2, dr, dc);
     const e = at(3, dr, dc);
-    if (e >= 0 && grid[a] === 1 - p && grid[b] === 1 - p && grid[e] === p) out.push(a, b);
+    if (e >= 0 && foe(grid[a], p) && grid[b] === grid[a] && grid[e] === p) out.push(a, b);
   }
   return out;
 }
@@ -79,7 +89,7 @@ function exposed(grid, n, i, p) {
     // 並び: (-1) i (+1) (+2)。i と +1 が自分で、両端の片方が相手・片方が空き
     if (v(1, dr, dc) !== p || v(2, dr, dc) === p || v(-1, dr, dc) === p) continue;
     const ends = [v(-1, dr, dc), v(2, dr, dc)];
-    if (ends.includes(1 - p) && ends.includes(null)) k++;
+    if (ends.some((x) => foe(x, p)) && ends.includes(null)) k++;
   }
   return k;
 }
@@ -108,7 +118,7 @@ function run(s, i, p, dr, dc) {
 function place(s, i) {
   const grid = s.grid.slice();
   grid[i] = s.turn;
-  let caps = s.caps ?? [0, 0];
+  let caps = s.caps ?? Array(np(s)).fill(0);
   let taken = [];
   if (s.capture) {
     taken = captures(grid, s.size, i, s.turn);
@@ -119,10 +129,10 @@ function place(s, i) {
   let won = null;
   for (const [dr, dc] of DIRS) {
     const { cells } = run(t, i, s.turn, dr, dc);
-    if (s.exact ? cells.length === 5 : cells.length >= 5) { won = { winner: s.turn, cells }; break; }
+    if (s.exact ? cells.length === need(s) : cells.length >= need(s)) { won = { winner: s.turn, cells }; break; }
   }
   if (!won && s.capture && caps[s.turn] >= CAP_GOAL) won = { winner: s.turn, cells: [i], byCap: true };
-  return { ...t, turn: 1 - s.turn, last: i, won, count: s.count + 1 };
+  return { ...t, turn: (s.turn + 1) % np(s), last: i, won, count: s.count + 1 };
 }
 
 // 禁じ手: 点 i（空き）に黒が置くと三三・四四・長連になるか
@@ -188,7 +198,8 @@ const stuck = (s) => !!s.renju && s.turn === BLACK && s.grid.every((v, i) => v !
 
 /* ---------- CPU ---------- */
 
-// 石を置いたときに、その方向でできる形の点数（count = つながる数、open = 空いている端の数）
+// 石を置いたときに、その方向でできる形の点数（count = つながる数、open = 空いている端の数）。
+// 3人の4つ並べは、つながる数に 5 - 4 = 1 を足して同じ表で見る（cellValue）
 function shape(count, open, exact) {
   if (count >= 5) return exact && count > 5 ? 0 : 100000;
   if (open === 0) return 0;
@@ -198,7 +209,7 @@ function shape(count, open, exact) {
   return open === 2 ? 4 : 1;
 }
 
-// すき間のある形の点数: i を含む5マスの並び（相手の石も盤の外も無いもの）ごとに、自分の石の数で足す
+// すき間のある形の点数: i を含む5マスの並び（相手の石も盤の外も無いもの）ごとに、自分の石の数で足す（3人は4マスの並び・石の数に1を足す）
 const WINDOW = [0, 1, 3, 12, 600, 0];
 
 // 点 i に p が置いたときの点数（4方向の合計）
@@ -207,6 +218,8 @@ function cellValue(s, i, p) {
   const r0 = Math.floor(i / n);
   const c0 = i % n;
   const at = (r, c) => (r < 0 || r >= n || c < 0 || c >= n ? 'x' : r === r0 && c === c0 ? p : s.grid[r * n + c]);
+  const L = need(s);
+  const sh = 5 - L;
   let v = 0;
   let threats = 0;
   for (const [dr, dc] of DIRS) {
@@ -217,19 +230,19 @@ function cellValue(s, i, p) {
       while (at(r0 + dr * k * sg, c0 + dc * k * sg) === p) { count++; k++; }
       if (at(r0 + dr * k * sg, c0 + dc * k * sg) === null) open++;
     }
-    v += shape(count, open, s.exact);
+    v += shape(count + sh, open, s.exact);
     let most = 0;
-    for (let off = -4; off <= 0; off++) {
+    for (let off = 1 - L; off <= 0; off++) {
       let own = 0;
       let ok = true;
-      for (let k = off; k < off + 5 && ok; k++) {
+      for (let k = off; k < off + L && ok; k++) {
         const x = at(r0 + dr * k, c0 + dc * k);
         if (x === p) own++;
         else if (x !== null) ok = false;
       }
-      if (ok) { v += WINDOW[own]; most = Math.max(most, own); }
+      if (ok) { v += WINDOW[own + sh]; most = Math.max(most, own); }
     }
-    if (most >= 4 || (count === 3 && open === 2)) threats++;
+    if (most >= L - 1 || (count === L - 2 && open === 2)) threats++;
   }
   if (threats >= 2) v += 3000; // 四三・三三（2方向で同時に迫る形）
   return v;
@@ -249,7 +262,7 @@ function candidates(s) {
         const rr = r + dr;
         const cc = c + dc;
         const v = rr >= 0 && rr < n && cc >= 0 && cc < n ? s.grid[rr * n + cc] : null;
-        if (v === 0 || v === 1) { near = true; break; } // じゃま石は数えない
+        if (Number.isInteger(v) && v >= 0) { near = true; break; } // じゃま石は数えない
       }
     }
     if (near) out.push(i);
@@ -261,10 +274,13 @@ function candidates(s) {
 // CPU（よわい・ふつう・つよい）。読みはせず、置いた点の「攻め（自分の形）」と「守り（相手がそこに置いたときの形）」の点数で選ぶ。
 // よわい: 守りを軽く見て、3割は上位8つから適当に選ぶ。ふつう: 2割弱は上位3つから適当。つよい: 相手の次の手まで見る（下）
 const LEVEL = {
-  weak: { guard: 0.6, slip: 0.3, top: 8 },
-  normal: { guard: 0.9, slip: 0.18, top: 3 },
-  strong: { guard: 1, slip: 0, top: 1, look: true },
+  weak: { guard: 0.6, slip: 0.3, top: 8, after: 0.3 },
+  normal: { guard: 0.9, slip: 0.18, top: 3, after: 0.6 },
+  strong: { guard: 1, slip: 0, top: 1, look: true, after: 0.6 },
 };
+// 3人の つよい: 先読みをせず、守りを少し軽くする。2人と同じ形（先読みあり・守り1・次の次の人も全部ふさぐ）では、
+// よわい2人との対局で 200局 30勝75敗と負け越した（守ってばかりで自分の並びが遅れ、3人目が得をする）。この形で 300局 91勝101敗（よわい1人あたり約50）
+const STRONG3 = { ...LEVEL.strong, guard: 0.8, look: false };
 // はさみ取りの点数: 取れる組の数（5組に届くなら勝ち・止めなければ負けと同じ重さ）
 function capValue(s, i, p) {
   if (!s.capture) return 0;
@@ -274,27 +290,31 @@ function capValue(s, i, p) {
 }
 
 function gomokuCpu(s, rules) {
-  const lv = LEVEL[rules?.cpu] ?? LEVEL.weak;
+  const lv = np(s) === 3 && rules?.cpu === 'strong' ? STRONG3 : LEVEL[rules?.cpu] ?? LEVEL.weak;
   const p = s.turn;
+  const foes = others(s, p);
   const list = candidates(s).filter((i) => !(p === BLACK && banned(s, i))).map((i) => {
     let mine = cellValue(s, i, p) + capValue(s, i, p);
-    // 黒が禁じ手で置けない点は、白が守らなくてよい
-    const theirs = s.renju && 1 - p === BLACK && forbidden(s.grid, s.size, i) ? 0 : cellValue(s, i, 1 - p) + capValue(s, i, 1 - p);
+    // 黒が禁じ手で置けない点は、白が守らなくてよい。3人では、次の番の人の形を重く見る（後の人は次の人がふさぐこともあるため）
+    const each = foes.map((q) => (s.renju && q === BLACK && forbidden(s.grid, s.size, i) ? 0 : cellValue(s, i, q) + capValue(s, i, q)));
+    // 3人では、次の次の人の勝ちの点を見逃すことがある（次の人がふさげるため。全部ふさぐと、ほぼ引き分けになった）
+    const five = each.findIndex((x, d) => x >= 100000 && (d === 0 || Math.random() < lv.after));
+    const theirs = Math.max(...each.map((x, d) => x * (d ? 0.8 : 1)));
     if (s.capture && mine < 100000) mine -= exposed(s.grid, s.size, i, p) * 400 * lv.guard; // 取られる形へ置くのを嫌う
-    // 自分が勝てる手は必ず打つ。相手の五を止めるのも必ず（よわいでも）
-    const v = mine >= 100000 ? 1e9 : theirs >= 100000 ? 1e8 : mine * 1.1 + theirs * lv.guard + Math.random();
+    // 自分が勝てる手は必ず打つ。ほかの人の五を止めるのも必ず（よわいでも。次の番の人を先に）
+    const v = mine >= 100000 ? 1e9 : five >= 0 ? 1e8 - five : mine * 1.1 + theirs * lv.guard + Math.random();
     return { i, v };
   }).sort((a, b) => b.v - a.v);
-  if (list[0].v < 1e8 && Math.random() < lv.slip) {
+  if (list[0].v < 1e8 - 10 && Math.random() < lv.slip) {
     const pool = list.slice(0, lv.top);
     return pool[Math.floor(Math.random() * pool.length)].i;
   }
   // つよい: 点数の高い順に、置いたあと相手に「止められない形」（両端の空いた四・四三など）を作らせない手を選ぶ（1手先読み）。
   // はさみ取りでは、相手に石を取られない手も条件にする（入れないと つよい が ふつう に 25勝55敗と負け越した。入れて 40勝20敗）
-  if (lv.look && list[0].v < 1e8) {
+  if (lv.look && list[0].v < 1e8 - 10) {
     for (const { i } of list.slice(0, 8)) {
       const t = place(s, i);
-      if (candidates(t).every((j) => cellValue(t, j, 1 - p) < 3000 && capValue(t, j, 1 - p) === 0)) return i;
+      if (candidates(t).every((j) => foes.every((q) => cellValue(t, j, q) < 3000 && capValue(t, j, q) === 0))) return i;
     }
   }
   return list[0].i;
@@ -304,14 +324,17 @@ export default {
   id: 'gomoku',
   name: '五目並べ',
   icon: '⚪',
-  desc: '交代で黒と白の石を置き、たて・よこ・ななめに5つ並べたら勝ち',
+  desc: '交代で黒と白の石を置き、たて・よこ・ななめに5つ並べたら勝ち。オンラインでは3人（黒・白・赤。4つ並べ）でも遊べる',
   ready: true,
-  players: ['黒', '白'],
+  players: ['黒', '白', '赤'],
+  // 詳細設定の人数（2〜3人）。待合室の席の数になる
+  seatCount(rules) { return rules?.players === 3 ? 3 : 2; },
   settings: [
+    { key: 'players', label: '人数', def: 2, desc: '3人では 黒・白・赤 の順に置き、4つ並べたら勝ち（5つだと、ほかの2人にふさがれてほぼ引き分けになるため。禁じ手は使わない）', choices: [[2, '2人'], [3, '3人（4つ並べ）']] },
     { key: 'size', label: '盤', desc: '13路はスマホで押しやすい', def: 15, choices: [[15, '15路（15×15）'], [13, '13路（13×13）']] },
-    { key: 'exact', label: 'ぴったり五目', desc: 'ちょうど5つで勝ち。6つ以上つながっても勝ちにならない', def: false },
-    { key: 'renju', label: '禁じ手', desc: '先手の黒だけ、三三・四四・6つ以上並ぶ点に置けない（連珠のルール。先手の有利を消す）', def: false },
-    { key: 'capture', label: 'はさみ取り', desc: '相手の石がちょうど2つ並んだ両側をはさむと取れる。5組（10個）取っても勝ち', def: false },
+    { key: 'exact', label: 'ぴったり五目', desc: 'ちょうど5つ（3人は4つ）で勝ち。それより多くつながっても勝ちにならない', def: false },
+    { key: 'renju', label: '禁じ手', desc: '先手の黒だけ、三三・四四・6つ以上並ぶ点に置けない（連珠のルール。先手の有利を消す。2人のときだけ）', def: false },
+    { key: 'capture', label: 'はさみ取り', desc: '相手の石がちょうど2つ並んだ両側をはさむと取れる（3人では同じ人の石2つ）。5組（10個）取っても勝ち', def: false },
     { key: 'blocks', label: 'じゃま石', desc: '始める前に、だれの物でもない灰色の石を数個置く（置けない・並びが切れる）。場所は毎回ちがう', def: false },
     CPU_SETTING,
   ],
@@ -321,6 +344,7 @@ export default {
   init({ rules = {}, seed = 0 } = {}) {
     const size = rules.size === 13 ? 13 : 15;
     const grid = rules.blocks ? blockers(size, seed) : Array(size * size).fill(null);
+    if (rules.players === 3) return { size, exact: !!rules.exact, renju: false, capture: !!rules.capture, caps: [0, 0, 0], taken: [], grid, turn: 0, last: null, won: null, count: 0, np: 3 };
     return { size, exact: !!rules.exact, renju: !!rules.renju, capture: !!rules.capture, caps: [0, 0], taken: [], grid, turn: 0, last: null, won: null, count: 0 };
   },
 
@@ -341,7 +365,7 @@ export default {
 
   info(s) {
     if (!s.capture) return '';
-    let html = `取った組　<b>${this.players[0]} ${s.caps[0]}</b>　−　<b>${this.players[1]} ${s.caps[1]}</b>（${CAP_GOAL}組で勝ち）`;
+    let html = `取った組　${s.caps.map((k, p) => `<b>${this.players[p]} ${k}</b>`).join('　−　')}（${CAP_GOAL}組で勝ち）`;
     if (s.won?.byCap) html += `<br>${this.players[s.won.winner]}が${CAP_GOAL}組取った`;
     return html;
   },

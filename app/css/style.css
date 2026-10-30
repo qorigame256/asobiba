@@ -473,6 +473,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .gm-stone { width: 88%; height: 88%; border-radius: 50%; position: relative; z-index: 1; box-shadow: 0 1px 2px rgba(0, 0, 0, .4); }
 .gm-stone.p0 { background: radial-gradient(circle at 35% 30%, #555, #111 70%); }
 .gm-stone.p1 { background: radial-gradient(circle at 35% 30%, #fff, #d8d8d8 70%); }
+.gm-stone.p2 { background: radial-gradient(circle at 35% 30%, #ff7a6b, #c62828 70%); } /* 3人の赤（リバーシの赤と同じ） */
 .gm-stone.last::after { content: ""; position: absolute; inset: 36%; border-radius: 50%; background: #e04b3c; }
 .gm-stone.win { box-shadow: 0 0 0 2px var(--win), 0 1px 2px rgba(0, 0, 0, .4); }
 .gm-stone.pop { animation: pop .2s ease-out; }
@@ -482,7 +483,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .gm-ban { position: relative; z-index: 1; width: 72%; height: 72%; display: grid; place-items: center; border-radius: 50%; background: rgba(255, 255, 255, .8); box-shadow: 0 0 0 1.5px #c0392b; color: #c0392b; font-weight: 700; font-size: clamp(9px, 2.6vw, 16px); line-height: 1; pointer-events: none; }
 .gm .gm-pt.playable:hover { background: radial-gradient(circle, rgba(0, 0, 0, .25) 0 30%, transparent 32%); }
 .gm .gm-pt.playable.p1:hover { background: radial-gradient(circle, rgba(255, 255, 255, .6) 0 30%, transparent 32%); }
-[data-game="gomoku"] { --p0: #111; --p1: #8a8a8a; }
+[data-game="gomoku"] { --p0: #111; --p1: #8a8a8a; --p2: #c62828; }
 
 /* ---------- 点と線（点・線・四角を1つの格子に並べる。--w・--h = 四角の数） ---------- */
 .dt {
@@ -554,6 +555,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 }
 .sg-piece.flip { transform: rotate(180deg); padding-top: 0; padding-bottom: 10%; }
 .sg-piece.promoted { color: #c62d1f; }
+.hs .sg-piece.hs-third { color: #1e7a3c; } /* はさみ将棋の3人目の「金」は緑の字 */
 .hs .sg-cell.caught { animation: hs-caught .7s ease-out; }
 @keyframes hs-caught { from { background: #e2574a; } }
 .sg-hand {
@@ -2089,6 +2091,7 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .cb-slot { flex: 1; border-radius: 4px; background: rgba(47, 95, 158, .14); }
 .cb-slot.p0 { background: #e2493b; }
 .cb-slot.p1 { background: #f4c430; }
+.cb-slot.p2 { background: #2e9a52; }
 .cb-slot.next { outline: 2px dashed rgba(47, 95, 158, .55); outline-offset: -2px; }
 .cb-slot.last { box-shadow: inset 0 0 0 2px #fff; }
 .cb-slot.win { box-shadow: 0 0 0 2px var(--win); }
@@ -2101,6 +2104,7 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .cb-disc { position: absolute; inset: 12%; border-radius: 50%; }
 .cb-disc.p0 { background: #e2493b; }
 .cb-disc.p1 { background: #f4c430; }
+.cb-disc.p2 { background: #2e9a52; } /* 3人の緑（四目並べの緑と同じ） */
 .cb-disc.last::after { content: ""; position: absolute; inset: 32%; border-radius: 50%; background: rgba(255, 255, 255, .6); }
 .cb-disc.win { box-shadow: 0 0 0 2px var(--win); }
 /* 立体四目並べの重力なし: 4段の板を 2×2 で大きく出し、板のマスを押して置く */
