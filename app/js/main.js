@@ -3044,6 +3044,8 @@ const LICENSES = [
   ['mqtt.js（通信）', 'Copyright (c) 2015-2016 MQTT.js contributors'],
   ['qrcode-generator（招待の QR コード）', 'Copyright (c) 2009 Kazuhiko Arase'],
   ['inappropriate-words-ja（言葉のふるいの一覧のもと）', 'Copyright (c) 2020 K Hashimoto'],
+  // CC BY 4.0 は作者の表示と、手を入れたことの表示が条件（どの音が OtoLogic かは sound.js の先頭）
+  ['効果音の一部', 'OtoLogic（https://otologic.jp/）', 'CC BY 4.0（https://creativecommons.org/licenses/by/4.0/deed.ja）。長さと大きさを整えて使っています'],
   // アプリ版の殻と広告の部品（native/package.json）。ウェブ版には入っていないので出さない
   ...(IS_APP ? [
     ['Capacitor（アプリの殻）', 'Copyright (c) 2017-present Drifty Co.'],
