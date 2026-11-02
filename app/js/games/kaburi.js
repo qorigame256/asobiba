@@ -9,6 +9,9 @@
 //   - 全員が決めたら0.8秒で見せる。見せる間は3.5秒（だれが何を出したかを読む時間）。
 //   - 同じ点の人は同じ順位（成績表は合計点で並べる）。
 //   - CPU は 1.5〜7秒で決める。大きい数ほど少し選びやすい（大きい数は点が多いがかぶりやすい、を人がやりがちなまね）。読み合いはしない。
+// 2026-11-02 の32回目の案（本人がおすすめどおり選んだ。分かれ目は Claude の判断）: 詳細設定「前と同じ数字」（出せる（最初）・出せない。鍵は norepeat）。
+//   出せないでは、前の回に自分が決めた数字をその回は選べない（ボタンを押せなくして 🚫 を付ける。前の回に決めなかった人は全部選べる）。CPU もよける。
+//   前の回の数字は局面の log から取るので、局面の形は「出せる」のときと同じ。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next … → end
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'pick', r: 何回目（0 から）, v: 数字 }
 //   r が今の回と同じで、その人がまだ決めていないときだけ受け付けるので、同じ手が2回届いても2回目は反則になる。
@@ -28,6 +31,12 @@ export function scoreRound(picks) {
   return picks.map((v) => (v !== null && picks.filter((w) => w === v).length === 1 ? v : 0));
 }
 
+// その回に選べない数字（「前と同じ数字」が出せないのときの、前の回に自分が決めた数字）。無ければ null
+export function banOf(s, p) {
+  if (!s.rules.norepeat || s.r < 1) return null;
+  return s.log[s.r - 1]?.picks[p] ?? null;
+}
+
 const rKey = (s, r = s.r) => `kaburi:${s.seed}:${r}`;
 const clone = (s) => ({ ...s, scores: s.scores.slice(), picks: s.picks.slice() });
 const cpuPlan = new Map();
@@ -45,6 +54,7 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'rounds', label: '回数', desc: '1回の対局で数字を出す回数', def: 8, choices: ROUNDS },
+    { key: 'norepeat', label: '前と同じ数字', desc: '出せないにすると、前の回に自分が出した数字はその回に選べない', def: false, choices: [[false, '出せる'], [true, '出せない']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -106,7 +116,7 @@ export default {
       return null;
     }
     if (m.t !== 'pick' || s0.phase !== 'open' || m.r !== s0.r || !Number.isInteger(m.p) || m.p < 0 || m.p >= s0.n || s0.picks[m.p] !== null) return null;
-    if (!Number.isInteger(m.v) || m.v < 1 || m.v > s0.max) return null;
+    if (!Number.isInteger(m.v) || m.v < 1 || m.v > s0.max || m.v === banOf(s0, m.p)) return null;
     const s = clone(s0);
     s.step += 1;
     s.picks[m.p] = m.v;
@@ -119,10 +129,11 @@ export default {
     const key = rKey(s) + ':' + p;
     let plan = cpuPlan.get(key);
     if (!plan) {
-      const w = [...Array(s.max)].map((_, i) => Math.sqrt(i + 1)); // 大きい数ほど少し選びやすい
+      const ban = banOf(s, p);
+      const w = [...Array(s.max)].map((_, i) => (i + 1 === ban ? 0 : Math.sqrt(i + 1))); // 大きい数ほど少し選びやすい
       let x = Math.random() * w.reduce((a, b) => a + b, 0);
       let v = 1;
-      while (v < s.max && x > w[v - 1]) { x -= w[v - 1]; v += 1; }
+      while (v < s.max && (x > w[v - 1] || w[v - 1] === 0)) { x -= w[v - 1]; v += 1; }
       plan = { at: 1500 + Math.random() * 5500, v };
       cpuPlan.set(key, plan);
       if (cpuPlan.size > 300) cpuPlan.delete(cpuPlan.keys().next().value);
@@ -151,7 +162,7 @@ export default {
     card.className = 'kj-card';
     wrap.append(card);
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">1〜${s.max} から1つ選ぼう。ほかの人とかぶらなければ、その数が点・全${s.total}回</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">1〜${s.max} から1つ選ぼう。ほかの人とかぶらなければ、その数が点・全${s.total}回${s.rules.norepeat ? '・前の回と同じ数字は出せない' : ''}</div>`;
       return;
     }
     const key = rKey(s);
@@ -165,7 +176,8 @@ export default {
     const mine = me !== null ? s.picks[me] : null;
     const can = me !== null && o.canMove && mine === null && since(key) < LIMIT;
     const ck = key + ':' + me;
-    const sel = mine ?? chosen.get(ck) ?? null;
+    const ban = me !== null ? banOf(s, me) : null;
+    const sel = mine ?? (chosen.get(ck) === ban ? null : chosen.get(ck)) ?? null;
     const pad = document.createElement('div');
     pad.className = 'kb-pad' + (s.max > 5 ? ' many' : '');
     const go = document.createElement('button');
@@ -181,11 +193,12 @@ export default {
       b.type = 'button';
       b.className = 'kb-num';
       b.dataset.v = String(v);
-      b.textContent = String(v);
-      b.disabled = !can;
+      b.textContent = v === ban ? `🚫${v}` : String(v);
+      if (v === ban) b.title = '前の回に出した数字';
+      b.disabled = !can || v === ban;
       // 指が触れた瞬間に選ぶ（click を待つと、ほかの人や CPU の手で作り直されたときに押したのが消える。ビンゴと同じ）
       b.onpointerdown = b.onclick = (e) => {
-        if (!can) return;
+        if (!can || v === ban) return;
         e.preventDefault();
         chosen.set(ck, v);
         if (chosen.size > 100) chosen.delete(chosen.keys().next().value);

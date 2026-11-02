@@ -9,7 +9,8 @@
 //     答える時間は出終わってから10秒。速さは各自の画面で出終わってから答えるまで。全員が答えたら0.8秒で締め切り、答えを見せる間は3秒。
 //   - 答えは画面の数字のボタンで打つ（スマホのキーボードを出さないため）。PC は数字のキー・Backspace・Enter でも打てる。
 //   - いちばん早い正解が同じ速さで2人以上なら、その全員に +1。
-//   - CPU は出終わってから 1.5〜5秒で答え、やさしい 85%・ふつう 70%・むずかしい 50% 当てる（外すときは正しい答えから少しずれた数）。
+//   - CPU は出終わってから 1.5〜5秒で答え、やさしい 85%・ふつう 70%・むずかしい 50%・おに 35% 当てる（外すときは正しい答えから少しずれた数）。
+// 2026-11-02 の32回目の案（本人がおすすめどおり選んだ。中身は Claude の判断）: 難しさに「おに」（1桁を15個・0.4秒ごと）を足した。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open（数字を出す → 答える）→ close → shown → next … → end
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q: 何問目（0 から）, v: 答え, ms: 出終わってから答えるまで }
 //   q が今の問題と同じで、その人がまだ答えていないときだけ受け付けるので、同じ手が2回届いても2回目は反則になる。
@@ -21,6 +22,7 @@ export const LEVELS = {
   easy: { label: 'やさしい', lo: 1, hi: 9, k: 5, gap: 1000, cpu: 0.85 },
   normal: { label: 'ふつう', lo: 1, hi: 9, k: 8, gap: 700, cpu: 0.7 },
   hard: { label: 'むずかしい', lo: 10, hi: 99, k: 8, gap: 700, cpu: 0.5 },
+  oni: { label: 'おに', lo: 1, hi: 9, k: 15, gap: 400, cpu: 0.35 },
 };
 const ROUNDS = [[5, '5問'], [10, '10問']];
 const levelOf = (r) => LEVELS[r.level] ?? LEVELS.normal;
@@ -75,7 +77,7 @@ export default {
   minPlayers: 2,
   maxPlayers: 10,
   settings: [
-    { key: 'level', label: '難しさ', desc: 'やさしい: 1桁を5個・1秒ごと／ふつう: 1桁を8個・0.7秒ごと／むずかしい: 2桁を8個・0.7秒ごと', def: 'normal', choices: Object.entries(LEVELS).map(([k, v]) => [k, v.label]) },
+    { key: 'level', label: '難しさ', desc: 'やさしい: 1桁を5個・1秒ごと／ふつう: 1桁を8個・0.7秒ごと／むずかしい: 2桁を8個・0.7秒ごと／おに: 1桁を15個・0.4秒ごと', def: 'normal', choices: Object.entries(LEVELS).map(([k, v]) => [k, v.label]) },
     { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 10, choices: ROUNDS },
   ],
 

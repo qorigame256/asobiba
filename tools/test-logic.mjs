@@ -7415,7 +7415,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
 {
   const E = GAMES.eitango;
   const { EITANGO } = await import('../app/js/games/eitango-data.js');
-  const { choicesOf, norm, pointsOf, reviewOf, blanksOf } = await import('../app/js/games/eitango.js');
+  const { choicesOf, wordChoicesOf, norm, pointsOf, reviewOf, blanksOf } = await import('../app/js/games/eitango.js');
   const seen = new Set();
   for (const [level, list] of Object.entries(EITANGO)) {
     assert.ok(list.length >= 40, `英単語: ${level} は40語以上`);
@@ -7459,6 +7459,29 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.deepEqual(s.scores, [0, 3, 0]);
     assert.deepEqual(reviewOf(s, 1).map((r) => r.mark), ['⭕']);
   }
+  // 英単語を選ぶ（32回目の案）: 4つは別々の英単語で正しい単語を含み、ほかの3つは意味が違う。正解は英単語・1問に1回だけ
+  for (let seed = 0; seed < 30; seed++) {
+    const s = E.init(3, seed, { rules: { ask: 'reverse', level: 'mix', rounds: 20 } });
+    const means = new Map(Object.values(EITANGO).flat().map(([w, m]) => [w[0], m]));
+    s.qs.forEach((x, q) => {
+      const o = s.opts[q];
+      assert.equal(new Set(o).size, 4, '英単語を選ぶ: 4つは別々');
+      assert.ok(o.includes(x[0][0]), '英単語を選ぶ: 正しい単語が入っている');
+      assert.equal(o.filter((w) => means.get(w) === x[1]).length, 1, '英単語を選ぶ: 同じ意味の単語は正解の1つだけ');
+      assert.deepEqual(o, wordChoicesOf(seed, q, x), '英単語を選ぶ: 同じ種なら同じ4つ');
+    });
+  }
+  {
+    let s = E.apply(E.init(3, 5, { rules: { ask: 'reverse' } }), { p: -1, t: 'next' });
+    const [words, mean] = s.qs[0];
+    assert.equal(E.apply(s, { p: 0, t: 'try', q: 0, text: mean, ms: 100, n: 1 }), null, '英単語を選ぶ: 意味を送っても弾く（4つは英単語）');
+    const wrong = s.opts[0].find((x) => x !== words[0]);
+    s = E.apply(s, { p: 0, t: 'try', q: 0, text: wrong, ms: 100, n: 1 });
+    assert.equal(s.solved[0], null);
+    assert.equal(E.apply(s, { p: 0, t: 'try', q: 0, text: words[0], ms: 200, n: 2 }), null, '英単語を選ぶ: 1問に1回だけ');
+    s = E.apply(s, { p: 1, t: 'try', q: 0, text: words[0], ms: 300, n: 1 });
+    assert.equal(s.solved[1], 300, '英単語を選ぶ: 正しい英単語で正解');
+  }
   // スペル打ち: 何度でも打ち直せる・大文字や米英どちらのつづりでも正解・4つは作らない
   {
     const s0 = E.init(2, 1, { rules: { ask: 'spell', level: 'mid', rounds: 20 } });
@@ -7478,7 +7501,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     s = E.apply(s, { p: 1, t: 'try', q, text: ' ' + words[0] + ' ', ms: 800, n: 1 });
     assert.equal(s.solved[1], 800, '英単語: 前後の空白は無視');
   }
-  for (const rules of [{}, { ask: 'spell' }, { ask: 'spell', level: 'hard', rounds: 20 }]) {
+  for (const rules of [{}, { ask: 'spell' }, { ask: 'spell', level: 'hard', rounds: 20 }, { ask: 'reverse', level: 'hard' }]) {
     for (let seed = 0; seed < 3; seed++) {
       let s = E.init(4, seed, { rules });
       for (let guard = 0; guard < 200 && s.phase !== 'end'; guard++) {
@@ -7495,7 +7518,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
 // かぶったら0点: かぶらなかった数字だけが点・数字の幅は人数で決まる・決めたら変えられない・選ばなかった人は0点・回数・CPU どうしで最後まで
 {
   const K = GAMES.kaburi;
-  const { scoreRound, maxOf } = await import('../app/js/games/kaburi.js');
+  const { scoreRound, maxOf, banOf } = await import('../app/js/games/kaburi.js');
   assert.deepEqual(scoreRound([5, 3, 5, 1]), [0, 3, 0, 1], 'かぶり: かぶった5は0点・ほかはその数');
   assert.deepEqual(scoreRound([2, null, 4]), [2, 0, 4], 'かぶり: 決めなかった人は0点');
   assert.deepEqual(scoreRound([4, 4, 4]), [0, 0, 0], 'かぶり: 全員かぶったらだれも点なし');
@@ -7526,6 +7549,24 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.equal(st.log.length, 8);
     assert.ok(st.log.every((x) => x.picks.every((v) => v === null || (v >= 1 && v <= maxOf(n)))));
   }
+  // 前と同じ数字は出せない（32回目の案）
+  {
+    const pickAll = (x, vs) => { vs.forEach((v, p) => { if (v !== null) x = K.apply(x, { p, t: 'pick', r: x.r, v }); }); return K.apply(x, { p: -1, t: 'close' }); };
+    let x = K.apply(K.init(3, 4, { rules: { norepeat: true } }), { p: -1, t: 'next' });
+    assert.equal(banOf(x, 0), null, 'かぶり: 1回目は何でも出せる');
+    x = K.apply(pickAll(x, [3, 5, null]), { p: -1, t: 'next' });
+    assert.deepEqual([0, 1, 2].map((p) => banOf(x, p)), [3, 5, null], 'かぶり: 前の回に決めた数字だけ選べない（決めなかった人は全部選べる）');
+    assert.equal(K.apply(x, { p: 0, t: 'pick', r: 1, v: 3 }), null, 'かぶり: 前と同じ数字は弾く');
+    assert.ok(K.apply(x, { p: 0, t: 'pick', r: 1, v: 4 }), 'かぶり: 違う数字は出せる');
+    let y = K.apply(K.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+    y = K.apply(pickAll(y, [3, 5, 1]), { p: -1, t: 'next' });
+    assert.ok(K.apply(y, { p: 0, t: 'pick', r: 1, v: 3 }), 'かぶり: 最初の設定では前と同じ数字も出せる');
+    for (const n of [3, 10]) {
+      const st = runCpus(K, n, n, { norepeat: true }, 200, 5000);
+      assert.ok(K.result(st), `かぶり: 前と同じ数字なしでも CPU どうしで最後まで（${n}人）`);
+      assert.ok(st.log.every((r, i) => i === 0 || r.picks.every((v, p) => v === null || v !== st.log[i - 1].picks[p])), 'かぶり: CPU も前と同じ数字を出さない');
+    }
+  }
   console.log('kaburi OK');
 }
 
@@ -7545,6 +7586,8 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     }
   }
   assert.deepEqual([LEVELS.easy, LEVELS.normal, LEVELS.hard].map((L) => [L.k, L.gap, L.hi > 9]), [[5, 1000, false], [8, 700, false], [8, 700, true]], '暗算: 難しさの中身（本人の決定）');
+  assert.deepEqual([LEVELS.oni.k, LEVELS.oni.gap, LEVELS.oni.hi > 9], [15, 400, false], '暗算: おには 1桁を15個・0.4秒ごと（32回目の案）');
+  assert.equal(flashMs(Z.apply(Z.init(2, 3, { rules: { level: 'oni' } }), { p: -1, t: 'next' })), 6000, '暗算: おには 15個 × 0.4秒');
   assert.deepEqual(pointsOf([{ v: 20, ms: 900 }, { v: 20, ms: 500 }, { v: 19, ms: 100 }, null], 20), [1, 2, 0, 0], '暗算: 正解1点・いちばん早い正解は+1・まちがいと答えなしは0');
   assert.deepEqual(pointsOf([{ v: 7, ms: 500 }, { v: 7, ms: 500 }], 7), [2, 2], '暗算: 同じ速さの正解は両方+1');
   assert.deepEqual(pointsOf([{ v: 1, ms: 500 }, null], 7), [0, 0]);
@@ -7562,7 +7605,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.deepEqual(s.scores, [0, 1, 2]);
   assert.equal(Z.init(2, 1, { rules: { rounds: 5 } }).qs.length, 5, '暗算: 5問');
   assert.equal(Z.init(2, 1, { rules: { level: 'zzz' } }).rules.level, 'normal', '暗算: 知らない難しさは ふつう');
-  for (const rules of [{}, { level: 'easy', rounds: 5 }, { level: 'hard' }]) {
+  for (const rules of [{}, { level: 'easy', rounds: 5 }, { level: 'hard' }, { level: 'oni', rounds: 5 }]) {
     const st = runCpus(Z, 4, 3, rules, 100, 8000);
     assert.ok(Z.result(st) && st.scores.some((v) => v > 0), `暗算: CPU どうしで最後まで ${JSON.stringify(rules)}`);
   }
@@ -7572,7 +7615,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
 // ミニゴルフ: コースが入れられる・水は1打たして戻る・8打まで・カップに入ったら次のホール・同じ手は2回入らない・ホールの数・CPU どうしで最後まで
 {
   const Gf = GAMES.golf;
-  const { COURSES, simulate, inside, MAX_STROKES, MIN_V, MAX_V } = await import('../app/js/games/golf.js');
+  const { COURSES, simulate, inside, MAX_STROKES, MIN_V, MAX_V, courseOf } = await import('../app/js/games/golf.js');
   assert.equal(COURSES.length, 9, 'ゴルフ: コースは9つ');
   // どのコースも、ティーから打って入る（機械で向きと強さを探す。少ない打数で入れられること）
   for (const [i, c] of COURSES.entries()) {
@@ -7629,6 +7672,28 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.deepEqual(s.pl[0].cards, [4, 8], 'ゴルフ: 8打で次のホール（水の1打を足しても8）');
   assert.equal(Gf.apply(Gf.init(1, 1, {}), { p: 0, t: 'shot', h: 0, k: 0, x: 5000, y: 8000, in: 1, pen: 1 }), null, 'ゴルフ: 入ったのに水は弾く');
   for (const [holes, len] of [[3, 3], [9, 9], [4, 6]]) assert.equal(Gf.init(1, 1, { rules: { holes } }).holes, len, `ゴルフ: ホールの数 ${holes}`);
+  // コースの選び方（32回目の案）: 順番どおりは order を持たない・くじは種で決まり、同じ対局で同じコースが出ない
+  {
+    assert.equal(Gf.init(2, 3, { rules: { holes: 3 } }).order, undefined, 'ゴルフ: 順番どおりは局面に order を持たない');
+    assert.deepEqual([0, 1, 2].map((h) => courseOf(Gf.init(2, 3, { rules: { holes: 3 } }), h)), COURSES.slice(0, 3), 'ゴルフ: 順番どおりは1番から');
+    const firsts = new Set();
+    for (let seed = 0; seed < 20; seed++) {
+      const x = Gf.init(2, seed, { rules: { holes: 6, order: 'random' } });
+      assert.equal(x.order.length, 6);
+      assert.equal(new Set(x.order).size, 6, 'ゴルフ: くじでも同じコースは出ない');
+      assert.deepEqual(x.order, Gf.init(3, seed, { rules: { holes: 6, order: 'random' } }).order, 'ゴルフ: くじは種だけで決まる（全員同じ）');
+      const c = COURSES[x.order[0]];
+      assert.deepEqual([x.pl[0].x, x.pl[0].y], [T(c.tee[0]), T(c.tee[1])], 'ゴルフ: くじの1ホール目のティーから始める');
+      firsts.add(x.order[0]);
+      if (seed === 0) {
+        const y = Gf.apply(x, { p: 0, t: 'shot', h: 0, k: 0, x: T(c.cup[0]), y: T(c.cup[1]), in: 1, pen: 0 });
+        assert.deepEqual([y.pl[0].x, y.pl[0].y], [T(COURSES[x.order[1]].tee[0]), T(COURSES[x.order[1]].tee[1])], 'ゴルフ: くじの2ホール目のティーへ');
+      }
+    }
+    assert.ok(firsts.size > 3, 'ゴルフ: くじで1ホール目が変わる');
+    const st = runCpus(Gf, 2, 4, { holes: 3, order: 'random' }, 200, 20000);
+    assert.ok(Gf.result(st), 'ゴルフ: くじでも CPU どうしで最後まで');
+  }
   for (const [n, holes] of [[3, 6], [6, 9], [1, 3]]) {
     const st = runCpus(Gf, n, n, { holes }, 200, 20000);
     const res = Gf.result(st);
@@ -7642,7 +7707,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
 // ビリヤード: ラック・いちばん小さい番号から・落としたら続けて打てる・反則で次の人が手玉を置ける・9番で勝ち（反則なら戻す）・同じ手は2回入らない・CPU どうしで最後まで
 {
   const Bl = GAMES.billiards;
-  const { simulate, canPlace, lowestOf, BR, L, R, T, B, POCKETS, HEAD_Y } = await import('../app/js/games/billiards.js');
+  const { simulate, canPlace, lowestOf, topOf, afterLine, aimHit, BR, L, R, T, B, POCKETS, HEAD_Y } = await import('../app/js/games/billiards.js');
   const U = 10000;
   // ラック: 10個（手玉と1〜9）・1番が手玉にいちばん近い先頭・9番が真ん中・重ならない・種で並びが変わる
   {
@@ -7699,12 +7764,46 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.ok(f.winner === null && f.balls.some(([id]) => id === 9) && f.turn === 0, 'ビリヤード: 反則で9番を落としても勝ちにならず、9番は台に戻る');
   const w = Bl.apply(s, mk(s, 1, { cx: 5000, cy: 16000, b: [...keep(s, [9]), [0, 5000, 16000]], pot: [9], first: lowestOf(s) }));
   assert.equal(w.winner, 1, 'ビリヤード: 正しく当てて9番を落としたら勝ち');
-  assert.deepEqual(Bl.result(w), { winner: 1 });
+  assert.deepEqual(Bl.result(w), { winner: 1, top: 9 });
   assert.ok(nine);
+  // 玉の数 6個（32回目の案）: 1〜6番・1番が先頭・6番が後ろの段の真ん中・6番で勝ち・反則なら6番を戻す・9番は無い
+  {
+    let x = Bl.init(2, 7, { rules: { balls: 6 } });
+    assert.deepEqual(x.balls.map(([id]) => id).sort((a, b) => a - b), [0, 1, 2, 3, 4, 5, 6], 'ビリヤード6個: 玉は手玉と1〜6');
+    assert.equal(topOf(x), 6, 'ビリヤード6個: 勝ちの玉は6番');
+    const pos = Object.fromEntries(x.balls.map(([id, bx, by]) => [id, [bx / U, by / U]]));
+    assert.ok([2, 3, 4, 5, 6].every((id) => pos[id][1] < pos[1][1]), 'ビリヤード6個: 1番が先頭');
+    assert.ok(Math.abs(pos[6][0] - 0.5) < 1e-3 && [2, 3, 4, 5].every((id) => pos[id][1] >= pos[6][1] - 1e-4), 'ビリヤード6個: 6番は後ろの段の真ん中');
+    for (let i = 0; i < 7; i++) for (let j = i + 1; j < 7; j++) assert.ok(Math.hypot(pos[i][0] - pos[j][0], pos[i][1] - pos[j][1]) >= 2 * BR - 1e-4, 'ビリヤード6個: 玉が重ならない');
+    x = Bl.apply(x, mk(x, 0, { b: keep(x), pot: [], first: 2 }));
+    assert.ok(x.hand && x.turn === 1);
+    const ff = Bl.apply(x, mk(x, 1, { cx: 5000, cy: 16000, b: [...keep(x, [6, 0]), [0, 5000, 16000]], pot: [6], first: 3 }));
+    assert.ok(ff.winner === null && ff.balls.some(([id]) => id === 6), 'ビリヤード6個: 反則で6番を落としたら戻す');
+    const ww = Bl.apply(x, mk(x, 1, { cx: 5000, cy: 16000, b: [...keep(x, [6, 0]), [0, 5000, 16000]], pot: [6], first: 1 }));
+    assert.deepEqual(Bl.result(ww), { winner: 1, top: 6 }, 'ビリヤード6個: 正しく当てて6番を落としたら勝ち');
+    assert.equal(topOf(Bl.init(2, 7, { rules: { balls: 7 } })), 9, 'ビリヤード: 知らない玉の数は9個');
+  }
+  // 狙いの線の「長い」（32回目の案）: 玉にななめに当たると手玉は直角の向きへ・まっすぐ当たると出さない・クッションでははね返る
+  {
+    const balls = [{ id: 0, x: 0.5, y: 1.4 }, { id: 1, x: 0.5 + BR, y: 0.8 }];
+    const hit = aimHit(balls, 0.5, 1.4, 0, -1);
+    assert.equal(hit.id, 1);
+    const a = afterLine(balls, hit, 0, -1);
+    const nx = hit.bx - hit.x, ny = hit.by - hit.y;
+    const ax = a.x - hit.x, ay = a.y - hit.y;
+    assert.ok(Math.abs(ax * nx + ay * ny) < 1e-9 && ax < 0, 'ビリヤード: 長い線は当たった玉と直角の向き（右の玉に当てると手玉は左へ）');
+    const straight = [{ id: 0, x: 0.5, y: 1.4 }, { id: 1, x: 0.5, y: 0.8 }];
+    assert.equal(afterLine(straight, aimHit(straight, 0.5, 1.4, 0, -1), 0, -1), null, 'ビリヤード: まっすぐ当たると手玉は止まるので線を出さない');
+    const lone = [{ id: 0, x: 0.5, y: 1.0 }];
+    const d = Math.SQRT1_2;
+    const wall = aimHit(lone, 0.5, 1.0, d, d);
+    const b = afterLine(lone, wall, d, d);
+    assert.ok(Math.abs(wall.x - (R - BR)) < 1e-9 && b.x < wall.x && b.y > wall.y, 'ビリヤード: 右のクッションに当たると左へはね返る');
+  }
   // CPU どうしで最後まで（2〜4人）
-  for (let g = 0; g < 12; g++) {
+  for (let g = 0; g < 16; g++) {
     const n = 2 + (g % 3);
-    let st = Bl.init(n, 100 + g);
+    let st = Bl.init(n, 100 + g, { rules: { balls: g >= 12 ? 6 : 9 } });
     for (let k = 0; k < 400 && !Bl.result(st); k++) {
       const m = Bl.cpu(st, st.turn);
       const nx = Bl.apply(st, { ...m, p: st.turn });

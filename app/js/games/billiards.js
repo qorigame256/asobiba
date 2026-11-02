@@ -13,6 +13,12 @@
 //     （端末どうしで結果が食い違わないように。ボウリングと同じ考え）。ほかの人の画面では、同じ打ち方で動きを再生してから送られた位置に合わせる。
 //   - 名前の札の数は、その人が落とした玉の数（反則で落としたのも数える。見た目だけで勝ち負けには使わない）。
 //   - CPU は落とせそうなポケットを探して狙うが、向きに 1〜3.5°のずれを入れ、強さも少しばらつかせて弱める。手玉を置けるときは狙いやすい所に置く。
+// 2026-11-02 の32回目の案（本人がおすすめどおり選んだ。分かれ目は Claude の判断）:
+//   - 詳細設定「玉の数」: 9個（最初。ナインボール）・6個（シックスボール。鍵は balls）。6個では1〜6番を3段の三角に並べ（1番が先頭・6番が後ろの段の真ん中）、
+//     6番を落とした人の勝ち。この文の「9番」は、6個のときは6番と読む（勝ちの玉の番号は topOf）。反則で落としたら戻すのも6番。
+//   - 詳細設定「狙いの線」: 長い・ふつう（最初。最初に当たる玉まで）・なし（鍵は guide。ボウリングの向きの線と同じく手助けなので、おまかせで抽選しない）。
+//     長いでは、玉に当たったあと手玉が進む向き（当たった玉と手玉の真ん中を結ぶ線に直角）と、当たった玉が進む向きを長めに見せ、クッションに当たるときははね返った先の線も見せる（回転なしの見込み）。
+//     なしでは点線と当たる所の丸を出さず、キューの向きだけで狙う。
 // 手: { p, t: 'shot', n: 何打目（0 から）, cx, cy: 打つ前の手玉の位置, vx, vy: 打った速さ（×10000 の整数）, b: [[番号, x, y]…] 止まった玉, pot: [落ちた番号…], first: 最初に当たった番号 | null }
 //   n が局面の打った数と同じときだけ受け付けるので、同じ手が2回届いても2回目は反則になる。
 
@@ -27,7 +33,9 @@ export const BR = 0.024; // 玉の半径
 const PR = 0.046; // ポケットの半径（玉の真ん中がこの中に入ったら落ちる）
 export const POCKETS = [[L, T], [R, T], [L - 0.008, (T + B) / 2], [R + 0.008, (T + B) / 2], [L, B], [R, B]];
 export const HEAD_Y = 1.42; // ブレイクの手玉はこれより下（手前）
-const FOOT = [0.5, 0.52]; // 9番を戻す点・ラックの真ん中
+const FOOT = [0.5, 0.52]; // 9番（6個のときは6番）を戻す点・ラックの真ん中
+const BALLS = [[9, '9個（ナインボール）'], [6, '6個（シックスボール）']];
+const GUIDES = [['long', '長い（当たったあとの向きも）'], ['normal', 'ふつう（最初に当たる玉まで）'], ['none', 'なし']];
 const MAX_V = 4.2; // いっぱいに引いたときの速さ（横幅 / 秒）
 const PULL_MAX = 0.32;
 const U = 10000;
@@ -140,9 +148,18 @@ export function canPlace(s, x, y) {
   return s.balls.every(([id, bx, by]) => id === 0 || (bx / U - x) ** 2 + (by / U - y) ** 2 >= (2 * BR + 0.002) ** 2);
 }
 
-// ラック: 1番が手玉に近い先頭、9番が真ん中、ほかはばらばら（種から）
-function rack(seed) {
+// ラック: 1番が手玉に近い先頭、9番が真ん中、ほかはばらばら（種から）。6個では1番が先頭・6番が後ろの段の真ん中（9個の9番と同じ所）
+function rack(seed, top = 9) {
   const rnd = mulberry32(seed);
+  if (top === 6) {
+    const rest = shuffle([2, 3, 4, 5], rnd);
+    const dy = 2 * BR * 0.866 + 0.001, dx = BR + 0.0006;
+    const spots = [[0, 2], [-1, 1], [1, 1], [-2, 0], [2, 0]];
+    const ids = [1, ...rest];
+    const out = spots.map(([c, r], i) => [ids[i], Math.round((FOOT[0] + c * dx) * U), Math.round((FOOT[1] + r * dy) * U)]);
+    out.push([6, Math.round(FOOT[0] * U), Math.round(FOOT[1] * U)]);
+    return out;
+  }
   const rest = shuffle([2, 3, 4, 5, 6, 7, 8], rnd);
   const dy = 2 * BR * 0.866 + 0.001, dx = BR + 0.0006;
   const spots = [[0, 2], [-1, 1], [1, 1], [-2, 0], [2, 0], [-1, -1], [1, -1], [0, -2]]; // [横, 縦]（縦は上が負）
@@ -151,6 +168,10 @@ function rack(seed) {
   out.push([9, Math.round(FOOT[0] * U), Math.round(FOOT[1] * U)]);
   return out;
 }
+
+// 勝ちの玉の番号（9個なら9・6個なら6）
+export const topOf = (s) => (s.rules?.balls === 6 ? 6 : 9);
+const guideOf = (s) => (GUIDES.some(([v]) => v === s.rules?.guide) ? s.rules.guide : 'normal');
 
 const clone = (s) => ({ ...s, balls: s.balls.map((b) => b.slice()), got: s.got.slice() });
 const meOf = (o) => (o.me >= 0 && !o.watching ? o.me : null);
@@ -182,23 +203,37 @@ function draw() {
   } else balls = ballsOf(s);
   if (ui.place && !ui.anim) balls = balls.filter((b) => b.id !== 0).concat([{ id: 0, x: ui.place.x, y: ui.place.y }]);
   const cue = balls.find((b) => b.id === 0);
-  // 狙いの線（最初に当たる玉まで）
-  if (ui.aim && cue && !ui.anim) {
-    const { dx, dy, pw } = ui.aim;
+  // 狙いの線（ふつうは最初に当たる玉まで。長いは当たったあとの向きも。なしは出さない）
+  const guide = guideOf(s);
+  if (ui.aim && cue && !ui.anim && guide !== 'none') {
+    const { dx, dy } = ui.aim;
     const hit = aimHit(balls, cue.x, cue.y, dx, dy);
+    const long = guide === 'long';
     ctx.save();
     ctx.setLineDash([k * 0.012, k * 0.014]);
     ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = Math.max(1.5, k * 0.004);
     ctx.beginPath(); ctx.moveTo(cue.x * k, cue.y * k); ctx.lineTo(hit.x * k, hit.y * k); ctx.stroke();
+    if (long) {
+      const after = afterLine(balls, hit, dx, dy);
+      if (after) {
+        ctx.strokeStyle = 'rgba(255,255,255,.55)';
+        ctx.beginPath(); ctx.moveTo(hit.x * k, hit.y * k); ctx.lineTo(after.x * k, after.y * k); ctx.stroke();
+      }
+    }
     ctx.setLineDash([]);
+    ctx.strokeStyle = 'rgba(255,255,255,.85)';
     ctx.beginPath(); ctx.arc(hit.x * k, hit.y * k, BR * k, 0, Math.PI * 2); ctx.stroke();
     if (hit.id !== null) {
-      // 当たった玉が進む向き（短い線）
+      // 当たった玉が進む向き（ふつうは短い線・長いは長い線）
       const nx = hit.bx - hit.x, ny = hit.by - hit.y, d = Math.sqrt(nx * nx + ny * ny) || 1;
       ctx.strokeStyle = hit.id === lowestOf(s) ? 'rgba(255,255,255,.85)' : 'rgba(255,90,90,.9)';
-      ctx.beginPath(); ctx.moveTo(hit.bx * k, hit.by * k); ctx.lineTo((hit.bx + (nx / d) * 0.12) * k, (hit.by + (ny / d) * 0.12) * k); ctx.stroke();
+      const len = long ? 0.35 : 0.12;
+      ctx.beginPath(); ctx.moveTo(hit.bx * k, hit.by * k); ctx.lineTo((hit.bx + (nx / d) * len) * k, (hit.by + (ny / d) * len) * k); ctx.stroke();
     }
     ctx.restore();
+  }
+  if (ui.aim && cue && !ui.anim) {
+    const { dx, dy, pw } = ui.aim;
     // キュー（引いた分だけ下がる）
     const back = 0.03 + pw * 0.1;
     ctx.strokeStyle = '#d9b27a'; ctx.lineWidth = Math.max(3, k * 0.012); ctx.lineCap = 'round';
@@ -229,6 +264,27 @@ function draw() {
     ctx.font = `${Math.max(11, k * 0.032)}px sans-serif`;
     ctx.fillText(ui.canPlace ? '手玉を押して動かせる・ほかを押して引っ張ると打つ' : '押して引っ張り、離すと反対の向きへ打つ', k / 2, (B + (H - B) * 0.65) * k);
   }
+}
+
+// 「狙いの線」が長いときの、当たったあとの手玉の線の終わり（回転なしの見込み）。
+// 玉に当たったら、当たった玉と手玉の真ん中を結ぶ線に直角の向きへ（まっすぐ当たると止まるので出さない）。クッションならはね返った向きへ、次に当たる所まで
+export function afterLine(balls, hit, dx, dy) {
+  let ax, ay;
+  if (hit.id !== null) {
+    const nx = hit.bx - hit.x, ny = hit.by - hit.y, d = Math.sqrt(nx * nx + ny * ny) || 1;
+    const dot = (dx * nx + dy * ny) / d;
+    ax = dx - (nx / d) * dot; ay = dy - (ny / d) * dot;
+  } else {
+    ax = Math.abs(hit.x - (L + BR)) < 1e-6 || Math.abs(hit.x - (R - BR)) < 1e-6 ? -dx : dx;
+    ay = Math.abs(hit.y - (T + BR)) < 1e-6 || Math.abs(hit.y - (B - BR)) < 1e-6 ? -dy : dy;
+  }
+  const al = Math.sqrt(ax * ax + ay * ay);
+  if (al < 0.08) return null;
+  ax /= al; ay /= al;
+  const rest = balls.filter((b) => b.id !== 0 && b.id !== hit.id);
+  const next = aimHit(rest, hit.x, hit.y, ax, ay);
+  const t = Math.min(next.t, 0.45 * (hit.id !== null ? al : 1));
+  return { x: hit.x + ax * t, y: hit.y + ay * t };
 }
 
 function drawBall(ctx, k, b) {
@@ -274,7 +330,7 @@ if (typeof window !== 'undefined') window.addEventListener('resize', resize);
 function shotMsg(s) {
   const x = s.last;
   if (!x) return '';
-  if (x.win !== undefined) return '9番が落ちた！';
+  if (x.win !== undefined) return `${topOf(s)}番が落ちた！`;
   if (x.foul) return x.foul;
   return x.pot.length ? `${x.pot.join('・')}番が落ちた！続けて打てる` : '';
 }
@@ -299,21 +355,26 @@ export default {
   name: 'ビリヤード',
   icon: '🎱',
   desc: 'ナインボール。順番に打ち、いちばん小さい番号の玉から当てて、9番を落とした人の勝ち',
+  settings: [
+    { key: 'balls', label: '玉の数', desc: '6個にすると1〜6番で遊び、6番を落とした人の勝ち（早く終わる）', def: 9, choices: BALLS },
+    { key: 'guide', label: '狙いの線', desc: '長い: 当たったあとの手玉と当たった玉の向きも見せる／ふつう: 最初に当たる玉まで／なし: キューの向きだけで狙う', def: 'normal', choices: GUIDES },
+  ],
   ready: true,
   multi: true,
   minPlayers: 2,
   maxPlayers: 4,
 
-  init(n, seed) {
+  init(n, seed, { rules = {} } = {}) {
+    const r = { balls: 9, guide: 'normal', ...rules };
     return {
-      n, seed, balls: [[0, Math.round(0.5 * U), Math.round(1.6 * U)], ...rack(seed)], turn: 0, hand: true, shots: 0,
+      n, seed, rules: r, balls: [[0, Math.round(0.5 * U), Math.round(1.6 * U)], ...rack(seed, r.balls === 6 ? 6 : 9)], turn: 0, hand: true, shots: 0,
       got: Array(n).fill(0), last: null, winner: null, step: 0,
     };
   },
 
   turn(s) { return s.winner === null ? s.turn : null; },
   canAct(s, p) { return s.winner === null && s.turn === p; },
-  result(s) { return s.winner === null ? null : { winner: s.winner }; },
+  result(s) { return s.winner === null ? null : { winner: s.winner, top: topOf(s) }; },
   sound() { return null; }, // 打つ音・落ちる音は動きを見せる中で鳴らす
   // CPU は前の打球の動き（d は 1/30 秒の数）を見せ終わってから打つ
   cpuDelay(s) { return 1400 + ((s.last?.d ?? 0) * 1000) / 30; },
@@ -350,16 +411,17 @@ export default {
     const potted = m.pot.filter((id) => id > 0);
     s.got[m.p] += potted.length;
     s.last = { p: m.p, n: s0.shots, cx: m.cx, cy: m.cy, vx: m.vx, vy: m.vy, from: s0.balls.map((b) => b.slice()), pot: potted, foul, d: Number.isInteger(m.d) ? clamp(m.d, 0, SIM_MAX * 30) : 0 };
-    if (potted.includes(9) && !foul) {
+    const top = topOf(s0);
+    if (potted.includes(top) && !foul) {
       s.winner = m.p;
       s.last.win = m.p;
       return s;
     }
-    if (potted.includes(9)) {
-      // 反則で9番を落としたら戻す（ふさがっていれば少し上へ）
+    if (potted.includes(top)) {
+      // 反則で9番（6個のときは6番）を落としたら戻す（ふさがっていれば少し上へ）
       let y = FOOT[1];
       while (s.balls.some(([, bx, by]) => (bx / U - FOOT[0]) ** 2 + (by / U - y) ** 2 < (2 * BR + 0.002) ** 2) && y > T + BR) y -= 0.01;
-      s.balls.push([9, Math.round(FOOT[0] * U), Math.round(y * U)]);
+      s.balls.push([top, Math.round(FOOT[0] * U), Math.round(y * U)]);
     }
     if (foul) {
       s.turn = (m.p + 1) % s.n;
@@ -425,7 +487,7 @@ export default {
     };
   },
 
-  resultText(res, me, pn) { return res.winner === me ? 'あなたの勝ち！🎉 9番を落とした' : `${pn(res.winner)}の勝ち！（9番を落とした）`; },
+  resultText(res, me, pn) { const top = res.top ?? 9; return res.winner === me ? `あなたの勝ち！🎉 ${top}番を落とした` : `${pn(res.winner)}の勝ち！（${top}番を落とした）`; },
 
   render(root, s, o) {
     const me = meOf(o);

@@ -13,11 +13,15 @@
 //   - 水に落ちたら1打足して打った所へ戻る。8打目を打っても入らなければ、そのホールは8打（水の1打を足して9になっても8）。
 //   - 風車の羽の向きは各自の端末の時計で回る（見た目も当たりも打った人の端末だけで決まるので、ずれても困らない）。
 //   - 同じ打数の人は同じ順位。
+//   - 詳細設定「コースの選び方」（2026-11-02 の32回目の案。本人がおすすめどおり選んだ。分かれ目は Claude の判断）: 順番どおり（最初）・くじで選ぶ（鍵は order）。
+//     くじでは9つのコースを種で混ぜ、前からホールの数だけ遊ぶ（同じ対局で同じコースは出ない）。局面の order に、何ホール目がどのコースかを入れる（順番どおりのときは入れない）。
+//     ホールの番号は遊ぶ順（1ホール目・2ホール目…）で出す。おまかせで抽選してよい（遊び方なので）。
 //   - CPU は玉の動きを計算せず、ホールごとにパーの前後で打数を決め（−1: 10%・パー: 35%・+1: 35%・+2: 15%・+3: 5%）、ティーからカップへ近づく位置で1打ずつ送る。1打ごとに 2.5〜4秒あける。
 // 手: { p, t: 'shot', h: 何ホール目（0 から）, k: そのホールで今まで数えた打数, x, y: 止まった位置（盤の横幅を 10000 とした整数）, in: 入ったら 1, pen: 水なら 1 }
 //   h と k が局面のその人の今と同じときだけ受け付けるので、同じ手が2回届いても2回目は反則になる。
 
 import { scoreChips } from './party.js';
+import { mulberry32, shuffle } from './util.js';
 import { fitCanvas, toBoard, clamp, SEAT_COLORS } from './action.js';
 import { play } from '../sound.js';
 
@@ -63,6 +67,7 @@ export const COURSES = [
   },
 ];
 const HOLES = [[3, '3ホール'], [6, '6ホール'], [9, '9ホール']];
+const ORDERS = [['in', '順番どおり'], ['random', 'くじで選ぶ']];
 const holesOf = (r) => (HOLES.some(([v]) => v === r.holes) ? r.holes : 6);
 
 const inRect = (x, y, [l, t, r, b]) => x >= l && x <= r && y >= t && y <= b;
@@ -168,7 +173,7 @@ function rayToWall(c, x, y, dx, dy) {
 
 const clone = (s) => ({ ...s, pl: s.pl.map((P) => ({ ...P, cards: P.cards.slice() })) });
 const total = (P) => P.cards.reduce((a, v) => a + v, 0);
-const courseOf = (s, h) => COURSES[h];
+export const courseOf = (s, h) => COURSES[s.order ? s.order[h] : h];
 const meOf = (o) => (o.me >= 0 && !o.watching ? o.me : null);
 const now = () => performance.now();
 
@@ -318,7 +323,7 @@ function table(s, o, me) {
   head.innerHTML = '<th></th>' + [...Array(s.holes).keys()].map((i) => `<th>${i + 1}</th>`).join('') + '<th>計</th>';
   const par = document.createElement('tr');
   par.className = 'gf-par';
-  par.innerHTML = '<th>パー</th>' + [...Array(s.holes).keys()].map((i) => `<td>${COURSES[i].par}</td>`).join('') + `<td>${COURSES.slice(0, s.holes).reduce((a, c) => a + c.par, 0)}</td>`;
+  par.innerHTML = '<th>パー</th>' + [...Array(s.holes).keys()].map((i) => `<td>${courseOf(s, i).par}</td>`).join('') + `<td>${[...Array(s.holes).keys()].reduce((a, i) => a + courseOf(s, i).par, 0)}</td>`;
   t.append(head, par);
   s.pl.forEach((P, p) => {
     const tr = document.createElement('tr');
@@ -331,7 +336,7 @@ function table(s, o, me) {
       if (i === P.h && !P.done) td.className = 'now';
       const v = P.cards[i];
       td.textContent = v === undefined ? '' : String(v);
-      if (v !== undefined && v < COURSES[i].par) td.classList.add('gf-good');
+      if (v !== undefined && v < courseOf(s, i).par) td.classList.add('gf-good');
       tr.append(td);
     }
     const sum = document.createElement('td');
@@ -359,13 +364,16 @@ export default {
   maxPlayers: 6,
   settings: [
     { key: 'holes', label: 'ホールの数', desc: '1回の対局で回るホールの数', def: 6, choices: HOLES },
+    { key: 'order', label: 'コースの選び方', desc: '順番どおり: 1番のコースから順に遊ぶ／くじで選ぶ: 9つのコースから毎回くじで選ぶ（同じ対局で同じコースは出ない）', def: 'in', choices: ORDERS },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const r = { holes: 6, ...rules };
-    const c = COURSES[0];
+    const holes = holesOf(r);
+    const order = r.order === 'random' ? shuffle([...COURSES.keys()], mulberry32(seed)).slice(0, holes) : null;
+    const c = COURSES[order ? order[0] : 0];
     return {
-      n, seed, rules: r, holes: holesOf(r),
+      n, seed, rules: r, holes, ...(order ? { order } : {}),
       pl: Array.from({ length: n }, () => ({ h: 0, n: 0, x: Math.round(c.tee[0] * U), y: Math.round(c.tee[1] * U), cards: [], done: false })), step: 0,
     };
   },
@@ -405,7 +413,7 @@ export default {
       P.h += 1;
       P.n = 0;
       if (P.h >= s.holes) { P.done = true; return s; }
-      const c = COURSES[P.h];
+      const c = courseOf(s, P.h);
       P.x = Math.round(c.tee[0] * U);
       P.y = Math.round(c.tee[1] * U);
     } else if (!m.pen) { P.x = m.x; P.y = m.y; }
@@ -423,7 +431,7 @@ export default {
   cpu(s, p) {
     const P = s.pl[p];
     if (P.done) return null;
-    const c = COURSES[P.h];
+    const c = courseOf(s, P.h);
     const key = `${s.seed}:${p}:${P.h}`;
     if (!cpuPlan.has(key)) {
       const x = Math.random();
@@ -508,7 +516,7 @@ export default {
       if (!aim || aim.pw < 0.05 || !canShoot(cs, co, ui.me)) return;
       const P = cs.pl[ui.me];
       const sp = MIN_V + (MAX_V - MIN_V) * aim.pw;
-      const res = simulate(COURSES[P.h], P.x / U, P.y / U, aim.dx * sp, aim.dy * sp, { t0: now() / 1000, record: true });
+      const res = simulate(courseOf(s, P.h), P.x / U, P.y / U, aim.dx * sp, aim.dy * sp, { t0: now() / 1000, record: true });
       ui.sim = { ...res, h: P.h, k: P.n, at: now() };
       play('smack');
     };

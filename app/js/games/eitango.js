@@ -1,11 +1,13 @@
 // 英単語クイズ（2026-10-31 本人の依頼で追加）。全員に同じ問題が出る。詳細設定「出し方」で2通り（どちらも1つのゲームの中。本人が推奨を承認）:
 //   意味当て（最初）: 英単語が出て、4つの日本語の意味から1つ選ぶ。答えられるのは1問に1回だけ（難読漢字の「4つから選ぶ」と同じ）。
 //   スペル打ち: 日本語の意味が出て、英単語を打ち込む。何度でも打ち直せる。つづりの文字数を「_ _ _ _」で見せ、制限時間の4割がたつと1文字目も見せる（本人が推奨を承認）。
+//   英単語を選ぶ（2026-11-02 の32回目の案「逆の4択」。本人がおすすめどおり選んだ）: 日本語の意味が出て、4つの英単語から1つ選ぶ。答えられるのは1問に1回だけ（意味当てと同じ）。
 // 点と進め方は難読漢字と同じ（本人が推奨を承認）: 正解した人は速い順に 3点・2点・それ以降は1点、パスあり、10問（詳細設定で15・20問）。
 // 難しさは 中学（最初）・高校・むずかしい・ぜんぶまぜる（本人が推奨を承認）。単語は eitango-data.js（Claude が書いた）。
 // 進行と時間の測り方は kanji.js と同じ（ホストが p = -1 の手を足す。速さは各自の端末で画面に出てから答えるまで）。
 // Claude の判断:
 //   意味当てのまちがいの3つは、同じ難しさのほかの単語の意味から選ぶ（choicesOf。種と何問目かから作るので全員同じ）。
+//   英単語を選ぶのまちがいの3つも、同じ難しさのほかの単語（の1つ目のつづり）から選ぶ（wordChoicesOf）。局面の opts に入れるのは意味当てと同じで、正解が意味か英単語かだけが違う。
 //   スペル打ちは大文字・小文字・全角・空白を区別しない。米と英でつづりが違う単語はどちらでも正解。1文字目のヒントは詳細設定にせずいつも出す。
 //   スペル打ちでは、1回の入力で3文字以上増えたら予測変換（候補から選んだ）と見て戻す（タイピング早打ちと同じ。つづりを覚えていなくても打てるため）。
 //   CPU は難しさに応じた確率（中学 6割・高校 45%・むずかしい 3割・まぜる 45%）で、4秒〜制限時間の7割のあいだに正解する。
@@ -28,12 +30,15 @@ const PTS = [3, 2]; // 速い順の点。それより後ろは1点
 const HINT_AT = 0.4; // スペル打ちで1文字目を見せるのは、制限時間のこの割合がたったとき
 const PREDICT_JUMP = 3; // スペル打ちで、1回の入力でこれだけ増えたら予測変換と見る
 const LEVELS = { easy: '中学', mid: '高校', hard: 'むずかしい', mix: 'ぜんぶまぜる' };
-const ASKS = { meaning: '意味当て（4つから選ぶ）', spell: 'スペル打ち' };
+const ASKS = { meaning: '意味当て（4つから選ぶ）', spell: 'スペル打ち', reverse: '英単語を選ぶ（4つから）' };
 const CPU_RATE = { easy: 0.6, mid: 0.45, hard: 0.3, mix: 0.45 };
 const CHOICES = 4;
 
 const limitOf = (s) => Number(s.rules.time) * 1000;
 const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 10);
+const isRev = (s) => s.rules.ask === 'reverse';
+// 4つから選ぶときの正解（意味当ては意味・英単語を選ぶは1つ目のつづり）
+const rightOf = (s, q) => (isRev(s) ? s.qs[q][0][0] : s.qs[q][1]);
 const qKey = (s, q = s.q) => `eitango:${s.seed}:${q}`;
 const poolOf = (level) => (level === 'mix' ? [...EITANGO.easy, ...EITANGO.mid, ...EITANGO.hard] : EITANGO[level] ?? EITANGO.easy);
 // 打った英単語のそろえ方（全角→半角・大文字→小文字・空白を取る）
@@ -41,7 +46,7 @@ export const norm = (text) => String(text).normalize('NFKC').toLowerCase().repla
 // 正解か。意味当ては意味の文字列が同じか、スペル打ちはつづりのどれかと同じか
 export const isRight = (s, q, text) => {
   const [words, mean] = s.qs[q];
-  return s.opts ? text === mean : words.includes(norm(text));
+  return s.opts ? text === rightOf(s, q) : words.includes(norm(text));
 };
 
 // 意味当ての4つの意味。正しい意味のほかの3つは、その単語と同じ難しさのほかの単語の意味から選ぶ。並べ方は種と何問目かだけで決まる
@@ -50,6 +55,14 @@ export function choicesOf(seed, q, [words, mean]) {
   const level = Object.keys(EITANGO).find((l) => EITANGO[l].some(([w]) => w[0] === words[0])) ?? 'easy';
   const others = [...new Set(shuffle(EITANGO[level], rnd).map(([, m]) => m).filter((m) => m !== mean))];
   return shuffle([mean, ...others.slice(0, CHOICES - 1)], rnd);
+}
+
+// 英単語を選ぶの4つの英単語。正しい単語のほかの3つは、同じ難しさのほかの単語（意味もつづりも違うもの）から選ぶ。並べ方は種と何問目かだけで決まる
+export function wordChoicesOf(seed, q, [words, mean]) {
+  const rnd = mulberry32((Math.imul(seed >>> 0, 0x9e3779b1) ^ Math.imul(q + 1, 0x27d4eb2f)) >>> 0);
+  const level = Object.keys(EITANGO).find((l) => EITANGO[l].some(([w]) => w[0] === words[0])) ?? 'easy';
+  const others = [...new Set(shuffle(EITANGO[level], rnd).filter(([w, m]) => m !== mean && !words.includes(w[0])).map(([w]) => w[0]))];
+  return shuffle([words[0], ...others.slice(0, CHOICES - 1)], rnd);
 }
 
 const clone = (s) => ({ ...s, scores: s.scores.slice(), tries: s.tries.slice(), solved: s.solved.slice(), said: s.said.slice(), passed: s.passed.slice() });
@@ -102,7 +115,7 @@ export default {
   minPlayers: 2,
   maxPlayers: 10,
   settings: [
-    { key: 'ask', label: '出し方', desc: '意味当て: 英単語を見て4つの意味から選ぶ（1問に1回だけ）／スペル打ち: 意味を見て英単語を打つ', def: 'meaning', choices: Object.entries(ASKS) },
+    { key: 'ask', label: '出し方', desc: '意味当て: 英単語を見て4つの意味から選ぶ（1問に1回だけ）／スペル打ち: 意味を見て英単語を打つ／英単語を選ぶ: 意味を見て4つの英単語から選ぶ（1問に1回だけ）', def: 'meaning', choices: Object.entries(ASKS) },
     { key: 'level', label: '難しさ', desc: '出る英単語の難しさ', def: 'easy', choices: Object.entries(LEVELS) },
     { key: 'time', label: '制限時間', desc: '1問あたりの時間', def: '25', choices: [['15', '15秒'], ['25', '25秒'], ['40', '40秒']] },
     { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 10, choices: ROUNDS },
@@ -114,7 +127,7 @@ export default {
     return {
       n, seed, rules: r, qs, q: -1, phase: 'ready',
       tries: Array(n).fill(0), solved: Array(n).fill(null), said: Array(n).fill(''), passed: Array(n).fill(false), scores: Array(n).fill(0), last: null, step: 0,
-      ...(r.ask === 'spell' ? {} : { opts: qs.map((x, i) => choicesOf(seed, i, x)) }), // 意味当ての各問題の4つの意味
+      ...(r.ask === 'spell' ? {} : { opts: qs.map((x, i) => (r.ask === 'reverse' ? wordChoicesOf : choicesOf)(seed, i, x)) }), // 4つから選ぶときの各問題の4つ（意味当ては意味・英単語を選ぶは英単語）
     };
   },
 
@@ -209,10 +222,10 @@ export default {
     if (plan.done || t < plan.at) return null;
     plan.done = true;
     const ms = Math.round(t);
-    const [words, mean] = s.qs[s.q];
+    const [words] = s.qs[s.q];
     if (s.opts) {
       const opts = s.opts[s.q];
-      return { t: 'try', q: s.q, text: plan.ok ? mean : opts[Math.floor(Math.random() * opts.length)], ms, n: 1 };
+      return { t: 'try', q: s.q, text: plan.ok ? rightOf(s, s.q) : opts[Math.floor(Math.random() * opts.length)], ms, n: 1 };
     }
     if (!plan.ok) return { t: 'pass', q: s.q };
     return { t: 'try', q: s.q, text: words[0], ms, n: s.tries[p] + 1 };
@@ -255,7 +268,7 @@ export default {
     const card = document.createElement('div');
     card.className = 'kj-card';
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">${ASKS[s.opts ? 'meaning' : 'spell']}・難しさ: ${LEVELS[s.rules.level] ?? ''}・全${s.qs.length}問・1問 ${s.rules.time}秒</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">${ASKS[s.rules.ask] ?? ASKS[s.opts ? 'meaning' : 'spell']}・難しさ: ${LEVELS[s.rules.level] ?? ''}・全${s.qs.length}問・1問 ${s.rules.time}秒</div>`;
       wrap.append(card);
       root.append(wrap);
       return;
@@ -264,8 +277,8 @@ export default {
     const key = qKey(s);
     const limit = limitOf(s);
     card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div><div class="kj-word et-word"></div>`;
-    // 意味当ては英単語を、スペル打ちは意味を大きく出す
-    card.querySelector('.kj-word').textContent = s.opts ? words[0] : mean;
+    // 意味当ては英単語を、スペル打ちと英単語を選ぶは意味を大きく出す
+    card.querySelector('.kj-word').textContent = s.opts && !isRev(s) ? words[0] : mean;
     if (s.phase === 'open') {
       since(key);
       card.append(timeBar(key, limit, { secs: true }));
@@ -281,7 +294,7 @@ export default {
     } else {
       const ans = document.createElement('div');
       ans.className = 'kj-answer';
-      ans.textContent = s.opts ? `意味: ${mean}` : `答え: ${words.join('／')}`;
+      ans.textContent = isRev(s) ? `答え: ${words[0]}` : s.opts ? `意味: ${mean}` : `答え: ${words.join('／')}`;
       card.append(ans);
     }
     wrap.append(card);
@@ -364,12 +377,12 @@ export default {
     return box;
   },
 
-  // 意味当ての4つのボタン（2×2）。答えたあと・答えを見せる場面では押せない形にして、○×を付ける
+  // 意味当て・英単語を選ぶの4つのボタン（2×2）。答えたあと・答えを見せる場面では押せない形にして、○×を付ける
   choiceGrid(s, me, o, key, limit, note) {
     const grid = document.createElement('div');
     grid.className = 'kj-choices';
     grid.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr; gap: 10px; touch-action: manipulation;';
-    const right = s.qs[s.q][1];
+    const right = rightOf(s, s.q);
     const shown = s.phase !== 'open';
     const mine = me !== null && s.tries[me] ? s.said[me] : null;
     const canPick = s.phase === 'open' && me !== null && !doneOf(s, me);
@@ -377,6 +390,7 @@ export default {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'btn secondary kj-choice';
+      if (isRev(s)) b.lang = 'en';
       b.style.cssText = 'min-height: 64px; padding: 10px 6px; border-radius: 12px; font-size: 1.1rem; overflow-wrap: anywhere; line-height: 1.3;';
       const ok = text === right && (shown || mine === right);
       const ng = text === mine && text !== right;
