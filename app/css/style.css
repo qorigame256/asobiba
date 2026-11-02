@@ -2153,3 +2153,43 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .board button.ts-btn:disabled { opacity: .5; cursor: default; }
 .ts-btn.kick { animation: tsKick .12s ease-out; }
 @keyframes tsKick { from { transform: scale(.95); } }
+
+/* ---------- 2026-11-02 に足した4つ（かぶったら0点・フラッシュ暗算・ミニゴルフ・ビリヤード） ---------- */
+:is([data-game="kaburi"], [data-game="anzan"]) .board { width: min(100%, 560px); }
+/* かぶったら0点 */
+.kb-pad { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; width: min(100%, 400px); margin: 0 auto; touch-action: manipulation; }
+.board button.kb-num { min-height: 3.6rem; border-radius: 14px; border: 2px solid var(--line); background: var(--field); color: var(--ink); font: inherit; font-size: 1.6rem; font-weight: 800; cursor: pointer; }
+.board button.kb-num.sel { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+.board button.kb-num:disabled:not(.sel) { opacity: .5; cursor: default; }
+.board button.kb-go { display: block; margin: 0 auto; min-width: 12em; }
+.board button.kb-go:disabled { opacity: .55; cursor: default; }
+.kb-reveal { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; text-align: left; }
+.kb-row { display: grid; grid-template-columns: 2.4em 1fr auto; gap: 8px; align-items: center; padding: 6px 10px; border-radius: 10px; border: 1.5px solid var(--line); }
+.kb-row.ok { border-color: #2f8a4a; }
+.kb-row.hit { opacity: .75; }
+.kb-row.hit .kb-v { text-decoration: line-through; color: #c0392b; }
+.kb-v { font-size: 1.6rem; font-weight: 900; text-align: center; }
+.kb-who { overflow-wrap: anywhere; }
+.kb-tag { font-weight: 800; font-size: .9rem; }
+.kb-row.ok .kb-tag { color: #2f8a4a; }
+.kb-row.hit .kb-tag { color: #c0392b; }
+.kb-rv { font-size: .85rem; overflow-wrap: anywhere; }
+/* フラッシュ暗算 */
+.az-big { font-size: clamp(3.4rem, 20vw, 6rem); font-weight: 900; line-height: 1.15; min-height: 1.15em; font-variant-numeric: tabular-nums; }
+.az-big.ask { color: var(--muted); }
+.az-big.ans { color: #2f8a4a; }
+.az-nums { overflow-wrap: anywhere; }
+.az-bar { min-height: 2.2rem; }
+.az-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: min(100%, 300px); margin: 0 auto; touch-action: manipulation; }
+.board button.az-key { min-height: 2.9rem; border-radius: 12px; border: 2px solid var(--line); background: var(--field); color: var(--ink); font: inherit; font-size: 1.5rem; font-weight: 800; cursor: pointer; }
+.board button.az-key.ok { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-size: 1rem; }
+.board button.az-key:disabled { opacity: .5; cursor: default; }
+.az-rv { font-size: .85rem; overflow-wrap: anywhere; }
+/* ミニゴルフ（打数の表はボウリングの .bw-table を使う） */
+[data-game="golf"] .board { width: min(100%, 560px); }
+.bw-table tr.gf-par { color: var(--muted); }
+.bw-table td.gf-good { color: #2f8a4a; font-weight: 800; }
+/* ビリヤード */
+[data-game="billiards"] .board { width: min(100%, 560px); }
+.bl { display: flex; flex-direction: column; gap: 6px; }
+.bl-info { min-height: 1.4em; text-align: center; margin: 0; }
