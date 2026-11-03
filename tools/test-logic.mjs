@@ -8019,6 +8019,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     }
   }
   let s = K.apply(K.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  const s0kt = s;
   s = K.apply(s, { p: 0, t: 'find', q: 0, w: 2, ms: 9000 });
   assert.equal(K.apply(s, { p: 1, t: 'find', q: 0, w: 2, ms: 9500 }), null, 'ことばさがし: 遅いほうは取れない');
   assert.equal(K.apply(s, { p: 0, t: 'find', q: 0, w: 2, ms: 8000 }), null, 'ことばさがし: 自分の言葉は取り直さない');
@@ -8030,6 +8031,31 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.deepEqual(s.scores, [0, len(2), len(0)], 'ことばさがし: 字数が点');
   for (const rules of [{}, { hard: true }]) {
     const end = runCpus(K, 4, 8, rules, 300, 5000);
+    assert.ok(K.result(end) && end.scores.some((v) => v > 0), `ことばさがし: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  // 盤の大きさ 10×10（2026-11-03 の33回目の案）: 100字・10こ・どの言葉も1か所・1回3分
+  for (let seed = 0; seed < 40; seed++) {
+    for (const hard of [false, true]) {
+      const s10 = K.init(3, seed, { rules: { hard, size: 10 } });
+      for (const b of s10.qs) {
+        assert.equal([...b.grid].length, 100, 'ことばさがし: 10×10 は100字');
+        assert.equal(b.words.length, 10, 'ことばさがし: 10×10 は10こ隠す');
+        for (const x of b.words) {
+          assert.equal(countOf(b.grid, x.w, 10), 1, `ことばさがし: 10×10 でも ${x.w} は盤に1か所だけ`);
+          assert.equal(x.cells.map((c) => b.grid[c]).join(''), x.w, 'ことばさがし: 10×10 の場所と字が合う');
+          assert.deepEqual(lineOf(x.cells[0], x.cells.at(-1), 10), x.cells, 'ことばさがし: 10×10 でもまっすぐ並ぶ');
+          if (!hard) assert.ok(x.cells[1] - x.cells[0] === 1 || x.cells[1] - x.cells[0] === 10, 'ことばさがし: 10×10 のなしでもよこかたてだけ');
+        }
+      }
+    }
+  }
+  let t10 = K.apply(K.init(3, 5, { rules: { size: 10 } }), { p: -1, t: 'next' });
+  assert.equal(K.referee(t10).ms, 181500, 'ことばさがし: 10×10 は1回3分');
+  assert.ok(K.apply(t10, { p: 0, t: 'find', q: 0, w: 9, ms: 150000 }), 'ことばさがし: 10×10 は2分を過ぎても見つけられる');
+  assert.equal(K.apply(s0kt, { p: 0, t: 'find', q: 0, w: 1, ms: 150000 }), null, 'ことばさがし: 8×8 は2分を過ぎたら弾く');
+  assert.deepEqual(K.init(3, 9, { rules: { hide: true } }).qs, K.init(3, 9, { rules: {} }).qs, 'ことばさがし: 一覧を隠すでも盤は同じ');
+  for (const rules of [{ size: 10 }, { hide: true }, { size: 10, hard: true, hide: true }]) {
+    const end = runCpus(K, 4, 9, rules, 300, 5000);
     assert.ok(K.result(end) && end.scores.some((v) => v > 0), `ことばさがし: CPU どうしで最後まで ${JSON.stringify(rules)}`);
   }
   console.log('kotoba OK');
@@ -8082,6 +8108,26 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   c = O.apply(c, { p: 1, t: 'ans', q: 0, text: 'b' });
   c = O.apply(c, { p: -1, t: 'close' });
   for (let k = 0; k < 20; k++) assert.ok(O.apply(c, { ...O.cpu(c, 1), p: 1 }), '大喜利: 部屋を出た人の票は通る');
+  // 審査員が選ぶ（2026-11-03 の33回目の案）: 回数は人数・審査員は席順・審査員は書かない・審査員だけが選ぶ・選ばれた答えに1点
+  const { judgeOf } = await import('../app/js/games/oogiri.js');
+  assert.equal(O.init(4, 2, { rules: { judge: true, rounds: 8 } }).qs.length, 4, '大喜利: 審査員が選ぶでは回数は人数');
+  assert.equal(O.init(4, 2, { rules: { rounds: 8 } }).qs.length, 8, '大喜利: ふつうは回数の設定どおり');
+  let j = O.apply(O.init(4, 6, { rules: { judge: true } }), { p: -1, t: 'next' });
+  assert.equal(judgeOf(j), 0, '大喜利: 1回目の審査員は席0');
+  assert.equal(O.apply(j, { p: 0, t: 'ans', q: 0, text: '審査員の答え' }), null, '大喜利: 審査員は答えを書けない');
+  for (const p of [1, 2, 3]) j = O.apply(j, { p, t: 'ans', q: 0, text: 'こたえ' + p });
+  assert.equal(O.referee(j).ms, 1000, '大喜利: 審査員のほかが書いたら1秒');
+  j = O.apply(j, { p: -1, t: 'close' });
+  assert.equal(O.apply(j, { p: 1, t: 'vote', q: 0, to: 2 }), null, '大喜利: 審査員でない人は選べない');
+  assert.equal(O.cpu(j, 1), null, '大喜利: 審査員でない部屋を出た人の席は何もしない');
+  assert.ok(O.apply(j, { ...O.cpu(j, 0), p: 0 }), '大喜利: 審査員が部屋を出た人の席ならくじで選ぶ');
+  j = O.apply(j, { p: 0, t: 'vote', q: 0, to: 2 });
+  assert.equal(O.referee(j).ms, 1000, '大喜利: 審査員が選んだら1秒');
+  j = O.apply(j, { p: -1, t: 'tally' });
+  assert.deepEqual(j.scores, [0, 0, 1, 0], '大喜利: 選ばれた答えに1点');
+  j = O.apply(j, { p: -1, t: 'next' });
+  assert.equal(judgeOf(j), 1, '大喜利: 2回目の審査員は席1');
+  assert.ok(O.apply(j, { p: 0, t: 'ans', q: 1, text: 'こんどは書ける' }), '大喜利: 審査員でなくなったら書ける');
   console.log('oogiri OK');
 }
 
@@ -8119,7 +8165,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
 // 大縄とび（2026-11-03）: 縄の間はだんだん縮む・跳べたかの決まり・ライフと脱落・残り1人で終わり・全員いなくなったら最後まで残った人が1位・CPU どうしで最後まで
 {
   const W = GAMES.nawa;
-  const { TIMES, airOf, cleared, cpuMissRate } = await import('../app/js/games/nawa.js');
+  const { TIMES, airOf, cleared, cpuMissRate, timesOf } = await import('../app/js/games/nawa.js');
   assert.equal(TIMES[0], 2500);
   assert.equal(TIMES[1] - TIMES[0], 1500, '大縄とび: 最初の間は1.5秒');
   for (let k = 2; k < TIMES.length; k++) assert.ok(TIMES[k] - TIMES[k - 1] <= TIMES[k - 1] - TIMES[k - 2] + 1 && TIMES[k] - TIMES[k - 1] >= 549, '大縄とび: 間はだんだん縮み、0.55秒より短くならない');
@@ -8154,6 +8200,20 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   for (const rules of [{}, { lives: 1 }, { lives: 5 }]) {
     const end = runCpus(W, 4, 5, rules, 100, 4000);
     assert.ok(W.result(end), `大縄とび: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  // はじめの速さ（2026-11-03 の33回目の案）: 1回目の間だけ変わり、縮み方といちばん短い間は同じ
+  assert.equal(timesOf({}), TIMES, '大縄とび: 最初はふつうの表');
+  assert.equal(timesOf({ speed: 'normal' }), TIMES);
+  for (const [speed, first] of [['slow', 2000], ['fast', 1000]]) {
+    const T = timesOf({ speed });
+    assert.equal(T[0], 2500, '大縄とび: 1回目の時刻は同じ');
+    assert.equal(T[1] - T[0], first, `大縄とび: ${speed} の最初の間`);
+    assert.equal(T.length, TIMES.length);
+    assert.equal(T.at(-1) - T.at(-2), TIMES.at(-1) - TIMES.at(-2), '大縄とび: いちばん速いところは同じ');
+    assert.equal(cleared([T[3] - 100], 3, T), true, '大縄とび: 速さを変えても少し前に跳べば跳べる');
+    assert.equal(cleared([T[3] + 120], 3, T), false);
+    const end = runCpus(W, 4, 5, { speed }, 100, 4000);
+    assert.ok(W.result(end), `大縄とび: CPU どうしで最後まで ${speed}`);
   }
   console.log('nawa OK');
 }

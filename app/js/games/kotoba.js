@@ -13,6 +13,10 @@
 //   - 全部見つかったら1.5秒待って締め切る（ほかの人のもっと速い手が届く分を待つ）。結果を見せる間は3秒。
 //   - なぞった字の並びが、まだ見つかっていない言葉の場所とぴったり同じなら見つけたことにする（向きはどちらからでもよい）。
 //   - CPU は7〜20秒に1つ、まだ見つかっていない言葉を見つける。
+// 詳細設定「言葉の一覧」「盤の大きさ」（2026-11-03 の33回目の案。分かれ目は Claude の推奨を本人が承認）:
+//   - 一覧を隠すでは、お題と言葉の字数（「○○○」）だけ見せ、見つかった言葉だけ字に変わる。
+//   - 10×10 では言葉を10こ隠し、1回の時間は3分（8×8 は今までどおり7こ・2分）。
+//   Claude の判断: 一覧を隠すでも、結果を見せる間はまだ見つかっていない言葉も字で見せる。おまかせでは「言葉の一覧」は抽選し、盤の大きさは抽選しない（size は main.js の luckSettings が外す）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'find', q, w, ms }
 
@@ -20,10 +24,13 @@ import { mulberry32, shuffle, esc } from './util.js';
 import { since, scoreChips, leaders, winnersText, timeBar, SEAT_COLORS } from './party.js';
 import { KOTOBA } from './kotoba-data.js';
 
-const N = 8;
 const WORDS = 7;
 const ROUNDS = 3;
 const LIMIT = 120000;
+const SIZES = [[8, '8×8'], [10, '10×10']];
+const sizeOf = (r) => (r.size === 10 ? 10 : 8);
+const wordsOf = (r) => (sizeOf(r) === 10 ? 10 : WORDS);
+const limitOf = (r) => (sizeOf(r) === 10 ? 180000 : LIMIT);
 const READY_MS = 3000;
 const SHOWN_MS = 3000;
 const GRACE_MS = 1500;
@@ -36,15 +43,15 @@ const clone = (s) => ({ ...s, scores: s.scores.slice() });
 const lenOf = (w) => [...w].length;
 const cellsKey = (cells) => cells.slice().sort((a, b) => a - b).join(',');
 
-// 盤を作る。返り値 { grid: 64字, words: [{ w, cells }] }
-export function makeBoard(rnd, theme, hard) {
+// 盤を作る（N×N に count こ）。返り値 { grid: N×N 字, words: [{ w, cells }] }
+export function makeBoard(rnd, theme, hard, N = 8, count = WORDS) {
   const dirs = hard ? ALL : EASY;
   for (let tries = 0; tries < 200; tries++) {
     const grid = Array(N * N).fill('');
-    const pick = shuffle(theme[1].slice(), rnd).slice(0, WORDS + 3).sort((a, b) => lenOf(b) - lenOf(a));
+    const pick = shuffle(theme[1].slice(), rnd).slice(0, count + 3).sort((a, b) => lenOf(b) - lenOf(a));
     const words = [];
     for (const w of pick) {
-      if (words.length >= WORDS) break;
+      if (words.length >= count) break;
       const ch = [...w];
       for (let k = 0; k < 60; k++) {
         const [dr, dc] = dirs[Math.floor(rnd() * dirs.length)];
@@ -59,17 +66,17 @@ export function makeBoard(rnd, theme, hard) {
         break;
       }
     }
-    if (words.length < WORDS) continue;
+    if (words.length < count) continue;
     for (let fill = 0; fill < 30; fill++) {
       const g = grid.map((x) => x || FILL[Math.floor(rnd() * FILL.length)]);
-      if (words.every((x) => countOf(g, x.w) === 1)) return { grid: g.join(''), words };
+      if (words.every((x) => countOf(g, x.w, N) === 1)) return { grid: g.join(''), words };
     }
   }
   throw new Error('ことばさがし: 盤が作れなかった');
 }
 
 // 盤の中に言葉が何か所あるか（8方向。逆から読んで同じ場所になるものは1か所と数える）
-export function countOf(grid, w) {
+export function countOf(grid, w, N = 8) {
   const g = typeof grid === 'string' ? [...grid] : grid;
   const ch = [...w];
   const seen = new Set();
@@ -82,7 +89,7 @@ export function countOf(grid, w) {
 }
 
 // a から b までのまっすぐな並び（たて・よこ・ななめ45度でなければ null）
-export function lineOf(a, b) {
+export function lineOf(a, b, N = 8) {
   const ra = Math.floor(a / N), ca = a % N, rb = Math.floor(b / N), cb = b % N;
   const dr = Math.sign(rb - ra), dc = Math.sign(cb - ca);
   const len = Math.max(Math.abs(rb - ra), Math.abs(cb - ca));
@@ -105,13 +112,15 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'hard', label: 'ななめ・逆向き', desc: 'ななめに並んだ言葉や、右から左・下から上に並んだ言葉も混ぜる', def: false },
+    { key: 'hide', label: '言葉の一覧を隠す', desc: '隠れている言葉は字数（○○○）だけ見せる。見つかった言葉だけ字に変わる', def: false },
+    { key: 'size', label: '盤の大きさ', desc: '10×10 は言葉が10こで、1回3分（8×8 は7こ・2分）', def: 8, choices: SIZES },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const r = { hard: false, ...rules };
     const rnd = mulberry32(seed);
     const themes = shuffle([...KOTOBA.keys()], rnd).slice(0, ROUNDS);
-    const qs = themes.map((t) => ({ theme: t, ...makeBoard(rnd, KOTOBA[t], r.hard) }));
+    const qs = themes.map((t) => ({ theme: t, ...makeBoard(rnd, KOTOBA[t], r.hard, sizeOf(r), wordsOf(r)) }));
     return { n, seed, rules: r, qs, q: -1, phase: 'ready', found: [], scores: Array(n).fill(0), last: null, log: [], step: 0 };
   },
 
@@ -133,7 +142,7 @@ export default {
     if (s.phase === 'ready') return { key: 'ready', ms: READY_MS, move: { t: 'next' } };
     if (s.phase === 'open') {
       if (s.found.every((f) => f)) return { key: 'all' + s.q, ms: GRACE_MS, move: { t: 'close' } };
-      return { key: 'open' + s.q, ms: LIMIT + GRACE_MS, move: { t: 'close' } };
+      return { key: 'open' + s.q, ms: limitOf(s.rules) + GRACE_MS, move: { t: 'close' } };
     }
     if (s.phase === 'shown') return { key: 'shown' + s.q, ms: SHOWN_MS, move: { t: 'next' } };
     return null;
@@ -165,7 +174,7 @@ export default {
       return null;
     }
     if (m.t !== 'find' || s0.phase !== 'open' || m.q !== s0.q || !Number.isInteger(m.p) || m.p < 0 || m.p >= s0.n) return null;
-    if (!Number.isInteger(m.w) || m.w < 0 || m.w >= s0.found.length || typeof m.ms !== 'number' || !(m.ms >= 0) || m.ms > LIMIT + 300) return null;
+    if (!Number.isInteger(m.w) || m.w < 0 || m.w >= s0.found.length || typeof m.ms !== 'number' || !(m.ms >= 0) || m.ms > limitOf(s0.rules) + 300) return null;
     const f = s0.found[m.w];
     if (f && (f.p === m.p || f.ms <= m.ms)) return null; // もう見つかっている（あとから届いた手のほうが速いときだけ取り替える）
     const s = clone(s0);
@@ -186,7 +195,7 @@ export default {
       if (cpuPlan.size > 300) cpuPlan.delete(cpuPlan.keys().next().value);
     }
     const t = since(qKey(s));
-    if (t < plan.at || t >= LIMIT) return null;
+    if (t < plan.at || t >= limitOf(s.rules)) return null;
     const left = s.found.map((f, w) => (f ? -1 : w)).filter((w) => w >= 0);
     if (!left.length) return null;
     plan.at = t + 7000 + Math.random() * 13000;
@@ -226,16 +235,18 @@ export default {
     card.className = 'kj-card';
     wrap.append(card);
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">隠れた言葉を早い者勝ちで探そう・全${s.qs.length}回・1回 ${LIMIT / 1000}秒まで${s.rules.hard ? '・ななめ・逆向きあり' : ''}</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">隠れた言葉を早い者勝ちで探そう・全${s.qs.length}回・1回 ${limitOf(s.rules) / 1000}秒まで${sizeOf(s.rules) === 10 ? '・10×10' : ''}${s.rules.hard ? '・ななめ・逆向きあり' : ''}${s.rules.hide ? '・言葉の一覧は字数だけ' : ''}</div>`;
       return;
     }
     const x = s.qs[s.q];
+    const N = sizeOf(s.rules);
+    const limit = limitOf(s.rules);
     card.innerHTML = `<div class="kj-num">第${s.q + 1}回 / ${s.qs.length}</div><div class="kt-theme">お題: ${esc(KOTOBA[x.theme][0])}</div>`;
-    if (s.phase === 'open') { since(key); card.append(timeBar(key, LIMIT, { secs: true })); }
+    if (s.phase === 'open') { since(key); card.append(timeBar(key, limit, { secs: true })); }
     const list = document.createElement('div');
     list.className = 'kt-list';
     const grid = document.createElement('div');
-    grid.className = 'kt-grid';
+    grid.className = 'kt-grid' + (N === 10 ? ' kt-10' : '');
     const cells = [...x.grid].map((ch, i) => {
       const d = document.createElement('div');
       d.className = 'kt-cell';
@@ -256,7 +267,7 @@ export default {
       cur = st;
       const marks = Array(N * N).fill(null);
       st.found.forEach((f, w) => { if (f) for (const c of x.words[w].cells) marks[c] = f.p; });
-      const line = sel ? lineOf(sel.a, sel.b) ?? [sel.a] : pending !== null ? [pending] : [];
+      const line = sel ? lineOf(sel.a, sel.b, N) ?? [sel.a] : pending !== null ? [pending] : [];
       cells.forEach((d, i) => {
         const p = marks[i];
         d.style.background = p === null ? '' : color(p) + '55';
@@ -267,7 +278,8 @@ export default {
         const f = st.found[w];
         const t = document.createElement('span');
         t.className = 'kt-word' + (f ? ' done' : '');
-        t.textContent = wd.w + ` (${lenOf(wd.w)})`;
+        // 一覧を隠すでは、遊んでいる間はまだ見つかっていない言葉を字数だけ見せる
+        t.textContent = !f && st.phase === 'open' && s.rules.hide ? '○'.repeat(lenOf(wd.w)) : wd.w + ` (${lenOf(wd.w)})`;
         if (f) { t.style.borderColor = color(f.p); t.title = f.p === me ? 'あなた' : o.names[f.p] ?? ''; }
         list.append(t);
       });
@@ -277,13 +289,13 @@ export default {
     };
     ui.paint = paint;
     const tryFind = (a, b) => {
-      const line = lineOf(a, b);
+      const line = lineOf(a, b, N);
       if (!line || line.length < 2) return false;
       const k = cellsKey(line);
       const w = x.words.findIndex((wd, i) => !cur.found[i] && cellsKey(wd.cells) === k);
       if (w < 0) return false;
       const ms = Math.round(since(key));
-      if (ms >= LIMIT) return false;
+      if (ms >= limit) return false;
       o.onMove({ t: 'find', q: s.q, w, ms });
       return true;
     };

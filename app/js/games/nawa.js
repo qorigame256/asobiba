@@ -12,6 +12,9 @@
 //     全員いなくなったら、いちばんあとまで残った人たちが同じ1位。200回跳びきったら、残った人のうちライフの多い人が1位。
 //   - CPU は1回ごとに 3%（いちばん速いときは 28%）でひっかかる（ライフ3で脱落するのは、2000回の試算の真ん中で34回目・始まって約40秒）。
 //   - ほかの人の人形は縄に合わせて自動で跳ぶ（見た目だけ）。ひっかかった知らせが届いたら赤くする。
+// 詳細設定「はじめの速さ」（2026-11-03 の33回目の案。分かれ目は Claude の推奨を本人が承認）:
+//   - 縄の1回目の間だけを変える（ゆっくり 2.0秒・ふつう 1.5秒（最初。前と全く同じ表）・はやい 1.0秒）。縮み方（0.98倍）といちばん短い 0.55秒はどれも同じ。
+//   Claude の判断: 鍵は speed（main.js の KEEP_KEYS にあるので、おまかせで抽選しない）。CPU のひっかかりやすさは縄の間で決まるので、そのまま。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → start → play → end
 // 手: { p: -1, t: 'start' | 'end' } / { p, t: 'miss', k }
 
@@ -26,20 +29,25 @@ const DECAY = 0.98;
 const BEATS = 200;
 const LATE = 80;
 const LIVES = [[1, '1'], [3, '3'], [5, '5']];
+const SPEEDS = [['slow', 'ゆっくり'], ['normal', 'ふつう'], ['fast', 'はやい']];
+const STARTS = { slow: 2000, normal: START, fast: 1000 };
 const livesOf = (r) => (LIVES.some(([v]) => v === r.lives) ? r.lives : 3);
 
-// 縄が足元に来る時刻（始まってからの ms）
-export const TIMES = (() => {
+// 縄が足元に来る時刻（始まってからの ms）の表。start は1回目の間
+const makeTimes = (start) => {
   const out = [];
-  let t = FIRST, per = START;
+  let t = FIRST, per = start;
   for (let k = 0; k < BEATS; k++) { out.push(Math.round(t)); t += per; per = Math.max(MIN, per * DECAY); }
   return out;
-})();
-const periodOf = (k) => (k + 1 < BEATS ? TIMES[k + 1] - TIMES[k] : MIN);
-export const airOf = (k) => Math.min(400, Math.round(periodOf(Math.max(0, k - 1)) * 0.6));
+};
+export const TIMES = makeTimes(START); // ふつう
+const TABLES = { slow: makeTimes(STARTS.slow), normal: TIMES, fast: makeTimes(STARTS.fast) };
+export const timesOf = (r) => TABLES[r?.speed] ?? TIMES;
+const periodOf = (k, T = TIMES) => (k + 1 < BEATS ? T[k + 1] - T[k] : MIN);
+export const airOf = (k, T = TIMES) => Math.min(400, Math.round(periodOf(Math.max(0, k - 1), T) * 0.6));
 // 押した時刻の一覧で、k 回目の縄を跳べたか
-export const cleared = (presses, k) => presses.some((t) => t >= TIMES[k] - airOf(k) && t <= TIMES[k] + LATE);
-export const cpuMissRate = (k) => 0.03 + 0.25 * Math.min(1, Math.max(0, (1100 - periodOf(k)) / 550));
+export const cleared = (presses, k, T = TIMES) => presses.some((t) => t >= T[k] - airOf(k, T) && t <= T[k] + LATE);
+export const cpuMissRate = (k, T = TIMES) => 0.03 + 0.25 * Math.min(1, Math.max(0, (1100 - periodOf(k, T)) / 550));
 
 const key = (s) => `nawa:${s.seed}`;
 const clone = (s) => ({ ...s, lives: s.lives.slice(), out: s.out.slice(), missed: s.missed.map((m) => m.slice()) });
@@ -81,6 +89,7 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'lives', label: 'ライフ', desc: 'ひっかかってもいい回数（0になったら脱落）', def: 3, choices: LIVES },
+    { key: 'speed', label: 'はじめの速さ', desc: '縄の1回目の速さ（ゆっくり 2秒・ふつう 1.5秒・はやい 1秒に1回）。だんだん速くなり、いちばん速いところはどれも同じ', def: 'normal', choices: SPEEDS },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -107,7 +116,7 @@ export default {
     if (s.phase === 'play') {
       const live = s.out.filter((k) => k === null).length;
       if (live <= 1) return { key: 'fin' + live, ms: 1500, move: { t: 'end' } };
-      return { key: 'play', ms: TIMES[BEATS - 1] + 1500, move: { t: 'end' } };
+      return { key: 'play', ms: timesOf(s.rules)[BEATS - 1] + 1500, move: { t: 'end' } };
     }
     return null;
   },
@@ -136,9 +145,10 @@ export default {
     let plan = cpuPlan.get(pk);
     if (!plan) { plan = { next: 0 }; cpuPlan.set(pk, plan); if (cpuPlan.size > 100) cpuPlan.delete(cpuPlan.keys().next().value); }
     const t = since(key(s) + ':play');
-    while (plan.next < BEATS && t >= TIMES[plan.next] + LATE + 30) {
+    const T = timesOf(s.rules);
+    while (plan.next < BEATS && t >= T[plan.next] + LATE + 30) {
       const k = plan.next++;
-      if (Math.random() < cpuMissRate(k)) return { t: 'miss', k };
+      if (Math.random() < cpuMissRate(k, T)) return { t: 'miss', k };
     }
     return null;
   },
@@ -147,6 +157,7 @@ export default {
     bindKeys();
     const me = o.me >= 0 && !o.watching ? o.me : null;
     const tk = key(s) + ':play';
+    const T = timesOf(s.rules);
     const extra = (p) => {
       if (!alive(s, p)) return '<span class="pt-ng">脱落</span>';
       return `<span class="nw-life">${'❤️'.repeat(Math.max(0, s.lives[p]))}</span>`;
@@ -173,7 +184,7 @@ export default {
     card.className = 'kj-card nw-card';
     wrap.append(card);
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">縄が足元に来た瞬間に「ジャンプ」を押そう（PC はスペースキーでも）・ライフ ${livesOf(s.rules)}</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">縄が足元に来た瞬間に「ジャンプ」を押そう（PC はスペースキーでも）・ライフ ${livesOf(s.rules)}${s.rules.speed && s.rules.speed !== 'normal' ? `・はじめの速さ ${SPEEDS.find(([v]) => v === s.rules.speed)?.[1] ?? ''}` : ''}</div>`;
       return;
     }
     if (s.phase === 'play') since(tk);
@@ -197,8 +208,8 @@ export default {
       if (!playing()) return;
       const t = since(tk);
       if (t < loc.airUntil + 120) return; // 跳んでいる間（と着地の直後）は押しても何もしない
-      const k = TIMES.findIndex((x) => x + LATE >= t);
-      loc.airUntil = t + airOf(Math.max(0, k));
+      const k = T.findIndex((x) => x + LATE >= t);
+      loc.airUntil = t + airOf(Math.max(0, k), T);
       loc.presses.push(t);
       if (loc.presses.length > 40) loc.presses.shift();
     };
@@ -219,9 +230,9 @@ export default {
       if (!wrap.isConnected || ui?.wrap !== wrap) return;
       if (playing()) {
         const t = since(tk);
-        while (loc.judged < BEATS && t >= TIMES[loc.judged] + LATE + 30) {
+        while (loc.judged < BEATS && t >= T[loc.judged] + LATE + 30) {
           const k = loc.judged++;
-          if (!cleared(loc.presses, k)) { o.onMove({ t: 'miss', k }); break; }
+          if (!cleared(loc.presses, k, T)) { o.onMove({ t: 'miss', k }); break; }
         }
       }
       setTimeout(judge, 30);
@@ -229,7 +240,7 @@ export default {
     // 跳べなかった回を後から送らないよう、始めは今の時刻までを済みにする（描き直しで途中から入ったとき）
     if (s.phase === 'play') {
       const t0 = since(tk);
-      while (loc.judged < BEATS && TIMES[loc.judged] + LATE + 30 < t0 - 1000) loc.judged++;
+      while (loc.judged < BEATS && T[loc.judged] + LATE + 30 < t0 - 1000) loc.judged++;
       judge();
     }
 
@@ -248,10 +259,10 @@ export default {
       g.fillRect(0, ground, W, H - ground);
       const t = st.phase === 'play' ? since(tk) : 0;
       // 縄の位置: 足元の時刻で一番下、その間で一番上
-      let k = TIMES.findIndex((x) => x > t);
+      let k = T.findIndex((x) => x > t);
       if (k < 0) k = BEATS - 1;
-      const prev = k > 0 ? TIMES[k - 1] : TIMES[0] - START;
-      const ph = st.phase === 'play' && t > prev ? Math.min(1, (t - prev) / (TIMES[k] - prev)) : 0.5;
+      const prev = k > 0 ? T[k - 1] : T[0] - (T[1] - T[0]);
+      const ph = st.phase === 'play' && t > prev ? Math.min(1, (t - prev) / (T[k] - prev)) : 0.5;
       const ang = ph * Math.PI * 2;
       const amp = ground - hand + 6;
       const cy = hand + Math.cos(ang) * amp;
@@ -279,8 +290,8 @@ export default {
         const x = x0 + gap * (p + 1);
         let up = 0;
         if (alive(st, p) && st.phase === 'play') {
-          if (p === me) { const air = loc.airUntil - t; if (air > 0) up = Math.sin(Math.min(1, 1 - air / airOf(k)) * Math.PI); }
-          else { const d = TIMES[k] - t; const a = airOf(k); if (d >= 0 && d <= a) up = Math.sin((1 - d / a) * Math.PI); }
+          if (p === me) { const air = loc.airUntil - t; if (air > 0) up = Math.sin(Math.min(1, 1 - air / airOf(k, T)) * Math.PI); }
+          else { const d = T[k] - t; const a = airOf(k, T); if (d >= 0 && d <= a) up = Math.sin((1 - d / a) * Math.PI); }
         }
         const y = ground - up * H * 0.22;
         const col = !alive(st, p) ? '#aaaaaa' : (hurt.get(p) ?? 0) > now ? '#e0322a' : SEAT_COLORS[p % SEAT_COLORS.length];

@@ -8,6 +8,10 @@
 //   - 投票は30秒。全員が入れたら1秒で結果へ。結果を見せる間は7秒。答えの並びは種と回から決めるので全員同じ。
 //   - 答えが1つも無い回は、投票をとばして結果へ（だれも点なし）。
 //   - 部屋を出た人の席は、書く場面では何もせず、投票では自分以外の答えにくじで入れる（noCpu のゲームで cpu() が動くのは部屋を出た人の席だけ）。
+// 詳細設定「審査員が選ぶ」（2026-11-03 の33回目の案。分かれ目は Claude の推奨を本人が承認）:
+//   - 席順に1人ずつ審査員になり、回数の設定は使わず全員が1回ずつ審査員になったら終わり（審査員の回は点が取れないので、回数がずれると不公平になるため）。
+//   - 審査員は答えを書かず、並んだ答えから1つ選ぶ。選ばれた答えに1点（1票1点と同じ重み）。
+//   Claude の判断: 審査員の回の席は q % 人数。選ぶ時間は投票と同じ30秒で、選ばなかったらだれも点なし。審査員が部屋を出た人の席ならくじで選ぶ。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → write → close → vote → tally → shown → next …
 // 手: { p: -1, t: 'next' | 'close' | 'tally' } / { p, t: 'ans', q, text } / { p, t: 'vote', q, to: 答えた人の席 }
 
@@ -18,6 +22,8 @@ import { OOGIRI } from './oogiri-data.js';
 
 const ROUNDS = [[3, '3回'], [5, '5回'], [8, '8回']];
 const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 5);
+// 審査員の席（審査員が選ぶ でなければ null）
+export const judgeOf = (s, q = s.q) => (s.rules.judge ? q % s.n : null);
 const MAX_TEXT = 40;
 const WRITE_MS = 60000;
 const VOTE_MS = 30000;
@@ -29,8 +35,10 @@ const qKey = (s, q = s.q) => `oogiri:${s.seed}:${q}:${s.phase}`;
 const clone = (s) => ({ ...s, scores: s.scores.slice(), said: s.said.slice(), votes: s.votes.slice() });
 // 投票の場面に並べる答え（書いた人の席の並び）。種と回から決める
 export const orderOf = (s) => shuffle(s.said.map((t, p) => (t ? p : -1)).filter((p) => p >= 0), mulberry32((s.seed * 97 + s.q * 13 + 5) >>> 0));
-// p が票を入れられる相手
-const targetsOf = (s, p) => orderOf(s).filter((x) => x !== p);
+// p が票を入れられる相手（審査員が選ぶ では審査員だけが選べる）
+const targetsOf = (s, p) => (judgeOf(s) !== null && p !== judgeOf(s) ? [] : orderOf(s).filter((x) => x !== p));
+// 答えを書く人（審査員は書かない）
+const writersOf = (s) => [...Array(s.n).keys()].filter((p) => p !== judgeOf(s));
 
 // 票を数えて結果の場面へ（s は書き換えてよい写し）
 function tally(s, s0) {
@@ -57,12 +65,13 @@ export default {
   minPlayers: 3,
   maxPlayers: 10,
   settings: [
-    { key: 'rounds', label: '回数', desc: '1回の対局で出るお題の数', def: 5, choices: ROUNDS },
+    { key: 'rounds', label: '回数', desc: '1回の対局で出るお題の数（審査員が選ぶ ときは使わず、全員が1回ずつ審査員になったら終わり）', def: 5, choices: ROUNDS },
+    { key: 'judge', label: '審査員が選ぶ', desc: '投票の代わりに、順番に1人が審査員になっていちばん面白い答えを1つ選ぶ（選ばれた答えに1点）。全員が1回ずつ審査員になったら終わり', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const r = { rounds: 5, ...rules };
-    const qs = shuffle([...OOGIRI.keys()], mulberry32(seed)).slice(0, roundsOf(r));
+    const qs = shuffle([...OOGIRI.keys()], mulberry32(seed)).slice(0, r.judge ? n : roundsOf(r));
     return { n, seed, rules: r, qs, q: -1, phase: 'ready', said: Array(n).fill(null), votes: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
   },
 
@@ -77,14 +86,14 @@ export default {
   phaseText(s) {
     if (s.phase === 'ready') return 'まもなく始まります…';
     if (s.phase === 'write') return `第${s.q + 1}回 / ${s.qs.length}・答えを書こう`;
-    if (s.phase === 'vote') return `第${s.q + 1}回 / ${s.qs.length}・投票しよう`;
+    if (s.phase === 'vote') return `第${s.q + 1}回 / ${s.qs.length}・${judgeOf(s) !== null ? '審査員が選んでいます' : '投票しよう'}`;
     return `第${s.q + 1}回の結果`;
   },
 
   referee(s) {
     if (s.phase === 'ready') return { key: 'ready', ms: READY_MS, move: { t: 'next' } };
     if (s.phase === 'write') {
-      if (s.said.every((t) => t)) return { key: 'allw' + s.q, ms: GRACE_MS, move: { t: 'close' } };
+      if (writersOf(s).every((p) => s.said[p])) return { key: 'allw' + s.q, ms: GRACE_MS, move: { t: 'close' } };
       return { key: 'write' + s.q, ms: WRITE_MS + GRACE_MS, move: { t: 'close' } };
     }
     if (s.phase === 'vote') {
@@ -124,7 +133,7 @@ export default {
     }
     if (!Number.isInteger(m.p) || m.p < 0 || m.p >= s0.n || m.q !== s0.q) return null;
     if (m.t === 'ans') {
-      if (s0.phase !== 'write' || s0.said[m.p] || typeof m.text !== 'string') return null;
+      if (s0.phase !== 'write' || s0.said[m.p] || m.p === judgeOf(s0) || typeof m.text !== 'string') return null;
       const text = m.text.trim().slice(0, MAX_TEXT);
       if (!text) return null;
       const s = clone(s0);
@@ -153,9 +162,12 @@ export default {
   render(root, s, o) {
     const me = o.me >= 0 && !o.watching ? o.me : null;
     const text = (p) => filterShown(s.said[p] ?? '', o.hidden?.[p], 'sentence');
+    const judge = s.phase === 'end' || s.phase === 'ready' ? null : judgeOf(s);
+    const judgeName = judge === null ? '' : judge === me ? 'あなた' : o.names[judge] ?? '';
     const mount = `${s.seed}:${s.q}:${s.phase}:${me}:${me !== null && (s.phase === 'write' ? !!s.said[me] : s.votes[me] !== null)}:${s.phase === 'write' ? '' : (o.hidden ?? []).join()}`;
     const won = s.phase === 'end' ? leaders(s.scores) : [];
     const extra = (p) => {
+      if (p === judge && s.phase !== 'shown') return '<span class="pt-ok">👑審査員</span>';
       if (s.phase === 'write') return s.said[p] ? '<span class="pt-ok">書いた</span>' : '';
       if (s.phase === 'vote') return s.votes[p] !== null ? '<span class="pt-ok">投票した</span>' : '';
       if (s.phase === 'shown' && s.last) return s.last.got[p] ? `<span class="pt-ok">+${s.last.got[p]}</span>` : '<span class="pt-ng">―</span>';
@@ -176,19 +188,26 @@ export default {
     card.className = 'kj-card';
     wrap.append(card);
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">お題に答えを書いて、名前を隠したまま投票・全${s.qs.length}回</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">${s.rules.judge ? 'お題に答えを書いて、審査員がいちばん面白い答えを選ぶ・全員が1回ずつ審査員' : 'お題に答えを書いて、名前を隠したまま投票'}・全${s.qs.length}回</div>`;
       return;
     }
     const key = qKey(s);
     card.innerHTML = `<div class="kj-num">第${s.q + 1}回 / ${s.qs.length}</div><div class="og-topic"></div>`;
     card.querySelector('.og-topic').textContent = OOGIRI[s.qs[s.q]];
+    if (judge !== null) {
+      const j = document.createElement('div');
+      j.className = 'kj-sub';
+      j.textContent = `👑 審査員: ${judgeName}`;
+      card.append(j);
+    }
     const note = document.createElement('p');
     note.className = 'cc-log';
 
     if (s.phase === 'write') {
       since(key);
       card.append(timeBar(key, WRITE_MS, { secs: true }));
-      if (me !== null && !s.said[me] && o.canMove) {
+      if (me !== null && me === judge) note.textContent = 'あなたは審査員です。みんなの答えがそろったら、いちばん面白い答えを1つ選んでね';
+      else if (me !== null && !s.said[me] && o.canMove) {
         const form = document.createElement('form');
         form.className = 'kj-form';
         form.innerHTML = `<input type="text" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="send" maxlength="${MAX_TEXT}" placeholder="面白い答えを書こう（${MAX_TEXT}字まで）"><button type="submit" class="btn primary">出す</button>`;
@@ -217,7 +236,7 @@ export default {
     const list = document.createElement('div');
     list.className = 'og-list';
     const order = orderOf(s);
-    const can = s.phase === 'vote' && me !== null && o.canMove && s.votes[me] === null;
+    const can = s.phase === 'vote' && me !== null && o.canMove && s.votes[me] === null && targetsOf(s, me).length > 0;
     const top = s.phase === 'shown' && s.last ? Math.max(...s.last.got) : 0;
     order.forEach((p, i) => {
       const item = document.createElement(can && p !== me ? 'button' : 'div');
@@ -228,7 +247,7 @@ export default {
       body.textContent = text(p);
       const tag = document.createElement('span');
       tag.className = 'og-who';
-      if (s.phase === 'shown') tag.textContent = `${p === me ? 'あなた' : o.names[p]}・${s.last.got[p]}票`;
+      if (s.phase === 'shown') tag.textContent = judge !== null ? `${p === me ? 'あなた' : o.names[p]}${s.last.got[p] ? '・👑 選ばれた！' : ''}` : `${p === me ? 'あなた' : o.names[p]}・${s.last.got[p]}票`;
       else tag.textContent = p === me ? 'あなたの答え' : String.fromCharCode(65 + i);
       item.append(body, tag);
       if (item.tagName === 'BUTTON') item.onclick = () => { list.querySelectorAll('button').forEach((b) => { b.disabled = true; }); o.onMove({ t: 'vote', q: s.q, to: p }); };
@@ -237,7 +256,8 @@ export default {
     if (!order.length) list.textContent = 'だれも答えを書きませんでした';
     wrap.append(list);
     if (s.phase === 'vote') {
-      note.textContent = me === null ? '観戦中' : s.votes[me] !== null ? '投票しました。ほかの人を待っています' : targetsOf(s, me).length ? 'いちばん面白いと思う答えを1つ押そう（自分の答えには入れられません）' : '';
+      if (judge !== null) note.textContent = me === judge ? (s.votes[me] !== null ? '選びました' : 'いちばん面白いと思う答えを1つ押そう') : `審査員の${judgeName}が選んでいます`;
+      else note.textContent = me === null ? '観戦中' : s.votes[me] !== null ? '投票しました。ほかの人を待っています' : targetsOf(s, me).length ? 'いちばん面白いと思う答えを1つ押そう（自分の答えには入れられません）' : '';
     }
     wrap.append(note);
   },
@@ -253,7 +273,7 @@ export default {
       const li = document.createElement('li');
       const top = Math.max(...x.got);
       const best = top > 0 ? x.got.map((v, p) => (v === top ? p : -1)).filter((p) => p >= 0) : [];
-      const bestText = best.map((p) => `「${esc(filterShown(x.said[p] ?? '', o.hidden?.[p], 'sentence'))}」（${esc(p === me ? 'あなた' : o.names?.[p] ?? '')}・${top}票）`).join(' ');
+      const bestText = best.map((p) => `「${esc(filterShown(x.said[p] ?? '', o.hidden?.[p], 'sentence'))}」（${esc(p === me ? 'あなた' : o.names?.[p] ?? '')}${s.rules.judge ? '・👑' : `・${top}票`}）`).join(' ');
       li.innerHTML = `<span class="mk-rv-n">${q + 1}</span><span class="ox-rv">${esc(OOGIRI[s.qs[q]])}<br>${bestText || '―'}</span>`;
       list.append(li);
     });
