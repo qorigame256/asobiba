@@ -86,7 +86,7 @@ function myDev() {
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName', 'cpuAuto', 'rps', 'hidden', 'ptsMode', 'devs', 'bannedDevs', 'again', 'away', 'bench'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName', 'cpuAuto', 'rps', 'hidden', 'ptsMode', 'devs', 'bannedDevs', 'again', 'away', 'bench', 'draw'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -489,6 +489,172 @@ function votePanel() {
   return wrap;
 }
 
+/* ---------- 遊びの抽選（2026-11-04 本人の依頼）: 待合室で、ゲームの候補3つと「ほかの遊び」の4つからみんなで選ぶ ---------- */
+// 本人の決定: 部屋のだれでも始められる。候補は、この部屋で直近に遊んだ5種類（📜 この部屋の対局）を除いた全ゲームから3つ。
+//   みんなが4つから1つ選び、全員が選ぶか DRAW_MS（20秒）たったら、いちばん多いものに決まる（同じ数ならその中からくじ）。「ほかの遊び」に決まったら自動で引き直す。
+// Claude の判断: いまの人数で遊べないゲームも外す（ゲームのルーレットと同じ決まり。いまのゲームは外さない）。引き直しでは、その抽選で前に出たゲームも外す
+//   （残りが3つに満たなければ、いま出ていた3つだけ外す）。だれも選ばずに時間切れのときは、3つのゲームからくじ（「ほかの遊び」も入れると、だれもいないまま引き直しが続くため）。
+//   決まるまでは選び直せる。CPU は選ばない。「全員」は合図が届いている人だけで数える（抜けたまま部屋に名前が残っている人を20秒待たないように）。
+//   抽選するのも数えるのもホストの端末（S.draw = { n, by, re, opts, votes: 人の id → ゲームの id か 'other', seen }。state で送る）。ゲストは type: 'drawStart'・'drawVote' を送る。
+//   決まったら、ホストが type: 'drawn' を送りっぱなしにして全員に一言出す。対局が始まる・ゲームが替わる（startRound・newRound）と抽選は消える。
+//   残りの秒数は、もう一回の OK と同じく各端末が見たときから数える（端末ごとに少しずれる。決めるのはホストの時計）。
+const DRAW_MS = 20000;
+const DRAW_RECENT = 5;
+const DRAW_OTHER = 'other';
+function recentGames() {
+  const out = [];
+  for (const h of S.history ?? []) {
+    if (!out.includes(h.g)) out.push(h.g);
+    if (out.length >= DRAW_RECENT) break;
+  }
+  return out;
+}
+// 候補を3つまで引く（skip = その抽選で前に出たゲーム）
+function drawOpts(skip = []) {
+  const recent = recentGames();
+  const pool = GAME_ORDER.filter((id) => playableNow(GAMES[id]) && !recent.includes(id));
+  let list = pool.filter((id) => !skip.includes(id));
+  if (list.length < 3) list = pool.filter((id) => !skip.slice(-3).includes(id));
+  if (list.length < 3) list = pool;
+  list = list.slice();
+  for (let i = list.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [list[i], list[j]] = [list[j], list[i]];
+  }
+  return list.slice(0, 3);
+}
+const drawNeed = () => S.members.filter(alive);
+const drawValid = (d, c) => c === DRAW_OTHER || d.opts.includes(c);
+const drawVotes = () => (S.draw ? Object.fromEntries(Object.entries(S.draw.votes ?? {}).filter(([id, c]) => S.members.includes(id) && drawValid(S.draw, c))) : {});
+// ホストだけ。by = 抽選を始めた人。redraw = 「ほかの遊び」に決まって引き直す
+function startDraw(by, redraw = false) {
+  if (!S.isHost || S.mode !== 'online' || S.order) return;
+  const seen = redraw ? S.draw?.seen ?? [] : [];
+  const opts = drawOpts(seen);
+  if (!opts.length) { S.draw = null; toast('いまの人数で遊べるゲームがありません'); render(); return; }
+  S.draw = { n: Date.now(), by, re: redraw, opts, votes: {}, seen: [...seen, ...opts] };
+  saveRoom();
+  sendState();
+  render();
+}
+function onDrawVote(id, n, c) {
+  const d = S.draw;
+  if (!S.isHost || !d || d.n !== n || !S.members.includes(id) || !drawValid(d, c)) return;
+  S.draw = { ...d, votes: { ...d.votes, [id]: c } };
+  saveRoom();
+  sendState();
+  checkDraw();
+}
+function chooseDraw(c) {
+  const d = S.draw;
+  if (!d || drawVotes()[S.myId] === c) return;
+  if (S.isHost) { onDrawVote(S.myId, d.n, c); render(); return; }
+  S.draw = { ...d, votes: { ...d.votes, [S.myId]: c } }; // 先に自分の画面に出す（ホストからの state で置き換わる）
+  send({ type: 'drawVote', n: d.n, c });
+  render();
+}
+// ホストだけ。全員が選んだらすぐ、時間切れなら票で決める（抽選の画面を描くたびと、時間切れのときに見る）
+function checkDraw() {
+  const d = S?.draw;
+  if (!S?.isHost || S.mode !== 'online' || !d || S.order) return;
+  if (S.drawKey !== d.n) {
+    S.drawKey = d.n;
+    S.drawStart = Date.now();
+    clearTimeout(S.drawTimer);
+    const session = S;
+    S.drawTimer = setTimeout(() => { if (S === session) checkDraw(); }, DRAW_MS + 50);
+  }
+  const votes = drawVotes();
+  if (!drawNeed().every((id) => votes[id]) && Date.now() - S.drawStart < DRAW_MS) return;
+  setTimeout(() => { if (S?.draw?.n === d.n) finishDraw(); }, 0);
+}
+function finishDraw() {
+  const d = S.draw;
+  const votes = Object.values(drawVotes());
+  const count = (c) => votes.filter((v) => v === c).length;
+  const choices = votes.length ? [...d.opts, DRAW_OTHER] : d.opts;
+  const top = Math.max(...choices.map(count));
+  const tied = choices.filter((c) => count(c) === top);
+  const win = tied[Math.floor(Math.random() * tied.length)];
+  const tie = tied.length > 1 && votes.length > 0;
+  send({ type: 'drawn', g: win, tie });
+  drawnToast(win, tie);
+  if (win === DRAW_OTHER) { startDraw(d.by, true); return; }
+  if (win !== S.gameId) { newRound(win, { lobby: true }); return; } // 抽選は newRound が消す
+  S.draw = null;
+  saveRoom();
+  sendState();
+  render();
+}
+function drawnToast(g, tie) {
+  if (g === DRAW_OTHER) toast(`🔄 「ほかの遊び」に決まったので、引き直しました${tie ? '（同じ票の中からくじ）' : ''}`);
+  else toast(`🎰 ${GAMES[g].name} に決まりました${tie ? '（同じ票の中からくじ）' : ''}`);
+}
+function onDrawn(msg) {
+  if (S.isHost || !S.members.length || msg.from !== S.members[0]) return;
+  if (msg.g === DRAW_OTHER || GAMES[msg.g]?.ready) drawnToast(msg.g, msg.tie === true);
+}
+let drawTick = null;
+// 待合室の抽選の欄（抽選の前は始めるボタン、抽選の間は4つの札）
+function drawPanel() {
+  if (S.mode !== 'online' || S.order) return null;
+  const d = S.draw;
+  if (!d) {
+    const box = document.createElement('div');
+    box.className = 'draw-start';
+    const b = makeButton('🎰 遊びの抽選', () => {
+      if (S.isHost) startDraw(S.myId);
+      else { send({ type: 'drawStart', round: S.round }); toast('🎰 抽選しています…'); }
+    }, 'secondary');
+    b.disabled = !drawOpts().length;
+    const note = document.createElement('small');
+    note.textContent = `最近遊んだ${DRAW_RECENT}種類を除いて3つのゲームを引き、「ほかの遊び」と合わせた4つからみんなで選びます`;
+    box.append(b, note);
+    return box;
+  }
+  checkDraw();
+  const votes = drawVotes();
+  S.drawSeen ??= {};
+  S.drawSeen[d.n] ??= Date.now();
+  const leftText = () => `残り ${Math.max(0, Math.ceil((DRAW_MS - (Date.now() - (S?.drawSeen?.[d.n] ?? Date.now()))) / 1000))}秒`;
+  const who = (id) => esc(id === S.myId ? 'あなた' : nameOf(id));
+  const box = document.createElement('div');
+  box.className = 'draw-box';
+  const head = document.createElement('p');
+  head.className = 'draw-head';
+  head.innerHTML = `🎰 遊びの抽選${d.re ? '（引き直し）' : S.members.includes(d.by) ? `（${who(d.by)}が引きました）` : ''}　<b class="draw-left">${leftText()}</b>`;
+  const note = document.createElement('p');
+  note.className = 'lobby-note';
+  note.textContent = `遊びたいものを1つ選んでください。全員が選ぶか${DRAW_MS / 1000}秒たつと、いちばん多いものに決まります（同じ数ならくじ）。`;
+  const list = document.createElement('div');
+  list.className = 'vote-tiles big draw-tiles';
+  for (const c of [...d.opts, DRAW_OTHER]) {
+    const n = Object.values(votes).filter((v) => v === c).length;
+    const t = document.createElement('button');
+    t.type = 'button';
+    t.className = 'vote-tile' + (votes[S.myId] === c ? ' mine' : '');
+    t.innerHTML = c === DRAW_OTHER
+      ? `<span class="vote-icon" aria-hidden="true">🔄</span><span class="vote-name">ほかの遊び</span><span class="vote-desc">引き直す</span>`
+      : `<span class="vote-icon" aria-hidden="true">${GAMES[c].icon ?? ''}</span><span class="vote-name">${esc(GAMES[c].name)}</span><span class="vote-desc">${esc(GAMES[c].desc ?? '')}</span>`;
+    if (n) t.insertAdjacentHTML('beforeend', `<span class="vote-count">${n}票</span>`);
+    t.onclick = () => chooseDraw(c);
+    list.append(t);
+  }
+  const need = drawNeed();
+  const waitFor = need.filter((id) => !votes[id]);
+  const line = document.createElement('p');
+  line.className = 'draw-line';
+  line.innerHTML = `選んだ: ${need.length - waitFor.length}/${need.length}人${waitFor.length ? `<small>（まだ: ${waitFor.map(who).join('・')}）</small>` : ''}`;
+  box.append(head, note, list, line);
+  clearInterval(drawTick);
+  drawTick = setInterval(() => {
+    const b = document.querySelector('.draw-left');
+    if (!b || S?.draw?.n !== d.n) { clearInterval(drawTick); drawTick = null; return; }
+    b.textContent = leftText();
+  }, 500);
+  return box;
+}
+
 /* ---------- 待合室の「いま選んでいるゲーム」（2026-11-03 本人の依頼「選択中のゲームをもっとわかりやすく」） ---------- */
 // Claude の判断: 待合室の一番上に、ゲームの絵・名前・ひとこと・遊び方の図（2枚まで）を大きく出す。
 // ホストがゲームを替えたら、札を2秒ほど光らせて知らせる（描き直しで作り直しても光り方が途中から続くよう、替わった時刻からの経過を animation-delay に入れる）。
@@ -566,6 +732,10 @@ function appendLobbyExtras(board) {
   if (nm) board.append(nm);
   const r = readyLine();
   if (r) board.append(r);
+  const dp = drawPanel();
+  const top = board.querySelector('.lobby-game');
+  if (dp && S.draw && top) top.after(dp); // 抽選の間は、いまのゲームのすぐ下に大きく出す
+  else if (dp) board.append(dp);
   const v = votePanel();
   if (v) board.append(v);
   board.append(rpsPanel());
@@ -2587,6 +2757,7 @@ function replaceMember(old, neu, name) {
   }
   S.marks = rekey(S.marks);
   S.votes = rekey(S.votes);
+  if (S.draw) S.draw = { ...S.draw, by: swap(S.draw.by), votes: rekey(S.draw.votes) };
   S.devs = rekey(S.devs);
   S.beg = (S.beg ?? []).map(swap);
   if (S.ready) S.ready = { ...S.ready, ids: S.ready.ids.map(swap) };
@@ -2676,10 +2847,10 @@ function gameSelect() {
 
 // ゲームのルーレット（2026-10-06 本人の決定）: 待合室でホストが押すと、いまの部屋の人数で遊べるゲームから1つを抽選して切り替える。
 // Claude の判断: いまのゲームは外す。CPU を入れられないゲームは人がそろっているときだけ、エアホッケー（CPU を選べるのは3人のときだけ）は2人以上いるときだけ。
+// いまの部屋の人数で遊べるか（遊びの抽選も使う）
+const playableNow = (g) => g.ready && (!g.noCpu || S.members.length >= g.minPlayers) && (!g.live || S.members.length >= 2);
 function rouletteButton() {
-  const n = S.members.length;
-  const ok = (g) => g.ready && g.id !== S.gameId && (!g.noCpu || n >= g.minPlayers) && (!g.live || n >= 2);
-  const ids = GAME_ORDER.filter((id) => ok(GAMES[id]));
+  const ids = GAME_ORDER.filter((id) => playableNow(GAMES[id]) && id !== S.gameId);
   const b = makeButton('🎲 ゲームを抽選', () => {
     const id = ids[Math.floor(Math.random() * ids.length)];
     newRound(id, { lobby: true });
@@ -2789,6 +2960,7 @@ function newRound(gameId, { lobby = false } = {}) {
   S.gameId = gameId;
   S.round += 1;
   S.away = [];
+  S.draw = null; // 遊びの抽選は、ゲームが替わる・待合室に戻ると消える
   S.lobbyView = false;
   S.first = 1 - S.first;
   S.moves = [];
@@ -2822,6 +2994,7 @@ function startRound() {
   S.round += 1;
   S.order = order;
   S.away = [];
+  S.draw = null;
   S.seed = randomSeed();
   // 前の対局と同じ顔ぶれのときだけ、前の順位を引き継ぐ
   const prev = S.carry ? order.map((id) => S.carry[id]) : null;
@@ -3479,7 +3652,7 @@ document.addEventListener('visibilitychange', () => {
 function send(msg, qos) { S?.net?.send(msg, qos); }
 function sendState() {
   const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, undo, streak, beg } = S;
-  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {}, roomName: S.roomName ?? '', cpuAuto: !!S.cpuAuto, rps: S.rps ?? null, ptsMode: !!S.ptsMode, again: S.again ?? null, away: S.away ?? [], bench: S.bench ?? [] });
+  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {}, roomName: S.roomName ?? '', cpuAuto: !!S.cpuAuto, rps: S.rps ?? null, ptsMode: !!S.ptsMode, again: S.again ?? null, away: S.away ?? [], bench: S.bench ?? [], draw: S.draw ?? null });
 }
 function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves, u: S.undo ?? 0 }); }
 function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner, mark: myMark(), dev: myDev() }); }
@@ -3584,6 +3757,15 @@ function onMessage(msg) {
         sendState();
       }
       break;
+    case 'drawStart': // 遊びの抽選を始めたい（だれでも）
+      if (S.isHost && msg.from !== S.myId && S.members.includes(msg.from) && !S.order && !S.draw) startDraw(msg.from);
+      return;
+    case 'drawVote': // 遊びの抽選で選んだ
+      if (S.isHost && msg.from !== S.myId && Number.isInteger(msg.n) && typeof msg.c === 'string') { onDrawVote(msg.from, msg.n, msg.c); render(); }
+      return;
+    case 'drawn': // 遊びの抽選で決まった（ホストからだけ）。ゲームは state で届くので、ここでは一言だけ出す
+      onDrawn(msg);
+      return;
     case 'rematch':
       if (S.isHost) {
         const st = replay(S);
@@ -3664,6 +3846,10 @@ function adoptState(msg) {
   S.again = ag && Number.isInteger(ag.round) && Array.isArray(ag.ids) ? { round: ag.round, ids: ag.ids.filter((id) => typeof id === 'string') } : null;
   S.away = Array.isArray(msg.away) ? msg.away.filter((id) => typeof id === 'string') : [];
   S.bench = Array.isArray(msg.bench) ? msg.bench.filter((id) => typeof id === 'string') : [];
+  const dr = msg.draw; // 遊びの抽選
+  S.draw = dr && Number.isInteger(dr.n) && Array.isArray(dr.opts) && dr.opts.length && dr.opts.length <= 3 && dr.opts.every((g) => typeof g === 'string' && GAMES[g]?.ready) && dr.votes && typeof dr.votes === 'object'
+    ? { n: dr.n, by: typeof dr.by === 'string' ? dr.by : '', re: dr.re === true, opts: dr.opts.slice(), votes: Object.fromEntries(Object.entries(dr.votes).filter(([id, c]) => typeof id === 'string' && (c === DRAW_OTHER || dr.opts.includes(c)))), seen: [] }
+    : null;
   if (S.round !== msg.round || S.gameId !== msg.gameId) S.lobbyView = false; // 次の対局が始まったら、待合室を見ていた人も対局の画面へ
   for (const id of S.members) S.seen[id] ??= Date.now();
   const sameRound = S.gameId === msg.gameId && S.round === msg.round;

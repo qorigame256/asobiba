@@ -776,6 +776,19 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .vote-name { font-size: .78rem; line-height: 1.25; text-align: center; word-break: keep-all; overflow-wrap: anywhere; }
 .vote-count { position: absolute; top: -6px; right: -4px; background: var(--accent); color: var(--accent-ink); border-radius: 999px; padding: 1px 7px; font-size: .75rem; font-weight: 700; }
 .vote-pick summary { font-weight: 700; }
+/* 遊びの抽選（2026-11-04） */
+.draw-start { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 10px; }
+.draw-start small { color: var(--muted); font-size: .78rem; flex: 1 1 200px; }
+.draw-box { margin-top: 10px; padding: 10px; border: 2px solid var(--accent); border-radius: 12px; background: var(--soft, #fff1e8); }
+.draw-head { margin: 0; font-weight: 700; }
+.draw-left { color: var(--accent); white-space: nowrap; }
+.draw-box .lobby-note { margin: 4px 0 0; }
+.draw-tiles { grid-template-columns: repeat(2, 1fr); }
+@media (min-width: 560px) { .draw-tiles { grid-template-columns: repeat(4, 1fr); } }
+.draw-tiles .vote-tile { min-height: 96px; }
+.vote-desc { font-size: .68rem; line-height: 1.3; color: var(--muted); text-align: center; }
+.draw-line { margin: 6px 0 0; font-size: .85rem; }
+.draw-line small { color: var(--muted); }
 .lobby-ready small { color: var(--muted); margin-left: 4px; }
 .lobby-ready.all { color: #2e7d32; font-weight: 700; }
 /* 待合室でじゃんけん（開け閉めできる欄。閉じている間は見出しの1行だけ） */
