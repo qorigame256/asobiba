@@ -2264,3 +2264,45 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
   filter: none; transform: none; outline: none; -webkit-tap-highlight-color: transparent;
 }
 .board button.btn.kj-choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } /* キーボードで選んでいるときだけ枠 */
+
+/* ---------- 2026-11-03 に足した8つ（まんなかの漢字・○×クイズ・数字タッチ・ことばさがし・大喜利・福笑い・大縄とび・ダーツ） ---------- */
+:is([data-game="numtouch"], [data-game="mannaka"], [data-game="oxquiz"], [data-game="kotoba"], [data-game="oogiri"], [data-game="fukuwarai"]) .board { width: min(100%, 560px); }
+/* 数字タッチ */
+.nt-next { font-size: 1.6rem; font-weight: 800; min-height: 2.2rem; }
+.nt-prog { font-weight: 700; color: var(--muted); }
+.nt-grid { display: grid; gap: 6px; width: min(100%, 440px); margin: 0 auto; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.board button.nt-cell { aspect-ratio: 1; border-radius: 10px; border: 2px solid var(--line); background: var(--field); color: var(--ink); font: inherit; font-size: clamp(1.1rem, 5.5vw, 1.6rem); font-weight: 800; padding: 0; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.board button.nt-cell:disabled { cursor: default; }
+.board button.nt-cell.done { background: var(--line); color: var(--muted); opacity: .45; }
+.nt-grid.lock { filter: grayscale(1); opacity: .6; }
+.nt-grid.shake { animation: ntShake .3s; }
+@keyframes ntShake { 25% { transform: translateX(-6px); } 75% { transform: translateX(6px); } }
+/* まんなかの漢字 */
+.mn-cross { display: grid; grid-template-columns: repeat(5, auto); justify-content: center; align-items: center; gap: 2px 6px; margin: 8px auto 6px; }
+.mn-c { width: clamp(2.6rem, 13vw, 3.4rem); height: clamp(2.6rem, 13vw, 3.4rem); display: grid; place-items: center; border: 2px solid var(--line); border-radius: 10px; background: var(--field); font-size: clamp(1.6rem, 8vw, 2.2rem); font-weight: 800; font-family: "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", serif; }
+.mn-c.arw { border: 0; background: none; width: auto; height: auto; font-size: 1.3rem; color: var(--muted); font-family: inherit; }
+.mn-c.mid { border-color: var(--accent); border-width: 3px; color: var(--muted); }
+.mn-c.mid.ans { color: #2f8a4a; border-color: #2f8a4a; }
+.mn-choices { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; touch-action: manipulation; }
+.board button.btn.mn-choice { min-height: 72px; padding: 6px; border-radius: 12px; font-size: 2rem; font-weight: 800; font-family: "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", serif; }
+.board button.btn.mn-choice.ok { background: #2f8a4a; border-color: #2f8a4a; color: #fff; }
+.board button.btn.mn-choice.ng { background: #d9534f; border-color: #d9534f; color: #fff; }
+.board button.btn.mn-choice.off { opacity: .55; }
+/* ○×クイズ */
+.ox-q { font-size: clamp(1.15rem, 5vw, 1.45rem); font-weight: 700; line-height: 1.5; margin: 8px 0; text-align: left; }
+.ox-ans { font-weight: 700; color: #2f8a4a; margin-top: 6px; text-align: left; }
+.ox-rv { flex: 1 1 12em; font-size: .9rem; }
+.ox-pad { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: min(100%, 400px); margin: 0 auto; touch-action: manipulation; }
+.board button.ox-btn { min-height: 5.2rem; border-radius: 16px; border: 3px solid var(--line); background: var(--field); font-size: 3rem; line-height: 1; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.board button.ox-btn:disabled { opacity: .5; cursor: default; }
+.board button.ox-btn.mine { opacity: 1; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent); }
+.board button.ox-btn.ans { opacity: 1; border-color: var(--win); box-shadow: 0 0 0 4px var(--win); }
+/* ことばさがし */
+.kt-theme { font-size: 1.3rem; font-weight: 800; margin: 2px 0 6px; }
+.kt-list { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.kt-word { padding: 3px 10px; border-radius: 999px; border: 2px solid var(--line); background: var(--field); font-weight: 700; }
+.kt-word.done { text-decoration: line-through; color: var(--muted); }
+.kt-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; width: min(100%, 440px); margin: 0 auto; touch-action: none; user-select: none; -webkit-user-select: none; }
+.kt-cell { aspect-ratio: 1; display: grid; place-items: center; border-radius: 8px; border: 1.5px solid var(--line); background: var(--field); font-size: clamp(1rem, 5vw, 1.45rem); font-weight: 700; cursor: pointer; }
+.kt-cell.sel { outline: 3px solid var(--accent); outline-offset: -3px; }
+.kt-grid.miss { animation: ntShake .3s; }

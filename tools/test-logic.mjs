@@ -7857,4 +7857,182 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('billiards OK');
 }
 
+// 数字タッチ（2026-11-03）: 並びは 1〜N を1つずつ・全員同じ・速すぎる手は弾く・速い順に点・CPU の進み具合は全員の端末で同じ・CPU どうしで最後まで
+{
+  const N = GAMES.numtouch;
+  const { cpuTimes } = await import('../app/js/games/numtouch.js');
+  for (const size of [4, 5, 6]) {
+    const s = N.init(3, 7, { rules: { size } });
+    assert.equal(s.qs.length, 3, '数字タッチ: 3回');
+    for (const q of s.qs) assert.deepEqual(q.slice().sort((a, b) => a - b), Array.from({ length: size * size }, (_, i) => i + 1), `数字タッチ: ${size}×${size} は 1〜${size * size} を1つずつ`);
+  }
+  assert.deepEqual(N.init(2, 9, { rules: {} }).qs, N.init(2, 9, { rules: { size: 5 } }).qs, '数字タッチ: 最初は 5×5');
+  let s = N.apply(N.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  assert.equal(N.apply(s, { p: 0, t: 'done', q: 0, ms: 2000 }), null, '数字タッチ: 25個を2秒は速すぎるので弾く');
+  assert.equal(N.apply(s, { p: 0, t: 'done', q: 0, ms: 61000 }), null, '数字タッチ: 制限時間を過ぎた手は弾く');
+  s = N.apply(s, { p: 1, t: 'done', q: 0, ms: 15000 });
+  s = N.apply(s, { p: 2, t: 'done', q: 0, ms: 12000 });
+  assert.equal(N.apply(s, { p: 2, t: 'done', q: 0, ms: 11000 }), null, '数字タッチ: 2回目は弾く');
+  s = N.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [0, 2, 3], '数字タッチ: 速い順に3・2点');
+  const st = N.init(4, 11, { rules: {} });
+  assert.deepEqual(cpuTimes(st, 1, 2), cpuTimes(N.init(4, 11, { rules: {} }), 1, 2), '数字タッチ: CPU の押す時刻は種から決まる');
+  assert.notDeepEqual(cpuTimes(st, 1, 2), cpuTimes(st, 1, 3), '数字タッチ: CPU ごとに違う');
+  for (const rules of [{}, { size: 4 }, { size: 6 }]) {
+    const end = runCpus(N, 5, 3, rules, 200, 5000);
+    assert.ok(N.result(end) && end.scores.some((v) => v > 0), `数字タッチ: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('numtouch OK');
+}
+
+// まんなかの漢字（2026-11-03）: 問題の形・まわりの4字が全部ちがう・札は4つで正解が1つ・速い順に点・CPU どうしで最後まで
+{
+  const M = GAMES.mannaka;
+  const { MANNAKA } = await import('../app/js/games/mannaka-data.js');
+  const { sidesOf, choicesOf } = await import('../app/js/games/mannaka.js');
+  assert.ok(MANNAKA.length >= 80, 'まんなかの漢字: 80問以上');
+  assert.equal(new Set(MANNAKA.map((x) => x[0])).size, MANNAKA.length, 'まんなかの漢字: まんなかの字が重ならない');
+  for (const x of MANNAKA) {
+    const [c, t, l, r, b] = x;
+    assert.ok([t, l, r, b].every((w) => [...w].length === 2), `まんなかの漢字: 熟語は2字 ${c}`);
+    assert.ok(t[1] === c && l[1] === c && r[0] === c && b[0] === c, `まんなかの漢字: 熟語の形 ${x.join(',')}`);
+    assert.equal(new Set(sidesOf(x)).size, 4, `まんなかの漢字: まわりの4字が全部ちがう ${c}`);
+    assert.ok(!sidesOf(x).includes(c), `まんなかの漢字: まわりにまんなかの字が無い ${c}`);
+  }
+  for (let seed = 0; seed < 30; seed++) {
+    for (const rounds of [10, 15, 20]) {
+      const s = M.init(3, seed, { rules: { rounds } });
+      assert.equal(s.qs.length, rounds, `まんなかの漢字: ${rounds}問`);
+      assert.equal(new Set(s.qs.map((x) => x.i)).size, rounds, 'まんなかの漢字: 同じ問題を2回出さない');
+      for (const x of s.qs) {
+        assert.equal(x.opts.length, 4);
+        assert.equal(new Set(x.opts).size, 4, 'まんなかの漢字: 札は4つともちがう');
+        assert.equal(x.opts.filter((c) => c === MANNAKA[x.i][0]).length, 1, 'まんなかの漢字: 正解は1つ');
+        assert.ok(!x.opts.some((c) => sidesOf(MANNAKA[x.i]).includes(c)), 'まんなかの漢字: まわりの字は札にしない');
+      }
+    }
+  }
+  assert.deepEqual(choicesOf(5, 2, 7), choicesOf(5, 2, 7), 'まんなかの漢字: 札は種から決まる');
+  let s = M.apply(M.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  const right = MANNAKA[s.qs[0].i][0];
+  const ng = s.qs[0].opts.find((c) => c !== right);
+  s = M.apply(s, { p: 0, t: 'ans', q: 0, c: ng, ms: 300 });
+  assert.equal(M.apply(s, { p: 0, t: 'ans', q: 0, c: right, ms: 400 }), null, 'まんなかの漢字: 答えられるのは1回だけ');
+  assert.equal(M.apply(s, { p: 1, t: 'ans', q: 0, c: '鬱', ms: 400 }), null, 'まんなかの漢字: 札にない字は弾く');
+  s = M.apply(s, { p: 1, t: 'ans', q: 0, c: right, ms: 900 });
+  assert.equal(M.referee(s).ms, 5000, 'まんなかの漢字: だれかが正解したら5秒で締め切り');
+  s = M.apply(s, { p: 2, t: 'ans', q: 0, c: right, ms: 700 });
+  s = M.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [0, 2, 3], 'まんなかの漢字: 速い順に3・2点、まちがいは0点');
+  for (const rules of [{}, { rounds: 20 }]) {
+    const end = runCpus(M, 5, 8, rules, 200, 5000);
+    assert.ok(M.result(end) && end.scores.some((v) => v > 0), `まんなかの漢字: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('mannaka OK');
+}
+
+// ○×クイズ（2026-11-03）: 問題の形・○と×がかたよらない・速い順に点・脱落・全員まちがえたら脱落なし・残り1人で終わり・CPU どうしで最後まで
+{
+  const X = GAMES.oxquiz;
+  const { OXQUIZ } = await import('../app/js/games/oxquiz-data.js');
+  const { pickQuestions, answerOf } = await import('../app/js/games/oxquiz.js');
+  assert.ok(OXQUIZ.length >= 140, '○×クイズ: 140問以上');
+  assert.equal(new Set(OXQUIZ.map((x) => x[0])).size, OXQUIZ.length, '○×クイズ: 同じ文が2回ない');
+  assert.ok(OXQUIZ.every((x) => x.length === 3 && typeof x[0] === 'string' && typeof x[1] === 'boolean' && typeof x[2] === 'string' && x[2]), '○×クイズ: 問題の形');
+  const yes = OXQUIZ.filter((x) => x[1]).length;
+  assert.ok(yes > OXQUIZ.length * 0.4 && yes < OXQUIZ.length * 0.6, '○×クイズ: ○ と × が半分ずつくらい');
+  for (let seed = 0; seed < 40; seed++) {
+    for (const k of [5, 10, 20]) {
+      const qs = pickQuestions(seed, k);
+      assert.equal(qs.length, k);
+      assert.equal(new Set(qs).size, k, '○×クイズ: 同じ問題を2回出さない');
+      const y = qs.filter((i) => OXQUIZ[i][1]).length;
+      if (k >= 10) assert.ok(y >= k * 0.2 && y <= k * 0.8, `○×クイズ: ○ と × がかたよらない（${y}/${k}）`);
+    }
+  }
+  assert.deepEqual(X.init(2, 3, { rules: {} }).qs, pickQuestions(3, 10), '○×クイズ: 最初は10問');
+  let s = X.apply(X.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  const a = answerOf(s);
+  s = X.apply(s, { p: 0, t: 'ans', q: 0, c: !a, ms: 300 });
+  assert.equal(X.apply(s, { p: 0, t: 'ans', q: 0, c: a, ms: 400 }), null, '○×クイズ: 答えられるのは1回だけ');
+  assert.equal(X.apply(s, { p: 1, t: 'ans', q: 0, c: 1, ms: 400 }), null, '○×クイズ: ⭕ か ❌ だけ');
+  s = X.apply(s, { p: 1, t: 'ans', q: 0, c: a, ms: 900 });
+  s = X.apply(s, { p: 2, t: 'ans', q: 0, c: a, ms: 700 });
+  assert.equal(X.referee(s).ms, 1500, '○×クイズ: 全員答えたら1.5秒');
+  s = X.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [0, 2, 3], '○×クイズ: 速い順に3・2点');
+  assert.deepEqual(s.out, [null, null, null], '○×クイズ: 脱落なしではだれも抜けない');
+  // 脱落あり
+  let d = X.apply(X.init(3, 5, { rules: { drop: true } }), { p: -1, t: 'next' });
+  const b = answerOf(d);
+  d = X.apply(d, { p: 0, t: 'ans', q: 0, c: !b, ms: 300 });
+  d = X.apply(d, { p: 1, t: 'ans', q: 0, c: b, ms: 500 });
+  d = X.apply(d, { p: -1, t: 'close' }); // 2番は押さなかった
+  assert.deepEqual(d.out, [0, null, 0], '○×クイズ: まちがえた人と押さなかった人が脱落');
+  assert.equal(X.canAct(d, 0), false);
+  d = X.apply(d, { p: -1, t: 'next' });
+  assert.equal(d.phase, 'end', '○×クイズ: 残り1人で終わり');
+  const r = X.result(d);
+  assert.deepEqual(r.winners, [1]);
+  assert.deepEqual(r.place, [2, 1, 2], '○×クイズ: 脱落した人は同じ順位');
+  // 全員まちがえたら、だれも脱落しない
+  let e = X.apply(X.init(2, 6, { rules: { drop: true } }), { p: -1, t: 'next' });
+  e = X.apply(e, { p: 0, t: 'ans', q: 0, c: !answerOf(e), ms: 300 });
+  e = X.apply(e, { p: -1, t: 'close' });
+  assert.deepEqual(e.out, [null, null], '○×クイズ: 全員まちがえたら脱落なし');
+  for (const rules of [{}, { drop: true }, { rounds: 20, drop: true }, { rounds: 5 }]) {
+    const end = runCpus(X, 5, 8, rules, 200, 5000);
+    assert.ok(X.result(end) && X.result(end).winners.length >= 1, `○×クイズ: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('oxquiz OK');
+}
+
+// ことばさがし（2026-11-03）: 言葉の字数・どの言葉も盤に1か所・たてよこだけ（なし）・速いほうが取る・字数が点・CPU どうしで最後まで
+{
+  const K = GAMES.kotoba;
+  const { KOTOBA } = await import('../app/js/games/kotoba-data.js');
+  const { countOf, lineOf } = await import('../app/js/games/kotoba.js');
+  for (const [name, words] of KOTOBA) {
+    assert.ok(words.length >= 10, `ことばさがし: ${name} は10語以上`);
+    assert.equal(new Set(words).size, words.length, `ことばさがし: ${name} に同じ言葉がない`);
+    for (const w of words) assert.ok([...w].length >= 2 && [...w].length <= 7 && /^[ぁ-んー]+$/.test(w), `ことばさがし: ${w} はひらがな2〜7字`);
+  }
+  assert.deepEqual(lineOf(0, 3), [0, 1, 2, 3]);
+  assert.deepEqual(lineOf(24, 0), [24, 16, 8, 0]);
+  assert.deepEqual(lineOf(0, 18), [0, 9, 18]);
+  assert.equal(lineOf(0, 10), null, 'ことばさがし: 斜め45度でない線は選べない');
+  for (let seed = 0; seed < 40; seed++) {
+    for (const hard of [false, true]) {
+      const s = K.init(3, seed, { rules: { hard } });
+      assert.equal(new Set(s.qs.map((x) => x.theme)).size, 3, 'ことばさがし: 3回とも別のお題');
+      for (const b of s.qs) {
+        assert.equal([...b.grid].length, 64);
+        assert.equal(b.words.length, 7, 'ことばさがし: 7つ隠す');
+        for (const x of b.words) {
+          assert.equal(countOf(b.grid, x.w), 1, `ことばさがし: ${x.w} は盤に1か所だけ`);
+          assert.equal(x.cells.map((c) => b.grid[c]).join(''), x.w, 'ことばさがし: 場所と字が合う');
+          const line = lineOf(x.cells[0], x.cells.at(-1));
+          assert.deepEqual(line, x.cells, 'ことばさがし: まっすぐ並ぶ');
+          if (!hard) assert.ok(x.cells[1] - x.cells[0] === 1 || x.cells[1] - x.cells[0] === 8, 'ことばさがし: なしではよこ（左から）かたて（上から）だけ');
+        }
+      }
+    }
+  }
+  let s = K.apply(K.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  s = K.apply(s, { p: 0, t: 'find', q: 0, w: 2, ms: 9000 });
+  assert.equal(K.apply(s, { p: 1, t: 'find', q: 0, w: 2, ms: 9500 }), null, 'ことばさがし: 遅いほうは取れない');
+  assert.equal(K.apply(s, { p: 0, t: 'find', q: 0, w: 2, ms: 8000 }), null, 'ことばさがし: 自分の言葉は取り直さない');
+  s = K.apply(s, { p: 1, t: 'find', q: 0, w: 2, ms: 8500 });
+  assert.equal(s.found[2].p, 1, 'ことばさがし: あとから届いても速いほうが取る');
+  s = K.apply(s, { p: 2, t: 'find', q: 0, w: 0, ms: 3000 });
+  s = K.apply(s, { p: -1, t: 'close' });
+  const len = (w) => [...s.qs[0].words[w].w].length;
+  assert.deepEqual(s.scores, [0, len(2), len(0)], 'ことばさがし: 字数が点');
+  for (const rules of [{}, { hard: true }]) {
+    const end = runCpus(K, 4, 8, rules, 300, 5000);
+    assert.ok(K.result(end) && end.scores.some((v) => v > 0), `ことばさがし: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('kotoba OK');
+}
+
 console.log('ALL OK');
