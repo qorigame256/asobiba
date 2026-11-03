@@ -8,7 +8,7 @@
 // Claude の判断:
 //   意味当てのまちがいの3つは、同じ難しさのほかの単語の意味から選ぶ（choicesOf。種と何問目かから作るので全員同じ）。
 //   英単語を選ぶのまちがいの3つも、同じ難しさのほかの単語（の1つ目のつづり）から選ぶ（wordChoicesOf）。局面の opts に入れるのは意味当てと同じで、正解が意味か英単語かだけが違う。
-//   スペル打ちは大文字・小文字・全角・空白を区別しない。米と英でつづりが違う単語はどちらでも正解。1文字目のヒントは詳細設定にせずいつも出す。
+//   スペル打ちは大文字・小文字・全角・空白を区別しない。米と英でつづりが違う単語はどちらでも正解。1文字目のヒントはいつも出す（いつ出すかは 2026-11-03 から詳細設定「1文字目」）。
 //   スペル打ちでは、1回の入力で3文字以上増えたら予測変換（候補から選んだ）と見て戻す（タイピング早打ちと同じ。つづりを覚えていなくても打てるため）。
 //   CPU は難しさに応じた確率（中学 6割・高校 45%・むずかしい 3割・まぜる 45%）で、4秒〜制限時間の7割のあいだに正解する。
 //   正解しないときは、意味当てでは同じ時刻に4つから適当に選び、スペル打ちではパスする。
@@ -28,6 +28,9 @@ const GRACE_MS = 1500;
 const AFTER_MS = 5000; // 誰かが正解してから締め切るまで
 const PTS = [3, 2]; // 速い順の点。それより後ろは1点
 const HINT_AT = 0.4; // スペル打ちで1文字目を見せるのは、制限時間のこの割合がたったとき
+// 2026-11-03 本人の依頼: 詳細設定「1文字目」（鍵は hint。しばらくしてから（最初。今までと同じ）・最初から）で、スペル打ちの1文字目を最初から見せられるようにした。
+//   手伝いの好みなので、おまかせでは抽選しない（main.js の KEEP_KEYS の hint）。CPU の腕前は変えない（Claude の判断）
+const hintAt = (s) => (s.rules.hint === 'start' ? 0 : HINT_AT);
 const PREDICT_JUMP = 3; // スペル打ちで、1回の入力でこれだけ増えたら予測変換と見る
 const LEVELS = { easy: '中学', mid: '高校', hard: 'むずかしい', mix: 'ぜんぶまぜる' };
 const ASKS = { meaning: '意味当て（4つから選ぶ）', spell: 'スペル打ち', reverse: '英単語を選ぶ（4つから）' };
@@ -119,6 +122,7 @@ export default {
     { key: 'level', label: '難しさ', desc: '出る英単語の難しさ', def: 'easy', choices: Object.entries(LEVELS) },
     { key: 'time', label: '制限時間', desc: '1問あたりの時間', def: '25', choices: [['15', '15秒'], ['25', '25秒'], ['40', '40秒']] },
     { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 10, choices: ROUNDS },
+    { key: 'hint', label: '1文字目', desc: 'スペル打ちのとき、英単語の1文字目をいつ見せるか', def: 'later', choices: [['later', 'しばらくしてから'], ['start', '最初から']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -285,11 +289,14 @@ export default {
       if (!s.opts) {
         const hint = document.createElement('div');
         hint.className = 'kj-hint et-blanks';
-        hint.textContent = blanksOf(words[0]) + `（${[...words[0]].length}文字）`;
+        const early = hintAt(s) === 0;
+        hint.textContent = blanksOf(words[0], early) + `（${[...words[0]].length}文字）`;
         card.append(hint);
-        setTimeout(() => {
-          if (hint.isConnected) hint.textContent = blanksOf(words[0], true) + `（${[...words[0]].length}文字）`;
-        }, Math.max(0, limit * HINT_AT - since(key)));
+        if (!early) {
+          setTimeout(() => {
+            if (hint.isConnected) hint.textContent = blanksOf(words[0], true) + `（${[...words[0]].length}文字）`;
+          }, Math.max(0, limit * hintAt(s) - since(key)));
+        }
       }
     } else {
       const ans = document.createElement('div');
@@ -379,6 +386,7 @@ export default {
 
   // 意味当て・英単語を選ぶの4つのボタン（2×2）。答えたあと・答えを見せる場面では押せない形にして、○×を付ける
   choiceGrid(s, me, o, key, limit, note) {
+    if (document.activeElement?.classList?.contains("kj-choice")) document.activeElement.blur(); // 前の問題で押した札に残った focus を外す（2026-11-03）
     const grid = document.createElement('div');
     grid.className = 'kj-choices';
     grid.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr; gap: 10px; touch-action: manipulation;';

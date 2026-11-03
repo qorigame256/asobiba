@@ -13,16 +13,22 @@
 //     75個出きってもそろわない人がいれば8秒待って終わる。CPU は数字が出てから0.8〜2.2秒で押す。
 //   - 3位まで続けるのは3人より多いときだけ（2人なら1人、3人なら2人が決まったら終わり）。決まらなかった人は同じ最下位。
 //   - リーチ（あと1つでそろう列がある）は名前の札に出す。
+// 2026-11-03 本人の依頼（作りは Claude の判断）:
+//   - 「読み上げが早い」: 詳細設定「数字の間」（鍵は gap。3秒・5秒（最初）・7秒）を足し、最初を3秒から5秒にした。読み上げが終わってから押す時間が残るように。
+//   - 出た数字のマスを光らせる: いま出た数字のマスは強く光らせ（自分で押すときは押すまで点滅）、前に出てまだ押していないマスは薄く光らせる。
+//   - 名前の札に、リーチの列の数で「ダブルリーチ」「トリプルリーチ」（4列以上は「4重リーチ」）を出す。
+//   - ほかの人のカード: 自分のカードの下に、ほかの人のカードを小さく並べる（開いたマスとそろった列が見える）。
 // 手: { p: -1, t: 'draw' | 'end' }（ホストの進行）/ { p, t: 'mark', c: マスの番号 0〜24 }（自分で押すときだけ）
 
-import { mulberry32, shuffle } from './util.js';
+import { mulberry32, shuffle, esc } from './util.js';
 import { since } from './party.js';
 import { speak } from '../sound.js';
 
 const LETTERS = 'BINGO';
 const YOMI = { B: 'ビー', I: 'アイ', N: 'エヌ', G: 'ジー', O: 'オー' };
 const FIRST_MS = 2000;
-const STEP_MS = 3000;
+const GAPS = [3, 5, 7]; // 数字の間（秒）
+const stepMs = (s) => (GAPS.includes(Number(s.rules.gap)) ? Number(s.rules.gap) : 5) * 1000;
 const END_MS = 1500;
 const SELF_END_MS = 2500;
 const LAST_MS = 8000;
@@ -58,7 +64,8 @@ function openOf(s, p, drawn = drawnSet(s)) {
   return s.cards[p].map((v) => v === 0 || drawn.has(v));
 }
 export function linesOf(open) { return LINES.filter((l) => l.every((i) => open[i])); }
-const reachOf = (open) => LINES.some((l) => l.filter((i) => open[i]).length === 4);
+const reachCount = (open) => LINES.filter((l) => l.filter((i) => open[i]).length === 4).length;
+const reachText = (k) => (k === 1 ? 'リーチ' : k === 2 ? 'ダブルリーチ' : k === 3 ? 'トリプルリーチ' : `${k}重リーチ`);
 
 let spoken = null;
 const cpuPlan = new Map();
@@ -78,6 +85,7 @@ export default {
     { key: 'until', label: '終わり方', desc: '3位まで続けると、1人上がっても続く', def: 1, choices: [[1, '1人上がったら終わり'], [3, '3位まで続ける']] },
     { key: 'voice', label: '読み上げ', desc: '出た数字を声でも読む（🔇 のときは読まない）', def: true },
     { key: 'free', label: '真ん中の FREE', desc: 'なしにすると真ん中も数字になり、そろいにくくなる', def: true },
+    { key: 'gap', label: '数字の間', desc: '次の数字が出るまでの秒数', def: 5, choices: [[3, '3秒'], [5, '5秒'], [7, '7秒']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -129,7 +137,7 @@ export default {
     if (s.phase !== 'play') return null;
     if (doneCount(s) >= targetOf(s)) return { key: 'end' + s.k, ms: selfMark(s) ? SELF_END_MS : END_MS, move: { t: 'end' } };
     if (s.k >= 75) return { key: 'last', ms: LAST_MS, move: { t: 'end' } };
-    return { key: 'd' + s.k, ms: s.k ? STEP_MS : FIRST_MS, move: { t: 'draw' } };
+    return { key: 'd' + s.k, ms: s.k ? stepMs(s) : FIRST_MS, move: { t: 'draw' } };
   },
 
   apply(s0, m) {
@@ -203,7 +211,10 @@ export default {
       st.className = 'pt-extra';
       if (s.at[p] !== null) st.innerHTML = `<span class="pt-ok">ビンゴ！${res ? `${res.place[p]}位` : ''}</span>`;
       else if (res) st.textContent = `${res.place[p]}位`;
-      else if (reachOf(open)) st.innerHTML = '<span class="bg-reach">リーチ</span>';
+      else if (reachCount(open)) {
+        const k = reachCount(open);
+        st.innerHTML = `<span class="bg-reach${k > 1 ? ' multi' : ''}">${reachText(k)}</span>`;
+      }
       chip.append(name, st);
       if (o.away[p] || o.sub?.[p]) {
         const t = document.createElement('span');
@@ -241,10 +252,13 @@ export default {
       h.textContent = L;
       card.append(h);
     }
+    const now = s.k ? s.order[s.k - 1] : null;
     s.cards[seat].forEach((v, i) => {
       const cell = document.createElement(canTap ? 'button' : 'div');
       cell.className = 'bg-cell' + (open[i] ? ' open' : '') + (v === 0 ? ' free' : '') + (lit.has(i) ? ' line' : '')
-        + (s.k && v === s.order[s.k - 1] && open[i] && o.fresh ? ' pop' : '');
+        + (s.k && v === now && open[i] && o.fresh ? ' pop' : '')
+        + (s.phase === 'play' && v && v === now ? ' now' : '') // いま出た数字のマス
+        + (s.phase === 'play' && v && v !== now && !open[i] && drawn.has(v) ? ' called' : ''); // 前に出て、まだ押していないマス
       cell.textContent = v === 0 ? 'FREE' : v;
       if (canTap) {
         cell.type = 'button';
@@ -267,5 +281,23 @@ export default {
     else if (s.at[me] !== null) note.textContent = res ? '' : 'ビンゴ！ほかの人を待っています';
     else if (selfMark(s) && s.phase === 'play') note.textContent = '出た数字のマスを自分で押して穴を開けます';
     root.append(note);
+
+    // ほかの人のカード（小さく。観戦の人は全員の分）
+    const others = Array.from({ length: s.n }, (_, p) => p).filter((p) => p !== seat);
+    if (others.length) {
+      const box = document.createElement('div');
+      box.className = 'bg-others';
+      for (const p of others) {
+        const op = openOf(s, p, drawn);
+        const lines = new Set(linesOf(op).flat());
+        const fig = document.createElement('figure');
+        fig.className = 'bg-mini' + (s.at[p] !== null ? ' won' : '');
+        const k = reachCount(op);
+        fig.innerHTML = `<figcaption>${esc(nameP(p))}${s.at[p] !== null ? ' 🎉' : k ? ` <b>${reachText(k)}</b>` : ''}</figcaption>`
+          + `<div class="bg-mini-grid">${s.cards[p].map((v, i) => `<span class="${op[i] ? 'open' : ''}${lines.has(i) ? ' line' : ''}${s.phase === 'play' && v && v === now ? ' now' : ''}">${v === 0 ? '★' : v}</span>`).join('')}</div>`;
+        box.append(fig);
+      }
+      root.append(box);
+    }
   },
 };

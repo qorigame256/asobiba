@@ -750,6 +750,32 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .lobby-list li.cpu { color: var(--muted); border-style: dashed; }
 .lobby-total { font-weight: 700; text-align: center; margin-top: 8px; }
 .lobby-ready, .lobby-vote { margin: 8px 0 0; font-size: .9rem; } /* 準備OK・次のゲームの投票 */
+/* 待合室の「いま選んでいるゲーム」（2026-11-03）。ゲームが替わったら2秒光る */
+.lobby-game { margin: -2px 0 12px; padding: 12px 14px; border: 2px solid var(--accent); border-radius: var(--radius); background: var(--soft, #fff6ef); }
+.lobby-game-head { display: flex; gap: 12px; align-items: center; }
+.lobby-game-icon { font-size: 2.8rem; line-height: 1; flex: none; }
+.lobby-game-head small { display: block; color: var(--muted); font-size: .78rem; }
+.lobby-game-name { display: block; font-size: 1.45rem; line-height: 1.25; }
+.lobby-game-head p { margin: 2px 0 0; color: var(--muted); font-size: .88rem; line-height: 1.45; }
+.lobby-game .hf { margin: 10px 0 0; }
+.lobby-game.changed { animation: lobby-game-flash 2s ease-out both; }
+@keyframes lobby-game-flash {
+  0%, 30% { box-shadow: 0 0 0 6px rgba(242, 183, 5, .75); transform: scale(1.02); }
+  100% { box-shadow: 0 0 0 0 rgba(242, 183, 5, 0); transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .lobby-game.changed { animation: none; box-shadow: 0 0 0 4px rgba(242, 183, 5, .6); } }
+/* 次のゲームの投票の札（2026-11-03。絵と名前を並べて押す） */
+.lobby-votes { margin-top: 8px; }
+.vote-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 6px; margin-top: 8px; }
+.vote-tiles.big { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+.board button.vote-tile, .vote-tile { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 4px 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--field); color: var(--ink); font: inherit; cursor: pointer; }
+.vote-tile:hover { border-color: var(--accent); }
+.board button.vote-tile.mine, .vote-tile.mine { border: 2px solid var(--accent); background: var(--soft, #fff1e8); }
+.vote-icon { font-size: 1.6rem; line-height: 1.1; }
+.vote-tiles.big .vote-icon { font-size: 2rem; }
+.vote-name { font-size: .78rem; line-height: 1.25; text-align: center; word-break: keep-all; overflow-wrap: anywhere; }
+.vote-count { position: absolute; top: -6px; right: -4px; background: var(--accent); color: var(--accent-ink); border-radius: 999px; padding: 1px 7px; font-size: .75rem; font-weight: 700; }
+.vote-pick summary { font-weight: 700; }
 .lobby-ready small { color: var(--muted); margin-left: 4px; }
 .lobby-ready.all { color: #2e7d32; font-weight: 700; }
 /* 待合室でじゃんけん（開け閉めできる欄。閉じている間は見出しの1行だけ） */
@@ -1386,12 +1412,15 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .board button.np-cell.sel { background: var(--soft, #ffd9c7); }
 .board button.np-cell.bad { color: #d32f2f; text-decoration: underline wavy #d32f2f; }
 .board button.np-cell:disabled { cursor: default; }
+/* 埋め終わった数字（2026-11-03 本人の依頼）: マスは灰色の字で触れない・下の数字のボタンも灰色で押せない */
+.board button.np-cell.locked { color: var(--muted); font-weight: 600; }
 /* 仮置き（nanpure.js）: マスの中に小さく 1〜N を並べる（--m は1段に並べる数） */
 .np-memo { display: grid; grid-template-columns: repeat(var(--m, 3), 1fr); width: 100%; height: 100%; padding: 1px; font-size: clamp(.45rem, 1.9vw, .7rem); font-weight: 600; color: var(--muted); line-height: 1; }
 .np-memo i { font-style: normal; display: grid; place-items: center; }
 .np-memo-btn { display: block; margin: 8px auto 0; }
 .np-pad { --n: 10; display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 5px; touch-action: manipulation; }
 .board .btn.np-key { min-width: 0; min-height: 48px; padding: 4px 0; font-size: 1.3rem; font-weight: 800; border-radius: 10px; }
+.board .btn.np-key.done, .board .btn.np-key.done:disabled { opacity: .3; background: var(--line); color: var(--muted); text-decoration: line-through; cursor: default; }
 .dr-oni { display: flex; align-items: center; justify-content: center; gap: 12px; background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 10px; }
 .dr-face { font-size: 2.6rem; line-height: 1; transition: transform .15s; }
 .dr-face.look { transform: scale(1.25); }
@@ -2005,6 +2034,24 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .board .bg-cell.line { background: #2f8a4a; border-color: #1f6a36; color: #fff; }
 .bg-cell.pop { animation: pop .3s ease-out; }
 .bg-reach { color: #c0392b; font-weight: 800; }
+.bg-reach.multi { background: #c0392b; color: #fff; padding: 0 6px; border-radius: 999px; }
+/* 出た数字のマスを光らせる（2026-11-03 本人の依頼）。いま出た数字は強く、前に出てまだ押していない数字は薄く */
+.board .bg-cell.called { background: #fff3c4; border-color: #f2b705; }
+.board .bg-cell.now { border-color: #f2b705; box-shadow: 0 0 0 4px rgba(242, 183, 5, .7); }
+.board .bg-cell.now:not(.open) { background: #ffe27a; color: #2d2a26; animation: bg-now 1s ease-in-out infinite; }
+@keyframes bg-now { 50% { box-shadow: 0 0 0 7px rgba(242, 183, 5, .35); } }
+@media (prefers-reduced-motion: reduce) { .board .bg-cell.now:not(.open) { animation: none; } }
+/* ほかの人のカード（小さく） */
+.bg-others { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; margin-top: 4px; }
+.bg-mini { margin: 0; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--field); }
+.bg-mini.won { border-color: #2f8a4a; box-shadow: 0 0 0 2px rgba(47, 138, 74, .35); }
+.bg-mini figcaption { font-size: .78rem; font-weight: 700; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bg-mini figcaption b { color: #c0392b; }
+.bg-mini-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; }
+.bg-mini-grid span { aspect-ratio: 1; display: grid; place-items: center; border-radius: 3px; background: var(--bg); color: var(--muted); font-size: .62rem; font-weight: 700; }
+.bg-mini-grid span.open { background: #f08a5a; color: #fff; }
+.bg-mini-grid span.line { background: #2f8a4a; color: #fff; }
+.bg-mini-grid span.now { outline: 2px solid #f2b705; outline-offset: -1px; }
 /* 迷路早抜け */
 .mz-canvas { display: block; margin: 0 auto; border-radius: 8px; border: 2px solid var(--line); touch-action: none; }
 .mz-pad { display: grid; grid-template-columns: repeat(3, 3.4rem); grid-template-rows: repeat(3, 3rem); gap: 4px; justify-content: center; touch-action: manipulation; }
@@ -2052,14 +2099,14 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 /* ---------- 2026-10-30 に足した6つ（椅子取りゲーム・立体四目並べ・じゃんけん階段・後出しじゃんけん早押し・ボウリング・綱引き連打） ---------- */
 :is([data-game="isutori"], [data-game="kaidan"], [data-game="atodashi"], [data-game="tsuna"]) .board { width: min(100%, 560px); }
 /* 後出しじゃんけん早押し */
-.ad-hand { font-size: clamp(3.6rem, 22vw, 5.4rem); line-height: 1.15; margin-top: 4px; }
-.ad-order { display: inline-block; color: #fff; font-weight: 900; font-size: clamp(1.4rem, 7vw, 2rem); padding: 2px 18px; border-radius: 999px; margin: 2px 0 8px; text-shadow: 0 1px 2px rgba(0, 0, 0, .35); }
-.ad-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: min(100%, 380px); margin: 0 auto; touch-action: manipulation; }
-.board button.ad-btn { min-height: 5rem; border-radius: 14px; border: 2px solid var(--line); background: var(--field); color: var(--ink); font: inherit; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
-.ad-btn span { font-size: 2.2rem; line-height: 1; }
-.ad-btn small { font-size: .85rem; font-weight: 700; }
-.board button.ad-btn:disabled { opacity: .55; cursor: default; }
-.board button.ad-btn.ans { opacity: 1; box-shadow: 0 0 0 4px var(--win); }
+.aj-hand { font-size: clamp(3.6rem, 22vw, 5.4rem); line-height: 1.15; margin-top: 4px; }
+.aj-order { display: inline-block; color: #fff; font-weight: 900; font-size: clamp(1.4rem, 7vw, 2rem); padding: 2px 18px; border-radius: 999px; margin: 2px 0 8px; text-shadow: 0 1px 2px rgba(0, 0, 0, .35); }
+.aj-pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: min(100%, 380px); margin: 0 auto; touch-action: manipulation; }
+.board button.aj-btn { min-height: 5rem; border-radius: 14px; border: 2px solid var(--line); background: var(--field); color: var(--ink); font: inherit; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }
+.aj-btn span { font-size: 2.2rem; line-height: 1; }
+.aj-btn small { font-size: .85rem; font-weight: 700; }
+.board button.aj-btn:disabled { opacity: .55; cursor: default; }
+.board button.aj-btn.ans { opacity: 1; box-shadow: 0 0 0 4px var(--win); }
 /* じゃんけん階段 */
 .kd-stairs { display: flex; flex-direction: column; gap: 6px; background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 8px; }
 .kd-row { display: grid; grid-template-columns: 5.5em 1fr 4.2em; gap: 8px; align-items: center; font-size: .88rem; }
@@ -2150,6 +2197,12 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .board button.ts-btn { display: block; width: min(100%, 360px); margin: 0 auto 6px; min-height: 5.5rem; border-radius: 18px; border: 0; font: inherit; font-size: 1.5rem; font-weight: 900; color: #fff; background: #777; cursor: pointer; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
 .board button.ts-btn.t0 { background: #e04b3c; }
 .board button.ts-btn.t1 { background: #f4f4f4; color: #444; border: 2px solid #bbb; }
+.board button.ts-btn.t2 { background: #3b7ddd; }
+/* 綱引きの三つ巴（2026-11-03）: 三角形の盤と Y の字の綱 */
+.ts-tri { width: min(100%, 300px); margin: 4px auto 0; }
+.ts-tri svg { display: block; width: 100%; height: auto; overflow: visible; }
+.ts-knot { transition: transform .25s ease-out; }
+.ts-y { transition: x1 .25s ease-out, y1 .25s ease-out; }
 .board button.ts-btn:disabled { opacity: .5; cursor: default; }
 .ts-btn.kick { animation: tsKick .12s ease-out; }
 @keyframes tsKick { from { transform: scale(.95); } }
@@ -2193,3 +2246,21 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 [data-game="billiards"] .board { width: min(100%, 560px); }
 .bl { display: flex; flex-direction: column; gap: 6px; }
 .bl-info { min-height: 1.4em; text-align: center; margin: 0; }
+
+/* ひたいカードの「いま何回目か」（2026-11-03 本人の依頼） */
+.ht-round { text-align: center; margin: 0 0 10px; padding: 8px 10px; border-radius: 12px; background: var(--soft, #fff3e6); border: 1.5px solid var(--line); font-size: 1rem; }
+.ht-round b { font-size: 1.5rem; color: var(--accent); }
+.ht-round small { color: var(--muted); margin-left: 4px; }
+.ht-round em { font-style: normal; font-weight: 700; margin-left: 8px; padding: 1px 8px; border-radius: 999px; background: #d0312d; color: #fff; font-size: .85rem; }
+.ht-round.last { border-color: #d0312d; }
+.ht-dots { display: flex; justify-content: center; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.ht-dots i { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid var(--muted); }
+.ht-dots i.done { background: var(--muted); }
+.ht-dots i.now { background: var(--accent); border-color: var(--accent); transform: scale(1.3); }
+
+/* 4つから選ぶ札（難読漢字・英単語クイズ）。2026-11-03 本人の報告「4つのうち1つだけ見た目が違うことがある」:
+   押した場所の札だけ、指を離したあとも :hover・:active・:focus の見た目（明るさ・縮み・枠）が次の問題の札に残る端末があるので、状態で見た目を変えない */
+.board button.btn.kj-choice, .board button.btn.kj-choice:hover, .board button.btn.kj-choice:active, .board button.btn.kj-choice:focus {
+  filter: none; transform: none; outline: none; -webkit-tap-highlight-color: transparent;
+}
+.board button.btn.kj-choice:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } /* キーボードで選んでいるときだけ枠 */

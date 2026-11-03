@@ -61,11 +61,18 @@ const SEND_MS = 40; // オンラインで位置を送る間隔
 // 2026-10-26 本人の声「3人だととても重い」への対策（Claude の判断。本物の中継サーバーでは測れていない）:
 //   パックを1つも持っていない端末は、マレットの位置を SEND_IDLE_MS おきにしか送らない（ほかの陣地のマレットは見た目だけで、当たりには使わないため）。
 //   3人では送る端末が3台になり、中継サーバーを通る数が2人の1.5倍以上になるので、まずそれを減らす。
-//   ほかの端末が持っているパックの位置は、届くたびに飛び移らず、差の半分ずつ寄せる（SMOOTH。遠く離れていたら飛び移る）。
+//   ほかの端末が持っているパックの位置は、届くたびに飛び移らず、なめらかに寄せる（2026-11-03 に「差の半分ずつ寄せる」から下の OFFSET_T の形に替えた）。
 const SEND_IDLE_MS = 90;
-const SMOOTH = 0.5;
-const SNAP_DIST = 0.15;
+// 2026-11-03 本人の声「まだラグい、パックがワープする」への対策（Claude の判断。本物の中継サーバーでは測れていない）:
+//   - ほかの端末から位置が届いて直すとき、計算に使う位置はすぐ直し、画面に描く位置だけを前の見た目から OFFSET_T 秒ほどでなめらかに寄せる（q.ox・q.oy）。
+//     前は差の半分ずつ寄せ、0.15 より離れていたら飛び移っていた（相手が打ったパックは遅れの分だけ大きくずれるので、飛び移って見えた）。SNAP_FAR より離れていたら飛び移る。
+//   - 先取り: ほかの端末が持っているパックが、こちらの見込みの動きで自分の陣地に入ってきたら、渡す知らせを待たずに持ち主になる（net.pred）。
+//     前は知らせが届くまで自分のマレットがパックをすり抜け、届いた瞬間に位置が飛んでいた。前の持ち主がまだ自分の陣地で持っていると知らせてきたら（向こうで打ち返していた）譲る。
+const OFFSET_T = 0.09;
+const SNAP_FAR = 0.6;
+const PRED_MS = 1000; // 先取りのあと、前の持ち主から受け取ったと分かる知らせを待つ長さ（過ぎたら先取りは確かなものとして扱う）
 const GOAL_PAUSE = 1.2;
+const FLASH = 1.4; // ゴールのとき盤を光らせる秒数（2026-11-03 本人の依頼「点数が入ったかをわかりやすく」）
 
 // 3人の六角形の盤（中心が原点。角は 0°・60°…の向きで、上下の辺が平ら）。
 // 席 p のゴールは、外向きの向きが 90°＋120°×p の辺（席0 が下）。席 p の陣地は、中心から見てその向きの ±60° の扇形
@@ -494,7 +501,7 @@ function drawPieces(ctx, P, s, st, rm) {
     ctx.fill();
   });
   for (const q of st.pucks) {
-    const [x, y] = P(q.x, q.y);
+    const [x, y] = P(q.x + (q.ox ?? 0), q.y + (q.oy ?? 0)); // ox・oy = 位置を直したあと、なめらかに寄せている間の見た目のずれ（オンラインだけ）
     ctx.fillStyle = '#222';
     ctx.beginPath();
     ctx.arc(x, y, R_P * s, 0, Math.PI * 2);
@@ -524,7 +531,11 @@ function drawBanner(ctx, text, s, cx, cy, rotate) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = 'rgba(255,255,255,.85)';
-  const tw = ctx.measureText(text).width;
+  let tw = ctx.measureText(text).width;
+  if (tw > s * 0.9) { // 長い文は盤の幅に収まるよう字を小さく
+    ctx.font = `800 ${Math.round(s * 0.11 * (s * 0.9) / tw)}px system-ui, sans-serif`;
+    tw = ctx.measureText(text).width;
+  }
   ctx.fillRect(-tw / 2 - 12, -s * 0.08, tw + 24, s * 0.16);
   ctx.fillStyle = '#2d2a26';
   ctx.fillText(text, 0, 0);
@@ -554,17 +565,32 @@ function drawRect(ctx, view, st, P, opts) {
     ctx.fillRect(gx - (opts.goal / 2) * s, gy - s * 0.012, opts.goal * s, s * 0.024);
     ctx.globalAlpha = 1;
   }
-  // 点数（盤の中央の線の近く。2人で同じ画面のときは上の人の分を逆さに）
-  ctx.font = `700 ${Math.round(s * 0.16)}px system-ui, sans-serif`;
+  // ゴールのとき: 決めた人の色で盤を光らせ、入れられたゴールを太く光らせる
+  const fl = st.flash ? Math.max(0, st.flash.t / FLASH) : 0;
+  if (fl) {
+    const scorer = 1 - st.flash.c;
+    ctx.fillStyle = COLORS[scorer];
+    ctx.globalAlpha = 0.28 * fl;
+    ctx.fillRect(0, 0, w, h);
+    ctx.globalAlpha = 1;
+    const [gx, gy] = P(W / 2, st.flash.c === 0 ? H : 0);
+    ctx.fillStyle = '#f2b705';
+    ctx.globalAlpha = fl;
+    ctx.fillRect(gx - (opts.goal / 2) * s - 6, gy - s * 0.035, opts.goal * s + 12, s * 0.07);
+    ctx.globalAlpha = 1;
+  }
+  // 点数（盤の中央の線の近く。2人で同じ画面のときは上の人の分を逆さに）。ゴールのときは入った側の点を大きく濃く
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   for (const p of [0, 1]) {
     const bottom = (p === 0) !== flip;
+    const big = fl && p === 1 - st.flash.c ? fl : 0;
     ctx.save();
+    ctx.font = `700 ${Math.round(s * 0.16 * (1 + big * 0.8))}px system-ui, sans-serif`;
     ctx.translate(w * 0.85, bottom ? h / 2 + s * 0.13 : h / 2 - s * 0.13);
     if (!bottom && opts.rotateTop) ctx.rotate(Math.PI);
     ctx.fillStyle = COLORS[p];
-    ctx.globalAlpha = 0.35;
+    ctx.globalAlpha = 0.35 + big * 0.65;
     ctx.fillText(String(st.score[p]), 0, 0);
     ctx.restore();
   }
@@ -620,14 +646,34 @@ function drawHex(ctx, view, st, P, goal, block, rm) {
     ctx.lineTo(bx, by);
     ctx.stroke();
   }
-  // 失点（それぞれの陣地の中に薄く）
-  ctx.font = `700 ${Math.round(s * 0.13)}px system-ui, sans-serif`;
+  // ゴールのとき: 入れられたゴールを太く光らせ、盤を薄く光らせる
+  const fl = st.flash ? Math.max(0, st.flash.t / FLASH) : 0;
+  if (fl) {
+    outline();
+    ctx.fillStyle = '#f2b705';
+    ctx.globalAlpha = 0.18 * fl;
+    ctx.fill();
+    const u = seatDir(st.flash.c);
+    const [ax, ay] = P(u.x * HEX_A - u.y * (goal / 2), u.y * HEX_A + u.x * (goal / 2));
+    const [bx, by] = P(u.x * HEX_A + u.y * (goal / 2), u.y * HEX_A - u.x * (goal / 2));
+    ctx.globalAlpha = fl;
+    ctx.strokeStyle = '#f2b705';
+    ctx.lineWidth = Math.max(10, s * 0.07);
+    ctx.beginPath();
+    ctx.moveTo(ax, ay);
+    ctx.lineTo(bx, by);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  // 失点（それぞれの陣地の中に薄く。ゴールのときは入れられた人の失点を大きく濃く）
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.globalAlpha = 0.35;
   for (let p = 0; p < 3; p++) {
     const u = seatDir(p);
     const [x, y] = P(u.x * 0.42, u.y * 0.42);
+    const big = fl && p === st.flash.c ? fl : 0;
+    ctx.font = `700 ${Math.round(s * 0.13 * (1 + big * 0.8))}px system-ui, sans-serif`;
+    ctx.globalAlpha = 0.35 + big * 0.65;
     ctx.fillStyle = COLORS[p];
     ctx.fillText(String(st.score[p]), x, y);
   }
@@ -750,15 +796,17 @@ function mount(root, opts) {
     st.pucks[i] = q;
   }
   // 失点が増えたあと: 点数・決着・ゴールの表示（パック1つは少し止める。2つは止めずに続ける＝2026-10-06 本人の決定）
-  function afterGoal() {
+  // c = 入れられた席（ゴールのときに盤を光らせ、だれの点かを盤の上の文で出す。2026-11-03 本人の依頼「点数が入ったかをわかりやすく」）
+  function afterGoal(c = null) {
     st.score = scoreOf(n, st.lost);
     st.over = limit ? (st.timeUp ? overTime(n, st.score) : null) : overOf(n, st.score, target);
+    if (c !== null) st.flash = { c, t: FLASH };
     if (st.over) {
       playing = false;
       finish();
     } else {
       play('goal');
-      st.banner = 'ゴール！';
+      st.banner = goalBanner(c);
       if (pucks === 1) st.pause = GOAL_PAUSE;
       else st.bannerT = GOAL_PAUSE;
     }
@@ -843,6 +891,19 @@ function mount(root, opts) {
     }
     return `${seats().filter((p) => r[p] === 1).map((p) => PLAYERS[p]).join('と')}の勝ち${online ? '' : '！'}`;
   }
+  // ゴールのときの盤の上の文: 2人は「あなたの得点！ 3対2」「失点… 2対3」（同じ画面の2人は「赤の得点！ 3対2」）、3人は「あなたが失点…」「青が失点」
+  function goalBanner(c) {
+    if (c === null) return 'ゴール！';
+    const me = perspective();
+    if (n === 2) {
+      const sc = 1 - c;
+      const pov = me !== null && me >= 0 ? me : sc;
+      const tally = `${st.score[pov]}対${st.score[1 - pov]}`;
+      if (me === null || me < 0) return `${PLAYERS[sc]}の得点！ ${tally}`;
+      return me === sc ? `あなたの得点！ ${tally}` : `失点… ${tally}`;
+    }
+    return me === c ? 'あなたが失点…' : `${PLAYERS[c]}が失点`;
+  }
   function finish() {
     st.banner = overBanner();
     play(overSound(st.over.rank, perspective()));
@@ -892,10 +953,11 @@ function mount(root, opts) {
   function localGoal(c, i) {
     st.lost[c]++;
     serveAt(c, i); // 決められた側から
-    afterGoal();
+    afterGoal(c);
   }
 
   function tickBanner(dt) {
+    if (st.flash) { st.flash.t -= dt; if (st.flash.t <= 0) st.flash = null; }
     if (st.pause > 0) {
       st.pause -= dt;
       if (st.pause <= 0 && !st.over) st.banner = '';
@@ -1052,7 +1114,7 @@ function mount(root, opts) {
   // ep = 「もう一回」の回数（点数は ep ではなく st.lost で合わせる）
   const startOwners = () => (pucks === 2 ? [0, 1] : [0]);
   const net = {
-    started: false, owners: startOwners(), ep: 0, lastSend: 0, lastPing: 0, rtt: null, rttMax: 0, rtts: [], handed: startOwners().map(() => -1), said: {}, heard: {},
+    started: false, owners: startOwners(), ep: 0, lastSend: 0, lastPing: 0, rtt: null, rttMax: 0, rtts: [], handed: startOwners().map(() => -1), pred: startOwners().map(() => null), said: {}, heard: {},
     lastHi: 0, quietShown: false, id: Math.random().toString(36).slice(2),
   };
   // 待つ相手: 自分以外の人の席（CPU の席は待たない）
@@ -1067,6 +1129,8 @@ function mount(root, opts) {
     net.ep = ep;
     net.owners = startOwners();
     net.handed = net.owners.map(() => -1);
+    net.pred = net.owners.map(() => null);
+    st.flash = null;
     st.lost = Array(n).fill(0);
     st.goalPuck = Array(n).fill(0);
     st.score = Array(n).fill(0);
@@ -1100,19 +1164,20 @@ function mount(root, opts) {
   // （パック2つで別々の端末がほぼ同時に決めても、片方が消えない。再読み込みした端末もここで追いつく）
   function mergeLost(l, gi) {
     if (!Array.isArray(l) || l.length !== n || st.over) return;
-    let changed = false;
+    let changed = null;
     for (let c = 0; c < n; c++) {
       const v = l[c];
       if (!Number.isInteger(v) || v <= st.lost[c]) continue;
       st.lost[c] = v;
-      changed = true;
+      changed = c;
       const i = Array.isArray(gi) && Number.isInteger(gi[c]) && gi[c] >= 0 && gi[c] < st.pucks.length ? gi[c] : 0;
       st.goalPuck[c] = i;
       serveAt(c, i);
       net.owners[i] = c;
       net.handed[i] = -1;
+      net.pred[i] = null;
     }
-    if (changed) afterGoal();
+    if (changed !== null) afterGoal(changed);
   }
 
   function receive(d) {
@@ -1149,25 +1214,44 @@ function mount(root, opts) {
       d.p.forEach((e, i) => {
         if (!Array.isArray(e) || i >= st.pucks.length) return;
         const o = os[i];
+        const pr = net.pred[i];
+        if (pr && dv.includes(net.owners[i]) && by.includes(pr.from)) {
+          if (dv.includes(o)) net.pred[i] = null; // 前の持ち主が、こちらへ渡したと分かった
+          else { // 前の持ち主がまだ自分の陣地で持っている（向こうで打ち返していた）か、ほかの席へ渡した: 譲る（届く途中の古い位置なら何もしない）
+            const next = advance({ x: e[0], y: e[1], vx: e[2], vy: e[3] }, lead() * 1.5);
+            if (Number.isInteger(o) && o >= 0 && o < n && (o !== pr.from || T.zone(next) === o)) {
+              net.owners[i] = o;
+              net.pred[i] = null;
+              setPuck(i, advance({ x: e[0], y: e[1], vx: e[2], vy: e[3] }, lead()));
+            }
+            return;
+          }
+        }
         // 持ち主を渡された・持ち主から位置が届いた（自分が持ち主の間は、ほかから届いた位置を使わない）
         if (!dv.includes(net.owners[i]) && (dv.includes(o) || by.includes(o))) {
           net.owners[i] = o;
-          const next = advance({ x: e[0], y: e[1], vx: e[2], vy: e[3] }, lead());
-          const q = st.pucks[i];
-          // 持ち主から届いた位置へは、差の半分ずつ寄せる（届く間隔のゆれでパックが飛んで見えないように）。渡されたとき・遠いときはそのまま
-          if (!dv.includes(o) && q && Math.hypot(next.x - q.x, next.y - q.y) < SNAP_DIST) {
-            q.x += (next.x - q.x) * SMOOTH;
-            q.y += (next.y - q.y) * SMOOTH;
-            q.vx = next.vx;
-            q.vy = next.vy;
-          } else st.pucks[i] = next;
+          setPuck(i, advance({ x: e[0], y: e[1], vx: e[2], vy: e[3] }, lead()));
         }
       });
     }
   }
 
+  // 届いた位置に直す。計算に使う位置はすぐ直し、描く位置は前の見た目から OFFSET_T 秒ほどでなめらかに寄せる（遠すぎるときは飛び移る）
+  function setPuck(i, next) {
+    const q = st.pucks[i];
+    if (q) {
+      const dx = q.x + (q.ox ?? 0) - next.x;
+      const dy = q.y + (q.oy ?? 0) - next.y;
+      if (Math.hypot(dx, dy) < SNAP_FAR) { next.ox = dx; next.oy = dy; }
+    }
+    st.pucks[i] = next;
+  }
+
   function onlineTick(dt, now) {
     const dv = driven();
+    const fade = Math.exp(-dt / OFFSET_T);
+    for (const q of st.pucks) if (q.ox || q.oy) { q.ox = (q.ox ?? 0) * fade; q.oy = (q.oy ?? 0) * fade; if (Math.hypot(q.ox, q.oy) < 0.002) { q.ox = 0; q.oy = 0; } }
+    for (let i = 0; i < st.pucks.length; i++) if (net.pred[i] && performance.now() - net.pred[i].at > PRED_MS) net.pred[i] = null;
     if (dv.length) {
       if (!net.started && now - net.lastHi > 500) { net.lastHi = now; opts.send({ k: 'hi', c: dv }); }
       // 遅れを測る合図の時刻は performance.now()（描き替えの時刻 now は古いことがあり、遅れが大きく出る）
@@ -1194,6 +1278,9 @@ function mount(root, opts) {
         const q = st.pucks[i];
         if (!dv.includes(net.owners[i])) {
           if (T.step(q, [], h, ev) !== null) { q.vx = 0; q.vy = 0; } // ほかの陣地のゴールの判定はその陣地の端末に任せる
+          // 先取り: 見込みの動きで自分の陣地に入ってきたら、渡す知らせを待たずに持ち主になる（自分のマレットで打てるように）
+          const z = T.zone(q);
+          if (dv.includes(z) && net.owners[i] >= 0) { net.pred[i] = { from: net.owners[i], at: performance.now() }; net.owners[i] = z; net.handed[i] = -1; }
           continue;
         }
         const c = T.step(q, dv.map((p) => st.mallets[p]), h, ev);
@@ -1203,8 +1290,9 @@ function mount(root, opts) {
           serveAt(c, i);
           net.owners[i] = c;
           net.handed[i] = -1;
+          net.pred[i] = null;
           opts.send({ k: 'goal', ep: net.ep, l: st.lost.slice(), gi: st.goalPuck.slice(), c: dv }, true);
-          afterGoal();
+          afterGoal(c);
           continue;
         }
         const z = T.zone(q);

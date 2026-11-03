@@ -250,8 +250,10 @@ export default {
       b.type = 'button';
       b.className = 'az-key' + (k === 'ok' ? ' ok' : k === 'del' ? ' del' : '');
       b.textContent = k === 'ok' ? '答える' : k === 'del' ? '⌫' : k;
-      // 指が触れた瞬間に押したことにする（ほかの人の手で作り直されても押したのが消えないように）
-      b.onpointerdown = b.onclick = (e) => { e.preventDefault(); press(k); };
+      // 指が触れた瞬間に押したことにする（ほかの人の手で作り直されても押したのが消えないように）。
+      // click は押したあとにも来るので、キーボードで押したとき（detail が 0）だけ使う（前は両方で押していて、1回で2つ入った。2026-11-03 本人の報告）
+      b.onpointerdown = (e) => { if (e.button !== 0) return; e.preventDefault(); press(k); };
+      b.onclick = (e) => { e.preventDefault(); if (e.detail === 0) press(k); };
       pad.append(b);
     }
     if (me !== null && mine === null) {

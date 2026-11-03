@@ -412,6 +412,7 @@ export default {
 
   // 答え方「4つから選ぶ」の4つのボタン（2×2）。答えたあと・答えを見せる場面では押せない形にして、○×を付ける
   choiceGrid(s, me, o, key, limit, note) {
+    if (document.activeElement?.classList?.contains("kj-choice")) document.activeElement.blur(); // 前の問題で押した札に残った focus を外す（2026-11-03）
     const grid = document.createElement('div');
     grid.className = 'kj-choices';
     grid.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr; gap: 10px; touch-action: manipulation;';

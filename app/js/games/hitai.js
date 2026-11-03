@@ -25,6 +25,16 @@ const alive = (s) => Array.from({ length: s.n }, (_, p) => p).filter((p) => !s.o
 // 終わったときの順位（1から）。残った人は持ち点が同じなら同じ順位（同点優勝。2026-10-10 本人の決定）、脱落した人は後に脱落した人ほど上
 const placeOf = (s, p) => (s.outOrder.includes(p) ? s.ranking.indexOf(p) + 1 : 1 + alive(s).filter((q) => s.chips[q] > s.chips[p]).length);
 
+// いま何回目か（2026-11-03 本人の依頼「いま何回目かをわかりやすく」）: 盤の一番上に「第3回 / 全10回」と、回の数だけの丸（済んだ回は塗る）を大きく出す。最後の回は「最終回」と添える（Claude の判断）
+function roundBadge(s) {
+  const box = document.createElement('div');
+  const last = s.round >= s.rules.rounds;
+  box.className = 'ht-round' + (last ? ' last' : '');
+  const dots = Array.from({ length: s.rules.rounds }, (_, i) => `<i class="${i + 1 < s.round ? 'done' : i + 1 === s.round ? 'now' : ''}"></i>`).join('');
+  box.innerHTML = `<b>第${s.round}回</b> / 全${s.rules.rounds}回${last ? '<em>最終回</em>' : `<small>（あと${s.rules.rounds - s.round}回）</small>`}<span class="ht-dots">${dots}</span>`;
+  return box;
+}
+
 // 次の回を始める（親を回し、参加料を集めて配る）
 function startRound(s) {
   s.round += 1;
@@ -206,6 +216,7 @@ export default {
     const shown = s.phase === 'end';
     root.innerHTML = '';
     root.className = 'board pk ht';
+    root.append(roundBadge(s));
 
     const opps = document.createElement('div');
     opps.className = 'cc-opps pk-opps';
@@ -246,7 +257,7 @@ export default {
     const table = document.createElement('div');
     table.className = 'pk-table';
     table.innerHTML = `<div class="pk-pot">場の点 <b>${s.pot}</b>${s.carry && shown ? `（次の回へ ${s.carry}）` : ''}</div>`
-      + `<div class="pk-meta">第${s.round}回 / ${s.rules.rounds}回・参加料 ${ANTE}・勝負 ${BET}</div>`;
+      + `<div class="pk-meta">参加料 ${ANTE}・勝負 ${BET}</div>`;
     root.append(table);
 
     const log = document.createElement('p');

@@ -173,16 +173,22 @@ function loop(token) {
         e.style.left = (tg.x * 100) + '%';
         e.style.top = (tg.y * 100) + '%';
         e.innerHTML = tg.kind === 'bomb' ? '<span>☠</span>' : `<span>${pt}</span>`;
+        // 2026-11-03 本人の声「まだホストが有利」: 速さを「的が出る予定の時刻から」でなく「この画面に実際に描いた時刻から、指が触れた時刻まで」で測る。
+        //   描き替えの遅い端末（スマホなど）では、予定の時刻より遅れて的が出るぶん、前は損をしていた。指が触れた時刻は ev.timeStamp（処理が始まるまでの待ちを含めない）。
+        //   ドクロの時間切れの判定・動く的の位置は今までどおり予定の時刻から（Claude の判断）
+        const shownAt = performance.now();
         if (me !== null && o.canMove) {
           e.onpointerdown = (ev) => {
             ev.preventDefault();
             ev.stopPropagation();
-            const ms = Math.round(since(goKey(s)) - tg.at);
-            if (ui.tapped.has(tg.id) || ms > tg.life + 200) return;
+            const touched = ev.timeStamp > 0 && ev.timeStamp <= performance.now() ? ev.timeStamp : performance.now();
+            const late = Math.round(since(goKey(s)) - tg.at);
+            const ms = Math.max(0, Math.min(late, Math.round(touched - shownAt)));
+            if (ui.tapped.has(tg.id) || late > tg.life + 200) return;
             ui.tapped.add(tg.id);
             e.remove();
             ui.els.delete(tg.id);
-            const at = posOf(tg, ms);
+            const at = posOf(tg, late);
             float(ui.field, at.x, at.y, tg.kind === 'bomb' ? '−2' : '+' + pt, tg.kind === 'bomb' ? 'bad' : 'good');
             o.onMove({ t: 'hit', id: tg.id, ms });
           };

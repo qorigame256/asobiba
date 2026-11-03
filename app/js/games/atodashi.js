@@ -159,7 +159,7 @@ export default {
       return s.miss[p] ? '<span class="pt-ng">×</span>' : '<span class="pt-ng">―</span>';
     };
     root.innerHTML = '';
-    root.className = 'board kj ir ad';
+    root.className = 'board kj ir aj';
     const wrap = document.createElement('div');
     wrap.className = 'kj-wrap';
     wrap.append(scoreChips(o, s.scores, { won, extra, steady: true }));
@@ -176,7 +176,7 @@ export default {
     const key = qKey(s);
     const [word, col] = ORDER[x.o];
     card.insertAdjacentHTML('beforeend', `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>`
-      + `<div class="ad-hand">${FACE[x.x]}</div><div class="ad-order" style="background:${col}">${word}</div>`);
+      + `<div class="aj-hand">${FACE[x.x]}</div><div class="aj-order" style="background:${col}">${word}</div>`);
     if (s.phase === 'open') { since(key); card.append(timeBar(key, LIMIT)); }
     else {
       const t = document.createElement('div');
@@ -187,11 +187,11 @@ export default {
     }
     const can = s.phase === 'open' && me !== null && o.canMove && !doneOf(s, me) && since(key) < LIMIT;
     const pad = document.createElement('div');
-    pad.className = 'ad-pad';
+    pad.className = 'aj-pad';
     for (const h of HANDS) {
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'ad-btn' + (s.phase === 'shown' && h === answerOf(x) ? ' ans' : '');
+      b.className = 'aj-btn' + (s.phase === 'shown' && h === answerOf(x) ? ' ans' : '');
       b.innerHTML = `<span>${FACE[h]}</span><small>${HAND_NAME[h]}</small>`;
       b.disabled = !can;
       const hit = (e) => {

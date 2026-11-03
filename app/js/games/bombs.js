@@ -21,6 +21,15 @@
 //   爆発まで BLINK（3秒）を切った爆弾は、点滅に合わせて大きくなったり戻ったりし、つまめる範囲も広くなる（urgent）。
 //   爆弾どうしは、直径の75%より深くは重ならない（中心の間を MIN_GAP 以上に押し離す。つまんでいる爆弾は動かさない）。
 //
+// 2026-11-03 本人の依頼（分かれ目は Claude の問いに本人が答えた。数字は Claude の判断）:
+//   - ほかの人から届いた爆弾は、爆発までの時間を FUSE（9秒）〜 INC_FUSE（15秒）の間でずらす（一度にまとめて爆発しないように）。
+//     ずらし方は届いた順に黄金比で散らす（incFuse。何個届いてもばらける）。CPU の盤も同じ。
+//   - 退避スペース（盤の下。SHELTER）: どちらの色でも5個まで置け、置いている間は爆発までの時間が止まる（本人の選択）。取り出すと続きから進む。
+//   - 詳細設定「送る数」（鍵は send）: 1個/2個（5の枠→1個・10の枠→2個）・半分（5→3個・10→5個）・ふつう（最初。5→5個・10→10個）。手の k は枠の大きさのまま、届く数を apply で決める。
+//   - 入り口から出てくる爆弾を、時間とともに前より早く増やす（spawnGap・spawnCount。いちばん短い間 0.55→0.45秒、2個がまざり始めるのを L=60→40、3個を L=180→120）。
+//   - 「違う色の枠に入れてもライフが減らない」不具合: ゲストの端末で、自分の爆発の手がホストの一覧とすれ違って消えると、
+//     それからあとの爆発の手が全部「何回目か」が合わずに受け付けられなくなっていた。爆発・送りは端末の中で数えておき、
+//     局面の数のほうが少なければ 0.5秒ごとに「局面の数＋1回目」として送り直す（同じ手が2回届いても2回目は反則なので、二重には数えない）。
 // 進行: ready →(3秒)→ go → play → 生き残りが1人以下で end
 // 手: { p: -1, t: 'go' } / { p, t: 'boom', n: その人の何回目の爆発か } / { p, t: 'send', n: 何回目の送りか, k: 5 | 10, to?: ねらった席（送る相手が「選べる」のときだけ） }
 
@@ -36,31 +45,38 @@ const PULSE = 1.35; // 点滅しているときの大きさ
 const GRAB = 0.075; // 指でつまめる範囲（爆弾の中心から）
 const GRAB_URGENT = 0.1; // 爆発まで3秒を切った爆弾をつまめる範囲
 const BOTTOM_AT = 30; // 下の入り口が開くまでの秒数
-export const H = 1.25;
+export const INC_FUSE = 15; // ほかの人から届いた爆弾の、爆発までのいちばん長い秒数
+export const incFuse = (k) => FUSE + (INC_FUSE - FUSE) * ((k * 0.6180339887) % 1); // k = 届いた何個目か（0から）
+export const H = 1.42;
+const SHELTER = { x0: 0.02, x1: 0.98, y0: 1.255, y1: 1.395, cap: 5 }; // 退避スペース（盤の下）
+const RETRY_MS = 500; // 局面に入っていない自分の爆発・送りを送り直す間
 const R = 0.035; // 爆弾の半径
 const COLOR = ['#e74c3c', '#3b7ddd'];
 const COLOR_NAME = ['赤', '青'];
-const FIELD = { x0: 0.26, x1: 0.74, y0: 0.2, y1: H - 0.04 };
+const FIELD = { x0: 0.26, x1: 0.74, y0: 0.2, y1: 1.21 };
 const DOOR = { x: 0.5, y: 0.13 };
 const MIN_GAP = R * 2 * 0.25; // 爆弾の中心どうしの近さの下限（直径の75%までしか重ならない）
 // 枠: 左が赤、右が青。上が 5、下が 10
 const BOXES = [
   { c: 0, cap: 5, x0: 0.02, x1: 0.23, y0: 0.2, y1: 0.58 },
-  { c: 0, cap: 10, x0: 0.02, x1: 0.23, y0: 0.63, y1: H - 0.04 },
+  { c: 0, cap: 10, x0: 0.02, x1: 0.23, y0: 0.63, y1: 1.21 },
   { c: 1, cap: 5, x0: 0.77, x1: 0.98, y0: 0.2, y1: 0.58 },
-  { c: 1, cap: 10, x0: 0.77, x1: 0.98, y0: 0.63, y1: H - 0.04 },
+  { c: 1, cap: 10, x0: 0.77, x1: 0.98, y0: 0.63, y1: 1.21 },
 ];
 // 速さごとの、忙しさの曲線の始まり（秒）。ゆっくりは間 1.8秒から、はやいは 1.14秒から・2個同時が出始める所から
 export const START = { slow: -50, normal: 0, fast: 60 };
 // 忙しさ L のとき、次が出るまでの秒数
-export const spawnGap = (L) => Math.max(0.55, 1.5 - L * 0.006);
-// 忙しさ L のとき、一度に出る数（r は 0〜1 の乱数）。L=60 から2個がまざり始め、L=180 から3個もまざる
+export const spawnGap = (L) => Math.max(0.45, 1.5 - L * 0.0085);
+// 忙しさ L のとき、一度に出る数（r は 0〜1 の乱数）。L=40 から2個がまざり始め、L=120 から3個もまざる
 export function spawnCount(L, r) {
-  const p3 = clamp((L - 180) / 240, 0, 0.25);
-  const p2 = clamp((L - 60) / 240, 0, 0.5);
+  const p3 = clamp((L - 120) / 200, 0, 0.25);
+  const p2 = clamp((L - 40) / 200, 0, 0.5);
   return r < p3 ? 3 : r < p3 + p2 ? 2 : 1;
 }
 export const levelOf = (s, t) => t + (START[s.rules?.speed] ?? 0);
+// 詳細設定「送る数」: 枠の大きさ k（5か10）から、相手に届く数
+export const SENDS = { one: { 5: 1, 10: 2 }, half: { 5: 3, 10: 5 }, normal: { 5: 5, 10: 10 } };
+export const sendCount = (s, k) => (SENDS[s.rules?.send] ?? SENDS.normal)[k];
 export const livesOf = (s) => s.lives ?? LIVES;
 
 const goKey = (s) => `bombs:${s.seed}:go`;
@@ -86,6 +102,12 @@ export function sendTarget(s, m) {
 
 let ui = null;
 
+const inShelter = (x, y) => x >= SHELTER.x0 - 0.02 && x <= SHELTER.x1 + 0.02 && y >= SHELTER.y0 - 0.03 && y <= SHELTER.y1 + 0.03;
+const slotX = (j) => SHELTER.x0 + ((SHELTER.x1 - SHELTER.x0) * (j + 0.5)) / SHELTER.cap;
+const slotY = (SHELTER.y0 + SHELTER.y1) / 2;
+// 爆発までの残り秒数（退避スペースに置いている間は止まっている）
+const leftOf = (b, sec) => b.fuse - ((b.stashAt ?? sec) - b.born);
+
 function boxAt(x, y) {
   return BOXES.findIndex((b) => x >= b.x0 - 0.02 && x <= b.x1 + 0.02 && y >= b.y0 - 0.02 && y <= b.y1 + 0.02);
 }
@@ -97,13 +119,13 @@ function spawn(sec, incoming, bottom = false) {
   if (incoming) {
     const x = FIELD.x0 + R + Math.random() * (FIELD.x1 - FIELD.x0 - 2 * R);
     const ty = FIELD.y0 + R + Math.random() * (FIELD.y1 - FIELD.y0 - 2 * R); // 止まる高さ
-    ui.bombs.push({ c, x, y: -R, ty, vx: 0, vy: 0.6, born: sec, turn: sec + 1 + Math.random(), inc: true, fall: true });
+    ui.bombs.push({ c, x, y: -R, ty, vx: 0, vy: 0.6, born: sec, fuse: incFuse(ui.consumed - 1), turn: sec + 1 + Math.random(), inc: true, fall: true });
     return;
   }
   const a = (bottom ? -Math.PI / 2 : Math.PI / 2) + (Math.random() - 0.5) * 1.6;
-  ui.bombs.push({ c, x: DOOR.x, y: bottom ? FIELD.y1 - R : FIELD.y0 + R, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: sec, turn: sec + 1 + Math.random(), inc: false });
+  ui.bombs.push({ c, x: DOOR.x, y: bottom ? FIELD.y1 - R : FIELD.y0 + R, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, born: sec, fuse: FUSE, turn: sec + 1 + Math.random(), inc: false });
 }
-const urgent = (b, sec) => FUSE - (sec - b.born) < BLINK;
+const urgent = (b, sec) => leftOf(b, sec) < BLINK;
 // 爆弾どうしを押し離す（直径の75%より深く重ならないように）。つまんでいる爆弾は動かさない
 function separate() {
   const list = ui.bombs.filter((b) => b !== ui.held);
@@ -130,12 +152,24 @@ function boom(x, y, sec) {
   void sec;
 }
 
+// 局面に入っていない自分の爆発・送りを、局面の数＋1回目として送り直す（手が一覧とすれ違って消えたとき）
+function resend() {
+  const { s, o } = ui.cur;
+  if (ui.me === null || s.phase !== 'play' || s.out[ui.me] !== null) return;
+  const now = performance.now();
+  if (now - ui.retryAt < RETRY_MS) return;
+  if (s.boom[ui.me] < Math.min(ui.lost, livesOf(s))) { ui.retryAt = now; o.onMove({ t: 'boom', n: s.boom[ui.me] + 1 }); return; }
+  const j = s.sent[ui.me];
+  if (j < ui.sends && ui.sendList[j]) { ui.retryAt = now; o.onMove({ t: 'send', n: j + 1, ...ui.sendList[j] }); }
+}
+
 function step() {
   const { s, o } = ui.cur;
   const now = performance.now();
   const dt = Math.min(0.05, (now - ui.last) / 1000);
   ui.last = now;
   if (s.phase !== 'play' || ui.me === null || s.out[ui.me] !== null || !o.canMove) return;
+  resend();
   const sec = since(goKey(s)) / 1000;
   // ふつうに出てくる分
   while (ui.nextSpawn <= sec) {
@@ -177,9 +211,9 @@ function step() {
     if (b.y > FIELD.y1 - R) { b.y = FIELD.y1 - R; b.vy = -Math.abs(b.vy); }
   }
   separate();
-  // 時間切れで爆発
+  // 時間切れで爆発（退避スペースの爆弾は止まっているので数えない）
   ui.bombs = ui.bombs.filter((b) => {
-    if (sec - b.born < FUSE) return true;
+    if (leftOf(b, sec) > 0) return true;
     if (b === ui.held) ui.held = null;
     boom(b.x, b.y, sec);
     return false;
@@ -189,6 +223,16 @@ function step() {
 function drop(b) {
   const { s, o } = ui.cur;
   const sec = since(goKey(s)) / 1000;
+  if (inShelter(b.x, b.y) && ui.shelter.filter(Boolean).length < SHELTER.cap) { // 退避スペースに置く（空いている所へ。時間は止まる）
+    const j = ui.shelter.findIndex((q) => !q);
+    ui.bombs = ui.bombs.filter((q) => q !== b);
+    b.stashAt = sec;
+    b.fall = false;
+    b.x = slotX(j);
+    b.y = slotY;
+    ui.shelter[j] = b;
+    return;
+  }
   const i = boxAt(b.x, b.y);
   if (i < 0) { // 枠の外: 歩く場所へ戻す
     b.x = clamp(b.x, FIELD.x0 + R, FIELD.x1 - R);
@@ -204,7 +248,9 @@ function drop(b) {
     ui.counts[i] = 0;
     ui.sends += 1;
     const to = aimNow(s);
-    ui.flash = { text: to === null ? `${box.cap}個 発射！` : `${o.names[to]}へ ${box.cap}個 発射！`, at: performance.now() };
+    const k = sendCount(s, box.cap);
+    ui.flash = { text: to === null ? `${k}個 発射！` : `${o.names[to]}へ ${k}個 発射！`, at: performance.now() };
+    ui.sendList[ui.sends - 1] = { k: box.cap, ...(to === null ? {} : { to }) };
     o.onMove({ t: 'send', n: ui.sends, k: box.cap, ...(to === null ? {} : { to }) });
   }
 }
@@ -247,7 +293,7 @@ function roundRect(ctx, x, y, w, h, r) {
 }
 
 function drawBomb(ctx, k, b, sec, scale = 1) {
-  const left = FUSE - (sec - b.born);
+  const left = leftOf(b, sec);
   const blink = left < BLINK && Math.floor(left * 6) % 2 === 0;
   if (blink) scale *= PULSE; // 最後の3秒は、点滅に合わせて大きくなる
   ctx.beginPath();
@@ -311,7 +357,28 @@ function draw() {
       ctx.fill();
     }
   });
+  // 退避スペース（盤の下。5つの置き場）
+  roundRect(ctx, SHELTER.x0 * k, SHELTER.y0 * k, (SHELTER.x1 - SHELTER.x0) * k, (SHELTER.y1 - SHELTER.y0) * k, 10);
+  ctx.fillStyle = 'rgba(255,212,0,.08)';
+  ctx.fill();
+  ctx.setLineDash([6, 4]);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#ffd400';
+  ctx.stroke();
+  ctx.setLineDash([]);
+  for (let j = 0; j < SHELTER.cap; j++) {
+    ctx.beginPath();
+    ctx.arc(slotX(j) * k, slotY * k, R * 1.15 * k, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,255,255,.25)';
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#ffd400';
+  ctx.textAlign = 'left';
+  ctx.font = `bold ${k * 0.032}px sans-serif`;
+  ctx.fillText(`⏸ 退避 ${ui.shelter.filter(Boolean).length}/${SHELTER.cap}`, (SHELTER.x0 + 0.015) * k, (SHELTER.y0 - 0.012) * k);
+  ctx.textAlign = 'center';
   if (s.phase === 'play') { // 終わったら爆弾は消す（前は残りの秒数がおかしな数で残っていた）
+    for (const b of ui.shelter) if (b && b !== ui.held) drawBomb(ctx, k, b, sec);
     for (const b of ui.bombs) if (b !== ui.held) drawBomb(ctx, k, b, sec);
     if (ui.held) drawBomb(ctx, k, ui.held, sec, 1.25);
   }
@@ -373,12 +440,12 @@ export function cpuAdvance(c, upto, incTotal, rnd) {
     const t = Math.min(upto, c.t + 0.1);
     while (c.nextSpawn <= t) {
       const L = c.nextSpawn + (c.start ?? 0);
-      for (let i = spawnCount(L, rnd()); i > 0; i--) c.q.push(c.nextSpawn);
+      for (let i = spawnCount(L, rnd()); i > 0; i--) c.q.push(c.nextSpawn + FUSE);
       c.nextSpawn += spawnGap(L);
     }
-    while (c.consumed < incTotal) { c.consumed += 1; c.q.push(t); }
+    while (c.consumed < incTotal) { c.consumed += 1; c.q.push(t + incFuse(c.consumed - 1)); } // c.q は爆発する時刻の列
     c.q.sort((a, b) => a - b);
-    while (c.q.length && t - c.q[0] >= FUSE) { c.q.shift(); c.events.push('boom'); }
+    while (c.q.length && t >= c.q[0]) { c.q.shift(); c.events.push('boom'); }
     if (t >= c.handleAt && c.q.length) {
       c.q.shift();
       c.handleAt = t + 1.0 + rnd() * 0.4;
@@ -408,6 +475,7 @@ export default {
   settings: [
     { key: 'lives', label: 'ライフ', desc: '何回爆発させたら脱落か', def: '3', choices: [['1', '1回'], ['3', '3回'], ['5', '5回']] },
     { key: 'speed', label: '速さ', desc: '始まったときの忙しさ。どれも時間がたつほど爆弾が多く出てくる（いちばん忙しい所は同じ）', def: 'normal', choices: [['slow', 'ゆっくり'], ['normal', 'ふつう'], ['fast', 'はやい']] },
+    { key: 'send', label: '送る数', desc: '枠をいっぱいにしたとき相手に届く爆弾の数（5の枠／10の枠）', def: 'normal', choices: [['one', '1個／2個'], ['half', '半分（3個／5個）'], ['normal', 'ふつう（5個／10個）']] },
     { key: 'aim', label: '送る相手', desc: '3人以上のとき、いっぱいにした爆弾をだれへ送るか。選べる では上の名前を押した人をねらう（押さなければくじ）', def: 'random', choices: [['random', 'くじ'], ['pick', '選べる']] },
   ],
 
@@ -478,8 +546,9 @@ export default {
       s.step += 1;
       s.sent[m.p] = m.n;
       if (to >= 0) {
-        s.inc[to] += m.k;
-        s.log = [...s.log.slice(-4), { from: m.p, to, k: m.k }];
+        const k = sendCount(s0, m.k);
+        s.inc[to] += k;
+        s.log = [...s.log.slice(-4), { from: m.p, to, k }];
       }
       return s;
     }
@@ -532,7 +601,7 @@ export default {
     canvas.className = 'ac-canvas';
     const note = document.createElement('p');
     note.className = 'ac-note';
-    note.textContent = '爆弾を指（マウス）でつまんで、同じ色の枠へ運びます。黄色いふちの爆弾は、ほかの人から送られてきたものです。'
+    note.textContent = '爆弾を指（マウス）でつまんで、同じ色の枠へ運びます。下の退避スペースには、どちらの色でも5個まで置けて、置いている間は時間が止まります。黄色いふちの爆弾は、ほかの人から送られてきたものです。'
       + (canAim(s) && s.n > 2 && me !== null ? '上の名前を押すと、その人へ送ります（もう一度押すとくじ）。' : '');
     wrap.append(canvas);
     root.append(chips, wrap, note);
@@ -542,7 +611,7 @@ export default {
     const sec = s.phase === 'play' ? since(goKey(s)) / 1000 : 0;
     ui = {
       key, canvas, ctx: canvas.getContext('2d'), chips, wrap, me, cur: { s, o }, scale: 300,
-      bombs: [], held: null, fx: [], counts: [0, 0, 0, 0], flash: null, last: performance.now(),
+      bombs: [], shelter: Array(SHELTER.cap).fill(null), held: null, fx: [], counts: [0, 0, 0, 0], flash: null, last: performance.now(), retryAt: 0, sendList: [],
       // 開き直したときは、それまでの爆発・送り・届いた分を引き継ぐ（同じ番号の手を送らないように）
       lost: me === null ? 0 : s.boom[me], sends: me === null ? 0 : s.sent[me], consumed: me === null ? 0 : s.inc[me],
       nextSpawn: sec, nextInc: 0, aim: null,
@@ -558,7 +627,7 @@ export default {
       // つまむ爆弾: 範囲の中でいちばん近いもの。爆発まで3秒を切った爆弾は範囲が広く、少し選ばれやすい
       const sec = since(goKey(cur)) / 1000;
       let best = null; let bd = Infinity;
-      for (const b of ui.bombs) {
+      for (const b of [...ui.bombs, ...ui.shelter.filter(Boolean)]) {
         const d = Math.hypot(b.x - p.x, b.y - p.y);
         const u = urgent(b, sec);
         if (d > (u ? GRAB_URGENT : GRAB)) continue;
@@ -567,6 +636,13 @@ export default {
       }
       e.preventDefault();
       if (!best) return;
+      const j = ui.shelter.indexOf(best);
+      if (j >= 0) { // 退避スペースから取り出す: 止まっていた時間のぶん、続きから進む
+        ui.shelter[j] = null;
+        best.born += sec - best.stashAt;
+        delete best.stashAt;
+        ui.bombs.push(best);
+      }
       ui.held = best;
       best.fall = false;
       drag = { id: e.pointerId, dx: best.x - p.x, dy: best.y - p.y };

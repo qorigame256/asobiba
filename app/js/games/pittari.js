@@ -16,8 +16,9 @@ const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 5);
 const READY_MS = 3000;
 const SHOWN_MS = 4500;
 const GRACE_MS = 1500;
-const PEEK_CHOICES = [[3, '3秒'], [0, '見えない'], [5, '5秒']]; // 時計が見えている秒数（詳細設定）
-const peekMs = (s) => (PEEK_CHOICES.some(([v]) => v === s.rules.peek) ? s.rules.peek : 3) * 1000;
+// 時計が見えている秒数（詳細設定）。2026-11-03 本人の依頼で「見えない」をやめ、いちばん短いのを1秒にした（前に「見えない」を選んでいた部屋は1秒）
+const PEEK_CHOICES = [[1, '1秒'], [3, '3秒'], [5, '5秒']];
+const peekMs = (s) => (s.rules.peek === 0 ? 1 : PEEK_CHOICES.some(([v]) => v === s.rules.peek) ? s.rules.peek : 3) * 1000;
 const EXTRA_MS = 5000; // 目標の秒数を過ぎても押せる時間
 export const PITA_MS = 5; // ずれがこれより小さければピタリ賞（小数2けたで出すと ±0.00 になる）
 export const PITA_PTS = 5;
@@ -51,7 +52,7 @@ export default {
   settings: [
     { key: 'fixed', label: 'いつも10秒', desc: '止める秒数を毎回10秒にする（いいえ なら5〜15秒で毎回変わる）', def: false },
     { key: 'rounds', label: '回数', desc: '1回の対局で止める回数', def: 5, choices: ROUNDS },
-    { key: 'peek', label: '時計の見える時間', desc: '始めに時計が見えている時間。「見えない」は最初から自分の感覚だけで数える', def: 3, choices: PEEK_CHOICES },
+    { key: 'peek', label: '時計の見える時間', desc: '始めに時計が見えている時間。そのあとは自分の感覚だけで数える', def: 3, choices: PEEK_CHOICES },
   ],
 
   init(n, seed, { rules = {} } = {}) {

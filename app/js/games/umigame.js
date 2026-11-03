@@ -16,6 +16,11 @@
 //   考えた時間: 各人の札に、いまの番の人が考えている秒数と、これまでの合計を出す。手の一覧に時刻は入れられないので、
 //     各端末が局面の変わった時刻で数える（再読み込みすると0から。端末ごとに少しずれる）。
 //   部分的にはい: 最初を「あり」にした。
+// 2026-11-03 本人の依頼: CPU が出題者のとき、回答者が「答えを見る」を押したら、ほかの回答者に「答えを見ますか？」と聞き、全員が「はい」なら答えを出す。
+//   Claude の判断: 聞いている間は s.giveup = { by: 押した人, yes: [はいと言った人] }（使うまで局面に持たない。前と同じ形のまま）。だれかが「いいえ（まだ考える）」なら取り下げ、
+//   s.seeNo にその人を入れて「○○がまだ考えたいので続けます」と出す（次の質問・解答・パスで消す）。押した人は取り下げられる。聞いている間は質問・解答・パスはできない。
+//   ほかの回答者がいない（1人で遊んでいる）ときは今までどおりすぐ答えを出す。部屋を出た人の席は CPU が「はい」と答える。みんなが同時に押すので concurrent（main.js がホストで手を足し直す）。
+//   手: { p, t: 'see', ok }（ok = はい／いいえ。押した人の ok: false は取り下げ）
 
 import { esc } from './util.js';
 import { since, kana } from './party.js';
@@ -69,6 +74,7 @@ function nextAsker(s, from) {
 }
 
 const clone = (s) => ({ ...s, log: s.log.slice() });
+const answerers = (s) => Array.from({ length: s.n }, (_, p) => p).filter((p) => p !== s.setter); // 回答者（出題者のほかの全員）
 const cpuSetter = (s) => !!s.cpus?.includes(s.setter);
 const timeKey = (s) => `umigame:${s.seed}:time`;
 
@@ -163,13 +169,15 @@ export default {
     if (s.phase === 'end') return false;
     // CPU の出題者は、質問を待っている間は何もしない（main.js が何度も CPU を呼ばないように）
     if (p === s.setter) return s.phase !== 'ask' || !cpuSetter(s);
+    if (s.giveup && s.phase === 'ask') return p === s.giveup.by || !s.giveup.yes.includes(p); // 答えを見るか聞いている間は、まだ答えていない回答者も押せる
     return s.phase === 'ask' && p === s.turn;
   },
-  result(s) { return s.phase === 'end' ? { winner: s.winner, setterWon: s.winner !== null && s.winner === s.setter } : null; },
+  concurrent(s) { return !!s.giveup; },
+  result(s) { return s.phase === 'end' ? { winner: s.winner, setterWon: s.winner !== null && s.winner === s.setter, ...(s.seen ? { seen: true } : {}) } : null; },
   // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
   sound(a, b, m) { return m.t === 'pick' || m.t === 'custom' ? 'question' : m.t === 'judge' && !m.ok ? 'wrong' : 'pop'; },
   resultText(res, me, pn) {
-    if (res.winner === null) return '出題者が答えを明かしました';
+    if (res.winner === null) return res.seen ? '答えを見ました（だれも当てられませんでした）' : '出題者が答えを明かしました';
     if (res.setterWon) return res.winner === me ? 'だれも当てられなかった。出題者のあなたの勝ち！🎉' : `だれも当てられなかった。出題者の${pn(res.winner)}の勝ち！`;
     return res.winner === me ? 'あなたが真相を当てた！🎉' : `${pn(res.winner)}が真相を当てた！`;
   },
@@ -212,13 +220,15 @@ export default {
         return s;
       case 'ask':
       case 'guess':
-        if (s.phase !== 'ask' || m.p !== s.turn || !okText(m.text, MAX_TEXT)) return null;
+        if (s.phase !== 'ask' || m.p !== s.turn || s.giveup || !okText(m.text, MAX_TEXT)) return null;
         if (m.t === 'ask' && s.final !== null) return null; // 質問を使い切った
+        if (s.seeNo != null) s.seeNo = null;
         s.pending = { p: m.p, kind: m.t, text: m.text.trim() };
         s.phase = 'reply';
         return s;
       case 'pass':
-        if (s.phase !== 'ask' || m.p !== s.turn) return null;
+        if (s.phase !== 'ask' || m.p !== s.turn || s.giveup) return null;
+        if (s.seeNo != null) s.seeNo = null;
         s.log.push({ p: m.p, kind: 'pass' });
         if (finalStep(s)) return s;
         s.turn = nextAsker(s, s.turn);
@@ -243,10 +253,22 @@ export default {
         s.turn = nextAsker(s, s.turn);
         return s;
       case 'reveal': // CPU が出題者のときは、回答者も自分の番に降参できる
-        if (!isSetter && !(cpuSetter(s) && s.phase === 'ask' && m.p === s.turn)) return null;
+        if (!isSetter && !(cpuSetter(s) && s.phase === 'ask' && m.p === s.turn && !s.giveup)) return null;
+        if (!isSetter && answerers(s).length > 1) { s.giveup = { by: m.p, yes: [m.p] }; s.seeNo = null; return s; } // ほかの回答者にも聞く
         s.phase = 'end';
         s.winner = null;
+        if (!isSetter) s.seen = true; // 回答者が答えを見た（結果の文を変える）
         return s;
+      case 'see': { // 答えを見るか、ほかの回答者の返事（押した人の ok: false は取り下げ）
+        const g = s.giveup;
+        if (!g || s.phase !== 'ask' || isSetter || typeof m.ok !== 'boolean') return null;
+        if (m.p === g.by ? m.ok : g.yes.includes(m.p)) return null;
+        if (!m.ok) { s.giveup = null; s.seeNo = m.p === g.by ? null : m.p; return s; }
+        const yes = [...g.yes, m.p];
+        if (answerers(s).every((p) => yes.includes(p))) { s.giveup = null; s.phase = 'end'; s.winner = null; s.seen = true; return s; }
+        s.giveup = { by: g.by, yes };
+        return s;
+      }
       default:
         return null;
     }
@@ -261,6 +283,7 @@ export default {
       if (s.phase === 'reply') return { t: 'judge', ok: cpuJudge(s.puzzle, s.pending.text) };
       return null;
     }
+    if (s.giveup) return s.giveup.yes.includes(p) ? null : { t: 'see', ok: true }; // 部屋を出た人の席は「はい」
     return p === s.setter ? { t: 'reveal' } : { t: 'pass' };
   },
 
@@ -401,7 +424,7 @@ export default {
     ui.top = top;
 
     /* 下の操作の部分は、場面が変わったときだけ作り直す */
-    const actKey = `${s.phase}:${s.turn}:${me}:${o.canMove}:${s.pending?.text ?? ''}`;
+    const actKey = `${s.phase}:${s.turn}:${me}:${o.canMove}:${s.pending?.text ?? ''}:${s.giveup ? s.giveup.yes.join('.') : '-'}:${s.seeNo ?? ''}`;
     if (ui.actKey === actKey) return;
     ui.actKey = actKey;
     const act = document.createElement('div');
@@ -454,7 +477,19 @@ export default {
       } else {
         note(`${nameP(s.setter)}が問題を選んでいます…`);
       }
+    } else if (s.phase === 'ask' && s.giveup) { // 答えを見るか、みんなに聞いている
+      const g = s.giveup;
+      const all = answerers(s);
+      const count = `（はい ${g.yes.length}/${all.length}人）`;
+      if (me === g.by) {
+        note(`みんなに「答えを見ますか？」と聞いています${count}。全員が「はい」なら答えが出ます`);
+        if (o.canMove) row(button('取り下げる', 'secondary', () => o.onMove({ t: 'see', ok: false })));
+      } else if (me !== null && all.includes(me) && !g.yes.includes(me) && o.canMove) {
+        note(`${nameP(g.by)}が答えを見たいと言っています。答えを見ますか？${count}`);
+        row(button('まだ考える', 'secondary', () => o.onMove({ t: 'see', ok: false })), button('はい、答えを見る', 'primary', () => o.onMove({ t: 'see', ok: true })));
+      } else note(`${nameP(g.by)}が答えを見たいと言っています。みんなの返事を待っています${count}`);
     } else if (s.phase === 'ask') {
+      if (s.seeNo != null) note(`${nameP(s.seeNo)}がまだ考えたいので、続けます`);
       if (me === s.turn && o.canMove) {
         const last = s.final !== null; // 質問を使い切った: 最後の解答だけ
         note(last ? '質問は使い切りました。最後の解答をするか、パス（あなたの番はこれが最後）' : '「はい・いいえ」で答えられる質問をするか、真相が分かったら「答えを言う」');
@@ -469,7 +504,8 @@ export default {
         else row(button('パス', 'secondary', () => o.onMove({ t: 'pass' })), button('答えを言う', 'secondary', send('guess')), button('質問する', 'primary', send('ask')));
         if (cpuSetter(s)) {
           note('CPU の出題者は、質問の言葉の手がかりで答えます（短くはっきり聞くと答えやすい）');
-          row(button('降参して答えを見る', 'ghost', () => { if (confirm('降参して答えを見ますか？')) o.onMove({ t: 'reveal' }); }));
+          const ask = answerers(s).length > 1;
+          row(button('降参して答えを見る', 'ghost', () => { if (confirm(ask ? '答えを見ますか？（ほかの人にも聞き、全員が「はい」なら答えが出ます）' : '降参して答えを見ますか？')) o.onMove({ t: 'reveal' }); }));
         }
       } else {
         note(`${nameP(s.turn)}が考えています…`);

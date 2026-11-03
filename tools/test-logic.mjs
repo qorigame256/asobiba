@@ -3499,8 +3499,19 @@ assert.equal(UM.apply(UM.init(2, 3, {}), { p: 1, t: 'reveal' }), null, '出題�
   assert.ok(UM.canAct(cs, 2));
   cs = UM.apply(cs, { ...UM.cpu(cs, 2), p: 2 });
   assert.ok(cs && cs.log.length === 1, 'CPU が質問に答える');
-  // CPU が出題者なら、回答者も自分の番に降参できる
-  assert.equal(UM.result(UM.apply(cs, { p: cs.turn, t: 'reveal' })).winner, null, '回答者が降参して答えを見る');
+  // CPU が出題者なら、回答者も自分の番に降参できる。ほかの回答者がいれば聞き、全員が「はい」なら答えを出す（2026-11-03 本人の依頼）
+  const by = cs.turn;
+  const other = [0, 1].find((p) => p !== by);
+  const gv = UM.apply(cs, { p: by, t: 'reveal' });
+  assert.ok(gv && !UM.result(gv) && gv.giveup?.by === by, 'ほかの回答者がいれば、すぐには答えを出さずに聞く');
+  assert.ok(UM.canAct(gv, other), '聞かれた人は自分の番でなくても答えられる');
+  assert.equal(UM.apply(gv, { p: by, t: 'ask', text: 'しつもん' }), null, '聞いている間は質問できない');
+  assert.equal(UM.apply(gv, { p: by, t: 'see', ok: true }), null, '押した人の「はい」は2回数えない');
+  assert.equal(UM.result(UM.apply(gv, { p: other, t: 'see', ok: true })).winner, null, '全員が「はい」なら答えを出す');
+  const no = UM.apply(gv, { p: other, t: 'see', ok: false });
+  assert.ok(no && !no.giveup && no.seeNo === other && no.phase === 'ask', '「まだ考える」なら取り下げて続ける');
+  assert.ok(!UM.apply(gv, { p: by, t: 'see', ok: false }).giveup, '押した人は取り下げられる');
+  assert.deepEqual(UM.cpu(gv, other), { t: 'see', ok: true }, '部屋を出た人の席は「はい」');
 }
 // ウミガメの「部分的にはい」（詳細設定）: ありのときだけ part で答えられる。なしでは今までと同じ局面
 {
@@ -6080,6 +6091,15 @@ console.log('kaisen OK');
   c = run(c, [{ p: 0, t: 'send', n: 1, k: 5, to: other }]);
   assert.equal(c.inc[lot], 5, 'くじ（最初）では to を見ない');
   assert.equal(c.inc[other], 0);
+  // 送る数（2026-11-03 本人の依頼）: 手の k は枠の大きさのまま、届く数が変わる
+  for (const [send, want] of [['one', 3], ['half', 8], ['normal', 15], [undefined, 15]]) {
+    const sd = run(B.init(2, 5, { rules: { send } }), [{ p: -1, t: 'go' }, { p: 0, t: 'send', n: 1, k: 5 }, { p: 0, t: 'send', n: 2, k: 10 }]);
+    assert.equal(sd.inc[1], want, `送る数 ${send}: 5の枠と10の枠で ${want}個`);
+  }
+  // ほかの人から届いた爆弾の爆発までの時間は 9〜15秒にばらける（2026-11-03 本人の依頼）
+  const fuses = Array.from({ length: 10 }, (_, k) => BM.incFuse(k));
+  assert.ok(fuses.every((f) => f >= BM.FUSE && f <= BM.INC_FUSE), '届いた爆弾は 9〜15秒');
+  assert.ok(Math.max(...fuses) - Math.min(...fuses) > 4, '10個届いても時間がばらける');
   // ライフ
   b = run(B.init(2, 5, { rules: { lives: '1' } }), [{ p: -1, t: 'go' }, { p: 0, t: 'boom', n: 1 }]);
   assert.equal(b.out[0], 0, 'ライフ1なら1回で脱落');
@@ -6095,7 +6115,7 @@ console.log('kaisen OK');
   assert.ok(BM.spawnGap(lv('slow', 0)) > BM.spawnGap(lv('normal', 0)) && BM.spawnGap(lv('normal', 0)) > BM.spawnGap(lv('fast', 0)), '始まりの間は ゆっくり > ふつう > はやい');
   assert.equal(BM.spawnGap(lv('normal', 0)), 1.5, 'ふつうの始まりは前と同じ');
   for (const sp of ['slow', 'normal', 'fast']) {
-    assert.equal(BM.spawnGap(lv(sp, 600)), 0.55, `${sp}: いちばん短い間は同じ`);
+    assert.equal(BM.spawnGap(lv(sp, 600)), 0.45, `${sp}: いちばん短い間は同じ（2026-11-03 本人の依頼で 0.55 から縮めた）`);
     assert.equal(BM.spawnCount(lv(sp, 600), 0), 3, `${sp}: 一度に出る数の上限は同じ`);
     assert.equal(BM.spawnCount(lv(sp, 600), 0.99), 1);
   }
@@ -7408,6 +7428,28 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.equal(w.phase, 'end', '綱引き: 重いの2対2は差64で端');
   }
   for (const rules of [{}, { weight: 'light' }, { weight: 'heavy' }]) for (let seed = 0; seed < 3; seed++) assert.ok(N.result(runCpus(N, 4, seed, rules, 100, 1000)), `綱引き: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  // 三つ巴（2026-11-03 本人の依頼）: 席の番号を3で割った余りがチーム。自分の連打 −（ほかの2チームの和）÷2 が 1チームの人数×重さ になったら勝ち
+  {
+    const T3 = { rules: { teams: 3 } };
+    let t = N.apply(N.init(3, 1, T3), { p: -1, t: 'go' });
+    t = N.apply(N.apply(t, { p: 1, t: 'tap', n: 10 }), { p: 2, t: 'tap', n: 10 });
+    t = N.apply(t, { p: 0, t: 'tap', n: 29 });
+    assert.equal(t.phase, 'play', '三つ巴: 29 −（10＋10）÷2 = 19 ではまだ');
+    t = N.apply(t, { p: 0, t: 'tap', n: 30 });
+    assert.equal(t.phase, 'end', '三つ巴: 30 −（10＋10）÷2 = 20 で勝ち');
+    assert.deepEqual(N.result(t).winners, [0]);
+    assert.equal(N.result(t).teams.length, 3);
+    let u = N.apply(N.init(6, 1, T3), { p: -1, t: 'go' });
+    u = N.apply(N.apply(u, { p: 2, t: 'tap', n: 12 }), { p: 5, t: 'tap', n: 10 }); // 青（席2・5）が 22
+    u = N.apply(N.apply(u, { p: 0, t: 'tap', n: 5 }), { p: -1, t: 'end' });
+    assert.deepEqual(N.result(u).winners, [2, 5], '三つ巴: 時間切れはいちばん引いているチームの勝ち（同じチームの2人）');
+    let d = N.apply(N.init(3, 1, T3), { p: -1, t: 'go' });
+    d = N.apply(N.apply(N.apply(d, { p: 0, t: 'tap', n: 5 }), { p: 1, t: 'tap', n: 5 }), { p: -1, t: 'end' });
+    assert.ok(N.result(d).draw, '三つ巴: いちばんが2チームなら引き分け');
+    assert.equal(N.teamCount({ teams: 3 }), 3);
+    assert.equal(N.teamCount({}), 2);
+    for (let seed = 0; seed < 3; seed++) assert.ok(N.result(runCpus(N, 6, seed, { teams: 3 }, 100, 1000)), '三つ巴: CPU どうしで最後まで');
+  }
   console.log('tsuna OK');
 }
 

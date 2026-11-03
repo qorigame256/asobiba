@@ -424,45 +424,87 @@ function setVote(id, g) {
   S.votes = now;
   saveRoom();
 }
-// 待合室に出す「🗳 遊びたいゲーム: 大富豪 2票・将棋 1票」（票があるときだけ）
-function voteLine() {
+// 2026-11-03 本人の依頼「遊びたいゲーム欄を見やすく。図解など」: 選ぶ欄（select）をやめ、ゲームの絵と名前の札を並べて押す形にした（Claude の判断）。
+//   票の入ったゲームは、上に大きめの札で票の数と一緒に並べる（ホストが押すとそのゲームに替わる）。
+//   ゲストは「ゲームを選んで投票」を開くと全部のゲームの札が並び、押すと1票（もう一度押すと取り消し）。開け閉めは S.voteOpen（端末ごと・保存しない）。
+function votedTiles() {
   const n = voteCounts();
   const ids = Object.keys(n).sort((a, b) => n[b] - n[a] || gameOrder().indexOf(a) - gameOrder().indexOf(b));
   if (!ids.length) return null;
-  const p = document.createElement('p');
-  p.className = 'lobby-vote';
-  p.textContent = '🗳 遊びたいゲーム: ' + ids.map((g) => `${GAMES[g].name} ${n[g]}票`).join('・');
-  return p;
+  const box = document.createElement('div');
+  box.className = 'vote-top';
+  const head = document.createElement('p');
+  head.className = 'lobby-vote';
+  head.textContent = S.isHost ? '🗳 みんなが遊びたいゲーム（押すとそのゲームに替わります）' : '🗳 みんなが遊びたいゲーム';
+  const list = document.createElement('div');
+  list.className = 'vote-tiles big';
+  for (const g of ids) {
+    const t = voteTile(g, n[g]);
+    if (S.isHost) t.onclick = () => { if (confirm(`${GAMES[g].name} に替えますか？`)) newRound(g, { lobby: true }); };
+    else t.onclick = () => castVote(g);
+    list.append(t);
+  }
+  box.append(head, list);
+  return box;
 }
-function voteSelect() {
-  const label = document.createElement('label');
-  label.className = 'game-select';
-  label.textContent = '🗳 次に遊びたいゲーム ';
-  const sel = document.createElement('select');
+function voteTile(g, count = 0) {
+  const t = document.createElement('button');
+  t.type = 'button';
+  t.className = 'vote-tile' + (S.votes?.[S.myId] === g && !S.isHost ? ' mine' : '');
+  t.innerHTML = `<span class="vote-icon" aria-hidden="true">${GAMES[g].icon ?? ''}</span><span class="vote-name">${esc(GAMES[g].name)}</span>${count ? `<span class="vote-count">${count}票</span>` : ''}`;
+  return t;
+}
+function castVote(g) {
+  const v = S.votes?.[S.myId] === g ? null : g; // 同じゲームをもう一度押すと取り消し
+  setVote(S.myId, v);
+  send({ type: 'vote', g: v });
+  toast(v ? `🗳 ${GAMES[v].name} に投票しました` : '投票を取り消しました');
+  render();
+}
+// 待合室の投票の欄（票の入ったゲーム＋ゲストは全部のゲームから選ぶ札）
+function votePanel() {
+  const wrap = document.createElement('div');
+  wrap.className = 'lobby-votes';
+  const top = votedTiles();
+  if (top) wrap.append(top);
+  if (S.isHost) return top ? wrap : null;
+  const det = document.createElement('details');
+  det.className = 'lobby-rules vote-pick';
+  det.open = !!S.voteOpen;
+  det.ontoggle = () => { S.voteOpen = det.open; };
   const mine = S.votes?.[S.myId];
-  const none = document.createElement('option');
-  none.value = '';
-  none.textContent = '（えらばない）';
-  sel.append(none);
-  const favs = favorites();
+  const sum = document.createElement('summary');
+  sum.textContent = mine && GAMES[mine] ? `🗳 次に遊びたいゲーム（いまの票: ${GAMES[mine].icon ?? ''} ${GAMES[mine].name}）` : '🗳 次に遊びたいゲームを選んで投票する';
+  const list = document.createElement('div');
+  list.className = 'vote-tiles';
+  const n = voteCounts();
   for (const id of gameOrder()) {
     if (!GAMES[id].ready || id === S.gameId) continue;
-    const opt = document.createElement('option');
-    opt.value = id;
-    opt.textContent = (favs.includes(id) ? '★ ' : '') + GAMES[id].name;
-    opt.selected = id === mine;
-    sel.append(opt);
+    const t = voteTile(id, n[id] ?? 0);
+    t.onclick = () => castVote(id);
+    list.append(t);
   }
-  sel.onblur = () => render(); // 開いている間に止めていた描き直しを追いつかせる（ゲームを変えると同じ）
-  sel.onchange = () => {
-    sel.onblur = null;
-    sel.blur();
-    setVote(S.myId, sel.value || null);
-    send({ type: 'vote', g: sel.value || null });
-    render();
-  };
-  label.append(sel);
-  return label;
+  det.append(sum, list);
+  wrap.append(det);
+  return wrap;
+}
+
+/* ---------- 待合室の「いま選んでいるゲーム」（2026-11-03 本人の依頼「選択中のゲームをもっとわかりやすく」） ---------- */
+// Claude の判断: 待合室の一番上に、ゲームの絵・名前・ひとこと・遊び方の図（2枚まで）を大きく出す。
+// ホストがゲームを替えたら、札を2秒ほど光らせて知らせる（描き直しで作り直しても光り方が途中から続くよう、替わった時刻からの経過を animation-delay に入れる）。
+function lobbyGameCard(game) {
+  if (S.lobbyGame !== game.id) {
+    if (S.lobbyGame) S.lobbyGameAt = Date.now();
+    S.lobbyGame = game.id;
+  }
+  const box = document.createElement('div');
+  box.className = 'lobby-game';
+  const ago = Date.now() - (S.lobbyGameAt ?? 0);
+  if (ago < 2000) { box.classList.add('changed'); box.style.animationDelay = `-${ago}ms`; }
+  box.innerHTML = `<div class="lobby-game-head"><span class="lobby-game-icon" aria-hidden="true">${game.icon ?? ''}</span>`
+    + `<div><small>いま選んでいるゲーム</small><b class="lobby-game-name">${esc(game.name)}</b><p>${esc(game.desc ?? '')}</p></div></div>`;
+  if (game.howtoFigs?.length) box.append(howtoFigs(game.howtoFigs.slice(0, 2)));
+  return box;
 }
 // 待合室の下に出す、準備OK と投票の欄（ゲストはボタンと投票の一覧、ホストは数だけ）
 /* ---------- 部屋の名前（2026-10-07 本人の決定）: ホストが部屋に名前を付け、部屋の欄・招待の小窓に出す ---------- */
@@ -524,7 +566,7 @@ function appendLobbyExtras(board) {
   if (nm) board.append(nm);
   const r = readyLine();
   if (r) board.append(r);
-  const v = voteLine();
+  const v = votePanel();
   if (v) board.append(v);
   board.append(rpsPanel());
 }
@@ -767,7 +809,7 @@ function rulesOf(gameId, rules) {
 // マルバツ・将棋の size は盤の大きさでなく遊び方（スーパー・消える・5五将棋）なので抽選する。
 // ビンゴの終わり方（until。長さ）・ことわざかるたの場の札の数（field。難しさ）も抽選しない（2026-10-29 の Codex の点検。本人承認）。
 // 綱引き連打の綱の重さ（weight。長さ）・ボウリングのガードレール（bumper。ハンデ）と向きの線（guide。手助け）も抽選しない。立体四目並べの重力なし（free）は遊び方なので抽選する（31回目の案。Claude の判断）。ミニゴルフのホールの数（holes。長さ）も抽選しない（2026-11-02。Claude の判断）。
-const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'safe', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check', 'mallet', 'stones', 'diffs', 'kind', 'tries', 'until', 'field', 'frames', 'weight', 'bumper', 'guide', 'ask', 'holes']);
+const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'safe', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check', 'mallet', 'stones', 'diffs', 'kind', 'tries', 'until', 'field', 'frames', 'weight', 'bumper', 'guide', 'ask', 'holes', 'gap', 'teams']); // gap = ビンゴの数字の間・teams = 綱引きのチームの数（2026-11-03。時間の長さと人数なので抽選しない。Claude の判断）
 const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
 
 // 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、将棋・マンカラ・海戦ゲーム・五目並べ・立体四目並べ・はさみ将棋・エアホッケーは 2〜3。ほかは2）
@@ -830,11 +872,15 @@ function canMove(game, st, res) {
 // 人数を変えたときは、選んであった席を残して、足りない席に まだ選ばれていない人 → CPU の順で入れる
 function boardPick() {
   const n = boardSeats(S.gameId, S.rules);
+  // 観戦に回した人（S.bench）は、ホストがその席に選び直さない限り席に入れない（2026-11-03 本人の依頼「ホストが外すまで観戦のまま」）
+  const benched = (v) => !!S.bench?.includes(v);
   const ok = (v) => (v === 'cpu' && cpuPickable(GAMES[S.gameId])) || S.members.includes(v);
   const p = S.pick;
   const people = Array.isArray(p) ? p.filter((v) => v !== 'cpu') : [];
   const q = Array.isArray(p) && p.every(ok) && new Set(people).size === people.length ? p.slice(0, n) : [];
-  for (const id of S.members) if (q.length < n && !q.includes(id)) q.push(id);
+  for (const id of S.members) if (q.length < n && !q.includes(id) && !benched(id)) q.push(id);
+  if (cpuPickable(GAMES[S.gameId])) while (q.length < n) q.push('cpu');
+  for (const id of S.members) if (q.length < n && !q.includes(id)) q.push(id); // CPU を選べないゲームで人が足りないときだけ
   while (q.length < n) q.push('cpu');
   return q;
 }
@@ -843,7 +889,9 @@ function boardPick() {
 // seats(rules) を持つゲーム（麻雀）は詳細設定で人数が決まり、足りない分はすべて CPU
 function lineup(game) {
   const seats = game.seats?.(rulesOf(S.gameId, S.rules)) ?? null;
-  const max = seats ?? game.maxPlayers;
+  // チームで分かれるゲーム（玉入れ・綱引き）はチームの数（teamCount。綱引きの三つ巴は3。2026-11-03）の倍数にそろえる。上限もその倍数に切り下げる
+  const teams = game.evenTeams ? (game.teamCount?.(rulesOf(S.gameId, S.rules)) ?? 2) : 0;
+  const max = seats ?? (teams ? Math.floor(game.maxPlayers / teams) * teams : game.maxPlayers);
   const pool = S.members.filter((id) => !S.bench?.includes(id)); // bench = ホストが観戦に回した人（2026-10-26）
   const humans = pool.slice(0, max);
   const watchers = [...pool.slice(max), ...S.members.filter((id) => S.bench?.includes(id))];
@@ -854,10 +902,11 @@ function lineup(game) {
     return { humans: pool.slice(0, max - c), watchers: [...pool.slice(max - c), ...S.members.filter((id) => S.bench?.includes(id))], cpus: c, seats, max };
   }
   let cpus = seats ? seats - humans.length
-    : Math.max(0, Math.min(Math.max(S.cpus, game.minPlayers - humans.length), game.maxPlayers - humans.length));
-  // チームで分かれるゲーム（玉入れ）は全員の数を偶数にする（足りなければ CPU を1人足す。上限なら1人減らす）
-  if (game.evenTeams && (humans.length + cpus) % 2) cpus += humans.length + cpus < game.maxPlayers ? 1 : -1;
-  return { humans, watchers, cpus, seats, max };
+    : Math.max(0, Math.min(Math.max(S.cpus, game.minPlayers - humans.length), max - humans.length));
+  // チームで分かれるゲームは全員の数をチームの数の倍数にする（足りなければ CPU を足す。上限を超えるなら減らす）
+  const r = teams ? (humans.length + cpus) % teams : 0;
+  if (r) cpus = humans.length + cpus + (teams - r) <= max ? cpus + teams - r : Math.max(0, cpus - r);
+  return { humans, watchers, cpus, seats, max, teams };
 }
 
 /* ---------- 画面 ---------- */
@@ -1674,8 +1723,10 @@ function renderAwayLobby(game, st) {
   const hist = historyLine();
   if (hist) board.append(hist);
   board.append(meTools());
+  const v = votePanel();
+  if (v) board.append(v);
   const controls = ctl();
-  controls.append(makeButton('▶ 対局の画面に戻る', backFromLobby), voteSelect());
+  controls.append(makeButton('▶ 対局の画面に戻る', backFromLobby));
   appendMemberPanel();
 }
 
@@ -2166,6 +2217,7 @@ function renderLobby(game) {
     : `<p class="lobby-total">${humans.length + cpus}人で遊びます</p>`;
   board.className = 'board lobby';
   board.innerHTML = html;
+  board.prepend(lobbyGameCard(game));
   if (S.isHost && S.members.length > 1) board.append(benchPanel(game));
   const tally = tallyLine();
   if (tally) board.append(tally);
@@ -2174,20 +2226,20 @@ function renderLobby(game) {
   appendLobbyExtras(board);
   if (game.settings) board.append(rulesPanel(game));
 
-  if (!S.isHost) { controls.append(readyButton(), voteSelect()); return; }
+  if (!S.isHost) { controls.append(readyButton()); return; }
   const start = makeButton('始める', startRound);
   start.disabled = short;
   if (allReady() && !short) start.classList.add('ready-go');
   if (game.noCpu || seats) { controls.append(start, gameSelect(), rouletteButton()); return; }
   // 押したボタンが指の下に残るようにする（一覧が1行のびて、下のボタンがずれていた。2026-10-30 本人の依頼）
   const setCpus = (n, key) => keepPlace(key, () => { S.cpus = n; saveRoom(); sendState(); render(); });
-  const step = game.evenTeams ? 2 : 1; // チームの人数をそろえるゲームは2人ずつ
+  const step = lineup(game).teams || 1; // チームの人数をそろえるゲームはチームの数ずつ（2人ずつ・三つ巴は3人ずつ）
   const minus = makeButton('CPU を減らす', () => setCpus(cpus - step, 'cpu-minus'), 'secondary');
   minus.dataset.keep = 'cpu-minus';
   minus.disabled = humans.length + cpus - step < game.minPlayers || cpus < step;
   const plus = makeButton('CPU を増やす', () => setCpus(cpus + step, 'cpu-plus'), 'secondary');
   plus.dataset.keep = 'cpu-plus';
-  plus.disabled = humans.length + cpus + step > game.maxPlayers;
+  plus.disabled = humans.length + cpus + step > max;
   controls.append(minus, plus, start, gameSelect(), rouletteButton());
 }
 
@@ -2203,6 +2255,7 @@ function renderBoardLobby(game) {
     : '<div class="status-main">待合室</div><div class="status-sub">部屋を作った人が始めるのを待っています…<br>準備ができたら「準備OK」を押してください。</div>';
   board.className = 'board lobby';
   board.innerHTML = `<p class="lobby-note">${n}人で対局します。ほかの人は観戦します。</p>`;
+  board.prepend(lobbyGameCard(game));
   const pick = boardPick();
   const label = (v) => (v === 'cpu' ? 'CPU' : nameOf(v) + (v === S.myId ? '（あなた）' : ''));
   const list = document.createElement('div');
@@ -2226,6 +2279,9 @@ function renderBoardLobby(game) {
         next[i] = sel.value;
         const j = next.findIndex((v, k) => k !== i && v === sel.value);
         if (sel.value !== 'cpu' && j >= 0) next[j] = pick[i]; // 同じ人をほかの席にも選んだら入れ替える
+        // 席から外した人は観戦に回した人として覚え、ほかのゲームに替えても観戦のまま。席に選び直したら外す（2026-11-03 本人の依頼）
+        const out = pick.filter((v) => v !== 'cpu' && !next.includes(v));
+        S.bench = [...new Set([...(S.bench ?? []).filter((v) => !next.includes(v)), ...out])];
         S.pick = next;
         saveRoom();
         sendState();
@@ -2257,7 +2313,7 @@ function renderBoardLobby(game) {
   if (cpuLevels(game)) board.append(cpuAutoPanel(game));
   board.append(ptsPanel());
   if (game.settings) board.append(rulesPanel(game));
-  if (!S.isHost) { controls.append(readyButton(), voteSelect()); return; }
+  if (!S.isHost) { controls.append(readyButton()); return; }
   const start = makeButton('始める', startRound);
   if (allReady()) start.classList.add('ready-go');
   const people = pick.filter((v) => v !== 'cpu');
@@ -2523,6 +2579,8 @@ function replaceMember(old, neu, name) {
   if (S.order) S.order = S.order.map(swap);
   if (S.pick) S.pick = S.pick.map(swap);
   if (S.line) S.line = S.line.map(swap);
+  if (S.bench) S.bench = S.bench.map(swap); // 観戦に回した人が入り直しても観戦のまま（2026-11-03 本人の依頼）
+  if (S.away) S.away = S.away.map(swap);
   if (S.tally) {
     S.tally = { ...S.tally, wins: rekey(S.tally.wins), played: rekey(S.tally.played), pts: rekey(S.tally.pts), preds: rekey(S.tally.preds) };
     if (S.tally.best) S.tally.best = Object.fromEntries(Object.entries(S.tally.best).map(([k, list]) => [k, list.map((b) => (b.id === old ? { ...b, id: neu } : b))]));

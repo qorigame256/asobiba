@@ -4,7 +4,7 @@
 //   まちがえた数字を入れても知らせず、全部埋まって正しいときに完成。ほかの人が何マス埋めたかは割合で見える。
 // Claude の判断:
 //   - 問題は tools/make-nanpure.mjs が前もって作って nanpure-data.js に書き出したもの（答えが1つだけになる問題。画面で作ると時間がかかるため）。
-//     9×9 は最初から40マス、6×6 は18マス埋まっている（2026-10-30 本人の依頼で、34マス・14マスから増やした）。
+//     9×9 は最初から46マス、6×6 は18マス埋まっている（2026-10-30 本人の依頼で、34マス・14マスから増やした。2026-11-03 本人の依頼「もう少し簡単に」で 9×9 を40マスから46マスへ）。
 //   - 制限時間は 9×9 が20分、6×6 が8分。全員が解くかあきらめたら1.5秒で締め切る。解けなかった人は同じ最下位。
 //   - 送るのは解いた盤（数字の文字列）。apply で答えと同じかを確かめる。進み具合は見た目だけ送りっぱなし（o.stream）。
 //   - 同じ数字・選んだマスの段と列と枠を薄く光らせる（まちがいの場所は光らせない）。PC は数字キー・矢印キー・Backspace でも入れられる。
@@ -17,6 +17,8 @@
 // 2026-10-30 本人の依頼: 「仮置き」を足した。数字の下の「✏️ 仮置き」を付けている間は、押した数字をマスの中に小さく書く（もう一度押すと消す。PC は M キーで切り替え）。
 //   Claude の判断: 仮置きは自分の画面だけ（送らない）。本当の数字を入れたマスでは仮置きを隠し、消すと元に戻る。仮置き中の ⌫ はそのマスの仮置きを全部消す。
 //   本当の数字を入れたら、同じ段・列・枠の仮置きからその数字を消す（手で消す手間を省く）。
+// 2026-11-03 本人の依頼: 埋め終わった数字（その数字が入るマスが全部、正しい数字で埋まった）は、下の数字のボタンを灰色にして押せなくし、
+//   その数字の入ったマスも消したり書き換えたりできなくする（灰色の字）。まちがいが1つでも混じっていればそのまま（本人の選択）。自分の画面だけ（送らない）。
 // 進行: ready →（3秒）open →（全員済み1.5秒 / 制限時間）end
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', grid, ms, k?（3問のとき何問目か。0 から） } / { p, t: 'pass' }
 
@@ -26,7 +28,7 @@ import { since, scoreChips, timeBar, secText } from './party.js';
 
 const READY_MS = 3000;
 const GRACE_MS = 1500;
-export const SHAPES = { 9: { n: 9, br: 3, bc: 3, givens: 40 }, 6: { n: 6, br: 2, bc: 3, givens: 18 } };
+export const SHAPES = { 9: { n: 9, br: 3, bc: 3, givens: 46 }, 6: { n: 6, br: 2, bc: 3, givens: 18 } };
 
 /* ---------- 作る・解く（画面に依存しない。tools/make-nanpure.mjs と自動確認も使う） ---------- */
 
@@ -290,8 +292,13 @@ export default {
     const note = document.createElement('p');
     note.className = 'cc-log';
     const tiles = [];
+    const keys = []; // 下の数字のボタン（1〜N）
+    // 埋め終わった数字: その数字が入るマスが全部、正しい数字で埋まっている（まちがいが混じっていれば入れない）
+    const doneDigits = () => new Set(Array.from({ length: N }, (_, k) => k + 1).filter((d) => q.answer.every((a, i) => a !== d || loc.cells[i] === d)));
+    const locked = (i) => !q.puzzle[i] && !!loc.cells[i] && doneDigits().has(loc.cells[i]);
     const draw = () => {
       const sel = loc.sel;
+      const done = playing ? doneDigits() : new Set();
       const sv = sel >= 0 ? showCells[sel] : 0;
       const sr = Math.floor(sel / N), sc = sel % N;
       tiles.forEach((t, i) => {
@@ -303,8 +310,10 @@ export default {
         const same = sel >= 0 && (r === sr || c === sc || (Math.floor(r / sh.br) === Math.floor(sr / sh.br) && Math.floor(c / sh.bc) === Math.floor(sc / sh.bc)));
         t.className = 'np-cell' + (q.puzzle[i] ? ' given' : '') + (i === sel ? ' sel' : same ? ' near' : '') + (v && v === sv && i !== sel ? ' same' : '')
           + (s.rules.hint && s.phase === 'open' && me !== null && v && !q.puzzle[i] && v !== q.answer[i] ? ' bad' : '')
+          + (playing && v && !q.puzzle[i] && done.has(v) ? ' locked' : '')
           + (c % sh.bc === sh.bc - 1 && c < N - 1 ? ' br' : '') + (r % sh.br === sh.br - 1 && r < N - 1 ? ' bb' : '');
       });
+      keys.forEach((b, k) => { const d = done.has(k + 1); b.disabled = d; b.classList.toggle('done', d); });
       const filled = loc.cells.filter((v, i) => v && !q.puzzle[i]).length;
       if (s.phase !== 'open') note.textContent = '';
       else if (me === null) note.textContent = '観戦中';
@@ -323,7 +332,8 @@ export default {
     }
     let lastSend = -1e9;
     const put = (v) => {
-      if (!playing || loc.sent || loc.sel < 0 || q.puzzle[loc.sel]) return;
+      if (!playing || loc.sent || loc.sel < 0 || q.puzzle[loc.sel] || locked(loc.sel)) return;
+      if (v && doneDigits().has(v)) return; // 埋め終わった数字は押せない
       if (loc.memoOn) { // 仮置き: 小さく書く・消す（送らない）
         const m = loc.memo[loc.sel];
         loc.memo[loc.sel] = !v ? [] : m.includes(v) ? m.filter((x) => x !== v) : [...m, v];
@@ -352,6 +362,7 @@ export default {
         b.className = 'btn secondary np-key';
         b.textContent = v;
         b.onclick = () => put(v);
+        keys.push(b);
         pad.append(b);
       }
       const del = document.createElement('button');
