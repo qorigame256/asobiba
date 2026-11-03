@@ -7,6 +7,7 @@ import { TOPICS } from '../app/js/games/oekaki-data.js';
 import { PAIRS } from '../app/js/games/wordwolf-data.js';
 import { TOPICS as ISHIN } from '../app/js/games/ishin-data.js';
 import { KOTOWAZA } from '../app/js/games/karuta-data.js';
+import { OOGIRI } from '../app/js/games/oogiri-data.js';
 
 // ① 表記のゆれをそろえて当てる
 assert.ok(isBad('ばか'), 'ひらがな');
@@ -45,6 +46,7 @@ for (const t of TOPICS.flat()) if (isBad(t)) hit.push('お絵描き: ' + t);
 for (const t of PAIRS.flat()) if (isBad(t)) hit.push('ワードウルフ: ' + t);
 for (const [q, groups] of ISHIN) for (const t of [q, ...groups.flat()]) if (isBad(t)) hit.push('以心伝心: ' + t);
 for (const row of KOTOWAZA) for (const t of [row.slice(0, 2).join(''), ...row]) if (isBad(t)) hit.push('ことわざかるた: ' + t);
+for (const t of OOGIRI) if (isBad(t, 'sentence')) hit.push('大喜利: ' + t);
 assert.deepEqual(hit, [], 'お題・問題のデータが一覧に当たる');
 
 console.log('filter OK');

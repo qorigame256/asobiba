@@ -1052,7 +1052,7 @@ const READING = {
   babanuki: 'ばばぬき ' + CARD_WORDS, doubt: 'だうと ' + CARD_WORDS, sevens: 'しちならべ ' + CARD_WORDS, blackjack: 'ぶらっくじゃっく ' + CARD_WORDS, hitai: 'ひたいかーど ' + CARD_WORDS,
   hitblow: 'ひっとあんどぶろー すうじ', sensou: 'せんそう わりばし ゆび てあそび', yubisuma: 'ゆびすま てあそび', tamebeam: 'ためてびーむ てあそび', memory: 'しんけいすいじゃく ' + CARD_WORDS,
   yacht: 'よっと さいころ', seri: 'せりあい ' + CARD_WORDS, nim: 'いしとりげーむ', flags: 'はたあげ', kanji: 'なんどくかんじ くいず', make10: 'てんぱずる めいくてん すうじ けいさん さんすう', targets: 'まとのはやおし まとあて', mikiri: 'みきり はやおし せつなのみきり いあい', iroji: 'いろちがいはやおし いろ はやおし', bingo: 'びんご', sugoroku: 'すごろく さいころ', taru: 'かいぞくのたる たる けん', meiro: 'めいろはやぬけ めいろ',
-  isutori: 'いすとりげーむ はやおし', cube4: 'りったいよんもくならべ ばん', kaidan: 'じゃんけんかいだん ぐりこ じゃんけん てあそび', atodashi: 'あとだしじゃんけん はやおし じゃんけん', bowling: 'ぼうりんぐ あくしょん', tsuna: 'つなひきれんだ つなひき あくしょん', eitango: 'えいたんごくいず えいご たんご すぺる いみ', kaburi: 'かぶったらぜろてん かぶり すうじ よみあい', anzan: 'ふらっしゅあんざん あんざん けいさん たしざん さんすう すうじ', golf: 'みにごるふ ごるふ ぱたーごるふ あくしょん', billiards: 'びりやーど ないんぼーる たまつき あくしょん', kotoba: 'ことばさがし わーどさーち もじさがし ことば ひらがな はやおし', oxquiz: 'まるばつくいず まるばつ おーえっくす くいず ざつがく はやおし', mannaka: 'まんなかのかんじ わどうかいちん かんじ くいず じゅくご', numtouch: 'すうじたっち たっちざなんばー すうじ はやおし',
+  isutori: 'いすとりげーむ はやおし', cube4: 'りったいよんもくならべ ばん', kaidan: 'じゃんけんかいだん ぐりこ じゃんけん てあそび', atodashi: 'あとだしじゃんけん はやおし じゃんけん', bowling: 'ぼうりんぐ あくしょん', tsuna: 'つなひきれんだ つなひき あくしょん', eitango: 'えいたんごくいず えいご たんご すぺる いみ', kaburi: 'かぶったらぜろてん かぶり すうじ よみあい', anzan: 'ふらっしゅあんざん あんざん けいさん たしざん さんすう すうじ', golf: 'みにごるふ ごるふ ぱたーごるふ あくしょん', billiards: 'びりやーど ないんぼーる たまつき あくしょん', darts: 'だーつ まと なげる あくしょん', nawa: 'おおなわとび なわとび なわ じゃんぷ あくしょん', fukuwarai: 'ふくわらい かお おしょうがつ', oogiri: 'おおぎり おもしろ とうひょう ことば', kotoba: 'ことばさがし わーどさーち もじさがし ことば ひらがな はやおし', oxquiz: 'まるばつくいず まるばつ おーえっくす くいず ざつがく はやおし', mannaka: 'まんなかのかんじ わどうかいちん かんじ くいず じゅくご', numtouch: 'すうじたっち たっちざなんばー すうじ はやおし',
   pittari: 'ぴったりすとっぷ', kioku: 'きおくりれー', typing: 'たいぴんぐはやうち', danmaku: 'だんまくかいひ あくしょん', tamaire: 'たまいれ あくしょん', machigai: 'まちがいさがし',
   bombs: 'にしょくばくだんさばいばる あくしょん', umigame: 'うみがめのすーぷ くいず', wordwolf: 'わーどうるふ', ishin: 'いしんでんしん くいず', karuta: 'ことわざかるた はやとり', acchi: 'あっちむいてほい じゃんけん てあそび', daruma: 'だるまさんがころんだ あくしょん', slide: 'じゅうごぱずる すらいどぱずる すうじ', nanpure: 'なんぷれ なんばーぷれーす すうじ ぱずる', jinro: 'じんろう', oekaki: 'おえかきあて え', hockey: 'えあほっけー あくしょん',
   hasami: 'はさみしょうぎ ばん', shogi: 'しょうぎ ばん', mahjong: 'まーじゃん',
@@ -2700,7 +2700,7 @@ function pushMove(move) {
 
 // 汚い言葉のふるい（2026-10-21 本人の決定）: 人が自由に打った言葉は送る前に確かめる。ゲームの id → [手の中の欄, 一覧の種類]。
 // 受け取った側では、各ゲームが filter.js の shown で当たった所を隠す（ゲームを足したら両方に足す）。
-const FREE_TEXT = { umigame: [['text', 'sentence'], ['q', 'sentence'], ['a', 'sentence']], oekaki: [['text', 'short']], wordwolf: [['text', 'short']], ishin: [['text', 'short']], jinro: [['text', 'sentence']] };
+const FREE_TEXT = { umigame: [['text', 'sentence'], ['q', 'sentence'], ['a', 'sentence']], oekaki: [['text', 'short']], wordwolf: [['text', 'short']], ishin: [['text', 'short']], jinro: [['text', 'sentence']], oogiri: [['text', 'sentence']] };
 const badText = (move) => (FREE_TEXT[S.gameId] ?? []).some(([k, kind]) => typeof move?.[k] === 'string' && isBad(move[k], kind));
 
 function onBoardMove(move) {

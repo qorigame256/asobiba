@@ -8035,4 +8035,172 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('kotoba OK');
 }
 
+// 大喜利（2026-11-03）: お題が重ならない・答えは1回・自分には投票できない・1票1点・答えが無い回は投票をとばす・部屋を出た人の席は投票だけ
+{
+  const O = GAMES.oogiri;
+  const { OOGIRI } = await import('../app/js/games/oogiri-data.js');
+  const { orderOf } = await import('../app/js/games/oogiri.js');
+  assert.ok(OOGIRI.length >= 30 && new Set(OOGIRI).size === OOGIRI.length, '大喜利: お題は30以上で重ならない');
+  assert.ok(O.noCpu && O.minPlayers === 3, '大喜利: CPU なし・3人から');
+  for (const [rules, k] of [[{}, 5], [{ rounds: 3 }, 3], [{ rounds: 8 }, 8]]) {
+    const s = O.init(3, 2, { rules });
+    assert.equal(s.qs.length, k);
+    assert.equal(new Set(s.qs).size, k, '大喜利: 同じお題を2回出さない');
+  }
+  let s = O.apply(O.init(4, 7, { rules: {} }), { p: -1, t: 'next' });
+  s = O.apply(s, { p: 0, t: 'ans', q: 0, text: ' いきなりゴール ' });
+  assert.equal(s.said[0], 'いきなりゴール', '大喜利: 前後の空白は取る');
+  assert.equal(O.apply(s, { p: 0, t: 'ans', q: 0, text: 'もう1つ' }), null, '大喜利: 答えは1回だけ');
+  assert.equal(O.apply(s, { p: 1, t: 'ans', q: 0, text: '   ' }), null, '大喜利: 空の答えは弾く');
+  s = O.apply(s, { p: 1, t: 'ans', q: 0, text: 'あ'.repeat(60) });
+  assert.equal([...s.said[1]].length, 40, '大喜利: 40字まで');
+  s = O.apply(s, { p: 2, t: 'ans', q: 0, text: '玉入れの玉が全部たまご' });
+  assert.equal(O.referee(s).ms, 61000, '大喜利: まだ全員書いていない');
+  s = O.apply(s, { p: -1, t: 'close' }); // 3番は書かなかった
+  assert.equal(s.phase, 'vote');
+  assert.deepEqual(orderOf(s).slice().sort(), [0, 1, 2], '大喜利: 書いた人の答えだけ並ぶ');
+  assert.deepEqual(orderOf(s), orderOf(JSON.parse(JSON.stringify(s))), '大喜利: 並びは全員同じ');
+  assert.equal(O.apply(s, { p: 0, t: 'vote', q: 0, to: 0 }), null, '大喜利: 自分には投票できない');
+  assert.equal(O.apply(s, { p: 0, t: 'vote', q: 0, to: 3 }), null, '大喜利: 書いていない人には投票できない');
+  s = O.apply(s, { p: 0, t: 'vote', q: 0, to: 2 });
+  assert.equal(O.apply(s, { p: 0, t: 'vote', q: 0, to: 1 }), null, '大喜利: 票は1回だけ');
+  s = O.apply(s, { p: 1, t: 'vote', q: 0, to: 2 });
+  s = O.apply(s, { p: 2, t: 'vote', q: 0, to: 0 });
+  assert.equal(O.referee(s).ms, 31000, '大喜利: まだ全員入れていない（30秒＋1秒）');
+  s = O.apply(s, { p: 3, t: 'vote', q: 0, to: 1 });
+  assert.equal(O.referee(s).ms, 1000, '大喜利: 全員入れたら1秒');
+  s = O.apply(s, { p: -1, t: 'tally' });
+  assert.deepEqual(s.scores, [1, 1, 2, 0], '大喜利: 1票1点');
+  // 答えが1つも無い回は投票をとばす
+  let e = O.apply(O.init(3, 1, { rules: {} }), { p: -1, t: 'next' });
+  e = O.apply(e, { p: -1, t: 'close' });
+  assert.equal(e.phase, 'shown', '大喜利: 答えが無ければ投票をとばす');
+  // 部屋を出た人の席: 書く場面では何もせず、投票では自分以外に入れる
+  let c = O.apply(O.init(3, 3, { rules: {} }), { p: -1, t: 'next' });
+  assert.equal(O.cpu(c, 1), null);
+  c = O.apply(c, { p: 0, t: 'ans', q: 0, text: 'a' });
+  c = O.apply(c, { p: 1, t: 'ans', q: 0, text: 'b' });
+  c = O.apply(c, { p: -1, t: 'close' });
+  for (let k = 0; k < 20; k++) assert.ok(O.apply(c, { ...O.cpu(c, 1), p: 1 }), '大喜利: 部屋を出た人の票は通る');
+  console.log('oogiri OK');
+}
+
+// 福笑い（2026-11-03）: 顔は3回とも別・点の付け方・置けなかった部品は0点・手の形・CPU どうしで最後まで
+{
+  const F = GAMES.fukuwarai;
+  const { FACES, partPoints, roundPoints } = await import('../app/js/games/fukuwarai.js');
+  assert.ok(FACES.every((f) => f.at.length === 6 && f.draw.length === 6), '福笑い: 部品は6つ');
+  for (let seed = 0; seed < 10; seed++) assert.equal(new Set(F.init(3, seed).faces).size, 3, '福笑い: 顔は3回とも別');
+  assert.equal(partPoints([500, 500], [500, 500]), 10, '福笑い: ぴったりは10点');
+  assert.equal(partPoints([500, 500], [530, 500]), 9, '福笑い: 30ずれたら9点');
+  assert.equal(partPoints([500, 500], [500, 529]), 10);
+  assert.equal(partPoints([500, 500], [800, 900]), 0, '福笑い: 遠いと0点');
+  assert.equal(partPoints([500, 500], null), 0, '福笑い: 置かなかった部品は0点');
+  assert.equal(roundPoints(FACES[0], FACES[0].at), 60, '福笑い: 全部ぴったりで60点');
+  let s = F.apply(F.init(3, 4), { p: -1, t: 'next' });
+  const face = FACES[s.faces[0]];
+  assert.equal(F.apply(s, { p: 0, t: 'put', q: 0, pts: [[1, 2]] }), null, '福笑い: 6つぶん送る');
+  assert.equal(F.apply(s, { p: 0, t: 'put', q: 0, pts: Array(6).fill([1001, 0]) }), null, '福笑い: 顔の外は弾く');
+  assert.equal(F.apply(s, { p: 0, t: 'put', q: 0, pts: Array(6).fill([1.5, 0]) }), null, '福笑い: 座標は整数');
+  s = F.apply(s, { p: 0, t: 'put', q: 0, pts: face.at });
+  assert.equal(F.apply(s, { p: 0, t: 'put', q: 0, pts: face.at }), null, '福笑い: 1回だけ');
+  s = F.apply(s, { p: 1, t: 'put', q: 0, pts: [face.at[0], null, null, null, null, null] });
+  s = F.apply(s, { p: 2, t: 'put', q: 0, pts: face.at.map(([x, y]) => [x + 60, y]) });
+  assert.equal(F.referee(s).ms, 1000, '福笑い: 全員置いたら1秒');
+  s = F.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [60, 10, 48], '福笑い: 点は部品ごとの合計');
+  for (let g = 0; g < 4; g++) {
+    const end = runCpus(F, 4, 20 + g, {}, 300, 5000);
+    assert.ok(F.result(end) && end.scores.every((v) => v > 0 && v <= 180), '福笑い: CPU どうしで最後まで');
+  }
+  console.log('fukuwarai OK');
+}
+
+// 大縄とび（2026-11-03）: 縄の間はだんだん縮む・跳べたかの決まり・ライフと脱落・残り1人で終わり・全員いなくなったら最後まで残った人が1位・CPU どうしで最後まで
+{
+  const W = GAMES.nawa;
+  const { TIMES, airOf, cleared, cpuMissRate } = await import('../app/js/games/nawa.js');
+  assert.equal(TIMES[0], 2500);
+  assert.equal(TIMES[1] - TIMES[0], 1500, '大縄とび: 最初の間は1.5秒');
+  for (let k = 2; k < TIMES.length; k++) assert.ok(TIMES[k] - TIMES[k - 1] <= TIMES[k - 1] - TIMES[k - 2] + 1 && TIMES[k] - TIMES[k - 1] >= 549, '大縄とび: 間はだんだん縮み、0.55秒より短くならない');
+  assert.equal(cleared([TIMES[3] - 100], 3), true, '大縄とび: 少し前に跳べば跳べる');
+  assert.equal(cleared([TIMES[3] + 50], 3), true, '大縄とび: 0.08秒までの遅れは間に合う');
+  assert.equal(cleared([TIMES[3] + 120], 3), false, '大縄とび: 遅すぎるとひっかかる');
+  assert.equal(cleared([TIMES[3] - airOf(3) - 50], 3), false, '大縄とび: 早すぎると着地してからひっかかる');
+  assert.ok(cpuMissRate(0) < 0.05 && cpuMissRate(199) > 0.25, '大縄とび: CPU は速いほどひっかかる');
+  let s = W.apply(W.init(3, 1, { rules: {} }), { p: -1, t: 'start' });
+  assert.deepEqual(s.lives, [3, 3, 3], '大縄とび: ライフは最初3');
+  s = W.apply(s, { p: 0, t: 'miss', k: 4 });
+  assert.equal(W.apply(s, { p: 0, t: 'miss', k: 4 }), null, '大縄とび: 同じ縄で2回は減らない');
+  s = W.apply(s, { p: 0, t: 'miss', k: 5 });
+  s = W.apply(s, { p: 0, t: 'miss', k: 9 });
+  assert.equal(s.out[0], 9, '大縄とび: ライフ0で脱落');
+  assert.equal(W.apply(s, { p: 0, t: 'miss', k: 10 }), null, '大縄とび: 脱落した人の手は弾く');
+  assert.equal(W.referee(s).key, 'play');
+  s = W.apply(s, { p: 1, t: 'miss', k: 20 });
+  s = W.apply(s, { p: 1, t: 'miss', k: 21 });
+  s = W.apply(s, { p: 1, t: 'miss', k: 22 });
+  assert.equal(W.referee(s).ms, 1500, '大縄とび: 残り1人で1.5秒待って終わる');
+  s = W.apply(s, { p: -1, t: 'end' });
+  let r = W.result(s);
+  assert.deepEqual(r.winners, [2]);
+  assert.deepEqual(r.place, [3, 2, 1], '大縄とび: あとまで残った人ほど上');
+  // 同じ縄で最後の2人がひっかかったら同じ1位
+  let e = W.apply(W.init(2, 2, { rules: { lives: 1 } }), { p: -1, t: 'start' });
+  e = W.apply(e, { p: 0, t: 'miss', k: 7 });
+  e = W.apply(e, { p: 1, t: 'miss', k: 7 });
+  e = W.apply(e, { p: -1, t: 'end' });
+  assert.deepEqual(W.result(e).winners, [0, 1], '大縄とび: 同じ縄で全員いなくなったら同じ1位');
+  for (const rules of [{}, { lives: 1 }, { lives: 5 }]) {
+    const end = runCpus(W, 4, 5, rules, 100, 4000);
+    assert.ok(W.result(end), `大縄とび: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('nawa OK');
+}
+
+// ダーツ（2026-11-03）: 的の点・3本でラウンド終わり・カウントアップの合計・301 の減らしすぎと上がり・CPU どうしで最後まで
+{
+  const D = GAMES.darts;
+  const { scoreAt, spotOf } = await import('../app/js/games/darts.js');
+  assert.equal(scoreAt(0, 0).s, 50, 'ダーツ: 真ん中は50点');
+  assert.equal(scoreAt(0, -100).s, 25, 'ダーツ: ブルの外側は25点');
+  assert.equal(scoreAt(...spotOf(20, 103)).s, 60, 'ダーツ: 20の3倍は60点');
+  assert.equal(scoreAt(...spotOf(3, 166)).s, 6, 'ダーツ: 3の2倍は6点');
+  assert.equal(scoreAt(...spotOf(19, 130)).s, 19, 'ダーツ: 19のふつうの所は19点');
+  assert.equal(scoreAt(...spotOf(6, 50)).s, 6, 'ダーツ: 内側のふつうの所');
+  assert.equal(scoreAt(0, -1800).s, 0, 'ダーツ: 的の外は0点');
+  for (const n of [20, 1, 18, 4, 13, 6, 10, 15, 2, 17, 3, 19, 7, 16, 8, 11, 14, 9, 12, 5]) assert.equal(scoreAt(...spotOf(n, 130)).s, n, `ダーツ: ${n}の区切り`);
+  let s = D.apply(D.init(2, 1, { rules: {} }), { p: -1, t: 'next' });
+  assert.equal(D.apply(s, { p: 0, t: 'throw', q: 0, d: 1, x: 0, y: 0, s: 50 }), null, 'ダーツ: 1本目から順に');
+  assert.equal(D.apply(s, { p: 0, t: 'throw', q: 0, d: 0, x: 0, y: 0, s: 59 }), null, 'ダーツ: ありえない点は弾く');
+  for (const v of [60, 20, 5]) s = D.apply(s, { p: 0, t: 'throw', q: 0, d: s.darts[0].length, x: 1, y: 1, s: v });
+  assert.equal(s.done[0], true, 'ダーツ: 3本で投げ終わり');
+  assert.equal(D.apply(s, { p: 0, t: 'throw', q: 0, d: 3, x: 1, y: 1, s: 5 }), null, 'ダーツ: 4本目は弾く');
+  assert.equal(s.total[0], 85, 'ダーツ: カウントアップは合計');
+  // 301
+  let t = D.apply(D.init(2, 2, { rules: { mode: '301' } }), { p: -1, t: 'next' });
+  t = { ...t, left: [40, 301], start: [40, 301] };
+  t = D.apply(t, { p: 0, t: 'throw', q: 0, d: 0, x: 1, y: 1, s: 20 });
+  t = D.apply(t, { p: 0, t: 'throw', q: 0, d: 1, x: 1, y: 1, s: 60 });
+  assert.equal(t.left[0], 40, 'ダーツ: 減らしすぎたらラウンドの始めに戻る');
+  assert.equal(t.done[0], true, 'ダーツ: 減らしすぎたらそのラウンドは終わり');
+  t = D.apply(t, { p: -1, t: 'close' });
+  t = D.apply(t, { p: -1, t: 'next' });
+  t = D.apply(t, { p: 0, t: 'throw', q: 1, d: 0, x: 1, y: 1, s: 40 });
+  assert.equal(t.fin[0], 1, 'ダーツ: ぴったり0で上がり');
+  t = D.apply(t, { p: -1, t: 'close' });
+  t = D.apply(t, { p: -1, t: 'next' });
+  assert.equal(t.phase, 'end', 'ダーツ: 上がった人がいたらそのラウンドで終わり');
+  assert.deepEqual(D.result(t).winners, [0]);
+  assert.deepEqual(D.result(t).place, [1, 2]);
+  for (const rules of [{}, { mode: '301' }]) {
+    for (const n of [1, 3]) {
+      const end = runCpus(D, n, 4, rules, 250, 5000);
+      assert.ok(D.result(end), `ダーツ: CPU どうしで最後まで ${n}人 ${JSON.stringify(rules)}`);
+      if (!rules.mode) assert.ok(end.total.every((v) => v > 60 && v < 24 * 60), 'ダーツ: CPU の合計がありえる数');
+    }
+  }
+  console.log('darts OK');
+}
+
 console.log('ALL OK');

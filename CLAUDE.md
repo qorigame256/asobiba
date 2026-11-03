@@ -165,7 +165,7 @@ App Store 版について本人が決めたことも `appstore.md` に書き、�
   **人ごとの色（○×・駒の色 など）はどの色の組でも変えない**（友だちと「オレンジの方」と話すとき画面ごとに違うと困るため。Claude の判断で本人に色見本で伝えた）。2026-10-27 に「本人が決めたこと」の「ランキング・スキン」から移した。
 - 汚い言葉のふるいの作り（2026-10-21。`app/js/filter.js`・`main.js` の `FREE_TEXT`）: **人が自由に打った言葉を送るゲームを足したら、2か所に足すこと。**
   送る前に止めるのは `main.js` の `FREE_TEXT`（ゲームの id → 手の中の欄と一覧の種類。文は `sentence`、名前や短い答えは `short`）、
-  受け取った側で隠すのは各ゲームが出すときに `filter.js` の `shown(言葉, o.hidden?.[その人の席], 種類)` を通す（いまはウミガメのスープ・お絵描き当て・ワードウルフ・人狼・以心伝心。難読漢字とタイピングは自分の答えしか出ないので通していない）。
+  受け取った側で隠すのは各ゲームが出すときに `filter.js` の `shown(言葉, o.hidden?.[その人の席], 種類)` を通す（いまはウミガメのスープ・お絵描き当て・ワードウルフ・人狼・以心伝心・大喜利。難読漢字とタイピングは自分の答えしか出ないので通していない）。
   名前は `nameOf`、部屋の名前は受け取ったときに `mask` を通す。ゲームのお題・問題のデータが一覧に当たらないことは `tools/test-filter.mjs` が見ている（当たると正しい言葉が隠れる）。
 - 初心者マークの作り（`main.js` の「初心者マーク」の節・`style.css` の `body.beginner`）: `nameOf` が名前の後ろに 🔰 を付ける（ゲームに渡す名前にも付く）。付けたかどうかの覚え方と送り方は `docs/ゲームの作りと実測.md` の「部屋と対局画面」。
   光らせるのは、選べる所が限られるゲームだけ（リバーシ・マンカラ・将棋・はさみ将棋・いろあわせ・大富豪・スピード・ダウト・七並べ。`BEG_GAMES` と `style.css` の一覧を合わせる）。
@@ -212,7 +212,8 @@ App Store 版について本人が決めたことも `appstore.md` に書き、�
   ことわざかるたは `karuta.js`（札は `karuta-data.js`）、あっち向いてホイは `acchi.js`、だるまさんがころんだは `daruma.js`、15パズル早解きは `slide.js`、
   ナンプレ早解きは `nanpure.js`（問題の一覧は `nanpure-data.js`。`tools/make-nanpure.mjs` が作る）、見切りは `mikiri.js`、ビンゴは `bingo.js`、迷路早抜けは `meiro.js`、色ちがい早押しは `iroji.js`、すごろくは `sugoroku.js`、海賊のたるは `taru.js`、
   椅子取りゲームは `isutori.js`、立体四目並べは `cube4.js`、じゃんけん階段は `kaidan.js`、後出しじゃんけん早押しは `atodashi.js`、ボウリングは `bowling.js`、綱引き連打は `tsuna.js`、英単語クイズは `eitango.js`（単語は `eitango-data.js`。ふりかえりの見た目は `kanji.js` の `REVIEW_CSS` を使う）、かぶったら0点は `kaburi.js`、フラッシュ暗算は `anzan.js`、ミニゴルフは `golf.js`（コースも中にある）、ビリヤードは `billiards.js`、
-  まんなかの漢字は `mannaka.js`（問題は `mannaka-data.js`）、○×クイズは `oxquiz.js`（問題は `oxquiz-data.js`）、数字タッチは `numtouch.js`、ことばさがしは `kotoba.js`（お題は `kotoba-data.js`）。
+  まんなかの漢字は `mannaka.js`（問題は `mannaka-data.js`）、○×クイズは `oxquiz.js`（問題は `oxquiz-data.js`）、数字タッチは `numtouch.js`、ことばさがしは `kotoba.js`（お題は `kotoba-data.js`）、
+  大喜利は `oogiri.js`（お題は `oogiri-data.js`）、福笑いは `fukuwarai.js`（顔の絵も中にある）、大縄とびは `nawa.js`、ダーツは `darts.js`。
 - `app/js/games/party.js` … パーティーゲームの共通の道具（画面に出てからの時間・ひらがなへのそろえ方・点数の札・残り時間の帯）。
 - `app/js/games/cards.js` … トランプの共通の道具（札の書き方・山札・札の見た目）。札の絵は `app/img/cards/<札>.webp`（`s1`〜`c13` と `joker`。
   元の PNG を幅240の WebP に縮めた。53枚で約0.5MB。元の SVG は絵札が1枚1MB前後と重いので使わない）。
