@@ -10,6 +10,10 @@
 //   - 1回の時間は40秒。時間までに置けなかった部品は0点（置いた分だけ自動で送る）。全員が置き終えたら1秒で結果へ。結果を見せる間は8秒。
 //   - 「左の目」などの左右は、画面を見ている人から見た左右。
 //   - CPU は8〜20秒で置き終え、1つずつ正しい位置から上下左右に ±150 ほどずらす。
+// 2026-11-04 の34回目の案（本人が選んだ。案の名前は「はじめに正しい顔を見せる」。分かれ目は Claude の判断）:
+//   - 詳細設定「はじめに顔を見せる」（鍵は hint）: なし（最初）・あり。各回の始めの3秒だけ、部品の入った正しい顔（お手本）を見せ、そのあいだは置けない。
+//     40秒はお手本を見せる時間も含めて数える（置ける時間は37秒）。各自の画面だけのことで、手と点の付け方は同じ。CPU も変えない。
+//     手助けなので、おまかせで抽選しない（KEEP_KEYS の hint）。なしのときの局面は前と全く同じ形（rules は {}）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'put', q, pts: [[x, y] | null ×6] }
 
@@ -22,6 +26,7 @@ const LIMIT = 40000;
 const READY_MS = 3000;
 const SHOWN_MS = 8000;
 const GRACE_MS = 1000;
+const PEEK_MS = 3000;
 const LABELS = ['左のまゆ', '右のまゆ', '左の目', '右の目', '鼻', '口'];
 
 // 部品の絵（x, y が真ん中）
@@ -98,10 +103,13 @@ export default {
   realtime: true,
   minPlayers: 2,
   maxPlayers: 10,
+  settings: [
+    { key: 'hint', label: 'はじめに顔を見せる', desc: '各回の始めの3秒だけ、部品の入った正しい顔を見せる（おぼえてから置く）', def: false },
+  ],
 
-  init(n, seed) {
+  init(n, seed, { rules = {} } = {}) {
     const faces = shuffle([0, 1, 2], mulberry32(seed)).slice(0, ROUNDS);
-    return { n, seed, rules: {}, faces, q: -1, phase: 'ready', put: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
+    return { n, seed, rules: rules.hint === true ? { hint: true } : {}, faces, q: -1, phase: 'ready', put: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
   },
 
   turn() { return null; },
@@ -232,7 +240,8 @@ export default {
     next.className = 'fw-next';
     const board = document.createElement('div');
     board.className = 'fw-board';
-    board.innerHTML = faceSvg(face, [], { faint: true });
+    const peekLeft = () => (s.rules.hint === true ? PEEK_MS - since(key) : 0); // お手本を見せる残り
+    board.innerHTML = peekLeft() > 0 ? faceSvg(face, face.at) : faceSvg(face, [], { faint: true });
     const note = document.createElement('p');
     note.className = 'cc-log';
     const send = () => {
@@ -245,6 +254,7 @@ export default {
       const i = loc.pts.length;
       if (me === null) { next.textContent = '観戦中'; return; }
       if (s.put[me] || loc.sent) { next.textContent = '置き終えました。ほかの人を待っています'; return; }
+      if (peekLeft() > 0) { next.textContent = '👀 正しい顔をおぼえよう（3秒）'; return; }
       next.innerHTML = `つぎは <b>${LABELS[i]}</b>（${i + 1}/${LABELS.length}）`;
       const prev = document.createElement('span');
       prev.className = 'fw-prev';
@@ -253,7 +263,7 @@ export default {
     };
     if (playing) {
       board.addEventListener('pointerdown', (e) => {
-        if (loc.sent || loc.pts.length >= LABELS.length) return;
+        if (loc.sent || loc.pts.length >= LABELS.length || peekLeft() > 0) return;
         e.preventDefault();
         const r = board.getBoundingClientRect();
         const x = Math.round(((e.clientX - r.left) / r.width) * 1000), y = Math.round(((e.clientY - r.top) / r.height) * 1000);
@@ -268,6 +278,13 @@ export default {
       });
       setTimeout(() => { if (board.isConnected && !loc.sent && loc.key === key) send(); }, Math.max(0, LIMIT - since(key) - 200)); // 時間までに置けた分だけ送る
       note.textContent = '顔のどこかを押すと、その場所に置きます（置いた部品は見えません）';
+    }
+    if (peekLeft() > 0) {
+      setTimeout(() => {
+        if (!board.isConnected) return;
+        board.innerHTML = faceSvg(face, [], { faint: true });
+        paint();
+      }, peekLeft() + 20);
     }
     paint();
     wrap.append(next, board, note);

@@ -10,6 +10,10 @@
 //   - 全部の札を並べた時点で、その端末で答え合わせをする。ちがっていたら知らせるだけで、何度でも並べ直せる（送るのは正解のときだけ）。
 //     並べた札を押すと、その札が下に戻る。「ぜんぶ戻す」もある。
 //   - CPU は字の数に合わせて 4〜14秒ほどで答え、3字は7割5分・4字は6割・5〜6字は4割5分当てる。当てられない問題は15〜25秒でパスする。
+// 2026-11-04 の34回目の案（本人が選んだ。分かれ目は Claude の判断）:
+//   - 詳細設定「1字目のヒント」（鍵は hint）: なし（最初）・あり。問題が出て10秒たつと、並べる列の1つ目に正しい1字目が入って動かせなくなる
+//     （同じ字の札が2枚あれば左の札）。各自の画面だけのことで、送る手も局面も変わらない。並べかけの札はそのまま後ろに残す。
+//     全部並んでいて、1字目を入れ替えた結果が正解なら、そのまま答えを送る。CPU は変えない。手助けなので、おまかせで抽選しない（KEEP_KEYS の hint）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（まんなかの漢字と同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ok', q, w: 並べた言葉, ms } / { p, t: 'pass', q }
 
@@ -25,6 +29,7 @@ const READY_MS = 3000;
 const SHOWN_MS = 3500;
 const GRACE_MS = 1500;
 const AFTER_MS = 6000;
+const HINT_MS = 10000;
 
 const qKey = (s, q = s.q) => `narabe:${s.seed}:${q}`;
 const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice(), passed: s.passed.slice() });
@@ -69,6 +74,7 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 10, choices: ROUNDS },
+    { key: 'hint', label: '1字目のヒント', desc: '問題が出て10秒たつと、正しい1字目が並べる列の先頭に入る', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -207,6 +213,26 @@ export default {
       t.textContent = `答え: ${word}${fast ? ` ／ いちばん速かったのは ${fast}` : ' ／ だれも正解できませんでした'}`;
       card.append(t);
     }
+    // 1字目のヒント: 正しい1字目の札を列の先頭に入れて固定する
+    const hintOn = () => s.rules.hint === true && s.phase === 'open' && since(key) >= HINT_MS;
+    const i0 = x.tiles.indexOf([...word][0]);
+    const applyHint = () => {
+      if (!hintOn() || loc.picked[0] === i0) return false;
+      const rest = loc.picked.filter((i) => i !== i0);
+      loc.picked = [i0, ...rest];
+      return true;
+    };
+    const check = () => {
+      if (loc.picked.length !== x.tiles.length) return false;
+      const w = loc.picked.map((j) => x.tiles[j]).join('');
+      const ms = Math.round(since(key));
+      if (w === word && ms < LIMIT) { o.onMove({ t: 'ok', q: s.q, w, ms }); return true; }
+      row.classList.remove('shake');
+      void row.offsetWidth; // 揺らす動きを最初からやり直す
+      row.classList.add('shake');
+      return false;
+    };
+    if (can && applyHint()) setTimeout(() => { if (row.isConnected && loc.key === key) check(); }, 0); // 全部並んでいたら答え合わせ
     const draw = () => {
       row.innerHTML = '';
       pool.innerHTML = '';
@@ -214,11 +240,12 @@ export default {
       for (let k = 0; k < x.tiles.length; k++) {
         const b = document.createElement('button');
         b.type = 'button';
-        b.className = 'nb-tile' + (k < chars.length ? ' on' : ' empty') + (shown || solvedMe ? ' ans' : '');
+        const fixed = k === 0 && can && hintOn(); // ヒントで入った1字目は戻せない
+        b.className = 'nb-tile' + (k < chars.length ? ' on' : ' empty') + (shown || solvedMe ? ' ans' : '') + (fixed ? ' hint' : '');
         b.textContent = chars[k] ?? '';
-        b.disabled = !can || k >= loc.picked.length;
-        b.onpointerdown = (e) => { if (!can || k >= loc.picked.length) return; e.preventDefault(); loc.picked.splice(k, 1); draw(); };
-        b.onclick = (e) => { if (e.detail === 0 && can && k < loc.picked.length) { loc.picked.splice(k, 1); draw(); } };
+        b.disabled = !can || fixed || k >= loc.picked.length;
+        b.onpointerdown = (e) => { if (!can || fixed || k >= loc.picked.length) return; e.preventDefault(); loc.picked.splice(k, 1); draw(); };
+        b.onclick = (e) => { if (e.detail === 0 && can && !fixed && k < loc.picked.length) { loc.picked.splice(k, 1); draw(); } };
         row.append(b);
       }
       x.tiles.forEach((c, i) => {
@@ -232,14 +259,7 @@ export default {
           if (!can || loc.picked.includes(i)) return;
           e.preventDefault();
           loc.picked.push(i);
-          if (loc.picked.length === x.tiles.length) {
-            const w = loc.picked.map((j) => x.tiles[j]).join('');
-            const ms = Math.round(since(key));
-            if (w === word && ms < LIMIT) { o.onMove({ t: 'ok', q: s.q, w, ms }); return; }
-            row.classList.remove('shake');
-            void row.offsetWidth; // 揺らす動きを最初からやり直す
-            row.classList.add('shake');
-          }
+          if (check()) return;
           draw();
         };
         b.onpointerdown = hit;
@@ -251,6 +271,7 @@ export default {
       else if (s.phase === 'open' && s.solved[me] !== null) note.textContent = `⭕ 正解！（${secText(s.solved[me])}）`;
       else if (s.phase === 'open' && s.passed[me]) note.textContent = 'パスしました。次の問題を待とう';
       else if (s.phase === 'open' && full) note.textContent = '❌ ちがうみたい… 上の札を押すと下に戻せます';
+      else if (s.phase === 'open' && can && hintOn()) note.textContent = `💡 1字目は「${[...word][0]}」。続きを押して並べよう`;
       else if (s.phase === 'open') note.textContent = '下の字を、言葉になる順に押そう';
       else note.textContent = '';
     };
@@ -263,7 +284,7 @@ export default {
       back.type = 'button';
       back.className = 'btn secondary';
       back.textContent = 'ぜんぶ戻す';
-      back.onclick = () => { loc.picked = []; draw(); };
+      back.onclick = () => { loc.picked = []; applyHint(); draw(); };
       const pass = document.createElement('button');
       pass.type = 'button';
       pass.className = 'btn secondary';
@@ -271,6 +292,13 @@ export default {
       pass.onclick = () => o.onMove({ t: 'pass', q: s.q });
       act.append(back, pass);
       wrap.append(act);
+      if (s.rules.hint === true && since(key) < HINT_MS) {
+        setTimeout(() => {
+          if (!pool.isConnected || loc.key !== key) return;
+          applyHint();
+          if (!check()) draw();
+        }, HINT_MS - since(key) + 20);
+      }
       setTimeout(() => {
         if (!pool.isConnected) return;
         pool.querySelectorAll('button').forEach((b) => { b.disabled = true; });

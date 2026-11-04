@@ -13,6 +13,11 @@
 //     局面の数が端末の中で数えた数より少ないあいだは0.5秒ごとに、届いていない分をまとめて送り直す（2色爆弾サバイバルと同じ。ゲストの手がすれ違って消えることがあるため）。
 //   - 指で遊ぶときは、ポイを指の少し上に出す（指で金魚が隠れないように）。
 //   - CPU は2.5〜4.5秒に1回すくおうとし、5割5分ですくえる（1匹）。1回ごとに2割2分でポイが破れる。
+// 2026-11-04 の34回目の案（本人が選んだ。分かれ目は Claude の判断）:
+//   - 詳細設定「ポイの数」（鍵は poi）: 1枚・3枚（最初。前と同じ）・5枚。CPU のポイの数も同じ。
+//   - 詳細設定「ぬし」（鍵は nushi）: なし（最初）・あり。生まれる金魚の4%が大きな「ぬし」（10点・重さ0.85）になる。
+//     重いので、水に入れてすぐ（およそ0.75秒のうちに）持ち上げないとポイが破れて逃げる。ほかの金魚と一緒にはすくいにくい。
+//     ぬしかどうかは金魚の色と動きを決めたあとの乱数で決める（なしのときの金魚は前と全く同じ）。ぬしはゆっくり泳ぐ。CPU はすくおうとした回の1%でぬし（10点）をすくう。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → start → play → end
 // 手: { p: -1, t: 'start' | 'end' } / { p, t: 'scoop', n, v, c } / { p, t: 'out' }
 
@@ -26,7 +31,9 @@ const GRACE_MS = 1500;
 export const TANK_H = 0.7;
 export const NF = 16;
 const RESPAWN = 2500;
-const POIS = 3;
+const POIS = [[1, '1枚'], [3, '3枚'], [5, '5枚']];
+export const poisOf = (s) => (POIS.some(([v]) => v === s.poi) ? s.poi : 3);
+const NUSHI_RATE = 0.04;
 const POI_R = 0.085;
 export const DRAIN = 0.2; // 水の中で1秒に減る丈夫さ
 export const FAST = 0.5; // これより速く動かすと減る（横幅/秒）
@@ -35,19 +42,23 @@ export const KINDS = [
   { v: 1, w: 0.12, r: 0.034, col: '#e8452c', name: '赤' },
   { v: 3, w: 0.22, r: 0.044, col: '#262626', name: '黒' },
   { v: 5, w: 0.18, r: 0.04, col: '#f2b705', name: '金' },
+  { v: 10, w: 0.85, r: 0.075, col: '#d8322a', name: 'ぬし' }, // ぬしありのときだけ
 ];
+const maxV = (s) => (s.nushi ? 10 : 5); // 1匹の点のいちばん大きい数
 
 // slot 番目の g 代目の金魚（種から。全員同じ）
-export function fishOf(seed, slot, g) {
+export function fishOf(seed, slot, g, nushi = false) {
   const rnd = mulberry32((seed ^ Math.imul(slot * 977 + g * 131 + 3, 0x85ebca6b)) >>> 0);
   const r = rnd();
   const kind = r < 0.06 ? 2 : r < 0.28 ? 1 : 0;
   const ax = 0.08 + rnd() * 0.22, ay = 0.05 + rnd() * 0.12;
-  return {
+  const f = {
     kind,
     cx: ax + 0.04 + rnd() * (0.92 - 2 * ax), cy: ay + 0.05 + rnd() * (TANK_H - 0.1 - 2 * ay), ax, ay,
     wx: (kind === 1 ? 0.0003 : 0.0004) + rnd() * 0.0005, wy: 0.0006 + rnd() * 0.0007, px: rnd() * 6.283, py: rnd() * 6.283,
   };
+  if (nushi && rnd() < NUSHI_RATE) Object.assign(f, { kind: 3, wx: f.wx * 0.6, wy: f.wy * 0.6 });
+  return f;
 }
 // t ミリ秒の位置
 export const posOf = (f, t) => [f.cx + f.ax * Math.sin(f.wx * t + f.px), f.cy + f.ay * Math.sin(f.wy * t + f.py)];
@@ -60,6 +71,7 @@ export function lift(dur, kinds) {
 export const wear = (dt, v) => dt * DRAIN + Math.max(0, v - FAST) * dt * FAST_K;
 
 const key = (s) => `kingyo:${s.seed}`;
+const pointsText = (s) => (s.nushi ? '赤1点 黒3点 金5点 ぬし10点' : '赤1点 黒3点 金5点');
 const clone = (s) => ({ ...s, scores: s.scores.slice(), cnt: s.cnt.slice(), fish: s.fish.slice(), out: s.out.slice() });
 
 const cpuPlan = new Map();
@@ -76,9 +88,17 @@ export default {
   realtime: true,
   minPlayers: 1,
   maxPlayers: 10,
+  settings: [
+    { key: 'poi', label: 'ポイの数', desc: '1人が使えるポイの枚数', def: 3, choices: POIS },
+    { key: 'nushi', label: 'ぬし', desc: 'ごくまれに大きな「ぬし」（10点）が出る。重いので、水に入れてすぐ持ち上げないとポイが破れる', def: false },
+  ],
 
-  init(n, seed) {
-    return { n, seed, phase: 'ready', scores: Array(n).fill(0), cnt: Array(n).fill(0), fish: Array(n).fill(0), out: Array(n).fill(false), step: 0 };
+  init(n, seed, { rules = {} } = {}) {
+    const s = { n, seed, phase: 'ready', scores: Array(n).fill(0), cnt: Array(n).fill(0), fish: Array(n).fill(0), out: Array(n).fill(false), step: 0 };
+    // 最初の値（3枚・ぬしなし）のときは前と全く同じ形にする
+    if (POIS.some(([v]) => v === rules.poi) && rules.poi !== 3) s.poi = rules.poi;
+    if (rules.nushi === true) s.nushi = true;
+    return s;
   },
 
   turn() { return null; },
@@ -112,7 +132,7 @@ export default {
       if (s0.out[m.p]) return null;
       const s = clone(s0); s.step += 1; s.out[m.p] = true; return s;
     }
-    if (m.t !== 'scoop' || m.n !== s0.cnt[m.p] || !Number.isInteger(m.c) || m.c < 1 || m.c > 3 || !Number.isInteger(m.v) || m.v < m.c || m.v > m.c * 5) return null;
+    if (m.t !== 'scoop' || m.n !== s0.cnt[m.p] || !Number.isInteger(m.c) || m.c < 1 || m.c > 3 || !Number.isInteger(m.v) || m.v < m.c || m.v > m.c * maxV(s0)) return null;
     const s = clone(s0);
     s.step += 1;
     s.cnt[m.p] += 1;
@@ -126,7 +146,7 @@ export default {
     if (s.phase !== 'play' || s.out[p]) return null;
     const pk = key(s) + ':' + p;
     let plan = cpuPlan.get(pk);
-    if (!plan) { plan = { next: 2500 + Math.random() * 2000, left: POIS }; cpuPlan.set(pk, plan); if (cpuPlan.size > 100) cpuPlan.delete(cpuPlan.keys().next().value); }
+    if (!plan) { plan = { next: 2500 + Math.random() * 2000, left: poisOf(s) }; cpuPlan.set(pk, plan); if (cpuPlan.size > 100) cpuPlan.delete(cpuPlan.keys().next().value); }
     const t = since(key(s) + ':play');
     if (t < plan.next || t >= LIMIT) return null;
     plan.next = t + 2500 + Math.random() * 2000;
@@ -136,6 +156,7 @@ export default {
     }
     if (Math.random() >= 0.55) return null;
     const r = Math.random();
+    if (s.nushi && r < 0.01) return { t: 'scoop', n: s.cnt[p], v: 10, c: 1 };
     return { t: 'scoop', n: s.cnt[p], v: r < 0.05 ? 5 : r < 0.25 ? 3 : 1, c: 1 };
   },
 
@@ -161,12 +182,12 @@ export default {
     root.append(wrap);
     ui = { mount, wrap, chips, state: s };
     if (s.phase === 'ready') {
-      wrap.insertAdjacentHTML('beforeend', '<div class="kj-card"><div class="kj-word small">よーい…</div><div class="kj-sub">押している間ポイが水の中に入り、離すとすくえる・赤1点 黒3点 金5点・ポイは3枚・60秒</div></div>');
+      wrap.insertAdjacentHTML('beforeend', `<div class="kj-card"><div class="kj-word small">よーい…</div><div class="kj-sub">押している間ポイが水の中に入り、離すとすくえる・${pointsText(s)}・ポイは${poisOf(s)}枚・60秒</div></div>`);
       return;
     }
     if (s.phase === 'end') return;
     since(tk);
-    if (loc?.key !== tk) loc = { key: tk, gen: Array(NF).fill(0), back: Array(NF).fill(0), dur: 1, left: POIS, brokeAt: -1e9, scoops: [], out: false };
+    if (loc?.key !== tk) loc = { key: tk, gen: Array(NF).fill(0), back: Array(NF).fill(0), dur: 1, left: poisOf(s), brokeAt: -1e9, scoops: [], out: false };
     const card = document.createElement('div');
     card.className = 'kj-card kg-card';
     card.append(timeBar(tk, LIMIT));
@@ -190,7 +211,7 @@ export default {
       note.textContent = me === null ? '観戦中'
         : loc.out ? `ポイがなくなりました（${mine}点）。ほかの人を待っています`
         : since(tk) >= LIMIT ? `時間です（${mine}点）`
-        : `ポイ ${'🥅'.repeat(loc.left)}（のこり${loc.left}枚）・赤1点 黒3点 金5点`;
+        : `ポイ ${'🥅'.repeat(loc.left)}（のこり${loc.left}枚）・${pointsText(st)}`;
       if (st.phase === 'play' && me !== null && st.cnt[me] > loc.scoops.length) { // 開き直したとき: 局面の数から続ける
         while (loc.scoops.length < st.cnt[me]) loc.scoops.push({ v: 1, c: 1 });
       }
@@ -223,7 +244,7 @@ export default {
       const got = [];
       for (let i = 0; i < NF; i++) {
         if (loc.back[i] > t) continue;
-        const f = fishOf(s.seed, i, loc.gen[i]);
+        const f = fishOf(s.seed, i, loc.gen[i], s.nushi);
         const [fx, fy] = posOf(f, t);
         if (Math.sqrt((fx - x) ** 2 + (fy - y) ** 2) <= POI_R - KINDS[f.kind].r * 0.3) got.push([i, f.kind]);
       }
@@ -289,7 +310,7 @@ export default {
       // 金魚
       for (let i = 0; i < NF; i++) {
         if (loc.back[i] > t) continue;
-        const f = fishOf(s.seed, i, loc.gen[i]);
+        const f = fishOf(s.seed, i, loc.gen[i], s.nushi);
         const [x, y] = posOf(f, t);
         const [x2, y2] = posOf(f, t + 60);
         const ang = Math.atan2(y2 - y, x2 - x);
@@ -304,6 +325,12 @@ export default {
         g.beginPath(); g.moveTo(-k.r * 0.8, 0); g.lineTo(-k.r * 1.9, -k.r * (0.7 + wag)); g.lineTo(-k.r * 1.9, k.r * (0.7 - wag)); g.closePath(); g.fill();
         g.beginPath(); g.ellipse(0, 0, k.r, k.r * 0.6, 0, 0, Math.PI * 2); g.fill();
         if (f.kind === 2) { g.strokeStyle = '#fff6c0'; g.lineWidth = 0.004; g.stroke(); }
+        if (f.kind === 3) { // ぬし: 白いまだらと金のふち
+          g.fillStyle = '#fff';
+          g.beginPath(); g.ellipse(-k.r * 0.25, k.r * 0.1, k.r * 0.35, k.r * 0.22, 0.4, 0, Math.PI * 2); g.fill();
+          g.strokeStyle = '#f2b705'; g.lineWidth = 0.005;
+          g.beginPath(); g.ellipse(0, 0, k.r, k.r * 0.6, 0, 0, Math.PI * 2); g.stroke();
+        }
         g.fillStyle = '#fff';
         g.beginPath(); g.arc(k.r * 0.5, -k.r * 0.25, k.r * (f.kind === 1 ? 0.28 : 0.16), 0, Math.PI * 2); g.fill();
         g.fillStyle = '#000';

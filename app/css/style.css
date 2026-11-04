@@ -2375,6 +2375,7 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .am-prize { fill: var(--field); stroke: var(--line); stroke-width: 2; }
 .am-prize.got { stroke-width: 6; }
 .am-pt { font-size: 21px; font-weight: 800; text-anchor: middle; fill: var(--ink); }
+.am-pt.minus { fill: #c0392b; }
 .am-mine { fill: none; stroke-width: 3; opacity: .5; stroke-dasharray: 6 5; stroke-linejoin: round; }
 .am-path { fill: none; stroke-width: 9; opacity: .8; stroke-linejoin: round; stroke-linecap: round; }
 .am-path.anim { stroke-dasharray: 1; stroke-dashoffset: 1; animation: amTrace 3s ease-in-out forwards; }
@@ -2390,6 +2391,7 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .board button.nb-tile.on { border-color: var(--accent); }
 .board button.nb-tile.ans { border-color: #2f8a4a; color: #2f8a4a; }
 .board button.nb-tile.used { opacity: .25; }
+.board button.nb-tile.hint { border-color: #e0a100; background: #fff6d6; color: #8a6200; opacity: 1; }
 .board button.nb-tile:disabled { cursor: default; }
 /* 金魚すくい */
 .kg-card { padding: 8px; }

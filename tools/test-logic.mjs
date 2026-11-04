@@ -8159,6 +8159,9 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     const end = runCpus(F, 4, 20 + g, {}, 300, 5000);
     assert.ok(F.result(end) && end.scores.every((v) => v > 0 && v <= 180), '福笑い: CPU どうしで最後まで');
   }
+  // はじめに顔を見せる（2026-11-04 の34回目の案）: 画面だけのことなので、局面は rules のほかは同じ
+  assert.deepEqual(F.init(3, 4, { rules: { hint: false } }), F.init(3, 4), '福笑い: 最初の値なら前と全く同じ局面');
+  assert.deepEqual(F.init(3, 4, { rules: { hint: true } }), { ...F.init(3, 4), rules: { hint: true } }, '福笑い: 見せるありは rules だけちがう');
   console.log('fukuwarai OK');
 }
 
@@ -8318,6 +8321,46 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.ok(r && end.round === 2, `あみだ: CPU どうしで3回遊んで終わる ${n}人`);
     assert.ok(end.scores.every((v) => v >= 0 && v <= 15));
   }
+  // 隠し線の本数・はずれ（2026-11-04 の34回目の案）
+  assert.deepEqual(A.init(3, 5, { rules: { hide: 1, minus: false } }), A.init(3, 5), 'あみだ: 最初の値なら前と全く同じ局面');
+  for (let seed = 0; seed < 20; seed++) {
+    assert.deepEqual(setup(seed, 1, 3, true).prizes.slice().sort((a, b) => a - b), [-3, 1, 2, 3, 5], 'あみだ: はずれありは 0点が −3点');
+    assert.deepEqual(setup(seed, 1, 3, true).starts, setup(seed, 1, 3).starts, 'あみだ: はずれありでもスタートと並びは同じ');
+  }
+  const drawAll = (st) => { while (st.phase === 'draw') { const [r, c] = free(st); st = A.apply(st, { p: A.turn(st), t: 'line', r, c }); } return st; };
+  let z = drawAll(A.init(2, 3, { rules: { hide: 0 } }));
+  assert.equal(z.phase, 'hide');
+  assert.equal(A.canAct(z, 0), false, 'あみだ: 隠し線なしでは引けない');
+  assert.deepEqual(A.referee(z), { key: 'hall0', ms: 800, move: { t: 'reveal' } }, 'あみだ: 隠し線なしはすぐ結果へ');
+  z = A.apply(z, { p: -1, t: 'reveal' });
+  assert.equal(z.lines.filter((l) => l.hid).length, 0);
+  let w = drawAll(A.init(2, 3, { rules: { hide: 2, minus: true } }));
+  assert.ok(w.prizes.includes(-3) && !w.prizes.includes(0), 'あみだ: はずれありの当たり');
+  const [wr, wc] = free(w);
+  w = A.apply(w, { p: 1, t: 'hide', r: wr, c: wc });
+  assert.equal(A.apply(w, { p: 1, t: 'hide', r: wr, c: wc }), null, 'あみだ: 自分の隠し線とぶつかる所には引けない');
+  assert.equal(A.apply(w, { p: 1, t: 'hide', r: wr, c: wc + 1 }), null, 'あみだ: 自分の隠し線のとなりにも引けない');
+  assert.equal(A.canAct(w, 1), true, 'あみだ: 2本のときはもう1本');
+  const w2 = free({ lines: [...w.lines, { r: wr, c: wc }] });
+  w = A.apply(w, { p: 1, t: 'hide', r: w2[0], c: w2[1] });
+  assert.equal(A.canAct(w, 1), false, 'あみだ: 2本引いたら終わり');
+  assert.equal(A.apply(w, { p: 1, t: 'hide', r: ROWS - 1, c: 3 }), null, 'あみだ: 3本目は弾く');
+  assert.equal(A.referee(w).key, 'hide0', 'あみだ: ほかの人がまだ');
+  w = A.apply(w, { p: 0, t: 'hide', r: wr, c: wc }); // 1番の人の1本目とぶつける
+  assert.equal(A.referee(w).key, 'hide0');
+  w = A.apply(w, { p: 0, t: 'hide', r: w2[0], c: w2[1] });
+  assert.equal(A.referee(w).key, 'hall0', 'あみだ: 全員2本ずつで結果へ');
+  w = A.apply(w, { p: -1, t: 'reveal' });
+  assert.equal(w.lines.some((l) => l.hid && l.p === 0 && l.r === wr && l.c === wc), true, 'あみだ: ぶつかったら席が先の人の線が残る');
+  assert.equal(w.last.lost[1], true, 'あみだ: ぶつかった後ろの人の線は消える');
+  w.starts.forEach((st, p) => assert.equal(w.last.got[p], w.prizes[trace(w.lines, st)], 'あみだ: 2本でもたどった先の点'));
+  for (const rules of [{ hide: 0 }, { hide: 2 }, { hide: 2, minus: true }]) {
+    for (const n of [2, 4]) {
+      const end = runCpus(A, n, 30 + n, rules, 1000, 3000);
+      assert.ok(A.result(end) && end.round === 2, `あみだ: CPU どうしで最後まで ${n}人 ${JSON.stringify(rules)}`);
+      assert.ok(end.scores.every((v) => v >= (rules.minus ? -9 : 0) && v <= 15));
+    }
+  }
   console.log('amida OK');
 }
 
@@ -8365,6 +8408,12 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     const end = runCpus(N, 4, 6, rules, 250, 8000);
     assert.ok(N.result(end), `ならべかえ: CPU どうしで最後まで ${JSON.stringify(rules)}`);
   }
+  // 1字目のヒント（2026-11-04 の34回目の案）: 画面だけのことなので、局面は rules のほかは同じ
+  assert.equal(N.settings.find((x) => x.key === 'hint')?.def, false, 'ならべかえ: 1字目のヒントは最初なし');
+  const { rules: hr, ...hs } = N.init(3, 4, { rules: { hint: true } });
+  const { rules: nr, ...ns } = N.init(3, 4, { rules: {} });
+  assert.deepEqual(hs, ns, 'ならべかえ: ヒントありでも問題は同じ');
+  assert.equal(hr.hint, true);
   console.log('narabe OK');
 }
 
@@ -8383,7 +8432,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     }
   }
   assert.ok(kinds[0] > kinds[1] && kinds[1] > kinds[2] && kinds[2] > 0, '金魚: 赤がいちばん多く、金がまれ');
-  assert.deepEqual(KINDS.map((k) => k.v), [1, 3, 5], '金魚: 赤1点・黒3点・金5点');
+  assert.deepEqual(KINDS.slice(0, 3).map((k) => k.v), [1, 3, 5], '金魚: 赤1点・黒3点・金5点');
   assert.equal(lift(1, [0]), 1 - KINDS[0].w, '金魚: 持ち上げると重さの分だけ弱る');
   assert.equal(lift(0.1, [1]), null, '金魚: 弱ったポイで重い金魚をすくうと破れる');
   assert.ok(Math.abs(wear(1, 0) - DRAIN) < 1e-9, '金魚: 水の中で1秒に減る分');
@@ -8409,6 +8458,36 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.ok(K.result(end), `金魚: CPU どうしで最後まで ${n}人`);
     assert.ok(end.scores.every((v) => v >= 0 && v < 80), '金魚: CPU の点がありえる数');
   }
+  // ポイの数・ぬし（2026-11-04 の34回目の案）
+  assert.deepEqual(K.init(3, 4, { rules: { poi: 3, nushi: false } }), K.init(3, 4), '金魚: 最初の値なら前と全く同じ局面');
+  let nushi = 0;
+  for (let seed = 0; seed < 50; seed++) for (let i = 0; i < NF; i++) {
+    const a = fishOf(seed, i, 0), b = fishOf(seed, i, 0, true);
+    if (b.kind === 3) nushi += 1; else assert.deepEqual(b, a, '金魚: ぬしありでも、ぬし以外の金魚は同じ');
+    assert.notEqual(a.kind, 3, '金魚: ぬしなしではぬしが出ない');
+  }
+  assert.ok(nushi > 10 && nushi < 70, `金魚: ぬしはまれ（${nushi}/800）`);
+  assert.equal(KINDS[3].v, 10, '金魚: ぬしは10点');
+  assert.ok(lift(1, [3]) !== null && lift(1 - DRAIN, [3]) === null, '金魚: ぬしは水に入れてすぐでないと破れる');
+  let u = K.apply(K.init(2, 3), { p: -1, t: 'start' });
+  assert.equal(K.apply(u, { p: 0, t: 'scoop', n: 0, v: 10, c: 1 }), null, '金魚: ぬしなしで10点は弾く');
+  u = K.apply(K.init(2, 3, { rules: { nushi: true } }), { p: -1, t: 'start' });
+  assert.ok(K.apply(u, { p: 0, t: 'scoop', n: 0, v: 10, c: 1 }), '金魚: ぬしありなら10点');
+  assert.equal(K.apply(u, { p: 0, t: 'scoop', n: 0, v: 21, c: 2 }), null);
+  const { poisOf } = await import('../app/js/games/kingyo.js');
+  assert.deepEqual([1, 3, 5].map((poi) => poisOf(K.init(2, 1, { rules: { poi } }))), [1, 3, 5], '金魚: ポイの数');
+  assert.equal(poisOf(K.init(2, 1)), 3, '金魚: ポイは最初3枚');
+  const lasts = {};
+  for (const poi of [1, 5]) {
+    let total = 0;
+    for (let g = 0; g < 6; g++) {
+      const end = runCpus(K, 3, 40 + poi * 10 + g, { poi, nushi: true }, 150, 3000); // 種は分ける（CPU の予定と時計は種ごとに覚えているため）
+      assert.ok(K.result(end), `金魚: CPU どうしで最後まで ポイ${poi}枚`);
+      total += end.fish.reduce((a, b) => a + b, 0);
+    }
+    lasts[poi] = total;
+  }
+  assert.ok(lasts[5] > lasts[1], `金魚: ポイが多いほど CPU もたくさんすくう（1枚 ${lasts[1]}・5枚 ${lasts[5]}）`);
   console.log('kingyo OK');
 }
 
