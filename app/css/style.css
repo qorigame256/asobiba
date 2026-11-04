@@ -2357,3 +2357,45 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 /* ダーツ */
 .dt-head { padding: 8px 12px; }
 .dt-canvas { display: block; margin: 0 auto; border-radius: 50%; touch-action: none; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+/* あみだくじ陣取り */
+.am-board { display: flex; justify-content: center; }
+.am-svg { width: min(100%, 420px); height: auto; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.am-v { stroke: #8a8a8a; stroke-width: 4; stroke-linecap: round; }
+.am-h { stroke-width: 7; stroke-linecap: round; }
+.am-h.hid { stroke-dasharray: 10 7; }
+.am-h.hid.mine { opacity: .85; }
+.am-h.lost { stroke-dasharray: 4 6; opacity: .45; stroke-width: 4; }
+.am-h.pop { animation: pop .25s ease-out; transform-box: fill-box; transform-origin: center; }
+.am-slot { stroke: var(--line); stroke-width: 3; stroke-dasharray: 4 6; }
+.am-hit { fill: transparent; cursor: pointer; }
+.am-hit:hover { fill: rgba(217, 100, 58, .14); }
+.am-start { stroke: #fff; stroke-width: 3; }
+.am-start.me { stroke: var(--ink); stroke-width: 4; }
+.am-name { font-size: 17px; font-weight: 700; text-anchor: middle; fill: var(--ink); }
+.am-prize { fill: var(--field); stroke: var(--line); stroke-width: 2; }
+.am-prize.got { stroke-width: 6; }
+.am-pt { font-size: 21px; font-weight: 800; text-anchor: middle; fill: var(--ink); }
+.am-mine { fill: none; stroke-width: 3; opacity: .5; stroke-dasharray: 6 5; stroke-linejoin: round; }
+.am-path { fill: none; stroke-width: 9; opacity: .8; stroke-linejoin: round; stroke-linecap: round; }
+.am-path.anim { stroke-dasharray: 1; stroke-dashoffset: 1; animation: amTrace 3s ease-in-out forwards; }
+@keyframes amTrace { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .am-path.anim { animation: none; stroke-dashoffset: 0; } }
+/* ならべかえ言葉 */
+.nb-kind { font-size: 1rem; margin: 4px 0 8px; }
+.nb-row, .nb-pool { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; touch-action: manipulation; }
+.nb-row { margin: 6px 0 10px; }
+.nb-row.shake { animation: ntShake .3s; }
+.board button.nb-tile { width: clamp(2.6rem, 13vw, 3.4rem); height: clamp(2.6rem, 13vw, 3.4rem); padding: 0; border: 2px solid var(--line); border-radius: 10px; background: var(--field); color: var(--ink); font-size: clamp(1.4rem, 7vw, 1.9rem); font-weight: 800; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+.board button.nb-tile.empty { border-style: dashed; background: transparent; }
+.board button.nb-tile.on { border-color: var(--accent); }
+.board button.nb-tile.ans { border-color: #2f8a4a; color: #2f8a4a; }
+.board button.nb-tile.used { opacity: .25; }
+.board button.nb-tile:disabled { cursor: default; }
+/* 金魚すくい */
+.kg-card { padding: 8px; }
+.kg-canvas { display: block; margin: 8px auto 0; border-radius: 14px; box-shadow: 0 0 0 6px #d9d9d9; touch-action: none; user-select: none; -webkit-user-select: none; }
+/* 積み上げタワー */
+.tw-card { padding: 8px; }
+.tw-canvas { display: block; margin: 0 auto; border-radius: 10px; background: linear-gradient(#cfe9ff, #f6fbff); touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.board button.tw-btn:disabled { opacity: .45; cursor: default; }
+.board button.tw-btn { display: block; width: min(100%, 360px); min-height: 4.4rem; margin: 0 auto; font-size: 1.6rem; font-weight: 800; touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }

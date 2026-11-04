@@ -8263,4 +8263,207 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('darts OK');
 }
 
+// あみだくじ陣取り（2026-11-04）: 線の決まり・たどった先は全員ばらばら・順番・隠し線のぶつかり・3回で終わり・CPU どうしで最後まで
+{
+  const A = GAMES.amida;
+  const { canDraw, trace, setup, COLS, ROWS } = await import('../app/js/games/amida.js');
+  const ls = [{ r: 3, c: 1, p: 0 }];
+  assert.equal(canDraw(ls, 3, 1), false, 'あみだ: 同じ所には引けない');
+  assert.equal(canDraw(ls, 3, 0), false, 'あみだ: 同じ段のとなりには引けない（左）');
+  assert.equal(canDraw(ls, 3, 2), false, 'あみだ: 同じ段のとなりには引けない（右）');
+  assert.equal(canDraw(ls, 3, 3), true, 'あみだ: 1つあけたら引ける');
+  assert.equal(canDraw(ls, 4, 1), true, 'あみだ: ちがう段なら引ける');
+  assert.equal(canDraw(ls, 0, COLS - 1), false, 'あみだ: 右の端の外には引けない');
+  assert.equal(canDraw(ls, ROWS, 0), false, 'あみだ: 段の外には引けない');
+  assert.equal(trace(ls, 1), 2, 'あみだ: 横線で右へ');
+  assert.equal(trace(ls, 2), 1, 'あみだ: 横線で左へ');
+  assert.equal(trace(ls, 0), 0);
+  for (let seed = 0; seed < 30; seed++) {
+    const u = setup(seed, seed % 3, 4);
+    assert.equal(new Set(u.starts).size, 4, 'あみだ: スタートは別々');
+    assert.deepEqual(u.prizes.slice().sort((a, b) => a - b), [0, 1, 2, 3, 5], 'あみだ: 当たりは 5・3・2・1・0点');
+    assert.deepEqual(setup(seed, seed % 3, 4), u, 'あみだ: 同じ種なら同じ形');
+    const ends = [...Array(COLS).keys()].map((c) => trace(u.lines, c));
+    assert.equal(new Set(ends).size, COLS, 'あみだ: どう引いても着く所は全員ばらばら');
+  }
+  let s = A.init(3, 5);
+  assert.equal(A.turn(s), 0, 'あみだ: 1回目は1番の人から');
+  const free = (st) => { for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS - 1; c++) if (canDraw(st.lines, r, c)) return [r, c]; return null; };
+  assert.equal(A.apply(s, { p: 1, t: 'line', r: 0, c: 0 }), null, 'あみだ: 番でない人は引けない');
+  for (let i = 0; i < 6; i++) {
+    assert.equal(A.turn(s), i % 3, 'あみだ: 1本ずつ順番に回る');
+    const [r, c] = free(s);
+    s = A.apply(s, { p: A.turn(s), t: 'line', r, c });
+  }
+  assert.equal(s.phase, 'hide', 'あみだ: 全員2本ずつで隠し線へ');
+  assert.equal(A.concurrent(s), true);
+  const [hr, hc] = free(s);
+  s = A.apply(s, { p: 2, t: 'hide', r: hr, c: hc });
+  s = A.apply(s, { p: 0, t: 'hide', r: hr, c: hc }); // 同じ所（見える線とはぶつからないので受け付ける）
+  assert.equal(A.apply(s, { p: 0, t: 'hide', r: hr, c: hc }), null, 'あみだ: 隠し線は1本だけ');
+  assert.equal(A.referee(s).key, 'hide0');
+  s = A.apply(s, { p: -1, t: 'reveal' });
+  assert.equal(s.last.lost[0], false, 'あみだ: ぶつかったら席が先の人が残る');
+  assert.equal(s.last.lost[2], true, 'あみだ: ぶつかった後ろの人の線は消える');
+  assert.equal(s.lines.filter((l) => l.hid).length, 1);
+  s.starts.forEach((st, p) => assert.equal(s.last.got[p], s.prizes[trace(s.lines, st)], 'あみだ: たどった先の点'));
+  assert.deepEqual(s.scores, s.last.got);
+  s = A.apply(s, { p: -1, t: 'next' });
+  assert.equal(s.round, 1);
+  assert.equal(A.turn(s), 1, 'あみだ: 2回目は2番の人から');
+  assert.equal(s.lines.length, 2, 'あみだ: 回ごとに線を引き直す');
+  for (const n of [2, 3, 4]) {
+    const end = runCpus(A, n, 9 + n, {}, 1000, 3000);
+    const r = A.result(end);
+    assert.ok(r && end.round === 2, `あみだ: CPU どうしで3回遊んで終わる ${n}人`);
+    assert.ok(end.scores.every((v) => v >= 0 && v <= 15));
+  }
+  console.log('amida OK');
+}
+
+// ならべかえ言葉（2026-11-04）: 言葉の一覧の決まり・出す順・ばらばらの並び・正解とパスと点・CPU どうしで最後まで
+{
+  const N = GAMES.narabe;
+  const { NARABE } = await import('../app/js/games/narabe-data.js');
+  const { pickWords, scramble } = await import('../app/js/games/narabe.js');
+  const sorted = (w) => [...w].sort().join('');
+  assert.equal(new Set(NARABE.map(([w]) => w)).size, NARABE.length, 'ならべかえ: 同じ言葉が2つ');
+  assert.equal(new Set(NARABE.map(([w]) => sorted(w))).size, NARABE.length, 'ならべかえ: 同じ字の組み合わせの言葉が2つ（答えが2つになる）');
+  for (const [w, k] of NARABE) {
+    assert.ok(/^[ぁ-ゖ]{3,6}$/.test(w) && !/[ぁぃぅぇぉっゃゅょゎー]/.test(w), `ならべかえ: 3〜6字のひらがな・小さい字なし: ${w}`);
+    assert.ok(typeof k === 'string' && k, 'ならべかえ: お題の種類');
+  }
+  for (const n of [3, 4, 5]) assert.ok(NARABE.filter(([w]) => (n === 5 ? w.length >= 5 : w.length === n)).length >= 30, `ならべかえ: ${n}字の言葉が足りる`);
+  for (let seed = 0; seed < 20; seed++) {
+    for (const count of [10, 20]) {
+      const ws = pickWords(seed, count).map((i) => NARABE[i][0]);
+      assert.equal(new Set(ws).size, count, 'ならべかえ: 同じ言葉を2回出さない');
+      for (let i = 1; i < count; i++) assert.ok(Math.min(ws[i].length, 5) >= Math.min(ws[i - 1].length, 5), 'ならべかえ: 後ろほど長い');
+      assert.equal(ws[0].length, 3, 'ならべかえ: はじめは3字');
+      assert.ok(ws.at(-1).length >= 5, 'ならべかえ: 最後は5〜6字');
+    }
+  }
+  for (const [w] of NARABE) for (let q = 0; q < 3; q++) {
+    const t = scramble(7, q, w);
+    assert.notEqual(t.join(''), w, `ならべかえ: 答えと同じ並びにしない: ${w}`);
+    assert.equal(sorted(t.join('')), sorted(w));
+  }
+  assert.deepEqual(N.init(3, 4, { rules: {} }), N.init(3, 4, { rules: {} }), 'ならべかえ: 同じ種なら同じ問題');
+  let s = N.apply(N.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  const word = NARABE[s.qs[0].i][0];
+  assert.equal(N.apply(s, { p: 0, t: 'ok', q: 0, w: s.qs[0].tiles.join(''), ms: 900 }), null, 'ならべかえ: ちがう言葉は弾く');
+  assert.equal(N.apply(s, { p: 0, t: 'ok', q: 1, w: word, ms: 900 }), null, 'ならべかえ: ちがう問題の手は弾く');
+  s = N.apply(s, { p: 1, t: 'ok', q: 0, w: word, ms: 3000 });
+  s = N.apply(s, { p: 0, t: 'ok', q: 0, w: word, ms: 2000 });
+  assert.equal(N.apply(s, { p: 0, t: 'ok', q: 0, w: word, ms: 1000 }), null, 'ならべかえ: 正解は1回だけ');
+  assert.equal(N.referee(s).key, 'solved0', 'ならべかえ: だれかが正解したら締め切りが近づく');
+  s = N.apply(s, { p: 2, t: 'pass', q: 0 });
+  assert.equal(N.referee(s).key, 'all0', 'ならべかえ: 全員が正解かパスなら締め切り');
+  s = N.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [3, 2, 0], 'ならべかえ: 速い順に3点・2点、パスは0点');
+  for (const rules of [{}, { rounds: 20 }]) {
+    const end = runCpus(N, 4, 6, rules, 250, 8000);
+    assert.ok(N.result(end), `ならべかえ: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('narabe OK');
+}
+
+// 金魚すくい（2026-11-04）: 金魚の動きは種で決まり水そうの中・ポイの破れ方・すくった数の手の決まり・全員おしまいで終わり・CPU どうしで最後まで
+{
+  const K = GAMES.kingyo;
+  const { fishOf, posOf, lift, wear, NF, TANK_H, KINDS, DRAIN, FAST } = await import('../app/js/games/kingyo.js');
+  const kinds = [0, 0, 0];
+  for (let seed = 0; seed < 20; seed++) for (let i = 0; i < NF; i++) for (let g = 0; g < 3; g++) {
+    const f = fishOf(seed, i, g);
+    assert.deepEqual(fishOf(seed, i, g), f, '金魚: 同じ種なら同じ金魚');
+    kinds[f.kind] += 1;
+    for (let t = 0; t < 60000; t += 997) {
+      const [x, y] = posOf(f, t);
+      assert.ok(x > 0 && x < 1 && y > 0 && y < TANK_H, `金魚: 水そうの中を泳ぐ ${x} ${y}`);
+    }
+  }
+  assert.ok(kinds[0] > kinds[1] && kinds[1] > kinds[2] && kinds[2] > 0, '金魚: 赤がいちばん多く、金がまれ');
+  assert.deepEqual(KINDS.map((k) => k.v), [1, 3, 5], '金魚: 赤1点・黒3点・金5点');
+  assert.equal(lift(1, [0]), 1 - KINDS[0].w, '金魚: 持ち上げると重さの分だけ弱る');
+  assert.equal(lift(0.1, [1]), null, '金魚: 弱ったポイで重い金魚をすくうと破れる');
+  assert.ok(Math.abs(wear(1, 0) - DRAIN) < 1e-9, '金魚: 水の中で1秒に減る分');
+  assert.equal(wear(1, FAST), wear(1, 0), '金魚: ゆっくり動かすだけなら減り方は同じ');
+  assert.ok(wear(1, FAST + 0.5) > wear(1, 0), '金魚: 速く動かすと早く破れる');
+  let s = K.apply(K.init(2, 3), { p: -1, t: 'start' });
+  assert.equal(K.apply(s, { p: 0, t: 'scoop', n: 1, v: 1, c: 1 }), null, '金魚: 1回目から順に');
+  assert.equal(K.apply(s, { p: 0, t: 'scoop', n: 0, v: 7, c: 1 }), null, '金魚: 1匹で7点はありえない');
+  assert.equal(K.apply(s, { p: 0, t: 'scoop', n: 0, v: 3, c: 4 }), null, '金魚: 一度に4匹は弾く');
+  s = K.apply(s, { p: 0, t: 'scoop', n: 0, v: 4, c: 2 });
+  assert.equal(K.apply(s, { p: 0, t: 'scoop', n: 0, v: 4, c: 2 }), null, '金魚: 同じ手が2回届いても1回だけ数える');
+  s = K.apply(s, { p: 0, t: 'scoop', n: 1, v: 5, c: 1 });
+  assert.deepEqual([s.scores[0], s.fish[0]], [9, 3]);
+  s = K.apply(s, { p: 0, t: 'out' });
+  assert.equal(K.apply(s, { p: 0, t: 'out' }), null);
+  assert.equal(K.referee(s).key, 'play');
+  s = K.apply(s, { p: 1, t: 'out' });
+  assert.equal(K.referee(s).key, 'allout', '金魚: 全員のポイがなくなったら終わり');
+  s = K.apply(s, { p: -1, t: 'end' });
+  assert.deepEqual(K.result(s).winners, [0]);
+  for (const n of [1, 4]) {
+    const end = runCpus(K, n, 8, {}, 150, 3000);
+    assert.ok(K.result(end), `金魚: CPU どうしで最後まで ${n}人`);
+    assert.ok(end.scores.every((v) => v >= 0 && v < 80), '金魚: CPU の点がありえる数');
+  }
+  console.log('kingyo OK');
+}
+
+// 積み上げタワー（2026-11-04）: 動き方・ぴったり・はみ出し・段の数の手の決まり・全員おしまいで終わり・CPU どうしで最後まで
+{
+  const T = GAMES.tower;
+  const { stack, xOf, speedOf, BASE, PERFECT, MAX } = await import('../app/js/games/tower.js');
+  assert.ok(xOf(0, 0) < -0.8 && xOf(1, 0) > 0.8, 'タワー: 偶数の段は左から・奇数の段は右から');
+  for (let k = 0; k < 120; k += 7) for (let t = 0; t < 20000; t += 37) assert.ok(Math.abs(xOf(k, t)) <= 0.9 + 1e-9, 'タワー: ブロックは −0.9〜0.9 を動く');
+  assert.ok(speedOf(30) > speedOf(0) && speedOf(500) === 2.4, 'タワー: 段が上がるほど速く、いちばん速くて 2.4');
+  const pf = stack(0, 0.4, PERFECT);
+  assert.ok(pf.x === 0 && Math.abs(pf.w - 0.42) < 1e-9 && pf.perfect, 'タワー: ぴったりなら真上にそろえて幅が戻る');
+  assert.equal(stack(0, BASE, 0.01).w, BASE, 'タワー: 幅は 0.6 より広くならない');
+  const cut = stack(0, 0.4, 0.1);
+  assert.ok(Math.abs(cut.w - 0.3) < 1e-9 && Math.abs(cut.x - 0.05) < 1e-9 && !cut.perfect, 'タワー: はみ出た分が切れる');
+  assert.equal(stack(0, 0.4, 0.41), null, 'タワー: 全部はみ出たらおしまい');
+  let s = T.apply(T.init(2, 3), { p: -1, t: 'start' });
+  assert.equal(T.apply(s, { p: 0, t: 'up', k: 1 }), null, 'タワー: 1段目から順に');
+  s = T.apply(s, { p: 0, t: 'up', k: 0 });
+  assert.equal(T.apply(s, { p: 0, t: 'up', k: 0 }), null, 'タワー: 同じ手が2回届いても1段だけ');
+  s = T.apply(s, { p: 0, t: 'up', k: 1 });
+  s = T.apply(s, { p: 0, t: 'over', k: 2 });
+  assert.equal(T.apply(s, { p: 0, t: 'up', k: 2 }), null, 'タワー: おしまいのあとは積めない');
+  s = T.apply(s, { p: 1, t: 'over', k: 0 });
+  assert.equal(T.referee(s).key, 'allover', 'タワー: 全員おしまいで終わり');
+  s = T.apply(s, { p: -1, t: 'end' });
+  assert.deepEqual(T.result(s).winners, [0]);
+  assert.deepEqual(T.result(s).place, [1, 2]);
+  let t = T.apply(T.init(1, 1), { p: -1, t: 'start' });
+  for (let k = 0; k < MAX; k++) t = T.apply(t, { p: 0, t: 'up', k });
+  assert.equal(t.over[0], true, 'タワー: 100段で上がり');
+  const hs = [];
+  for (const n of [1, 3]) for (let seed = 0; seed < 10; seed++) {
+    const end = runCpus(T, n, seed, {}, 200, 8000);
+    assert.ok(T.result(end), `タワー: CPU どうしで最後まで ${n}人`);
+    hs.push(...end.h);
+  }
+  hs.sort((a, b) => a - b);
+  // ホストが開き直して CPU の覚えが消えても、局面の高さから続けて積む（2026-11-04 にブラウザで見つけた。前は止まったままだった）
+  {
+    const real = performance.now.bind(performance);
+    let fake = 0;
+    performance.now = () => fake;
+    try {
+      const r0 = { ...T.apply(T.init(1, 77), { p: -1, t: 'start' }), h: [5] };
+      let m = null;
+      for (let i = 0; i < 50 && !m; i++) { fake += 200; m = T.cpu(r0, 0); }
+      assert.ok(m && m.k === 5, 'タワー: 開き直したあとの CPU は局面の高さから続ける');
+      assert.deepEqual(T.cpu(r0, 0), m, 'タワー: 返した手がまだ局面に入っていなければ同じ手をもう一度');
+    } finally {
+      performance.now = real;
+    }
+  }
+  assert.ok(hs[hs.length >> 1] >= 5 && hs[hs.length >> 1] <= 40, `タワー: CPU の高さの真ん中がありえる数 ${hs[hs.length >> 1]}`);
+  console.log('tower OK（CPU の高さの真ん中', hs[hs.length >> 1], '段）');
+}
+
 console.log('ALL OK');
