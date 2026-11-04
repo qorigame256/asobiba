@@ -9,17 +9,19 @@
 //   - ポイの丈夫さは1。水の中にいると1秒に0.2減る（ずっと入れていると5秒で破れる）。横幅の0.5倍より速く動かすと、その速さに応じてさらに減る（1秒に横幅ぶん動かし続けると2秒ほどで破れる）。
 //     持ち上げるとき、上にいた金魚の重さ（赤0.12・黒0.22・金0.18）だけ減る。足りなければ破れて金魚は逃げる。一度にすくえるのは3匹まで。
 //   - 破れたら1秒で次のポイ。3枚とも破れたらおしまい（{ t: 'out' } を送る）。全員おしまいになったら1.2秒で終わる。
+//   - ポイが破れるたびに { t: 'break', n: 何枚目 } も送り、局面に破れた枚数（broke。破れるまで局面に持たない）を数える。ポイの数だけ破れたらおしまい（out）。
+//     端末の中だけで数えていたので、読み込み直すとポイがそろい直し、部屋を出た人の代わりの CPU も最初の枚数から始めていた（2026-11-04 Codex の点検の指摘）。
 //   - すくった点は各自の端末で決め、すくうたびに { t: 'scoop', n: 何回目, v: 点, c: 匹数 } を送る（大縄とびと同じく、各自の画面の時間で決める）。
 //     局面の数が端末の中で数えた数より少ないあいだは0.5秒ごとに、届いていない分をまとめて送り直す（2色爆弾サバイバルと同じ。ゲストの手がすれ違って消えることがあるため）。
 //   - 指で遊ぶときは、ポイを指の少し上に出す（指で金魚が隠れないように）。
-//   - CPU は2.5〜4.5秒に1回すくおうとし、5割5分ですくえる（1匹）。1回ごとに2割2分でポイが破れる。
+//   - CPU は2.5〜4.5秒に1回すくおうとし、5割5分ですくえる（1匹）。1回ごとに2割2分でポイが破れる（局面の破れた枚数から続ける）。
 // 2026-11-04 の34回目の案（本人が選んだ。分かれ目は Claude の判断）:
 //   - 詳細設定「ポイの数」（鍵は poi）: 1枚・3枚（最初。前と同じ）・5枚。CPU のポイの数も同じ。
 //   - 詳細設定「ぬし」（鍵は nushi）: なし（最初）・あり。生まれる金魚の4%が大きな「ぬし」（10点・重さ0.85）になる。
 //     重いので、水に入れてすぐ（およそ0.75秒のうちに）持ち上げないとポイが破れて逃げる。ほかの金魚と一緒にはすくいにくい。
 //     ぬしかどうかは金魚の色と動きを決めたあとの乱数で決める（なしのときの金魚は前と全く同じ）。ぬしはゆっくり泳ぐ。CPU はすくおうとした回の1%でぬし（10点）をすくう。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → start → play → end
-// 手: { p: -1, t: 'start' | 'end' } / { p, t: 'scoop', n, v, c } / { p, t: 'out' }
+// 手: { p: -1, t: 'start' | 'end' } / { p, t: 'scoop', n, v, c } / { p, t: 'break', n } / { p, t: 'out' }
 
 import { mulberry32 } from './util.js';
 import { scoreChips, since, leaders, winnersText, timeBar, SEAT_COLORS } from './party.js';
@@ -72,10 +74,11 @@ export const wear = (dt, v) => dt * DRAIN + Math.max(0, v - FAST) * dt * FAST_K;
 
 const key = (s) => `kingyo:${s.seed}`;
 const pointsText = (s) => (s.nushi ? '赤1点 黒3点 金5点 ぬし10点' : '赤1点 黒3点 金5点');
-const clone = (s) => ({ ...s, scores: s.scores.slice(), cnt: s.cnt.slice(), fish: s.fish.slice(), out: s.out.slice() });
+const clone = (s) => ({ ...s, scores: s.scores.slice(), cnt: s.cnt.slice(), fish: s.fish.slice(), out: s.out.slice(), ...(s.broke ? { broke: s.broke.slice() } : {}) });
+const brokeOf = (s, p) => s.broke?.[p] ?? 0; // 破れたポイの枚数
 
 const cpuPlan = new Map();
-let loc = null; // この端末の記録 { key, gen, back, dur, left, brokeAt, scoops: [{ v, c }], out }
+let loc = null; // この端末の記録 { key, gen, back, dur, left, broke, brokeAt, scoops: [{ v, c }], out }
 let ui = null;
 
 export default {
@@ -132,6 +135,14 @@ export default {
       if (s0.out[m.p]) return null;
       const s = clone(s0); s.step += 1; s.out[m.p] = true; return s;
     }
+    if (m.t === 'break') { // 同じ手が2回届いても n がずれるので1回だけ数える
+      if (s0.out[m.p] || m.n !== brokeOf(s0, m.p)) return null;
+      const s = clone(s0); s.step += 1;
+      s.broke ??= Array(s.n).fill(0);
+      s.broke[m.p] += 1;
+      if (s.broke[m.p] >= poisOf(s)) s.out[m.p] = true;
+      return s;
+    }
     if (m.t !== 'scoop' || m.n !== s0.cnt[m.p] || !Number.isInteger(m.c) || m.c < 1 || m.c > 3 || !Number.isInteger(m.v) || m.v < m.c || m.v > m.c * maxV(s0)) return null;
     const s = clone(s0);
     s.step += 1;
@@ -146,14 +157,11 @@ export default {
     if (s.phase !== 'play' || s.out[p]) return null;
     const pk = key(s) + ':' + p;
     let plan = cpuPlan.get(pk);
-    if (!plan) { plan = { next: 2500 + Math.random() * 2000, left: poisOf(s) }; cpuPlan.set(pk, plan); if (cpuPlan.size > 100) cpuPlan.delete(cpuPlan.keys().next().value); }
+    if (!plan) { plan = { next: 2500 + Math.random() * 2000 }; cpuPlan.set(pk, plan); if (cpuPlan.size > 100) cpuPlan.delete(cpuPlan.keys().next().value); }
     const t = since(key(s) + ':play');
     if (t < plan.next || t >= LIMIT) return null;
     plan.next = t + 2500 + Math.random() * 2000;
-    if (Math.random() < 0.22) {
-      plan.left -= 1;
-      return plan.left <= 0 ? { t: 'out' } : null;
-    }
+    if (Math.random() < 0.22) return { t: 'break', n: brokeOf(s, p) }; // ポイの数だけ破れたら局面がおしまいにする
     if (Math.random() >= 0.55) return null;
     const r = Math.random();
     if (s.nushi && r < 0.01) return { t: 'scoop', n: s.cnt[p], v: 10, c: 1 };
@@ -187,7 +195,7 @@ export default {
     }
     if (s.phase === 'end') return;
     since(tk);
-    if (loc?.key !== tk) loc = { key: tk, gen: Array(NF).fill(0), back: Array(NF).fill(0), dur: 1, left: poisOf(s), brokeAt: -1e9, scoops: [], out: false };
+    if (loc?.key !== tk) loc = { key: tk, gen: Array(NF).fill(0), back: Array(NF).fill(0), dur: 1, left: poisOf(s), broke: 0, brokeAt: -1e9, scoops: [], out: false };
     const card = document.createElement('div');
     card.className = 'kj-card kg-card';
     card.append(timeBar(tk, LIMIT));
@@ -203,11 +211,17 @@ export default {
       const st = ui.state;
       if (me === null || st.phase !== 'play') return;
       for (let n = st.cnt[me]; n < loc.scoops.length; n++) o.onMove({ t: 'scoop', n, ...loc.scoops[n] }); // 届いていない分をまとめて（2回目に届いた手は弾かれる）
+      for (let n = brokeOf(st, me); n < loc.broke; n++) o.onMove({ t: 'break', n });
       if (loc.out && !st.out[me]) o.onMove({ t: 'out' });
     };
     ui.update = () => {
       const st = ui.state;
-      const mine = me !== null ? loc.scoops.reduce((a, x) => a + x.v, 0) : 0;
+      if (st.phase === 'play' && me !== null) { // 開き直したとき: 局面の破れた枚数から続ける
+        if (brokeOf(st, me) > loc.broke) { loc.broke = brokeOf(st, me); loc.left = Math.max(0, poisOf(st) - loc.broke); }
+        if (st.out[me]) loc.out = true;
+      }
+      // 点は局面の点に、まだ届いていない分を足す（開き直したときに局面の数から埋めた記録は点が分からないので使わない）
+      const mine = me !== null ? st.scores[me] + loc.scoops.slice(st.cnt[me]).reduce((a, x) => a + x.v, 0) : 0;
       note.textContent = me === null ? '観戦中'
         : loc.out ? `ポイがなくなりました（${mine}点）。ほかの人を待っています`
         : since(tk) >= LIMIT ? `時間です（${mine}点）`
@@ -234,6 +248,7 @@ export default {
     const broke = () => {
       poi = null;
       loc.left -= 1;
+      loc.broke += 1;
       loc.brokeAt = tNow();
       loc.dur = 1;
       play('wrong', 0.5);

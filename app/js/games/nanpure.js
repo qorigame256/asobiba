@@ -293,8 +293,9 @@ export default {
     note.className = 'cc-log';
     const tiles = [];
     const keys = []; // 下の数字のボタン（1〜N）
-    // 埋め終わった数字: その数字が入るマスが全部、正しい数字で埋まっている（まちがいが混じっていれば入れない）
-    const doneDigits = () => new Set(Array.from({ length: N }, (_, k) => k + 1).filter((d) => q.answer.every((a, i) => a !== d || loc.cells[i] === d)));
+    // 埋め終わった数字: その数字が入るマスが全部、正しい数字で埋まっている（まちがいが混じっていれば入れない）。
+    // ほかのマスにまちがえて同じ数字を入れていても入れない（入れると、まちがえたマスまで固まって消せず、解けなくなった。2026-11-04 Codex の点検の指摘）
+    const doneDigits = () => new Set(Array.from({ length: N }, (_, k) => k + 1).filter((d) => q.answer.every((a, i) => (a === d) === (loc.cells[i] === d))));
     const locked = (i) => !q.puzzle[i] && !!loc.cells[i] && doneDigits().has(loc.cells[i]);
     const draw = () => {
       const sel = loc.sel;

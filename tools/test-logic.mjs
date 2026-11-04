@@ -8453,6 +8453,33 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.equal(K.referee(s).key, 'allout', '金魚: 全員のポイがなくなったら終わり');
   s = K.apply(s, { p: -1, t: 'end' });
   assert.deepEqual(K.result(s).winners, [0]);
+  // 破れたポイは局面で数える（2026-11-04 Codex の点検の指摘。端末の中だけで数えていて、読み込み直すとそろい直していた）
+  let b = K.apply(K.init(2, 3), { p: -1, t: 'start' });
+  assert.equal(K.apply(b, { p: 0, t: 'break', n: 1 }), null, '金魚: 破れたポイは1枚目から順に');
+  b = K.apply(b, { p: 0, t: 'break', n: 0 });
+  assert.equal(K.apply(b, { p: 0, t: 'break', n: 0 }), null, '金魚: 破れた手が2回届いても1枚だけ数える');
+  b = K.apply(b, { p: 0, t: 'break', n: 1 });
+  assert.deepEqual([b.broke, b.out], [[2, 0], [false, false]], '金魚: 2枚破れてもまだ続く');
+  b = K.apply(b, { p: 0, t: 'break', n: 2 });
+  assert.equal(b.out[0], true, '金魚: ポイの数だけ破れたらおしまい');
+  assert.equal(K.apply(b, { p: 0, t: 'break', n: 3 }), null);
+  {
+    const realNow = performance.now.bind(performance);
+    let fake = 0;
+    performance.now = () => fake;
+    try {
+      let c = K.apply(K.init(2, 77), { p: -1, t: 'start' });
+      c = K.apply(K.apply(c, { p: 1, t: 'break', n: 0 }), { p: 1, t: 'break', n: 1 }); // 人が2枚破ってから部屋を出た
+      for (let i = 0; i < 400 && !c.out[1]; i++) {
+        fake += 150;
+        const m = K.cpu(c, 1);
+        if (m) c = K.apply(c, { ...m, p: 1 }) ?? assert.fail('金魚: CPU の手は弾かれない');
+      }
+      assert.deepEqual(c.broke, [0, 3], '金魚: 代わりの CPU は破れた枚数から続ける（残り1枚）');
+    } finally {
+      performance.now = realNow;
+    }
+  }
   for (const n of [1, 4]) {
     const end = runCpus(K, n, 8, {}, 150, 3000);
     assert.ok(K.result(end), `金魚: CPU どうしで最後まで ${n}人`);

@@ -121,7 +121,7 @@ function centerField(field, spacer) {
   const max = document.documentElement.scrollHeight - window.innerHeight;
   if (want > max) spacer.style.height = Math.ceil(want - max) + 'px';
   window.scrollTo(0, Math.max(0, want));
-} // { mount, field, chips, els: Map(id → 要素), tapped: Set, n, cur: { s, o } }
+} // { mount, field, chips, els: Map(id → 要素), shown: Map(id → この画面に描いた時刻), tapped: Set, n, cur: { s, o } }
 const cpuPlan = new Map();
 
 function float(field, x, y, text, cls) {
@@ -158,7 +158,9 @@ function loop(token) {
     // ほかの人が先に押していても、自分の画面でその人の速さ（best.ms）を過ぎるまでは的を残す（2026-10-26 本人の声「ホストが圧倒的に有利」）。
     // 前は押した知らせが届いたらすぐ消していたので、通信の遅れ方によってはゲストの画面では出てすぐ消え、押す機会が無かった。
     // 速さは各自の画面で的が出てからの時間で比べるので、残っている間に押せば取り返せる（apply が速い方を残す）
-    const lost = !!best && (best.p === me || t - tg.at > best.ms);
+    // その人の速さは「この画面に的を描いた時刻から」で数える（押した速さを描いた時刻から測るのに合わせた。予定の時刻からだと、描くのが遅れた端末では早く消えた。2026-11-04 Codex の点検の指摘）
+    const drawn = ui.shown.get(tg.id);
+    const lost = !!best && (best.p === me || (drawn !== undefined ? performance.now() - drawn : t - tg.at) > best.ms);
     const live = t >= tg.at && t < tg.at + tg.life && !lost && !mineGone && s.phase === 'play';
     let e = ui.els.get(tg.id);
     if (live) {
@@ -177,6 +179,7 @@ function loop(token) {
         //   描き替えの遅い端末（スマホなど）では、予定の時刻より遅れて的が出るぶん、前は損をしていた。指が触れた時刻は ev.timeStamp（処理が始まるまでの待ちを含めない）。
         //   ドクロの時間切れの判定・動く的の位置は今までどおり予定の時刻から（Claude の判断）
         const shownAt = performance.now();
+        ui.shown.set(tg.id, shownAt);
         if (me !== null && o.canMove) {
           e.onpointerdown = (ev) => {
             ev.preventDefault();
@@ -344,7 +347,7 @@ export default {
       + (s.rules.bombs ? ' <span class="tg-dot bomb">☠</span>−2点' : '')
       + (s.rules.sizes ? '<br>赤と青の的は小さく出ると点が2倍・3倍' : '') + '<br>的が無いときに押すと −1点';
 
-    ui = { mount, field, chips, clock, els: new Map(), tapped: new Set(), n: 0, visible: 0, cur: { s, o } };
+    ui = { mount, field, chips, clock, els: new Map(), shown: new Map(), tapped: new Set(), n: 0, visible: 0, cur: { s, o } };
     const spacer = document.createElement('div'); // ページの下が足りずに真ん中まで送れないときの余白
     top.append(chips, clock);
     root.append(top, field, legend, spacer);

@@ -858,7 +858,8 @@ function stayNext(res) {
   if (!won.size) return null;
   const gone = (id) => id !== 'cpu' && !S.members.includes(id);
   const seated = new Set(ids);
-  const waiting = S.members.filter((id) => !seated.has(id) && alive(id));
+  // 観戦に回した人（S.bench）は順番待ちにも入れない（2026-11-04 Codex の点検の指摘。入れると勝ち残りの交代で席に入っていた）
+  const waiting = S.members.filter((id) => !seated.has(id) && alive(id) && !S.bench?.includes(id));
   if (!waiting.length) return null;
   const line = S.line ?? [];
   const queue = [...line.filter((id) => waiting.includes(id)), ...waiting.filter((id) => !line.includes(id))];
@@ -1047,7 +1048,8 @@ function boardPick() {
   const ok = (v) => (v === 'cpu' && cpuPickable(GAMES[S.gameId])) || S.members.includes(v);
   const p = S.pick;
   const people = Array.isArray(p) ? p.filter((v) => v !== 'cpu') : [];
-  const q = Array.isArray(p) && p.every(ok) && new Set(people).size === people.length ? p.slice(0, n) : [];
+  // 前に選んだ席に観戦に回した人がいれば外す（盤のゲームで席を選ぶ → カードのゲームで観戦に回す → 盤のゲームに戻す、で席に戻っていた。2026-11-04 Codex の点検の指摘）
+  const q = Array.isArray(p) && p.every(ok) && new Set(people).size === people.length ? p.slice(0, n).filter((v) => !benched(v)) : [];
   for (const id of S.members) if (q.length < n && !q.includes(id) && !benched(id)) q.push(id);
   if (cpuPickable(GAMES[S.gameId])) while (q.length < n) q.push('cpu');
   for (const id of S.members) if (q.length < n && !q.includes(id)) q.push(id); // CPU を選べないゲームで人が足りないときだけ
@@ -2893,7 +2895,9 @@ function scheduleCpu(game, st, res) {
   // 同時に動くゲーム（realtime）は CPU ごとに別々に予約し、相手が動いても取り消さない
   // （取り消すと相手が速いと CPU が永久に動けない。1人ずつだと、待っている CPU の後ろの CPU が動けない）
   const ps = S.order.map((id, i) => i).filter((i) => cpuControlled(S.order[i]) && canAct(st, i));
-  for (const p of game.realtime ? ps : ps.slice(0, 1)) {
+  // みんなが同時に押す場面（concurrent）も CPU ごとに予約する。1人ずつだと、何もしない CPU（null を返す）が前にいると後ろの CPU が動けない
+  // （ウミガメの「答えを見る？」で、言い出した人と返事をしていない人が部屋を出ると返事待ちが終わらなかった。2026-11-04 Codex の点検の指摘）
+  for (const p of game.realtime || game.concurrent?.(st) ? ps : ps.slice(0, 1)) {
     // 待ったで手が減ると同じ長さに戻るので、待ったの回数も鍵に入れる（入れないと「もう予約してある」と見て CPU が止まる）
     const key = game.realtime ? `${S.gameId}:${S.round}:rt:${p}` : `${S.gameId}:${S.round}:${S.undo ?? 0}:${S.moves.length}:${p}`;
     if (S.cpuKeys[p] === key) continue; // もう予約してある
