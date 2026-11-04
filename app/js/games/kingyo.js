@@ -252,7 +252,8 @@ export default {
       loc.brokeAt = tNow();
       loc.dur = 1;
       play('wrong', 0.5);
-      if (loc.left <= 0) { loc.out = true; sendOwn(); }
+      if (loc.left <= 0) loc.out = true;
+      sendOwn(); // 最後の1枚でなくてもすぐ送る（0.5秒ごとの送り直しまで待つと、その間に読み込み直したポイが戻った。2026-11-04 Codex の点検の指摘）
       ui.update();
     };
     const under = (x, y, t) => {
