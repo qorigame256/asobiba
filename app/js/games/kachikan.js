@@ -12,6 +12,9 @@
 //   - 出す場面に時間の決まりはない（相談はできないので、言葉を見比べて「たぶん自分が一番小さい」と思ったら出す）。
 //   - 数字は全員の端末が知っている（手札と同じ簡易の隠し方）。画面には自分の数字と、出た札の数字だけを出す。
 //   - CPU は、言葉の列の数字の場所から ±1 ずれた所の言葉を使うことがある（弱め）。出すのは「前の札が出てから 1.2秒 ＋ (自分の数字 − 前の札の数字) × 0.09秒」たったとき。
+// 2026-11-05 の35回目の案（本人が選んだ。分かれ目は Claude の判断）:
+//   - 詳細設定「ライフの数」（鍵は lives）: 1つ・3つ（最初）・5つ。難しさなので、おまかせでは抽選しない（main.js の KEEP_KEYS）。
+//     3つのときは局面に maxLives を持たない（前と全く同じ形）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → write → close → play →（全部出た）→ done → next … → end
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'word', r: 何こ目のお題か, text } / { p, t: 'play', r }
 
@@ -22,6 +25,7 @@ import { shown as filtered } from '../filter.js';
 
 export const MAX_ROUNDS = 10;
 export const LIVES = 3;
+const LIFE_CHOICES = [[3, '3つ'], [1, '1つ'], [5, '5つ']];
 const READY_MS = 3000;
 const WRITE_MS = 60000;
 const GRACE_MS = 1500;
@@ -56,13 +60,20 @@ export default {
   realtime: true,
   minPlayers: 2,
   maxPlayers: 10,
+  settings: [
+    { key: 'lives', label: 'ライフの数', desc: 'まちがえるたびに1つ減り、0になったら終わり', def: LIVES, choices: LIFE_CHOICES },
+  ],
 
-  init(n, seed) {
+  init(n, seed, { rules = {} } = {}) {
     const topics = shuffle([...TOPICS.keys()], mulberry32(seed)).slice(0, MAX_ROUNDS);
-    return {
-      n, seed, topics, r: -1, phase: 'ready', lives: LIVES, cleared: 0, perfect: 0, miss: 0,
+    const max = Number(rules.lives);
+    const lives = max !== LIVES && LIFE_CHOICES.some(([v]) => v === max) ? max : LIVES;
+    const s = {
+      n, seed, topics, r: -1, phase: 'ready', lives, cleared: 0, perfect: 0, miss: 0,
       nums: Array(n).fill(0), words: Array(n).fill(null), state: Array(n).fill('hand'), order: [], log: [], step: 0, last: null,
     };
+    if (lives !== LIVES) s.maxLives = lives;
+    return s;
   },
 
   turn() { return null; },
@@ -83,7 +94,7 @@ export default {
   },
   phaseText(s) {
     if (s.phase === 'ready') return 'まもなく始まります…';
-    return `お題 ${s.r + 1} / ${MAX_ROUNDS}　ライフ ${'❤️'.repeat(Math.max(0, s.lives))}${'🖤'.repeat(Math.max(0, LIVES - s.lives))}`;
+    return `お題 ${s.r + 1} / ${MAX_ROUNDS}　ライフ ${'❤️'.repeat(Math.max(0, s.lives))}${'🖤'.repeat(Math.max(0, (s.maxLives ?? LIVES) - s.lives))}`;
   },
 
   referee(s) {
@@ -208,7 +219,7 @@ export default {
     card.className = 'kj-card';
     wrap.append(card);
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">みんなで協力！ ひみつの数字をお題に合わせた言葉で伝えて、小さい順に出そう</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">みんなで協力！ ひみつの数字をお題に合わせた言葉で伝えて、小さい順に出そう（ライフ ${s.maxLives ?? LIVES}つ）</div>`;
       root.append(wrap);
       return;
     }

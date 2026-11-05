@@ -11,7 +11,12 @@
 //   - 送るのは、数字ごとの線が通ったマスの並び（paths）。apply で、どの数字の線も2つの数字のマスを結ぶ1本の線で、全部のマスをちょうど1回ずつ通るか確かめる
 //     （答えが1つだけの問題なので、正しく解けば必ず用意した答えと同じになるが、比べるのは線になっているかどうかだけ）。
 //   - 問題を作るとき、線が自分のとなりを通って折り返す形（同じ線の2マス先以降のマスがとなりにある）は使わない（tools/make-tsunagi.mjs）。
-//   - CPU は 5×5 は7割・7×7 は5割5分の問題を、制限時間の2.5〜7.5割のころに解く。解かない問題は同じころにあきらめる。
+//   - CPU は 5×5 は7割・7×7 は5割5分・9×9 は4割の問題を、制限時間の2.5〜7.5割のころに解く。解かない問題は同じころにあきらめる。
+// 2026-11-05 の35回目の案（本人が選んだ。分かれ目は Claude の判断）:
+//   - 詳細設定「問題の数」（鍵は rounds）: 1問・3問（最初）・5問。おまかせでは抽選しない（main.js の KEEP_KEYS の rounds）。
+//   - 大きさに 9×9（むずかしい）を足した。制限時間は300秒。数字が9までだと 9×9 の問題が作れなかった（2万回試して0こ）ので、
+//     9×9 だけ数字を 10〜13 まで使う（問題の文字列では 'a'〜'd'。numOf で数に直す）。作り方も 9×9 だけ「線が自分のとなりに来そうな所で切る」形（makeCandidate の cut）。
+//   - 3問（最初）・7×7 のときの局面と乱数の使い方は前と同じ。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（15パズル早解きと同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, paths: { 数字: [マス…] }, ms } / { p, t: 'pass', q }
 
@@ -25,14 +30,19 @@ const SHOWN_MS = 4000;
 const GRACE_MS = 1500;
 const AFTER_MS = 20000;
 export const QUESTIONS = 3;
-const LIMITS = { 5: 90000, 7: 180000 };
-const sizeOf = (r) => (String(r.size) === '5' ? 5 : 7);
+const ROUNDS = [[3, '3問'], [1, '1問'], [5, '5問']];
+const roundsOf = (r) => (ROUNDS.some(([v]) => v === Number(r.rounds)) ? Number(r.rounds) : QUESTIONS);
+const LIMITS = { 5: 90000, 7: 180000, 9: 300000 };
+const sizeOf = (r) => (String(r.size) === '5' ? 5 : String(r.size) === '9' ? 9 : 7);
+// 問題の文字（'1'〜'9'・'a'〜'd'）を数（1〜13）に直す
+export const numOf = (ch) => parseInt(ch, 36);
 const limitOf = (s) => LIMITS[s.size];
 const qKey = (s, q = s.q) => `tsunagi:${s.seed}:${q}`;
 const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice(), passed: s.passed.slice() });
 const doneOf = (s, p) => s.solved[p] !== null || s.passed[p];
-// 線の色（数字ごと。1〜9）。どのスキンでも変えない
-export const LINE_COLORS = ['#e74c3c', '#2f6fb3', '#2e9a52', '#d4a20c', '#8a4fc0', '#e67e22', '#1a9aa0', '#d24a8c', '#7a5a3a'];
+// 線の色（数字ごと。1〜13。10〜13 は 9×9 だけ）。どのスキンでも変えない
+export const LINE_COLORS = ['#e74c3c', '#2f6fb3', '#2e9a52', '#d4a20c', '#8a4fc0', '#e67e22', '#1a9aa0', '#d24a8c', '#7a5a3a', '#3f3fa0', '#8fb339', '#22a7e0', '#666666'];
+const colorOf = (k) => LINE_COLORS[(numOf(k) - 1) % LINE_COLORS.length];
 
 /* ---------- 盤の道具（問題を作る台本 tools/make-tsunagi.mjs と自動確認も使う） ---------- */
 
@@ -105,7 +115,8 @@ export function countSolutions(puzzle, N, limit = 2) {
   const cells = N * N;
   const nb = neighbors(N);
   const color = new Int8Array(cells);
-  const ends = endsOf(puzzle);
+  const ends = {};
+  for (const [ch, v] of Object.entries(endsOf(puzzle))) ends[numOf(ch)] = v; // 色は数で持つ（'a' などの文字も 10〜 に直す）
   const ks = Object.keys(ends).map(Number);
   const head = {}, tail = {}, done = {};
   let filled = 0;
@@ -194,8 +205,9 @@ export function countSolutions(puzzle, N, limit = 2) {
   if (ok()) dfs();
   return count;
 }
-// 問題を1つ作る（答えが1つだけかはまだ見ない）。全部のマスを通る1本の道をでたらめに曲げてから、3〜maxLen マスずつに切る
-export function makeCandidate(N, rnd, maxLen) {
+// 問題を1つ作る（答えが1つだけかはまだ見ない）。全部のマスを通る1本の道をでたらめに曲げてから、3〜maxLen マスずつに切る。
+// cut（9×9 で使う）: 切る長さを決めたあと、線が自分のとなりに来るマスの手前でも切る（どこかが3マスより短くなったら使わない）。maxSegs = 線の数の上限
+export function makeCandidate(N, rnd, maxLen, { cut = false, maxSegs = 9 } = {}) {
   const nb = neighbors(N);
   const path = [];
   for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) path.push(r * N + (r % 2 ? N - 1 - c : c));
@@ -209,13 +221,23 @@ export function makeCandidate(N, rnd, maxLen) {
   }
   const segs = [];
   let i = 0;
-  while (i < path.length) {
-    let len = 3 + Math.floor(rnd() * (maxLen - 2));
-    if (path.length - (i + len) < 3) len = path.length - i;
-    segs.push(path.slice(i, i + len));
-    i += len;
+  if (cut) {
+    while (i < path.length) {
+      const want = 3 + Math.floor(rnd() * (maxLen - 2));
+      const seg = [path[i++]];
+      while (i < path.length && seg.length < want && !seg.slice(0, -1).some((x) => nb[x].includes(path[i]))) seg.push(path[i++]);
+      if (seg.length < 3) return null;
+      segs.push(seg);
+    }
+  } else {
+    while (i < path.length) {
+      let len = 3 + Math.floor(rnd() * (maxLen - 2));
+      if (path.length - (i + len) < 3) len = path.length - i;
+      segs.push(path.slice(i, i + len));
+      i += len;
+    }
   }
-  if (segs.length > 9) return null;
+  if (segs.length > maxSegs) return null;
   // 線が自分のとなりを通って折り返す形（2マス先以降の自分のマスがとなりにある）は使わない（見た目が分かりにくく、色分けから線が1本に決まらないため）
   for (const seg of segs) for (let a = 0; a < seg.length; a++) for (let b = a + 2; b < seg.length; b++) if (nb[seg[a]].includes(seg[b])) return null;
   const order = shuffle([...segs.keys()], rnd);
@@ -223,9 +245,10 @@ export function makeCandidate(N, rnd, maxLen) {
   const sol = Array(N * N).fill('0');
   order.forEach((si, k) => {
     const seg = segs[si];
-    for (const c of seg) sol[c] = String(k + 1);
-    p[seg[0]] = String(k + 1);
-    p[seg[seg.length - 1]] = String(k + 1);
+    const ch = (k + 1).toString(36); // 1〜9 は '1'〜'9'、10〜 は 'a'〜
+    for (const c of seg) sol[c] = ch;
+    p[seg[0]] = ch;
+    p[seg[seg.length - 1]] = ch;
   });
   return { p: p.join(''), s: sol.join('') };
 }
@@ -247,13 +270,14 @@ export default {
   minPlayers: 2,
   maxPlayers: 10,
   settings: [
-    { key: 'size', label: '大きさ', desc: '5×5 はかんたん・7×7 はふつう', def: '7', choices: [['7', '7×7'], ['5', '5×5（かんたん）']] },
+    { key: 'size', label: '大きさ', desc: '5×5 はかんたん・7×7 はふつう・9×9 はむずかしい', def: '7', choices: [['7', '7×7'], ['5', '5×5（かんたん）'], ['9', '9×9（むずかしい）']] },
+    { key: 'rounds', label: '問題の数', desc: '1回の対局で解く問題の数', def: 3, choices: ROUNDS },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const r = { size: '7', ...rules };
     const size = sizeOf(r);
-    const qs = shuffle([...TSUNAGI[size].keys()], mulberry32(seed)).slice(0, QUESTIONS).map((i) => TSUNAGI[size][i]);
+    const qs = shuffle([...TSUNAGI[size].keys()], mulberry32(seed)).slice(0, roundsOf(r)).map((i) => TSUNAGI[size][i]);
     return {
       n, seed, rules: r, size, qs, q: -1, phase: 'ready',
       solved: Array(n).fill(null), passed: Array(n).fill(false), scores: Array(n).fill(0), last: null, log: [], step: 0,
@@ -329,7 +353,7 @@ export default {
     const key = qKey(s) + ':' + p;
     let plan = cpuPlan.get(key);
     if (!plan) {
-      plan = { at: limitOf(s) * (0.25 + Math.random() * 0.5), ok: Math.random() < (s.size === 5 ? 0.7 : 0.55), done: false };
+      plan = { at: limitOf(s) * (0.25 + Math.random() * 0.5), ok: Math.random() < (s.size === 5 ? 0.7 : s.size === 9 ? 0.4 : 0.55), done: false };
       cpuPlan.set(key, plan);
       if (cpuPlan.size > 200) cpuPlan.delete(cpuPlan.keys().next().value);
     }
@@ -398,7 +422,7 @@ export default {
     note.className = 'cc-log';
     const owner = () => {
       const own = Array(N * N).fill(0);
-      for (const [k, path] of Object.entries(loc.paths)) for (const c of path) own[c] = Number(k);
+      for (const [k, path] of Object.entries(loc.paths)) for (const c of path) own[c] = numOf(k); // Number('a') は NaN で「埋まっていない」に見えるので numOf で直す
       return own;
     };
     const complete = (k) => { const path = loc.paths[k]; return !!path && path.length >= 2 && ends[k].includes(path[path.length - 1]) && path[path.length - 1] !== path[0]; };
@@ -411,15 +435,16 @@ export default {
       let html = '';
       for (let i = 0; i < N * N; i++) html += `<rect x="${i % N + 0.03}" y="${Math.floor(i / N) + 0.03}" width=".94" height=".94" rx=".12" class="tg-cell"/>`;
       for (const [k, path] of Object.entries(paths)) {
-        const col = LINE_COLORS[(Number(k) - 1) % LINE_COLORS.length];
+        const col = colorOf(k);
         for (const c of path) html += `<rect x="${c % N + 0.03}" y="${Math.floor(c / N) + 0.03}" width=".94" height=".94" rx=".12" fill="${col}" opacity=".18"/>`;
         if (path.length > 1) html += `<polyline points="${path.map((c) => center(c).join(',')).join(' ')}" fill="none" stroke="${col}" stroke-width=".32" stroke-linecap="round" stroke-linejoin="round"/>`;
       }
       for (const [k, [a, b]] of Object.entries(ends)) {
-        const col = LINE_COLORS[(Number(k) - 1) % LINE_COLORS.length];
+        const col = colorOf(k);
+        const label = numOf(k);
         for (const c of [a, b]) {
           const [x, y] = center(c);
-          html += `<circle cx="${x}" cy="${y}" r=".38" fill="${col}"/><text x="${x}" y="${y + 0.15}" text-anchor="middle" font-size=".42" font-weight="800" fill="#fff">${k}</text>`;
+          html += `<circle cx="${x}" cy="${y}" r=".38" fill="${col}"/><text x="${x}" y="${y + 0.15}" text-anchor="middle" font-size="${label >= 10 ? 0.36 : 0.42}" font-weight="800" fill="#fff">${label}</text>`;
         }
       }
       svg.innerHTML = html;

@@ -10,7 +10,10 @@
 //     ぴったりで返し続けると7回ほどでいちばん速くなり、ずれが大きいと少しずつゆっくりに戻る。
 //   - 押さなかった人の端末は、輪を過ぎたら「落とした」を送る。届かなかったときのため、ホストは輪を過ぎて2.5秒たったら落とした扱いにする。
 //   - 落としたら2.2秒、落書きを見せてから、落とした人がサーブする（席の順に次の人へ）。最初のサーブは席の1番目の人。
-//   - 落書きは 1:目のまわりの丸 2:ほっぺのばつ 3:ひげ 4:太いまゆ 5:おでこのうずまき の順に増える。
+//   - 落書きは 1:目のまわりの丸 2:ほっぺのばつ 3:ひげ 4:太いまゆ 5:おでこのうずまき（6:黒い鼻 7:あごのぶつぶつ）の順に増える。
+// 2026-11-05 の35回目の案（本人が選んだ。分かれ目は Claude の判断）:
+//   - 詳細設定「落とせる回数」（鍵は drops）: 3回・5回（最初）・7回。だれかがその回数落としたら終わり。7回のために落書きを2つ足した（上の6・7）。
+//     長さなので、おまかせでは抽選しない（main.js の KEEP_KEYS）。5回のときは局面に max を持たない（前と全く同じ形）。
 //   - CPU は羽根が遅いほど上手（1.6秒で9割、0.6秒で5割5分ほど返す）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → serve → fly → (hit → fly …) → drop → serve … → end
 // 手: { p: -1, t: 'serve' | 'drop', n } / { p, t: 'hit', n: 何本目の羽根か, ms: 羽根が出てから押すまで } / { p, t: 'miss', n }
@@ -19,6 +22,8 @@
 import { since, scoreChips, SEAT_COLORS } from './party.js';
 
 export const INK_MAX = 5;
+const DROPS = [[5, '5回'], [3, '3回'], [7, '7回']];
+export const maxOf = (s) => s.max ?? INK_MAX; // 何回落としたら終わりか
 export const START_D = 1600;
 export const MIN_D = 600;
 export const MAX_D = 1800;
@@ -47,7 +52,7 @@ function dropAt(s0, p) {
   s.step += 1;
   s.ink[p] += 1;
   s.dropped = p;
-  s.phase = s.ink[p] >= INK_MAX ? 'end' : 'drop';
+  s.phase = s.ink[p] >= maxOf(s) ? 'end' : 'drop';
   s.last = { p, ok: false };
   return s;
 }
@@ -62,9 +67,15 @@ export default {
   realtime: true,
   minPlayers: 2,
   maxPlayers: 6,
+  settings: [
+    { key: 'drops', label: '落とせる回数', desc: 'だれかがこの回数落としたら終わり', def: 5, choices: DROPS },
+  ],
 
-  init(n, seed) {
-    return { n, seed, phase: 'ready', ink: Array(n).fill(0), from: n - 1, to: 0, d: START_D, k: 0, hits: 0, dropped: null, last: null, step: 0, best: 0 };
+  init(n, seed, { rules = {} } = {}) {
+    const s = { n, seed, phase: 'ready', ink: Array(n).fill(0), from: n - 1, to: 0, d: START_D, k: 0, hits: 0, dropped: null, last: null, step: 0, best: 0 };
+    const max = Number(rules.drops);
+    if (max !== INK_MAX && DROPS.some(([v]) => v === max)) s.max = max;
+    return s;
   },
 
   turn() { return null; },
@@ -157,7 +168,7 @@ export default {
     const me = o.me >= 0 && !o.watching ? o.me : null;
     const won = s.phase === 'end' ? placeOf(s.ink).map((v, p) => (v === 1 ? p : -1)).filter((p) => p >= 0) : [];
     const extra = (p) => {
-      const dots = '●'.repeat(s.ink[p]) + '○'.repeat(Math.max(0, INK_MAX - s.ink[p]));
+      const dots = '●'.repeat(s.ink[p]) + '○'.repeat(Math.max(0, maxOf(s) - s.ink[p]));
       const tag = s.last?.ok && s.last.p === p && s.last.q >= 0.7 && s.phase === 'fly' ? ' <b class="hn-good">ぴったり！</b>' : '';
       return `<span class="hn-ink">${dots}</span>${tag}`;
     };
@@ -233,6 +244,8 @@ export default {
       if (k >= 3) { for (const sd of [-1, 1]) { g.beginPath(); g.moveTo(x + sd * r * 0.12, y + r * 0.12); g.quadraticCurveTo(x + sd * r * 0.5, y + r * 0.02, x + sd * r * 0.8, y + r * 0.18); g.stroke(); } }
       if (k >= 4) { g.lineWidth = r * 0.16; g.beginPath(); g.moveTo(x - r * 0.55, y - r * 0.4); g.lineTo(x - r * 0.15, y - r * 0.45); g.moveTo(x + r * 0.15, y - r * 0.45); g.lineTo(x + r * 0.55, y - r * 0.4); g.stroke(); }
       if (k >= 5) { g.lineWidth = Math.max(2.5, r * 0.07); g.beginPath(); for (let t = 0; t < 14; t++) { const a = t * 0.9; const rr = 2 + t * r * 0.022; const px = x + Math.cos(a) * rr; const py = y - r * 0.68 + Math.sin(a) * rr * 0.6; if (t) g.lineTo(px, py); else g.moveTo(px, py); } g.stroke(); }
+      if (k >= 6) { g.fillStyle = '#111'; g.beginPath(); g.arc(x, y + r * 0.08, r * 0.12, 0, Math.PI * 2); g.fill(); } // 黒い鼻
+      if (k >= 7) { g.fillStyle = '#111'; for (const [dx, dy] of [[-0.3, 0.7], [-0.15, 0.78], [0, 0.72], [0.15, 0.8], [0.3, 0.7], [-0.08, 0.86], [0.08, 0.64]]) { g.beginPath(); g.arc(x + dx * r, y + dy * r, Math.max(1.2, r * 0.035), 0, Math.PI * 2); g.fill(); } } // あごのぶつぶつ
       g.restore();
     };
     const draw = () => {

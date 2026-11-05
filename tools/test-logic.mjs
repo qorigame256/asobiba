@@ -8613,6 +8613,29 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   const res = F.result(s);
   assert.deepEqual(res.winners, [0], '風船: 合計点の多い人の勝ち');
   assert.deepEqual(res.scores, [pop - 1 + 4, 4, 4], '風船: 合計点');
+  // ボーナスと割れる回数の幅（2026-11-05 の35回目の案）
+  {
+    const { bonusOf, RANGES, BONUS: FB } = await import('../app/js/games/fusen.js');
+    const plain = F.init(3, 42);
+    assert.ok(!('bonus' in plain) && !('range' in plain), '風船: なし・ふつうのときは局面に bonus・range を持たない');
+    assert.deepEqual(F.init(3, 42, { rules: { bonus: false, range: 'mid' } }), plain, '風船: なし・ふつうを選んでも前と同じ局面');
+    assert.deepEqual(plain.pops, [...Array(5)].map((_, r) => popOf(42, r)), '風船: ふつうの割れる回数は前と同じ');
+    assert.deepEqual(bonusOf([4, 7, 0, 7]), [1, 3], '風船: ボーナスはいちばん多い人（並んだら全員）');
+    assert.deepEqual(bonusOf([0, 0]), [], '風船: 全員0点ならボーナスなし');
+    for (const [key, [lo, hi]] of Object.entries(RANGES)) {
+      const vs = new Set();
+      for (let seed = 0; seed < 200; seed++) for (const v of F.init(2, seed, { rules: { range: key } }).pops) { assert.ok(v >= lo && v <= hi, `風船: 幅 ${key} は ${lo}〜${hi}（${v}）`); vs.add(v); }
+      assert.equal(vs.size, hi - lo + 1, `風船: 幅 ${key} の回数はどれも出る`);
+    }
+    let b = F.apply(F.init(3, 42, { rules: { bonus: true } }), { p: -1, t: 'next' });
+    const bp = b.pops[0];
+    b = F.apply(b, { p: 0, t: 'stop', r: 0, k: bp - 1 });
+    b = F.apply(b, { p: 1, t: 'stop', r: 0, k: bp }); // 割れた（いちばん多く押したが0点）
+    b = F.apply(b, { p: 2, t: 'stop', r: 0, k: Math.max(0, bp - 2) });
+    b = F.apply(b, { p: -1, t: 'close' });
+    assert.deepEqual(b.scores, [bp - 1 + FB, 0, Math.max(0, bp - 2)], '風船: 割らずにいちばん多く押した人だけ +3点（割れた人はもらえない）');
+    assert.deepEqual(b.log[0].bonus, [0], '風船: ボーナスの人はふりかえりに残る');
+  }
   // CPU: 時間とともに決め、割れる回数を超えない
   const real = performance.now.bind(performance);
   let fake = 0;
@@ -8722,6 +8745,18 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.deepEqual(res.winners, [1], '羽根つき: 落書きのいちばん少ない人の勝ち');
   const { seatPoints: seatPointsLocal } = await import('../app/js/games/index.js');
   assert.deepEqual(seatPointsLocal(res, 3), [0, 2, 1], '羽根つき: 順位で点（落書き 5・0・1こ）');
+  // 落とせる回数（2026-11-05 の35回目の案）
+  assert.ok(!('max' in HN.init(3, 5)) && !('max' in HN.init(3, 5, { rules: { drops: 5 } })), '羽根つき: 5回のときは局面に max を持たない（前と同じ形）');
+  assert.ok(!('max' in HN.init(3, 5, { rules: { drops: 99 } })), '羽根つき: 知らない回数は5回');
+  for (const drops of [3, 7]) {
+    let t = HN.init(2, 5, { rules: { drops } });
+    for (let k = 0; k < 200 && t.phase !== 'end'; k++) {
+      if (t.phase === 'drop' || t.phase === 'ready') t = HN.apply(t, { p: -1, t: 'serve', n: t.k });
+      else t = HN.apply(t, { p: t.to, t: 'miss', n: t.k }); // 受けた人が毎回落とす
+    }
+    assert.ok(HN.result(t), `羽根つき: ${drops}回で終わる`);
+    assert.equal(Math.max(...t.ink), drops, `羽根つき: ${drops}回落とした人が出たら終わり`);
+  }
   // CPU: 遅い羽根ほどよく返す
   const real = performance.now.bind(performance);
   let fake = 0;
@@ -8785,6 +8820,21 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   let ok = s;
   for (const p of byNum) ok = KC.apply(ok, { p, t: 'play', r: 0 });
   assert.equal(ok.lives, LIVES, '価値観ならべ: 小さい順ならライフは減らない');
+  // ライフの数（2026-11-05 の35回目の案）
+  assert.ok(!('maxLives' in KC.init(3, 11)) && !('maxLives' in KC.init(3, 11, { rules: { lives: 3 } })), '価値観ならべ: ライフ3つのときは局面に maxLives を持たない（前と同じ形）');
+  assert.equal(KC.init(3, 11, { rules: { lives: 9 } }).lives, LIVES, '価値観ならべ: 知らないライフの数は3つ');
+  for (const lv of [1, 5]) {
+    let t = KC.apply(KC.init(3, 11, { rules: { lives: lv } }), { p: -1, t: 'next' });
+    assert.equal(t.lives, lv, `価値観ならべ: ライフ ${lv}つ`);
+    for (let k = 0; k < 200 && t.phase !== 'end'; k++) {
+      if (t.phase === 'done') t = KC.apply(t, { p: -1, t: 'next' });
+      else if (t.phase === 'write') t = KC.apply(t, { p: -1, t: 'close' });
+      else { const big = [0, 1, 2].filter((p) => t.state[p] === 'hand').sort((a, b) => t.nums[b] - t.nums[a])[0]; t = KC.apply(t, { p: big, t: 'play', r: t.r }); } // いちばん大きい人から出して毎回まちがえる
+    }
+    assert.equal(t.phase, 'end', `価値観ならべ: ライフ ${lv}つでも終わる`);
+    assert.equal(t.lives, 0, `価値観ならべ: ライフ ${lv}つを使い切って終わる`);
+    assert.equal(t.cleared, lv - 1, `価値観ならべ: ライフ ${lv}つなら、お題ごとに1回まちがえると ${lv - 1}こクリアで終わる`);
+  }
   assert.equal(ok.perfect, 1, '価値観ならべ: 小さい順ならパーフェクト');
   assert.equal(KC.apply(ok, { p: byNum[0], t: 'play', r: 0 }), null, '価値観ならべ: 同じ手が2回届いても2回目は反則');
   // ライフが0になったら終わり（引き分け・クリア数を持つ）
@@ -8817,7 +8867,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   const TG = GAMES.tsunagi;
   const { TSUNAGI } = await import('../app/js/games/tsunagi-data.js');
   const { isSolution: tgOk, countSolutions, pathsOf, makeCandidate, neighbors: tgNb } = await import('../app/js/games/tsunagi.js');
-  for (const N of [5, 7]) {
+  for (const N of [5, 7, 9]) {
     assert.ok(TSUNAGI[N].length >= 10, `数字つなぎ: ${N}×${N} の問題が10問以上`);
     for (const x of TSUNAGI[N]) {
       assert.ok(x.p.length === N * N && x.s.length === N * N, '数字つなぎ: 問題と答えの長さ');
@@ -8867,7 +8917,20 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   s = TG.apply(s, { p: 2, t: 'pass', q: 0 });
   s = TG.apply(s, { p: -1, t: 'close' });
   assert.deepEqual(s.scores, [3, 2, 0], '数字つなぎ: 速い順に点、あきらめたら0点');
-  console.log('tsunagi OK（5×5', TSUNAGI[5].length, '問・7×7', TSUNAGI[7].length, '問）');
+  // 問題の数と 9×9（2026-11-05 の35回目の案）
+  assert.equal(TG.init(2, 4, { rules: { rounds: 1 } }).qs.length, 1, '数字つなぎ: 問題の数 1問');
+  assert.equal(TG.init(2, 4, { rules: { rounds: 5 } }).qs.length, 5, '数字つなぎ: 問題の数 5問');
+  assert.equal(TG.init(2, 4, { rules: { rounds: 99 } }).qs.length, 3, '数字つなぎ: 知らない問題の数は3問');
+  assert.deepEqual(TG.init(2, 4, { rules: { rounds: 5 } }).qs.slice(0, 3), TG.init(2, 4).qs, '数字つなぎ: 5問でも、はじめの3問は3問のときと同じ（混ぜ方は変えていない）');
+  assert.ok(TSUNAGI[9].some((x) => /[a-d]/.test(x.p)), '数字つなぎ: 9×9 には 10 以上の数字（a〜d）がある');
+  let s9 = TG.init(2, 4, { rules: { size: '9' } });
+  assert.equal(s9.size, 9, '数字つなぎ: 大きさ 9×9');
+  s9 = TG.apply(s9, { p: -1, t: 'next' });
+  const ans9 = pathsOf(s9.qs[0].p, s9.qs[0].s, 9);
+  assert.ok(Object.keys(ans9).length >= 10, '数字つなぎ: 9×9 は10組以上');
+  s9 = TG.apply(s9, { p: 0, t: 'done', q: 0, paths: ans9, ms: 5000 });
+  assert.ok(s9 && s9.solved[0] === 5000, '数字つなぎ: 9×9 の答え（10 以上の数字の線を含む）を受け付ける');
+  console.log('tsunagi OK（5×5', TSUNAGI[5].length, '問・7×7', TSUNAGI[7].length, '問・9×9', TSUNAGI[9].length, '問）');
 }
 
 // 紙相撲（2026-11-05）

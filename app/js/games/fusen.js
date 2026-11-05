@@ -10,6 +10,13 @@
 //   - 回の途中は、ほかの人が決めたかどうかも名前の札に出さない（割れた人は早く決まるので、決めた早さで割れる回数の見当が付いてしまうため）。
 //   - 全員が決めたら0.8秒で見せる。見せる間は4.5秒（みんなの風船と、何回目で割れたかを読む時間）。同じ点の人は同じ順位。
 //   - CPU は 3〜12回のどれかを目当てにし、0.35〜0.6秒に1回押す（割れる回数は見ない）。
+// 2026-11-05 の35回目の案（本人が選んだ。分かれ目は Claude の判断）:
+//   - 詳細設定「いちばん大きくした人にボーナス」（鍵は bonus）: なし（最初）・あり。その回で割らずにいちばん多く押した人に +3点（並んだら全員）。
+//     0点（押さなかった・決めなかった）の人はもらえない。ほかの人の様子が見えない決まりはそのまま。おまかせの抽選に入る。
+//   - 詳細設定「割れる回数の幅」（鍵は range）: せまい（3〜10回目）・ふつう（最初。3〜20回目）・ひろい（5〜30回目）。おまかせの抽選に入る。
+//     風船の大きさは「押した回数 ÷ 幅のいちばん大きい数」で決める（幅は詳細設定で全員に見えているので手がかりにならない。ふつうでは前と同じ大きさ）。
+//     CPU が目当てにする回数も幅に合わせる（幅の下の数 から 幅の55%ほど上まで。ふつうでは前と同じ 3〜12回）。
+//   - どちらもなし・ふつうのときは局面に bonus・range を持たず、割れる回数も前と全く同じ。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next … → end
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'stop', r: 何回目（0 から）, k: 押した回数（割れたときは割れる回数そのもの） }
 //   r が今の回と同じで、その人がまだ決めていないときだけ受け付けるので、同じ手が2回届いても2回目は反則になる。
@@ -27,11 +34,20 @@ const SHOWN_MS = 4500;
 const GRACE_MS = 800;
 const LATE_MS = 1500;
 
+export const BONUS = 3;
+// 割れる回数の幅（詳細設定 range）
+export const RANGES = { mid: [MIN_POP, MAX_POP], low: [3, 10], high: [5, 30] };
+const rangeOf = (s) => s.range ?? RANGES.mid;
 // その回の風船が何回目で割れるか（種と何回目かから。全員同じ）
-export function popOf(seed, r) {
+export function popOf(seed, r, [lo, hi] = RANGES.mid) {
   const rnd = mulberry32((seed * 977 + r * 131 + 11) >>> 0);
   rnd();
-  return MIN_POP + Math.floor(rnd() * (MAX_POP - MIN_POP + 1));
+  return lo + Math.floor(rnd() * (hi - lo + 1));
+}
+// ボーナスをもらう人（割らずにいちばん多く押した人。0点の人はもらえない）
+export function bonusOf(pts) {
+  const top = Math.max(0, ...pts);
+  return top > 0 ? pts.map((v, p) => (v === top ? p : -1)).filter((p) => p >= 0) : [];
 }
 // 押した回数 k の点（割れたら0）
 export const pointsOf = (k, pop) => (k === null || k >= pop ? 0 : k);
@@ -43,8 +59,8 @@ const ui = {}; // いま画面に出しているもの（同じ局面なら作�
 const local = new Map(); // この端末で押した回数（描き直しても消えないように回ごとに覚える）: { k, popped, sent }
 
 // 風船の絵（svg の文字）。k = 押した回数。popped なら割れた絵
-export function balloonSvg(k, color, { popped = false, small = false } = {}) {
-  const r = Math.min(134, 34 + k * 5);
+export function balloonSvg(k, color, { popped = false, small = false, max = MAX_POP } = {}) {
+  const r = Math.min(134, 34 + (k * 100) / max); // 幅のいちばん大きい数でいちばん大きくなる（ふつうでは1回 5 ずつ）
   const cx = 160;
   const cy = 170 - r * 0.15;
   if (popped) {
@@ -75,12 +91,20 @@ export default {
   realtime: true,
   minPlayers: 2,
   maxPlayers: 10,
+  settings: [
+    { key: 'bonus', label: 'いちばん大きくした人にボーナス', desc: `その回で割らずにいちばん多く押した人に +${BONUS}点`, def: false },
+    { key: 'range', label: '割れる回数の幅', desc: '風船が何回目で割れるかの幅（どこで割れるかは毎回かくれている）', def: 'mid', choices: [['mid', 'ふつう（3〜20回目）'], ['low', 'せまい（3〜10回目）'], ['high', 'ひろい（5〜30回目）']] },
+  ],
 
-  init(n, seed) {
-    return {
-      n, seed, total: ROUNDS, pops: [...Array(ROUNDS)].map((_, r) => popOf(seed, r)), r: -1, phase: 'ready',
+  init(n, seed, { rules = {} } = {}) {
+    const range = rules.range !== 'mid' && RANGES[rules.range] ? RANGES[rules.range] : null;
+    const s = {
+      n, seed, total: ROUNDS, pops: [...Array(ROUNDS)].map((_, r) => popOf(seed, r, range ?? RANGES.mid)), r: -1, phase: 'ready',
       stops: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0,
     };
+    if (rules.bonus === true) s.bonus = true; // なし・ふつうのときは持たない（前と全く同じ形）
+    if (range) s.range = range;
+    return s;
   },
 
   turn() { return null; },
@@ -129,7 +153,12 @@ export default {
         const pts = s.stops.map((k) => pointsOf(k, pop));
         pts.forEach((v, p) => { s.scores[p] += v; });
         s.last = { pts };
-        s.log = [...s0.log, { pop, stops: s.stops.slice(), pts }];
+        if (s.bonus) {
+          const got = bonusOf(pts);
+          got.forEach((p) => { s.scores[p] += BONUS; });
+          s.last.bonus = got;
+        }
+        s.log = [...s0.log, { pop, stops: s.stops.slice(), pts, ...(s.bonus ? { bonus: s.last.bonus } : {}) }];
         return s;
       }
       return null;
@@ -148,7 +177,8 @@ export default {
     const key = rKey(s) + ':' + p;
     let plan = cpuPlan.get(key);
     if (!plan) {
-      plan = { aim: 3 + Math.floor(Math.random() * 10), gap: 350 + Math.random() * 250, start: 600 + Math.random() * 900 };
+      const [lo, hi] = rangeOf(s);
+      plan = { aim: lo + Math.floor(Math.random() * (Math.floor((hi - lo) * 0.55) + 1)), gap: 350 + Math.random() * 250, start: 600 + Math.random() * 900 };
       cpuPlan.set(key, plan);
       if (cpuPlan.size > 300) cpuPlan.delete(cpuPlan.keys().next().value);
     }
@@ -167,7 +197,8 @@ export default {
       if (s.phase !== 'shown' || !s.last) return '';
       const k = s.stops[p];
       if (k === null) return '<span class="pt-ng">―</span>';
-      return s.last.pts[p] ? `<span class="pt-ok">+${s.last.pts[p]}</span>` : '<span class="pt-ng">💥 0</span>';
+      const bonus = s.last.bonus?.includes(p) ? ` <span class="pt-ok">🏅+${BONUS}</span>` : '';
+      return s.last.pts[p] ? `<span class="pt-ok">+${s.last.pts[p]}</span>${bonus}` : '<span class="pt-ng">💥 0</span>';
     };
     root.innerHTML = '';
     root.className = 'board kj fs';
@@ -181,7 +212,9 @@ export default {
     card.className = 'kj-card';
     wrap.append(card);
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">押すたびに1点。割れたらその回は0点。風船はみんな同じ強さ・全${s.total}回</div>`;
+      const [lo, hi] = rangeOf(s);
+      const more = (s.range ? `・${lo}〜${hi}回目のどこかで割れる` : '') + (s.bonus ? `・割らずにいちばん大きくした人に 🏅+${BONUS}点` : '');
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">押すたびに1点。割れたらその回は0点。風船はみんな同じ強さ・全${s.total}回${more}</div>`;
       return;
     }
     card.insertAdjacentHTML('beforeend', `<div class="kj-num">${s.r + 1}回目 / ${s.total}</div>`);
@@ -229,14 +262,14 @@ export default {
     };
     const paint = () => {
       if (!loc) {
-        stage.innerHTML = balloonSvg(0, color);
+        stage.innerHTML = balloonSvg(0, color, { max: rangeOf(s)[1] });
         count.textContent = '';
         note.textContent = '観戦中（みんなの風船は、その回が終わると見えます）';
         pump.disabled = stop.disabled = true;
         stop.textContent = 'やめる';
         return;
       }
-      stage.innerHTML = balloonSvg(loc.k, color, { popped: loc.popped });
+      stage.innerHTML = balloonSvg(loc.k, color, { popped: loc.popped, max: rangeOf(s)[1] });
       count.innerHTML = loc.popped ? '<span class="pt-ng">割れた！ この回は0点</span>' : `<b>${loc.k}</b> 点`;
       const open = !done() && since(key) < LIMIT;
       pump.disabled = !open;
@@ -304,13 +337,13 @@ export default {
     s.stops.forEach((k, p) => {
       const item = document.createElement('div');
       item.className = 'fs-one';
-      item.innerHTML = balloonSvg(k ?? 0, SEAT_COLORS[p % SEAT_COLORS.length], { popped: k !== null && k >= pop, small: true });
+      item.innerHTML = balloonSvg(k ?? 0, SEAT_COLORS[p % SEAT_COLORS.length], { popped: k !== null && k >= pop, small: true, max: rangeOf(s)[1] });
       const name = document.createElement('div');
       name.className = 'fs-name';
       name.textContent = p === me ? 'あなた' : o.names[p];
       const v = document.createElement('div');
       v.className = 'fs-v';
-      v.textContent = k === null ? '決めなかった' : k >= pop ? '💥 0点' : `${k}点`;
+      v.textContent = (k === null ? '決めなかった' : k >= pop ? '💥 0点' : `${k}点`) + (s.last?.bonus?.includes(p) ? ` 🏅+${BONUS}` : '');
       item.append(name, v);
       list.append(item);
     });
@@ -332,7 +365,7 @@ export default {
       n.textContent = String(r + 1);
       const body = document.createElement('span');
       body.className = 'kb-rv';
-      body.textContent = `${x.pop}回目で割れる ／ ` + x.stops.map((k, p) => `${p === me ? 'あなた' : o.names?.[p] ?? ''} ${k === null ? '―' : k >= x.pop ? '💥' : k}`).join('　');
+      body.textContent = `${x.pop}回目で割れる ／ ` + x.stops.map((k, p) => `${p === me ? 'あなた' : o.names?.[p] ?? ''} ${k === null ? '―' : k >= x.pop ? '💥' : k}${x.bonus?.includes(p) ? '🏅' : ''}`).join('　');
       li.append(n, body);
       list.append(li);
     });
