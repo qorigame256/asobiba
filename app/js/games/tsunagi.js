@@ -365,8 +365,11 @@ export default {
   },
 
   render(root, s, o) {
-    const me = o.me >= 0 ? o.me : null;
-    const mount = `${s.seed}:${s.q}:${s.phase}:${me}:${me !== null && doneOf(s, me)}:${s.solved.some((v) => v !== null)}:${!!o.canMove}`;
+    // 観戦の人が「見る画面」でほかの人を選んでいても、自分の席として扱わない（前は答えが出ず空の盤になった。2026-11-05 の Codex の点検）
+    const me = o.me >= 0 && !o.watching ? o.me : null;
+    // だれかが解いたかどうかは盤を作り直す条件に入れない（作り直すと、なぞっている途中の指が切れた。2026-11-05 の Codex の点検）。残り時間の帯だけ替える
+    const mount = `${s.seed}:${s.q}:${s.phase}:${me}:${me !== null && doneOf(s, me)}:${!!o.canMove}`;
+    const anySolved = s.solved.some((v) => v !== null);
     const won = s.phase === 'end' ? leaders(s.scores) : [];
     const extra = (p) => {
       if (s.phase === 'open') return s.solved[p] !== null ? '<span class="pt-ok">解けた！</span>' : s.passed[p] ? '<span class="pt-ng">あきらめ</span>' : '';
@@ -375,7 +378,12 @@ export default {
       return '<span class="pt-ng">―</span>';
     };
     const chips = scoreChips(o, s.scores, { won, extra });
-    if (ui?.mount === mount && root.contains(ui.wrap)) { ui.chips.replaceWith(chips); ui.chips = chips; return; }
+    if (ui?.mount === mount && root.contains(ui.wrap)) {
+      ui.chips.replaceWith(chips);
+      ui.chips = chips;
+      if (ui.bar && ui.anySolved !== anySolved) { ui.anySolved = anySolved; ui.bar(); }
+      return;
+    }
 
     root.innerHTML = '';
     root.className = 'board kj tg';
@@ -397,10 +405,17 @@ export default {
     card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>`;
     if (s.phase === 'open') {
       since(key);
-      if (s.solved.some((v) => v !== null)) {
-        card.insertAdjacentHTML('beforeend', '<div class="kj-sub">だれかが解いた！ もうすぐ締め切り</div>');
-        card.append(afterBar(key, limit, AFTER_MS));
-      } else card.append(timeBar(key, limit, { secs: true }));
+      const box = document.createElement('div');
+      card.append(box);
+      ui.anySolved = anySolved;
+      ui.bar = () => {
+        box.innerHTML = '';
+        if (ui.anySolved) {
+          box.insertAdjacentHTML('beforeend', '<div class="kj-sub">だれかが解いた！ もうすぐ締め切り</div>');
+          box.append(afterBar(key, limit, AFTER_MS));
+        } else box.append(timeBar(key, limit, { secs: true }));
+      };
+      ui.bar();
     } else {
       const t = document.createElement('div');
       t.className = 'kj-sub';

@@ -10,7 +10,7 @@
 //   - 「トン」1回で、力士は向いている方へ 0.35（土俵の半径 / 秒）押し出される（速さの上限 0.9）。動きは床とのこすれで毎秒およそ 1/20 に落ちる。
 //     向きは、いちばん近い相手の方へ毎秒 2.2ラジアンずつ回り、トンのたびに ±0.35ラジアンまでふらつく（揺れながら前へ出る）。
 //   - ぐらつき（0〜1。1 で倒れる）: トン1回で 0.08、前のトンから0.2秒より短ければ (0.2 − 間) × 1.6 を足す。毎秒 0.35 ずつ戻る。
-//     ぶつかったときは、押された方にぶつかった速さ × 0.08、押した方にその6割を足す。
+//     ぶつかったときは、押された方にぶつかった速さ × 0.08、押した方（相手へ向かって速く動いていた方）にその6割を足す（向かう速さが同じならどちらも8割）。
 //     試算（2026-11-05。間を ±25% ばらつかせて、相手の居ない所へ押し出す・1対1・4人）: 0.25秒に1回なら自分では倒れず、動かない相手を4秒ほどで押し出す。
 //     0.15秒に1回だと1.5秒ほど・0.12秒に1回だと0.9秒ほどで自分が倒れる。0.25秒どうしは7〜8秒、4人は6〜18秒で決まり、押し出しと倒れるの両方で決まる。
 //   - ぶつかると、向かい合う向きの速さを分け合う（はね返り 0.2）。押している方が押し勝つ。
@@ -117,8 +117,12 @@ export function stepRound(r, dt) {
         const jv = ((1 + BOUNCE) * rel) / 2;
         a.vx -= jv * nx; a.vy -= jv * ny;
         b.vx += jv * nx; b.vy += jv * ny;
-        a.wob += rel * WOB_HIT * 0.6; // 押した方も少しぐらつく
-        b.wob += rel * WOB_HIT;
+        // 押した方（相手へ向かって速く動いていた方）は6割、押された方は全部ぐらつく。席の番号で決めない（2026-11-05 の Codex の点検。
+        // 前は番号の小さい方がいつも6割だった）。向かう速さがちょうど同じなら、どちらも押した方でも押された方でもあるので、間を取って8割
+        const va = a.vx * nx + a.vy * ny, vb = -(b.vx * nx + b.vy * ny);
+        const [ka, kb] = va > vb ? [0.6, 1] : vb > va ? [1, 0.6] : [0.8, 0.8];
+        a.wob += rel * WOB_HIT * ka;
+        b.wob += rel * WOB_HIT * kb;
         for (const [w, k] of [[a, i], [b, j]]) if (w.alive && w.wob >= 1) { w.alive = false; w.why = 'fall'; out.push(k); }
       }
     }
@@ -191,6 +195,13 @@ function mount(root, opts) {
   let shown = startRound(n); // ゲストが描く位置（届いた位置へなめらかに寄せる）
   let lastSend = 0;
   let lastFrame = performance.now();
+  // ホストが読み込み直したら、ゲストが覚えている試合の続きを引き継ぐ（2026-11-05 の Codex の点検）。
+  // 前は読み込み直したホストが1回戦から始め直し、「もう一回」のあとだとゲストが回数の小さい知らせを捨てて画面が止まったままになった。
+  // ゲストは、ホストから届いた状態が自分の覚えているものより前へ戻っていたら受け入れず、覚えている続き（have）を送る。ホストは自分より先の続きだけ引き継ぐ。
+  // 状態はホストからしか出ないので、ゲストがホストより先にいるのはホストが始め直したときだけ。開いた直後の need は早く引き継ぐための近道
+  // （読み込み直した直後はまだ中継サーバーにつながっておらず届かないことがあるので、これだけに頼らない）
+  let heard = false; // ゲスト: ホストから状態が届いたことがあるか（無ければ続きを答えない）
+  let lastHave = -1e9; // ゲスト: 最後に続きを送った時刻（状態は0.05秒ごとに届くので、0.5秒に1回まで）
   const cpuState = new Map();
   let seenAlive = ring.w.map(() => true);
 
@@ -284,10 +295,20 @@ function mount(root, opts) {
       // トン（だれが押したかは送ってきた人の席で決める）
       if (d.k === 'tap' && d.ep === ep && Number.isInteger(from) && from >= 0 && from < n && game.phase === 'fight' && !game.over) tap(ring, from, Math.random, Number.isFinite(d.g) ? Math.max(0, Math.min(9, d.g)) : undefined);
       if (d.k === 'hi') sendState(true); // あとから開いた人に今の状態を送る
+      if (d.k === 'have' && d.g && (d.ep > ep || (d.ep === ep && progOf(d.g) > progOf(game)))) adopt(d);
       return;
     }
+    // 読み込み直したホストに、覚えている試合の続きを答える
+    const sendHave = () => {
+      const now = performance.now();
+      if (!heard || now - lastHave < 500) return;
+      lastHave = now;
+      opts.send({ k: 'have', ep, g: { round: game.round, wins: game.wins, phase: game.phase, phaseT: r3(game.phaseT), last: game.last, over: game.over }, t: r3(ring.t), w: pack() }, true);
+    };
+    if (d.k === 'need') { sendHave(); return; }
     if (d.k !== 'st' || !d.g || !Array.isArray(d.w) || d.w.length !== n) return;
-    if (d.ep < ep) return;
+    if (d.ep < ep || (d.ep === ep && heard && progOf(d.g) < progOf(game))) { sendHave(); return; } // ホストが始め直した
+    heard = true;
     const wasOver = game.over;
     const wasPhase = game.phase;
     const wasLast = game.last;
@@ -392,14 +413,51 @@ function mount(root, opts) {
     }
   }
 
+  // ゲストが答えた続きを、読み込み直したホストが引き継ぐ（いちばん先に届いた1つだけ）
+  function adopt(d) {
+    const g = d.g;
+    if (!g || !Number.isInteger(d.ep) || d.ep < 0 || !Array.isArray(d.w) || d.w.length !== n || !Array.isArray(g.wins) || g.wins.length !== n) return;
+    if (!['count', 'fight', 'show'].includes(g.phase) || !Number.isInteger(g.round) || g.round < 0 || g.round >= ROUNDS) return;
+    ep = d.ep;
+    game = { ep, round: g.round, wins: g.wins.map((v) => Math.max(0, Math.trunc(Number(v) || 0))), phase: g.phase, phaseT: Number(g.phaseT) || 0, last: Number.isInteger(g.last) ? g.last : null, over: !!g.over };
+    ring = startRound(n);
+    ring.t = Number(d.t) || 0;
+    d.w.forEach((e, p) => {
+      if (!Array.isArray(e)) return;
+      const [x, y, dir, wob, al, why] = e;
+      Object.assign(ring.w[p], { x: Number(x) || 0, y: Number(y) || 0, dir: Number(dir) || 0, wob: Number(wob) || 0, alive: !!al, why: String(why ?? '') });
+    });
+    seenAlive = ring.w.map((w) => w.alive);
+    cpuState.clear();
+    sendState(true);
+    showStatus();
+    if (game.over) showOver();
+  }
+
+  // ホストの1歩。描き替え（requestAnimationFrame）と、画面が隠れて描き替えが止まったときの予備の時計の両方から呼ぶ。
+  // 予備の時計は隠れたタブでは1秒に1回ほどに間引かれるので、1秒までの間を 0.05秒ずつに分けて進める（前は描き替えでしか進まず、
+  // ホストが別のタブやアプリへ切り替えると全員の試合が止まった。2026-11-05 の Codex の点検。エアホッケーの backup と同じわけ）
+  function hostTick(now) {
+    let rem = Math.min(1, Math.max(0, now - lastFrame) / 1000);
+    lastFrame = now;
+    while (rem > 1e-6) {
+      const dt = Math.min(0.05, rem);
+      hostAdvance(dt);
+      rem -= dt;
+    }
+    if (now - lastSend >= SEND_MS) { lastSend = now; sendState(false); }
+  }
+  const backup = host ? setInterval(() => {
+    const now = performance.now();
+    if (alive && now - lastFrame > 120) hostTick(now);
+  }, 50) : 0;
+
   function frame(now) {
     if (!alive) return;
-    const dt = Math.min(0.05, (now - lastFrame) / 1000);
-    lastFrame = now;
-    if (host) {
-      hostAdvance(dt);
-      if (now - lastSend >= SEND_MS) { lastSend = now; sendState(false); }
-    } else {
+    if (host) hostTick(now);
+    else {
+      const dt = Math.min(0.05, Math.max(0, now - lastFrame) / 1000);
+      lastFrame = now;
       // 届いた位置へなめらかに寄せる
       const k = 1 - Math.exp(-dt * 18);
       shown.w.forEach((w, p) => {
@@ -423,7 +481,7 @@ function mount(root, opts) {
   }
   showStatus();
   if (!host) opts.send({ k: 'hi' }, true);
-  else sendState(true);
+  else { sendState(true); opts.send({ k: 'need' }, true); } // 続きを覚えているゲストがいれば答えてもらう
   raf = requestAnimationFrame(frame);
 
   return {
@@ -431,12 +489,15 @@ function mount(root, opts) {
     destroy() {
       alive = false;
       cancelAnimationFrame(raf);
+      clearInterval(backup);
       document.removeEventListener('keydown', onKey);
     },
   };
 }
 
 const r3 = (v) => Math.round(v * 1000) / 1000;
+// 試合がどこまで進んだか（同じ「もう一回」の回数の中で比べる）。回 → 数え・取り組み・結果 → おしまい の順に大きくなる
+export const progOf = (g) => (Number(g?.round) || 0) * 4 + (g?.over ? 3 : ({ count: 0, fight: 1, show: 2 })[g?.phase] ?? 0);
 
 export default {
   id: 'sumo',

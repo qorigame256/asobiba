@@ -9004,6 +9004,21 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   smStep(r, 0.05);
   assert.ok(r.w[1].vy < 0 && r.w[1].wob > 0, '紙相撲: ぶつかると押された方が下がり、ぐらつく');
   assert.ok(Math.hypot(r.w[0].x - r.w[1].x, r.w[0].y - r.w[1].y) >= 2 * SM_BODY - 1e-9, '紙相撲: ぶつかっても重ならない');
+  // ぐらつきは押した方が6割・押された方が全部。席の番号で決めない（2026-11-05 の Codex の点検。前は番号の小さい方がいつも6割だった）
+  const bump = (mover) => {
+    const q = smStart(2);
+    for (const w of q.w) { w.x = 0; w.vx = 0; w.vy = 0; w.dir = Math.PI; } // 向きの回り方で ぶつかり方が変わらないように横を向ける
+    q.w[0].y = 0.139; q.w[1].y = -0.139; // 少し重なっていて、1歩でぶつかる
+    q.w[mover].vy = mover === 0 ? -0.8 : 0.8;
+    smStep(q, 1 / 120);
+    return q.w.map((w) => w.wob);
+  };
+  for (const mover of [0, 1]) {
+    const wb = bump(mover);
+    const still = 1 - mover;
+    assert.ok(wb[still] > 0 && Math.abs(wb[mover] / wb[still] - 0.6) < 1e-6, `紙相撲: 席${mover}が押したら、押した席${mover}は押された席${still}の6割ぐらつく（${wb.map((v) => v.toFixed(4))}）`);
+  }
+  assert.deepEqual(bump(0).slice().reverse(), bump(1), '紙相撲: 押す席を入れ替えても、押した方・押された方のぐらつきは同じ');
   // 3回戦の順位
   assert.deepEqual(smRanks([2, 1, 0]), [1, 2, 3], '紙相撲: 勝った回数の多い順');
   assert.deepEqual(smRanks([1, 1, 1, 0]), [1, 1, 1, 4], '紙相撲: 同じ回数は同じ順位');

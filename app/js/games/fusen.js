@@ -227,7 +227,10 @@ export default {
     const color = me !== null ? SEAT_COLORS[me % SEAT_COLORS.length] : '#e05a6a';
     const lk = key + ':' + me;
     if (me !== null && !local.has(lk)) {
-      local.set(lk, { k: 0, popped: false, sent: s.stops[me] !== null });
+      // もう決めた回なら、決めた回数から始める（読み込み直したときに「0点で決めた」と出ていた。2026-11-05 の Codex の点検。
+      // まだ決めていない途中の回数は端末の中だけなので、読み込み直すと0から。20秒の回の途中でまれにしか起きず、不公平にもならないので戻さない。本人承認）
+      const k0 = s.stops[me];
+      local.set(lk, k0 !== null ? { k: k0, popped: k0 >= pop, sent: true } : { k: 0, popped: false, sent: false });
       if (local.size > 60) local.delete(local.keys().next().value);
     }
     const loc = me !== null ? local.get(lk) : null;
