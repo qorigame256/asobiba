@@ -2401,3 +2401,79 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .tw-canvas { display: block; margin: 0 auto; border-radius: 10px; background: linear-gradient(#cfe9ff, #f6fbff); touch-action: manipulation; user-select: none; -webkit-user-select: none; }
 .board button.tw-btn:disabled { opacity: .45; cursor: default; }
 .board button.tw-btn { display: block; width: min(100%, 360px); min-height: 4.4rem; margin: 0 auto; font-size: 1.6rem; font-weight: 800; touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+/* 風船ふくらまし */
+.fs-stage { width: min(100%, 240px); margin: 6px auto 0; transform-origin: 50% 95%; }
+.fs-stage.bump { animation: fsBump .25s ease-out; }
+@keyframes fsBump { 0% { transform: scale(.96, 1.04); } 60% { transform: scale(1.03, .98); } 100% { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .fs-stage.bump { animation: none; } }
+.fs-svg { display: block; width: 100%; height: auto; }
+.fs-svg.small { width: 72px; margin: 0 auto; }
+.fs-count { font-size: 1.3rem; margin-top: 2px; }
+.fs-count b { font-size: 2rem; }
+.fs-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: min(100%, 420px); margin: 0 auto; touch-action: manipulation; }
+.board button.fs-pump, .board button.fs-stop { min-height: 4.2rem; font-size: 1.2rem; font-weight: 800; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+.board button.fs-pump:disabled, .board button.fs-stop:disabled { opacity: .5; cursor: default; }
+.fs-pop { font-weight: 700; color: var(--ink); }
+.fs-all { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
+.fs-one { width: 84px; text-align: center; }
+.fs-name { font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fs-v { font-weight: 800; }
+/* シルエットクイズ */
+.sk-pic { font-size: clamp(5.5rem, 34vw, 9rem); line-height: 1.15; margin: 6px 0; filter: brightness(0); user-select: none; -webkit-user-select: none; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; }
+.sk-pic.show { filter: none; animation: skShow .4s ease-out; }
+@keyframes skShow { from { filter: brightness(0); } to { filter: none; } }
+@media (prefers-reduced-motion: reduce) { .sk-pic.show { animation: none; } }
+.sk-choices { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; touch-action: manipulation; }
+.board button.btn.sk-choice { min-height: 64px; padding: 6px; border-radius: 12px; font-size: 1.15rem; font-weight: 800; overflow-wrap: anywhere; }
+.board button.btn.sk-choice.ok { background: #2f8a4a; border-color: #2f8a4a; color: #fff; }
+.board button.btn.sk-choice.ng { background: #d9534f; border-color: #d9534f; color: #fff; }
+.board button.btn.sk-choice.off { opacity: .55; }
+:is([data-game="fusen"], [data-game="kage"]) .board { width: min(100%, 560px); }
+/* 羽根つき */
+.hn-card { padding: 8px; }
+.hn-canvas { display: block; width: min(100%, 360px); height: auto; aspect-ratio: 360 / 330; margin: 0 auto; border-radius: 14px; background: linear-gradient(#fdf3e3, #f6e6cc); touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.hn-ink { letter-spacing: .05em; color: #222; }
+.hn-good { color: #d07a00; }
+.board button.hn-hit { display: block; width: min(100%, 360px); min-height: 4.4rem; margin: 0 auto; font-size: 1.5rem; font-weight: 800; touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+.board button.hn-hit:disabled { opacity: .45; cursor: default; }
+:is([data-game="hane"]) .board { width: min(100%, 560px); }
+/* 価値観ならべ */
+.kc-topic { font-size: 1.6rem; font-weight: 800; margin: 4px 0; }
+.kc-scale { display: flex; justify-content: space-between; gap: 8px; font-size: .85rem; color: var(--muted); }
+.kc-mine { margin-top: 8px; font-size: 1.05rem; }
+.kc-mine b { font-size: 2rem; color: var(--accent); }
+.kc-line, .kc-hand { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.kc-line { padding: 8px; border-radius: 12px; background: var(--field); border: 1.5px dashed var(--line); min-height: 4rem; align-items: center; }
+.kc-empty { color: var(--muted); font-size: .9rem; }
+.kc-card { width: 96px; padding: 6px; border-radius: 10px; border: 2px solid var(--line); background: var(--panel); display: flex; flex-direction: column; align-items: center; gap: 2px; text-align: center; }
+.kc-card b { font-size: 1.5rem; line-height: 1.1; }
+.kc-card .kc-w { font-size: .85rem; font-weight: 700; overflow-wrap: anywhere; }
+.kc-card .kc-n { font-size: .72rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.kc-card.ok { border-color: #2f8a4a; }
+.kc-card.skip { border-color: #c0392b; opacity: .7; }
+.kc-card.skip b { text-decoration: line-through; color: #c0392b; }
+.kc-card.new { box-shadow: 0 0 0 3px var(--accent); }
+.kc-card.hand.me { border-color: var(--accent); }
+.board button.kc-play { display: block; width: min(100%, 360px); min-height: 3.6rem; margin: 0 auto; font-size: 1.2rem; font-weight: 800; }
+.board button.kc-play:disabled { opacity: .5; }
+:is([data-game="kachikan"]) .board { width: min(100%, 600px); }
+/* 数字つなぎ早解き */
+.tg-board { display: block; width: min(100%, 440px); height: auto; aspect-ratio: 1; margin: 0 auto; border-radius: 12px; background: var(--field); border: 2px solid var(--line); touch-action: none; user-select: none; -webkit-user-select: none; }
+.tg-board.live { cursor: pointer; }
+.tg-cell { fill: var(--panel); stroke: var(--line); stroke-width: .03; }
+.tg-board text { pointer-events: none; font-family: sans-serif; }
+.tg-btns { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+:is([data-game="tsunagi"]) .board { width: min(100%, 560px); }
+
+/* 紙相撲（sumo.js） */
+.board.sm { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.sm-canvas { display: block; width: min(100%, 340px); height: auto; aspect-ratio: 1; border-radius: 50%; touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+.sm-meter { display: flex; align-items: center; gap: 8px; width: min(100%, 340px); font-size: .9rem; }
+.sm-meter i { flex: 1; height: 12px; border-radius: 6px; background: linear-gradient(90deg, #e2574c var(--v), #e6e0d6 var(--v)); transition: background .1s; }
+.sm-meter i:not(.hi) { background: linear-gradient(90deg, #e6a23c var(--v), #e6e0d6 var(--v)); }
+.board button.sm-tap { display: block; width: min(100%, 340px); min-height: 4.6rem; font-size: 1.6rem; font-weight: 800; touch-action: manipulation; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
+.board button.sm-tap:disabled { opacity: .45; cursor: default; }
+.board button.sm-tap.hit { animation: sm-hit .12s ease-out; }
+@keyframes sm-hit { from { transform: scale(.94); } to { transform: none; } }
+.sm-panel:empty { display: none; }
+.sm-note { margin: 0; color: var(--muted, #777); }

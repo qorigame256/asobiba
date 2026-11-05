@@ -1228,6 +1228,12 @@ const READING = {
   pittari: 'ぴったりすとっぷ', kioku: 'きおくりれー', typing: 'たいぴんぐはやうち', danmaku: 'だんまくかいひ あくしょん', tamaire: 'たまいれ あくしょん', machigai: 'まちがいさがし',
   bombs: 'にしょくばくだんさばいばる あくしょん', umigame: 'うみがめのすーぷ くいず', wordwolf: 'わーどうるふ', ishin: 'いしんでんしん くいず', karuta: 'ことわざかるた はやとり', acchi: 'あっちむいてほい じゃんけん てあそび', daruma: 'だるまさんがころんだ あくしょん', slide: 'じゅうごぱずる すらいどぱずる すうじ', nanpure: 'なんぷれ なんばーぷれーす すうじ ぱずる', jinro: 'じんろう', oekaki: 'おえかきあて え', hockey: 'えあほっけー あくしょん',
   amida: 'あみだくじじんとり あみだ', narabe: 'ならべかえことば あなぐらむ もじ', kingyo: 'きんぎょすくい まつり あくしょん', tower: 'つみあげたわー ぶろっく あくしょん',
+  fusen: 'ふうせんふくらまし ふうせん ばるーん どきょう',
+  kage: 'しるえっとくいず かげ しるえっと えもじ はやおし くいず',
+  hane: 'はねつき はごいた おしょうがつ たいみんぐ あくしょん',
+  kachikan: 'かちかんならべ かちかん きょうりょく すうじ ことば いと',
+  tsunagi: 'すうじつなぎはやとき なんばーりんく せん つなぐ ぱずる はやとき',
+  sumo: 'かみずもう とんとんずもう すもう あくしょん',
   hasami: 'はさみしょうぎ ばん', shogi: 'しょうぎ ばん', mahjong: 'まーじゃん',
 };
 const toHira = (t) => String(t ?? '').toLowerCase().replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60)).replace(/\s+/g, '');
@@ -1283,9 +1289,10 @@ function renderHome() {
       actions.className = 'card-actions';
       if (g.live) {
         // 毎フレーム動くゲーム（エアホッケー）: CPU 戦・同じ画面の2人（指で触れる端末だけ）・オンライン（試作）
-        actions.append(makeButton('CPU と対戦', () => startLive(id, 'cpu')));
-        if (navigator.maxTouchPoints > 0) actions.append(makeButton('この画面で2人で', () => startLive(id, 'two'), 'secondary'));
-        actions.append(makeButton('部屋を作る（試作）', () => createRoom(id), 'secondary'));
+        // onlineOnly = オンラインだけのゲーム（紙相撲。2026-11-05 本人の決定）。CPU 戦・同じ画面のボタンを出さない
+        if (!g.onlineOnly) actions.append(makeButton('CPU と対戦', () => startLive(id, 'cpu')));
+        if (!g.onlineOnly && navigator.maxTouchPoints > 0) actions.append(makeButton('この画面で2人で', () => startLive(id, 'two'), 'secondary'));
+        actions.append(makeButton('部屋を作る（試作）', () => createRoom(id), g.onlineOnly ? undefined : 'secondary'));
       } else {
         actions.append(makeButton('部屋を作る', () => createRoom(id)));
         if (!g.multi && !g.noLocal) actions.append(makeButton('この画面で2人で', () => startLocal(id), 'secondary')); // noLocal = 隠す情報があるゲーム（海戦ゲーム）
@@ -2874,7 +2881,7 @@ function pushMove(move) {
 
 // 汚い言葉のふるい（2026-10-21 本人の決定）: 人が自由に打った言葉は送る前に確かめる。ゲームの id → [手の中の欄, 一覧の種類]。
 // 受け取った側では、各ゲームが filter.js の shown で当たった所を隠す（ゲームを足したら両方に足す）。
-const FREE_TEXT = { umigame: [['text', 'sentence'], ['q', 'sentence'], ['a', 'sentence']], oekaki: [['text', 'short']], wordwolf: [['text', 'short']], ishin: [['text', 'short']], jinro: [['text', 'sentence']], oogiri: [['text', 'sentence']] };
+const FREE_TEXT = { umigame: [['text', 'sentence'], ['q', 'sentence'], ['a', 'sentence']], oekaki: [['text', 'short']], wordwolf: [['text', 'short']], ishin: [['text', 'short']], jinro: [['text', 'sentence']], oogiri: [['text', 'sentence']], kachikan: [['text', 'short']] };
 const badText = (move) => (FREE_TEXT[S.gameId] ?? []).some(([k, kind]) => typeof move?.[k] === 'string' && isBad(move[k], kind));
 
 function onBoardMove(move) {

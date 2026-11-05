@@ -8572,4 +8572,379 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('tower OK（CPU の高さの真ん中', hs[hs.length >> 1], '段）');
 }
 
+// 風船ふくらまし（2026-11-05）
+{
+  const F = GAMES.fusen;
+  const { popOf, pointsOf: fsPoints, MIN_POP, MAX_POP, ROUNDS: FR } = await import('../app/js/games/fusen.js');
+  const seen = new Set();
+  for (let seed = 0; seed < 300; seed++) {
+    for (let r = 0; r < FR; r++) {
+      const v = popOf(seed, r);
+      assert.ok(Number.isInteger(v) && v >= MIN_POP && v <= MAX_POP, `風船: 割れる回数が ${MIN_POP}〜${MAX_POP}（${v}）`);
+      seen.add(v);
+    }
+  }
+  assert.equal(seen.size, MAX_POP - MIN_POP + 1, '風船: 割れる回数はどれも出る');
+  assert.equal(popOf(5, 2), popOf(5, 2), '風船: 割れる回数は種と回で決まる');
+  assert.equal(fsPoints(4, 10), 4, '風船: 割れる前にやめたら押した回数が点');
+  assert.equal(fsPoints(10, 10), 0, '風船: 割れる回数まで押したら0点');
+  assert.equal(fsPoints(null, 10), 0, '風船: 決めなかったら0点');
+  let s = F.init(3, 42);
+  assert.equal(s.pops.length, 5, '風船: 5回');
+  assert.equal(F.apply(s, { p: 0, t: 'stop', r: 0, k: 1 }), null, '風船: 始まる前は決められない');
+  s = F.apply(s, { p: -1, t: 'next' });
+  const pop = s.pops[0];
+  assert.equal(F.apply(s, { p: 0, t: 'stop', r: 0, k: pop + 1 }), null, '風船: 割れる回数より多くは押せない');
+  assert.equal(F.apply(s, { p: 0, t: 'stop', r: 1, k: 1 }), null, '風船: ちがう回の手は受け付けない');
+  s = F.apply(s, { p: 0, t: 'stop', r: 0, k: pop - 1 });
+  assert.equal(F.apply(s, { p: 0, t: 'stop', r: 0, k: 1 }), null, '風船: 同じ人の2回目の手は受け付けない');
+  s = F.apply(s, { p: 1, t: 'stop', r: 0, k: pop });
+  assert.equal(F.referee(s).move.t, 'close', '風船: 時間が来たら締め切る');
+  s = F.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [pop - 1, 0, 0], '風船: 割れた人と決めなかった人は0点');
+  assert.deepEqual(s.log[0].stops, [pop - 1, pop, null], '風船: ふりかえりに残る');
+  for (let r = 1; r < 5; r++) {
+    s = F.apply(s, { p: -1, t: 'next' });
+    for (let p = 0; p < 3; p++) s = F.apply(s, { p, t: 'stop', r, k: 1 });
+    assert.equal(F.referee(s).key, 'all' + r, '風船: 全員が決めたらすぐ締め切る');
+    s = F.apply(s, { p: -1, t: 'close' });
+  }
+  s = F.apply(s, { p: -1, t: 'next' });
+  const res = F.result(s);
+  assert.deepEqual(res.winners, [0], '風船: 合計点の多い人の勝ち');
+  assert.deepEqual(res.scores, [pop - 1 + 4, 4, 4], '風船: 合計点');
+  // CPU: 時間とともに決め、割れる回数を超えない
+  const real = performance.now.bind(performance);
+  let fake = 0;
+  performance.now = () => fake;
+  try {
+    let pops = 0;
+    let sum = 0;
+    for (let seed = 0; seed < 200; seed++) {
+      let c = F.apply(F.init(2, seed), { p: -1, t: 'next' });
+      let m = null;
+      for (let i = 0; i < 200 && !m; i++) { fake += 100; m = F.cpu(c, 1); }
+      assert.ok(m && m.t === 'stop' && m.r === 0, '風船: CPU は20秒のうちに決める');
+      c = F.apply(c, { ...m, p: 1 });
+      assert.ok(c, '風船: CPU の手は受け付けられる');
+      if (m.k >= c.pops[0]) pops++;
+      else sum += m.k;
+      fake += 100000;
+    }
+    assert.ok(pops > 10 && pops < 150, `風船: CPU はときどき割る（${pops}/200）`);
+    console.log('fusen OK（CPU が割った回', pops, '/200・割らなかったときの点の平均', (sum / (200 - pops)).toFixed(1), '）');
+  } finally {
+    performance.now = real;
+  }
+}
+
+// シルエットクイズ（2026-11-05）
+{
+  const SK = GAMES.kage;
+  const { KAGE, KINDS: SKINDS } = await import('../app/js/games/kage-data.js');
+  const { choicesOf: skChoices } = await import('../app/js/games/kage.js');
+  const names = new Set();
+  for (const [e, n, k] of KAGE) {
+    assert.ok(typeof e === 'string' && e && n && SKINDS[k], `シルエット: 絵と名前と仲間がある（${n}）`);
+    assert.ok(!names.has(k + ':' + n), `シルエット: 同じ仲間に同じ名前を重ねない（${n}）`);
+    assert.ok(![...e].some((c) => c.codePointAt(0) >= 0x1fa70), `シルエット: 新しすぎる絵文字を使わない（${n}）`);
+    names.add(k + ':' + n);
+  }
+  for (const k of Object.keys(SKINDS)) assert.ok(KAGE.filter((x) => x[2] === k).length >= 8, `シルエット: 仲間「${SKINDS[k]}」に8つ以上`);
+  for (let seed = 0; seed < 30; seed++) {
+    const s = SK.init(3, seed, { rules: { rounds: 20 } });
+    assert.equal(s.qs.length, 20, 'シルエット: 問題の数');
+    assert.equal(new Set(s.qs.map((x) => x.i)).size, 20, 'シルエット: 同じ絵を2回出さない');
+    for (const x of s.qs) {
+      assert.equal(x.opts.length, 4, 'シルエット: 答えは4つ');
+      assert.equal(new Set(x.opts).size, 4, 'シルエット: 4つの答えは重ならない');
+      assert.ok(x.opts.includes(KAGE[x.i][1]), 'シルエット: 正しい答えが入っている');
+      for (const c of x.opts) assert.ok(KAGE.some(([, n, k]) => n === c && k === KAGE[x.i][2]), 'シルエット: 4つとも同じ仲間');
+    }
+    assert.deepEqual(s.qs[3].opts, skChoices(seed, 3, s.qs[3].i), 'シルエット: 答えの並びは種で決まる');
+  }
+  let s = SK.init(3, 9);
+  s = SK.apply(s, { p: -1, t: 'next' });
+  const right = KAGE[s.qs[0].i][1];
+  const wrong = s.qs[0].opts.find((c) => c !== right);
+  assert.equal(SK.apply(s, { p: 0, t: 'ans', q: 0, c: 'なにか', ms: 100 }), null, 'シルエット: 4つにない答えは受け付けない');
+  s = SK.apply(s, { p: 0, t: 'ans', q: 0, c: wrong, ms: 900 });
+  assert.equal(SK.apply(s, { p: 0, t: 'ans', q: 0, c: right, ms: 1200 }), null, 'シルエット: 1問に1回だけ');
+  s = SK.apply(s, { p: 1, t: 'ans', q: 0, c: right, ms: 2000 });
+  s = SK.apply(s, { p: 2, t: 'ans', q: 0, c: right, ms: 1500 });
+  s = SK.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [0, 2, 3], 'シルエット: 速い順に点、まちがいは0点');
+  console.log('kage OK（絵', KAGE.length, 'こ）');
+}
+
+// 羽根つき（2026-11-05）
+{
+  const HN = GAMES.hane;
+  const { qualityOf, nextD, windowOf, START_D, MIN_D, MAX_D, INK_MAX, placeOf, fKey: hnKey } = await import('../app/js/games/hane.js');
+  assert.equal(qualityOf(1600, 1600), 1, '羽根つき: ちょうどならぴったり度1');
+  assert.equal(qualityOf(1600, 1600 + windowOf(1600) + 1), null, '羽根つき: 輪を過ぎたら落とす');
+  assert.equal(qualityOf(1600, 1600 - windowOf(1600) - 1), null, '羽根つき: 早すぎても落とす');
+  assert.ok(nextD(1600, 1) < nextD(1600, 0.3), '羽根つき: ぴったりほど速い羽根が返る');
+  let d = START_D;
+  for (let i = 0; i < 30; i++) d = nextD(d, 1);
+  assert.equal(d, MIN_D, '羽根つき: いちばん速くても下限で止まる');
+  d = START_D;
+  for (let i = 0; i < 30; i++) d = nextD(d, 0);
+  assert.equal(d, MAX_D, '羽根つき: ずれ続けても上限で止まる');
+  assert.deepEqual(placeOf([0, 2, 0, 5]), [1, 3, 1, 4], '羽根つき: 落書きの少ない人ほど上の順位');
+  let s = HN.init(3, 5);
+  assert.equal(HN.apply(s, { p: 0, t: 'hit', n: 0, ms: 1600 }), null, '羽根つき: サーブの前は打てない');
+  s = HN.apply(s, { p: -1, t: 'serve', n: 0 });
+  assert.equal(s.from, 0, '羽根つき: 最初のサーブは席の1番目');
+  assert.equal(s.to, 1, '羽根つき: 次の席へ飛ぶ');
+  assert.equal(HN.apply(s, { p: 2, t: 'hit', n: s.k, ms: 1600 }), null, '羽根つき: 受ける人でない人は打てない');
+  const n1 = s.k;
+  s = HN.apply(s, { p: 1, t: 'hit', n: n1, ms: 1610 });
+  assert.equal(s.to, 2, '羽根つき: 打ち返すと次の人へ');
+  assert.notEqual(hnKey(s), hnKey(HN.apply(HN.init(3, 5), { p: -1, t: 'serve', n: 0 })), '羽根つき: 羽根ごとに時計の鍵が変わる（前は人数で鍵を作り、2本目から押せなかった）');
+  assert.ok(s.d < START_D, '羽根つき: ぴったりなら速くなる');
+  assert.equal(HN.apply(s, { p: 1, t: 'hit', n: n1, ms: 1610 }), null, '羽根つき: 同じ手が2回届いても2回目は反則');
+  s = HN.apply(s, { p: 2, t: 'hit', n: s.k, ms: 50 });
+  assert.deepEqual(s.ink, [0, 0, 1], '羽根つき: 早すぎたら落として墨が1つ');
+  assert.equal(s.phase, 'drop', '羽根つき: 落としたら見せる');
+  s = HN.apply(s, { p: -1, t: 'serve', n: s.k });
+  assert.equal(s.from, 2, '羽根つき: 落とした人がサーブ');
+  assert.equal(s.to, 0, '羽根つき: 席の順に次の人へ（最後の席の次は最初の席）');
+  assert.equal(HN.referee(s).move.t, 'drop', '羽根つき: 届かないときはホストが落とした扱いにする');
+  for (let k = 0; k < 200 && s.phase !== 'end'; k++) {
+    if (s.phase === 'drop') s = HN.apply(s, { p: -1, t: 'serve', n: s.k });
+    else if (s.to === 0) s = HN.apply(s, { p: 0, t: 'miss', n: s.k }); // 席0だけが落とし続ける
+    else s = HN.apply(s, { p: s.to, t: 'hit', n: s.k, ms: s.d });
+  }
+  const res = HN.result(s);
+  assert.ok(res, '羽根つき: だれかが5回落としたら終わり');
+  assert.equal(s.ink[0], INK_MAX, '羽根つき: 5回落とした人');
+  assert.deepEqual(res.winners, [1], '羽根つき: 落書きのいちばん少ない人の勝ち');
+  const { seatPoints: seatPointsLocal } = await import('../app/js/games/index.js');
+  assert.deepEqual(seatPointsLocal(res, 3), [0, 2, 1], '羽根つき: 順位で点（落書き 5・0・1こ）');
+  // CPU: 遅い羽根ほどよく返す
+  const real = performance.now.bind(performance);
+  let fake = 0;
+  performance.now = () => fake;
+  try {
+    const rate = (dd) => {
+      let ok = 0;
+      for (let i = 0; i < 400; i++) {
+        const c = { ...HN.apply(HN.init(2, i), { p: -1, t: 'serve', n: 0 }), d: dd };
+        let m = null;
+        for (let k = 0; k < 400 && !m; k++) { fake += 10; m = HN.cpu(c, 1); }
+        if (m && qualityOf(dd, m.ms) !== null) ok++;
+        fake += 100000;
+      }
+      return ok / 400;
+    };
+    const slow = rate(START_D);
+    const fast = rate(MIN_D);
+    assert.ok(slow > 0.8 && fast < 0.7 && fast > 0.4, `羽根つき: CPU は遅い羽根ほど返す（${slow}・${fast}）`);
+    console.log('hane OK（CPU が返す割合 遅い羽根', slow, '・速い羽根', fast, '）');
+  } finally {
+    performance.now = real;
+  }
+}
+
+// 価値観ならべ（2026-11-05）
+{
+  const KC = GAMES.kachikan;
+  const { TOPICS: KCT } = await import('../app/js/games/kachikan-data.js');
+  const { numbersOf, cpuWord, MAX_ROUNDS: KMAX, LIVES } = await import('../app/js/games/kachikan.js');
+  assert.ok(KCT.length >= KMAX, '価値観ならべ: お題は10こ以上');
+  for (const t of KCT) assert.ok(t.length === 4 && t[3].length === 11 && new Set(t[3]).size === 11, `価値観ならべ: 言葉の列は重ならない11こ（${t[0]}）`);
+  for (let seed = 0; seed < 50; seed++) {
+    const ns = numbersOf(seed, 2, 10);
+    assert.equal(new Set(ns).size, 10, '価値観ならべ: 数字は重ならない');
+    assert.ok(ns.every((v) => Number.isInteger(v) && v >= 1 && v <= 100), '価値観ならべ: 数字は1〜100');
+  }
+  assert.equal(cpuWord(KCT[0], 1), KCT[0][3][0], '価値観ならべ: CPU は1なら列の最初の言葉');
+  assert.equal(cpuWord(KCT[0], 100), KCT[0][3][10], '価値観ならべ: CPU は100なら列の最後の言葉');
+  assert.equal(cpuWord(KCT[0], 100, 1), KCT[0][3][10], '価値観ならべ: ずらしても列からはみ出さない');
+  let s = KC.init(3, 11);
+  s = KC.apply(s, { p: -1, t: 'next' });
+  assert.equal(s.phase, 'write', '価値観ならべ: 言葉を書く場面から');
+  assert.equal(KC.apply(s, { p: 0, t: 'play', r: 0 }), null, '価値観ならべ: 書く場面では出せない');
+  assert.equal(KC.apply(s, { p: 0, t: 'word', r: 0, text: '   ' }), null, '価値観ならべ: 空の言葉は受け付けない');
+  s = KC.apply(s, { p: 0, t: 'word', r: 0, text: 'ライオン' });
+  assert.equal(KC.apply(s, { p: 0, t: 'word', r: 0, text: 'ゾウ' }), null, '価値観ならべ: 書き直しはなし');
+  s = KC.apply(s, { p: 1, t: 'word', r: 0, text: 'アリ' });
+  assert.equal(KC.referee(s).key, 'write0', '価値観ならべ: 全員書くまで待つ');
+  s = KC.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.words, ['ライオン', 'アリ', ''], '価値観ならべ: 書かなかった人は言葉なし');
+  const byNum = [0, 1, 2].sort((a, b) => s.nums[a] - s.nums[b]);
+  // いちばん大きい人が先に出すと、小さい2人の札が捨てられライフが1つ減る
+  let w = KC.apply(s, { p: byNum[2], t: 'play', r: 0 });
+  assert.equal(w.lives, LIVES - 1, '価値観ならべ: まちがえたらライフが1つ減る');
+  assert.deepEqual(w.order, [byNum[0], byNum[1], byNum[2]], '価値観ならべ: 小さかった札はめくって捨てる');
+  assert.equal(w.phase, 'done', '価値観ならべ: 全部出たらお題の終わり');
+  assert.equal(w.cleared, 1, '価値観ならべ: ライフが残っていればクリア');
+  assert.equal(w.perfect, 0, '価値観ならべ: まちがいがあればパーフェクトではない');
+  // 小さい順に出せばパーフェクト
+  let ok = s;
+  for (const p of byNum) ok = KC.apply(ok, { p, t: 'play', r: 0 });
+  assert.equal(ok.lives, LIVES, '価値観ならべ: 小さい順ならライフは減らない');
+  assert.equal(ok.perfect, 1, '価値観ならべ: 小さい順ならパーフェクト');
+  assert.equal(KC.apply(ok, { p: byNum[0], t: 'play', r: 0 }), null, '価値観ならべ: 同じ手が2回届いても2回目は反則');
+  // ライフが0になったら終わり（引き分け・クリア数を持つ）
+  let z = s;
+  for (let k = 0; k < 20 && z.phase !== 'end'; k++) {
+    if (z.phase === 'done') z = KC.apply(z, { p: -1, t: 'next' });
+    else if (z.phase === 'write') { z = KC.apply(z, { p: -1, t: 'close' }); }
+    else {
+      const hand = [0, 1, 2].filter((p) => z.state[p] === 'hand').sort((a, b) => z.nums[b] - z.nums[a]);
+      z = KC.apply(z, { p: hand[0], t: 'play', r: z.r }); // いちばん大きい人から出す（まちがえる）
+    }
+  }
+  const res = KC.result(z);
+  assert.ok(res && res.draw === true && res.winners.length === 0, '価値観ならべ: ライフが尽きたら引き分け');
+  assert.equal(z.lives, 0, '価値観ならべ: ライフ0で終わり');
+  // 10こ全部クリアしたら全員の勝ち
+  let a = KC.init(2, 3);
+  for (let k = 0; k < 100 && a.phase !== 'end'; k++) {
+    if (a.phase === 'ready' || a.phase === 'done') a = KC.apply(a, { p: -1, t: 'next' });
+    else if (a.phase === 'write') a = KC.apply(a, { p: -1, t: 'close' });
+    else a = KC.apply(a, { p: [0, 1].filter((p) => a.state[p] === 'hand').sort((x, y) => a.nums[x] - a.nums[y])[0], t: 'play', r: a.r });
+  }
+  assert.deepEqual(KC.result(a).winners, [0, 1], '価値観ならべ: 10こ全部クリアしたら全員の勝ち');
+  assert.equal(a.cleared, KMAX, '価値観ならべ: クリアは10こまで');
+  console.log('kachikan OK');
+}
+
+// 数字つなぎ早解き（2026-11-05）
+{
+  const TG = GAMES.tsunagi;
+  const { TSUNAGI } = await import('../app/js/games/tsunagi-data.js');
+  const { isSolution: tgOk, countSolutions, pathsOf, makeCandidate, neighbors: tgNb } = await import('../app/js/games/tsunagi.js');
+  for (const N of [5, 7]) {
+    assert.ok(TSUNAGI[N].length >= 10, `数字つなぎ: ${N}×${N} の問題が10問以上`);
+    for (const x of TSUNAGI[N]) {
+      assert.ok(x.p.length === N * N && x.s.length === N * N, '数字つなぎ: 問題と答えの長さ');
+      assert.equal(countSolutions(x.p, N, 2), 1, `数字つなぎ: 答えが1つだけ（${x.p}）`);
+      const ps = pathsOf(x.p, x.s, N);
+      assert.ok(tgOk(x.p, ps, N), '数字つなぎ: 書いてある答えが正しい');
+      // 線が自分のとなりを通って折り返さない
+      for (const path of Object.values(ps)) for (let a = 0; a < path.length; a++) for (let b = a + 2; b < path.length; b++) {
+        assert.ok(!tgNb(N)[path[a]].includes(path[b]), '数字つなぎ: 線が自分のとなりを通らない');
+      }
+    }
+  }
+  // 解の数え方: 答えが2つある小さな盤（2×2 の角に 1 と 1）は2つと数える。数字が1つしかないと0
+  assert.equal(countSolutions('100' + '000' + '001', 3, 5), 2, '数字つなぎ: 3×3 の対角の角どうしは、全部のマスを通る線が2通り（S の字とその裏返し）');
+  assert.equal(countSolutions('1100', 2, 5), 1, '数字つなぎ: 2×2 でとなりどうしの 1 は、U の字の1通り');
+  assert.equal(countSolutions('1001', 2, 5), 0, '数字つなぎ: 2×2 の対角の 1 は、全部のマスを通れないので0');
+  // 作り方の道具が、決まった種で同じ問題を作る
+  const { mulberry32: m32 } = await import('../app/js/games/util.js');
+  assert.deepEqual(makeCandidate(5, m32(7), 7), makeCandidate(5, m32(7), 7), '数字つなぎ: 種が同じなら同じ問題');
+  // 答え合わせ
+  const x = TSUNAGI[5][0];
+  const good = pathsOf(x.p, x.s, 5);
+  const rev = Object.fromEntries(Object.entries(good).map(([k, p]) => [k, p.slice().reverse()]));
+  assert.ok(tgOk(x.p, rev, 5), '数字つなぎ: どちらの数字からつないでもよい');
+  const k0 = Object.keys(good)[0];
+  assert.ok(!tgOk(x.p, { ...good, [k0]: good[k0].slice(0, -1) }, 5), '数字つなぎ: つながっていない線は完成でない');
+  const short = { ...good };
+  delete short[k0];
+  assert.ok(!tgOk(x.p, short, 5), '数字つなぎ: つないでいない数字があれば完成でない');
+  assert.ok(!tgOk(x.p, { ...good, [k0]: [good[k0][0], good[k0][good[k0].length - 1]] }, 5), '数字つなぎ: となりでないマスへは飛べない');
+  // 通るマスは同じで順番だけ飛ぶ線（2つ目と3つ目を入れかえる。線は自分のとなりを通らないので、1つ目と3つ目はとなりでない）
+  const kLong = Object.keys(good).find((k) => good[k].length >= 4);
+  const jump = good[kLong].slice();
+  [jump[1], jump[2]] = [jump[2], jump[1]];
+  assert.ok(!tgOk(x.p, { ...good, [kLong]: jump }, 5), '数字つなぎ: 全部のマスを通っていても、となりでないマスへ飛ぶ線は完成でない');
+  // 進め方
+  let s = TG.init(3, 4, { rules: { size: '5' } });
+  assert.equal(s.qs.length, 3, '数字つなぎ: 3問');
+  assert.equal(s.size, 5, '数字つなぎ: 大きさ 5×5');
+  assert.equal(TG.init(3, 4).size, 7, '数字つなぎ: 最初は 7×7');
+  s = TG.apply(s, { p: -1, t: 'next' });
+  const ans = pathsOf(s.qs[0].p, s.qs[0].s, 5);
+  assert.equal(TG.apply(s, { p: 0, t: 'done', q: 0, paths: { ...ans, [Object.keys(ans)[0]]: [] }, ms: 1000 }), null, '数字つなぎ: まちがった答えは受け付けない');
+  s = TG.apply(s, { p: 1, t: 'done', q: 0, paths: ans, ms: 3000 });
+  s = TG.apply(s, { p: 0, t: 'done', q: 0, paths: ans, ms: 2000 });
+  assert.equal(TG.apply(s, { p: 0, t: 'done', q: 0, paths: ans, ms: 2000 }), null, '数字つなぎ: 同じ手が2回届いても2回目は反則');
+  s = TG.apply(s, { p: 2, t: 'pass', q: 0 });
+  s = TG.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [3, 2, 0], '数字つなぎ: 速い順に点、あきらめたら0点');
+  console.log('tsunagi OK（5×5', TSUNAGI[5].length, '問・7×7', TSUNAGI[7].length, '問）');
+}
+
+// 紙相撲（2026-11-05）
+{
+  const SM = GAMES.sumo;
+  const { startRound: smStart, tap: smTap, stepRound: smStep, roundWinner: smWin, ranksOf: smRanks, RING: SM_RING, BODY: SM_BODY, WOB_TAP: SM_WT } = await import('../app/js/games/sumo.js');
+  const { mulberry32: smRnd } = await import('../app/js/games/util.js');
+  assert.ok(SM.live && SM.onlineOnly, '紙相撲: 毎フレーム動くゲームで、オンラインだけ');
+  assert.deepEqual([undefined, { players: 3 }, { players: 9 }].map((r) => SM.seatCount(r)), [2, 3, 4], '紙相撲: 席の数は 2〜4');
+  // 始めの並び: 土俵の中で重ならず、中心を向く
+  for (const n of [2, 3, 4]) {
+    const r = smStart(n);
+    for (const w of r.w) {
+      assert.ok(Math.hypot(w.x, w.y) + SM_BODY < SM_RING, '紙相撲: 始めは土俵の中');
+      assert.ok(Math.cos(w.dir - Math.atan2(-w.y, -w.x)) > 0.999, '紙相撲: 始めは中心を向く');
+    }
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) assert.ok(Math.hypot(r.w[i].x - r.w[j].x, r.w[i].y - r.w[j].y) > 2 * SM_BODY, '紙相撲: 始めは重ならない');
+  }
+  // 1人で叩く（相手は動かない）: 間 interval 秒で叩き続け、どうなったか
+  const solo = (interval, seed = 1, limit = 30) => {
+    const rnd = smRnd(seed);
+    const r = smStart(2);
+    let next = 0.1;
+    let win = null;
+    while (win === null) {
+      if (r.t >= next) { smTap(r, 0, rnd); next = r.t + interval; }
+      smStep(r, 1 / 60);
+      win = smWin(r, r.t >= limit);
+    }
+    return { win, t: r.t, r };
+  };
+  let r = smStart(2);
+  smTap(r, 0, () => 0.5);
+  assert.ok(Math.abs(r.w[0].wob - SM_WT) < 1e-9, '紙相撲: 1回目のトンは決まった分だけぐらつく');
+  assert.ok(r.w[0].vy < 0, '紙相撲: トンで向いている方（中心）へ動き出す');
+  const steady = solo(0.25);
+  assert.equal(steady.win, 0, '紙相撲: ゆっくり叩けば、動かない相手を押し出せる');
+  assert.equal(steady.r.w[1].why, 'out', '紙相撲: 押し出された相手は「外」で負け');
+  assert.ok(steady.t < 10, `紙相撲: 押し出すのに長すぎない（${steady.t.toFixed(1)}秒）`);
+  const mash = solo(0.1);
+  assert.equal(mash.win, 1, '紙相撲: 速く叩きすぎると自分が倒れて負ける');
+  assert.equal(mash.r.w[0].why, 'fall', '紙相撲: 叩きすぎて倒れたら「倒れた」');
+  assert.ok(mash.t < 2, '紙相撲: 叩きすぎるとすぐ倒れる');
+  // 人のトンは押した人の端末で測った間でぐらつく（届く間隔が詰まっても、押した間がゆっくりなら倒れにくい）
+  r = smStart(2);
+  smTap(r, 0, () => 0.5, 9);
+  smTap(r, 0, () => 0.5, 0.3);
+  assert.ok(Math.abs(r.w[0].wob - 2 * SM_WT) < 1e-9, '紙相撲: 渡した間がゆっくりなら、同じ時刻に届いても叩きすぎにならない');
+  smTap(r, 0, () => 0.5, 0.05);
+  assert.ok(r.w[0].wob > 3 * SM_WT + 0.1, '紙相撲: 渡した間が短ければ叩きすぎ');
+  // 倒れた力士はトンしても動かない
+  const vx = mash.r.w[0].vx;
+  smTap(mash.r, 0);
+  assert.equal(mash.r.w[0].vx, vx, '紙相撲: 倒れたらトンしても動かない');
+  // 同じ手なら同じ結果（ホストの端末だけが動かすが、自動確認のため）
+  assert.deepEqual(solo(0.2, 5).r, solo(0.2, 5).r, '紙相撲: 同じ乱数なら同じ動き');
+  // 回の勝ち負け
+  r = smStart(3);
+  assert.equal(smWin(r), null, '紙相撲: 3人残っていれば続く');
+  r.w[0].wob = 0.5; r.w[1].wob = 0.2; r.w[2].wob = 0.3;
+  assert.equal(smWin(r, true), 1, '紙相撲: 時間が来たらぐらつきのいちばん少ない人の勝ち');
+  r.w[2].wob = 0.2;
+  assert.equal(smWin(r, true), -1, '紙相撲: ぐらつきが並んだら引き分け');
+  r.w[0].alive = false; r.w[1].alive = false;
+  assert.equal(smWin(r), 2, '紙相撲: 1人だけ残ったらその人の勝ち');
+  r.w[2].alive = false;
+  assert.equal(smWin(r), -1, '紙相撲: 最後の人たちが同時に落ちたら引き分け');
+  // ぶつかったら押された方が下がる
+  r = smStart(2);
+  r.w[0].y = 0.14; r.w[1].y = -0.14; r.w[0].vy = -0.8;
+  smStep(r, 0.05);
+  assert.ok(r.w[1].vy < 0 && r.w[1].wob > 0, '紙相撲: ぶつかると押された方が下がり、ぐらつく');
+  assert.ok(Math.hypot(r.w[0].x - r.w[1].x, r.w[0].y - r.w[1].y) >= 2 * SM_BODY - 1e-9, '紙相撲: ぶつかっても重ならない');
+  // 3回戦の順位
+  assert.deepEqual(smRanks([2, 1, 0]), [1, 2, 3], '紙相撲: 勝った回数の多い順');
+  assert.deepEqual(smRanks([1, 1, 1, 0]), [1, 1, 1, 4], '紙相撲: 同じ回数は同じ順位');
+  console.log('sumo OK（ゆっくり叩いて', steady.t.toFixed(1), '秒で押し出し・叩きすぎて', mash.t.toFixed(2), '秒で倒れる）');
+}
+
 console.log('ALL OK');

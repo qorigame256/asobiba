@@ -47,11 +47,12 @@
 //     無ければ盤のゲームは place、カードゲームは card。対局が終わった手では呼ばれず、勝ち負けの音が鳴る（main.js の moveSound）,
 //   startSound（対局の始めに鳴らす音の名前。カードゲームの shuffle）
 //
-// 毎フレーム動くゲーム（live: true。エアホッケー）が持つもの: id / name / icon / desc / ready / players（席の呼び名）/ settings / seatCount（任意。上と同じ）,
+// 毎フレーム動くゲーム（live: true。エアホッケー・紙相撲）が持つもの: id / name / icon / desc / ready / players（席の呼び名）/ settings / seatCount（任意。上と同じ）,
 //   mount(要素, { mode: 'cpu' | 'two' | 'online', status: 状態表示の要素, me（オンライン: 席の番号、観戦は -1）, names, rules,
 //     send(中身, 大事か), isHost, cpuSeats()（CPU が動かす席の番号。部屋を出た人の席も入る） }) → { receive(中身, 送った人の番号), destroy() }。
 //   手の一覧は使わず、ゲームが自分で描いて自分で進める。オンラインでは send で送った中身が相手の receive に届く
-//   （大事でないものは届いたか確かめずに送る）。待合室は盤のゲームと同じで、CPU は liveCpu(rules) が true のとき（エアホッケーの3人）だけ選べる。
+//   （大事でないものは届いたか確かめずに送る）。待合室は盤のゲームと同じで、CPU は liveCpu(rules) が true のとき（エアホッケーの3人・紙相撲）だけ選べる。
+//   onlineOnly: true（紙相撲）なら、ホームに「CPU と対戦」「この画面で2人で」を出さず、mount の mode はいつも 'online'。
 
 import tictactoe from './tictactoe.js';
 import connect4 from './connect4.js';
@@ -131,17 +132,23 @@ import amida from './amida.js';
 import narabe from './narabe.js';
 import kingyo from './kingyo.js';
 import tower from './tower.js';
+import fusen from './fusen.js';
+import kage from './kage.js';
+import hane from './hane.js';
+import kachikan from './kachikan.js';
+import tsunagi from './tsunagi.js';
+import sumo from './sumo.js';
 import { HOWTO } from './howto.js';
 import { FIGS } from './howto-fig.js';
 
 // 準備中のゲームを一覧に出すとき: soon('id', '名前', '絵文字')
 export const soon = (id, name, icon) => ({ id, name, icon, desc: 'じゅんび中', ready: false });
 
-export const GAME_ORDER = ['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'colors', 'daifugo', 'poker', 'speed', 'babanuki', 'doubt', 'sevens', 'blackjack', 'hitai', 'hitblow', 'sensou', 'yubisuma', 'tamebeam', 'acchi', 'kaidan', 'memory', 'yacht', 'sugoroku', 'bingo', 'seri', 'nim', 'taru', 'amida', 'kaburi', 'fukuwarai', 'flags', 'kanji', 'mannaka', 'oxquiz', 'eitango', 'karuta', 'make10', 'anzan', 'numtouch', 'kotoba', 'narabe', 'slide', 'nanpure', 'meiro', 'targets', 'mikiri', 'isutori', 'iroji', 'atodashi', 'pittari', 'kioku', 'typing', 'danmaku', 'tamaire', 'tsuna', 'nawa', 'bowling', 'golf', 'darts', 'kingyo', 'tower', 'billiards', 'machigai', 'bombs', 'daruma', 'umigame', 'wordwolf', 'ishin', 'oogiri', 'jinro', 'oekaki', 'hockey', 'hasami', 'shogi', 'mahjong'];
+export const GAME_ORDER = ['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'colors', 'daifugo', 'poker', 'speed', 'babanuki', 'doubt', 'sevens', 'blackjack', 'hitai', 'hitblow', 'sensou', 'yubisuma', 'tamebeam', 'acchi', 'kaidan', 'memory', 'yacht', 'sugoroku', 'bingo', 'seri', 'nim', 'taru', 'fusen', 'amida', 'kaburi', 'fukuwarai', 'flags', 'kanji', 'mannaka', 'oxquiz', 'kage', 'eitango', 'karuta', 'make10', 'anzan', 'numtouch', 'kotoba', 'narabe', 'slide', 'nanpure', 'tsunagi', 'meiro', 'targets', 'mikiri', 'isutori', 'iroji', 'atodashi', 'pittari', 'kioku', 'typing', 'danmaku', 'tamaire', 'tsuna', 'nawa', 'hane', 'sumo', 'bowling', 'golf', 'darts', 'kingyo', 'tower', 'billiards', 'machigai', 'bombs', 'daruma', 'umigame', 'wordwolf', 'ishin', 'kachikan', 'oogiri', 'jinro', 'oekaki', 'hockey', 'hasami', 'shogi', 'mahjong'];
 export const GAMES = {
   tictactoe, connect4, reversi, colors, daifugo, poker, speed, hitblow, sensou, yubisuma, memory, nim, flags, kanji, targets, umigame, shogi, mahjong, hockey,
   gomoku, dots, babanuki, doubt, yacht, wordwolf, jinro, sevens, mancala, oekaki, seri, blackjack, kaisen, pittari, typing, danmaku, tamaire, machigai, bombs, hasami, hitai, kioku, tamebeam, make10, ishin, karuta, acchi, daruma, slide, nanpure, mikiri, bingo, meiro, iroji, sugoroku, taru,
-  isutori, cube4, kaidan, atodashi, bowling, tsuna, eitango, kaburi, anzan, golf, billiards, numtouch, mannaka, oxquiz, kotoba, oogiri, fukuwarai, nawa, darts, amida, narabe, kingyo, tower,
+  isutori, cube4, kaidan, atodashi, bowling, tsuna, eitango, kaburi, anzan, golf, billiards, numtouch, mannaka, oxquiz, kotoba, oogiri, fukuwarai, nawa, darts, amida, narabe, kingyo, tower, fusen, kage, hane, kachikan, tsunagi, sumo,
 };
 // 遊び方（howto.js）。対局画面の「？遊び方」で出す（main.js の renderHowto）
 for (const [id, lines] of Object.entries(HOWTO)) if (GAMES[id]) GAMES[id].howto = lines;
