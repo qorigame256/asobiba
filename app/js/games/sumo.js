@@ -207,6 +207,10 @@ function mount(root, opts) {
   // （読み込み直した直後はまだ中継サーバーにつながっておらず届かないことがあるので、これだけに頼らない）
   let heard = false; // ゲスト: ホストから状態が届いたことがあるか（無ければ続きを答えない）
   let lastHave = -1e9; // ゲスト: 最後に続きを送った時刻（状態は0.05秒ごとに届くので、0.5秒に1回まで）
+  // ゲスト: ホストから最後に届いた phaseT。比べるのも続きを送るのもこの値を使う（game.phaseT は数えの表示のために自分の端末でも進めるので、
+  // それで比べると、ゲストが少し先へ進んだだけでホストの正しい状態を捨ててしまう）
+  let heardPT = 0;
+  const heardG = () => ({ round: game.round, wins: game.wins, phase: game.phase, phaseT: r3(heardPT), last: game.last, over: game.over });
   const cpuState = new Map();
   let seenAlive = ring.w.map(() => true);
 
@@ -265,7 +269,9 @@ function mount(root, opts) {
   // CPU が動かす席（部屋を出た人の席も。自分の席は除く）
   const cpuSeatsNow = () => (opts.cpuSeats?.() ?? []).filter((p) => p >= 0 && p < n && p !== me);
 
-  const pack = () => ring.w.map((w) => [r3(w.x), r3(w.y), r3(w.dir), r3(w.wob), w.alive ? 1 : 0, w.why]);
+  // 速さ（vx・vy）も送る。ゲストの画面は使わないが、ホストが読み込み直したとき勢いごと引き継ぐため（前は勢いが0から再開し、
+  // 押し出されかけていた力士がその場で止まった。2026-11-06 の Codex の点検）
+  const pack = () => ring.w.map((w) => [r3(w.x), r3(w.y), r3(w.dir), r3(w.wob), w.alive ? 1 : 0, w.why, r3(w.vx), r3(w.vy)]);
   function sendState(important = false) {
     if (!host) return;
     opts.send({ k: 'st', ep, g: { round: game.round, wins: game.wins, phase: game.phase, phaseT: r3(game.phaseT), last: game.last, over: game.over }, t: r3(ring.t), w: pack() }, important);
@@ -308,12 +314,13 @@ function mount(root, opts) {
       const now = performance.now();
       if (!heard || now - lastHave < 500) return;
       lastHave = now;
-      opts.send({ k: 'have', ep, g: { round: game.round, wins: game.wins, phase: game.phase, phaseT: r3(game.phaseT), last: game.last, over: game.over }, t: r3(ring.t), w: pack() }, true);
+      opts.send({ k: 'have', ep, g: heardG(), t: r3(ring.t), w: pack() }, true);
     };
     if (d.k === 'need') { sendHave(); return; }
     if (d.k !== 'st' || !d.g || !Array.isArray(d.w) || d.w.length !== n) return;
-    if (d.ep < ep || (d.ep === ep && heard && progOf(d.g) < progOf(game))) { sendHave(); return; } // ホストが始め直した
+    if (d.ep < ep || (d.ep === ep && heard && progOf(d.g) < progOf(heardG()))) { sendHave(); return; } // ホストが始め直した（か、前の知らせが遅れて届いた）
     heard = true;
+    heardPT = Number(d.g.phaseT) || 0;
     const wasOver = game.over;
     const wasPhase = game.phase;
     const wasLast = game.last;
@@ -321,9 +328,9 @@ function mount(root, opts) {
     ep = d.ep;
     game = { ep, round: d.g.round, wins: d.g.wins, phase: d.g.phase, phaseT: d.g.phaseT, last: d.g.last, over: !!d.g.over };
     ring.t = d.t;
-    d.w.forEach(([x, y, dir, wob, al, why], p) => {
+    d.w.forEach(([x, y, dir, wob, al, why, vx, vy], p) => {
       const w = ring.w[p];
-      Object.assign(w, { x, y, dir, wob, alive: !!al, why });
+      Object.assign(w, { x, y, dir, wob, alive: !!al, why, vx: Number(vx) || 0, vy: Number(vy) || 0 });
     });
     if (game.round !== wasRound || (wasPhase === 'show' && game.phase === 'count')) shown = startRound(n);
     if (game.phase === 'show' && (wasPhase !== 'show' || wasLast !== game.last)) play(game.last === me ? 'goal' : 'pop');
@@ -429,8 +436,8 @@ function mount(root, opts) {
     ring.t = Number(d.t) || 0;
     d.w.forEach((e, p) => {
       if (!Array.isArray(e)) return;
-      const [x, y, dir, wob, al, why] = e;
-      Object.assign(ring.w[p], { x: Number(x) || 0, y: Number(y) || 0, dir: Number(dir) || 0, wob: Number(wob) || 0, alive: !!al, why: String(why ?? '') });
+      const [x, y, dir, wob, al, why, vx, vy] = e;
+      Object.assign(ring.w[p], { x: Number(x) || 0, y: Number(y) || 0, vx: Number(vx) || 0, vy: Number(vy) || 0, dir: Number(dir) || 0, wob: Number(wob) || 0, alive: !!al, why: String(why ?? '') });
     });
     seenAlive = ring.w.map((w) => w.alive);
     cpuState.clear();
@@ -501,8 +508,15 @@ function mount(root, opts) {
 }
 
 const r3 = (v) => Math.round(v * 1000) / 1000;
-// 試合がどこまで進んだか（同じ「もう一回」の回数の中で比べる）。回 → 数え・取り組み・結果 → おしまい の順に大きくなる
-export const progOf = (g) => (Number(g?.round) || 0) * 4 + (g?.over ? 3 : ({ count: 0, fight: 1, show: 2 })[g?.phase] ?? 0);
+// 試合がどこまで進んだか（同じ「もう一回」の回数の中で比べる）。回 → 数え・取り組み・結果 → おしまい の順に大きくなり、
+// 同じ段階の中では経った時間（phaseT）で大きくなる（0〜1未満の端数）。端数が無いと、最初の対局の1回戦の途中でホストが読み込み直し、
+// つながるまでに新しいホストが2秒の数えを終えると、どちらも「1回戦の取り組み」で並んでしまい、ゲストの続きを引き継がずに始めの位置へ戻った（2026-11-06 の Codex の点検）
+export const progOf = (g) => {
+  const base = (Number(g?.round) || 0) * 4 + (g?.over ? 3 : ({ count: 0, fight: 1, show: 2 })[g?.phase] ?? 0);
+  if (g?.over) return base;
+  const t = Math.max(0, Number(g?.phaseT) || 0);
+  return base + t / (t + 1);
+};
 
 export default {
   id: 'sumo',

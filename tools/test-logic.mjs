@@ -9222,15 +9222,30 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   // 紙相撲の何回戦（画面の中で数えるので、数の取り方だけ見る）
   const { roundsOf: smRounds } = await import('../app/js/games/sumo.js');
   assert.deepEqual([smRounds({}), smRounds({ rounds: 1 }), smRounds({ rounds: 5 }), smRounds({ rounds: 4 }), smRounds(undefined)], [3, 1, 5, 3, 3], '36回目: 紙相撲の何回戦');
+  {
+    // 紙相撲の進み具合（ホストが読み込み直したとき、ゲストの続きを引き継ぐかの比べ方）。同じ段階の中でも経った時間で比べる（2026-11-06 の Codex の点検）
+    const { progOf: smProg } = await import('../app/js/games/sumo.js');
+    const g = (round, phase, phaseT, over = false) => smProg({ round, phase, phaseT, over });
+    assert.ok(g(0, 'fight', 5) > g(0, 'fight', 0.3), '紙相撲: 同じ取り組みでも長く経った方が先');
+    assert.ok(g(0, 'count', 1.99) < g(0, 'fight', 0), '紙相撲: 数えの終わりより取り組みの始めが先');
+    assert.ok(g(0, 'fight', 30) < g(0, 'show', 0) && g(0, 'show', 2.49) < g(1, 'count', 0), '紙相撲: 端数で次の段階を追い越さない');
+    assert.equal(g(2, 'show', 1, true), g(2, 'show', 2, true), '紙相撲: おしまいは時間で比べない');
+  }
   // シルエットクイズの答えの数
   const SK = GAMES.kage;
   const { choicesOf: skChoices } = await import('../app/js/games/kage.js');
   const { KAGE } = await import('../app/js/games/kage-data.js');
   const s4 = SK.init(3, 21), s6 = SK.init(3, 21, { rules: { choice: 6 } });
-  s4.qs.forEach((x, q) => {
-    assert.equal(x.opts.length, 4, '36回目: シルエットは最初4択');
-    assert.deepEqual(skChoices(21, q, x.i), skChoices(21, q, x.i, 4), '36回目: シルエットの4択は前と全く同じ札');
-  });
+  s4.qs.forEach((x) => assert.equal(x.opts.length, 4, '36回目: シルエットは最初4択'));
+  {
+    // 4択の札は36回目の案より前（90a9332 の kage.js）と全く同じ。値はその版で種1〜30の問題と札を並べて作った（2026-11-06。
+    // 前は今の版どうしを比べていて、札の選び方が前から変わっても落ちなかった。Codex の点検の指摘）
+    const { createHash } = await import('node:crypto');
+    const all = [];
+    for (let seed = 1; seed <= 30; seed++) all.push(SK.init(3, seed).qs.map((x) => [x.i, x.opts]));
+    assert.equal(createHash('sha256').update(JSON.stringify(all)).digest('hex').slice(0, 16), 'ade9adc911b77542', '36回目: シルエットの4択は前と全く同じ札');
+    assert.deepEqual(s4.qs.map((x, q) => skChoices(21, q, x.i, 4)), s4.qs.map((x) => x.opts), '36回目: 札は choicesOf の4択と同じ');
+  }
   for (let seed = 1; seed <= 40; seed++) {
     for (const x of SK.init(2, seed, { rules: { choice: 6 } }).qs) {
       const [, right, kind] = KAGE[x.i];
