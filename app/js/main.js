@@ -1234,6 +1234,10 @@ const READING = {
   kachikan: 'かちかんならべ かちかん きょうりょく すうじ ことば いと',
   tsunagi: 'すうじつなぎはやとき なんばーりんく せん つなぐ ぱずる はやとき',
   sumo: 'かみずもう とんとんずもう すもう あくしょん',
+  nearpin: 'にあぴんくいず にあぴん ちかい すうじ くいず',
+  kanjiplus: 'かんじたしざん かんじ たしざん ぶしゅ くいず はやおし',
+  jigsaw: 'じぐそーはやとき じぐそー ぱずる え はやとき',
+  hitofude: 'ひとふでがきはやとき ひとふでがき ひとふで せん ぱずる はやとき',
   hasami: 'はさみしょうぎ ばん', shogi: 'しょうぎ ばん', mahjong: 'まーじゃん',
 };
 const toHira = (t) => String(t ?? '').toLowerCase().replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60)).replace(/\s+/g, '');

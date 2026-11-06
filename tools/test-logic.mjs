@@ -9025,4 +9025,172 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('sumo OK（ゆっくり叩いて', steady.t.toFixed(1), '秒で押し出し・叩きすぎて', mash.t.toFixed(2), '秒で倒れる）');
 }
 
+// ニアピンクイズ（2026-11-06）
+{
+  const NP = GAMES.nearpin;
+  const { NEARPIN } = await import('../app/js/games/nearpin-data.js');
+  const { nearPoints, closestOf, ROUNDS: NP_ROUNDS } = await import('../app/js/games/nearpin.js');
+  const texts = new Set();
+  for (const [t, v, u] of NEARPIN) {
+    assert.ok(typeof t === 'string' && t && typeof u === 'string', `ニアピン: 問題文と単位（${t}）`);
+    assert.ok(Number.isInteger(v) && v >= 0 && v < 1e7, `ニアピン: 答えは7桁までの整数（${t}）`);
+    assert.ok(!texts.has(t), `ニアピン: 同じ問題を重ねない（${t}）`);
+    texts.add(t);
+  }
+  assert.ok(NEARPIN.length >= 80, 'ニアピン: 問題が80問以上');
+  // 点: 近い順に 3・2・1、4番目は0、ぴったり +2、同じ近さは速い方が上、近さも速さも同じなら同じ点
+  assert.deepEqual(nearPoints([{ v: 100, ms: 5 }, { v: 90, ms: 1 }, { v: 130, ms: 1 }, { v: 0, ms: 1 }], 100), [5, 2, 1, 0], 'ニアピン: 近い順に点・ぴったりは +2・4番目は0');
+  assert.deepEqual(nearPoints([{ v: 90, ms: 900 }, { v: 110, ms: 500 }, null], 100), [2, 3, 0], 'ニアピン: 同じ近さは先に答えた人が上・答えなければ0');
+  assert.deepEqual(nearPoints([{ v: 90, ms: 500 }, { v: 110, ms: 500 }], 100), [3, 3], 'ニアピン: 近さも速さも同じなら同じ点');
+  assert.deepEqual(closestOf([{ v: 90, ms: 900 }, { v: 110, ms: 500 }, null], 100), [1], 'ニアピン: いちばん近い人');
+  // 進め方
+  let s = NP.init(3, 5);
+  assert.equal(s.qs.length, NP_ROUNDS, 'ニアピン: 10問');
+  assert.equal(new Set(s.qs).size, NP_ROUNDS, 'ニアピン: 同じ問題を2回出さない');
+  s = NP.apply(s, { p: -1, t: 'next' });
+  const right = NEARPIN[s.qs[0]][1];
+  assert.equal(NP.apply(s, { p: 0, t: 'ans', q: 0, v: 1.5, ms: 100 }), null, 'ニアピン: 整数でない答えは受け付けない');
+  assert.equal(NP.apply(s, { p: 0, t: 'ans', q: 0, v: 1e7, ms: 100 }), null, 'ニアピン: 8桁は受け付けない');
+  s = NP.apply(s, { p: 0, t: 'ans', q: 0, v: right, ms: 3000 });
+  assert.equal(NP.apply(s, { p: 0, t: 'ans', q: 0, v: right + 1, ms: 3500 }), null, 'ニアピン: 1問に1回だけ');
+  s = NP.apply(s, { p: 1, t: 'ans', q: 0, v: right + 5, ms: 1000 });
+  s = NP.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [5, 2, 0], 'ニアピン: ぴったりは 3+2点・2番目は2点・答えなければ0点');
+  assert.equal(NP.result(s), null, 'ニアピン: まだ終わらない');
+  console.log('nearpin OK（問題', NEARPIN.length, '問）');
+}
+
+// 漢字たし算（2026-11-06）
+{
+  const KP = GAMES.kanjiplus;
+  const { KANJIPLUS, RADICALS } = await import('../app/js/games/kanjiplus-data.js');
+  const { choicesOf: kpChoices, partsOf: kpParts } = await import('../app/js/games/kanjiplus.js');
+  const seenParts = new Set();
+  for (const [parts, right, bad, lv] of KANJIPLUS) {
+    const ps = parts.split('+');
+    assert.ok(ps.length >= 2 && ps.length <= 3 && ps.every((c) => [...c].length === 1), `漢字たし算: 部品は1字ずつ2〜3個（${parts}）`);
+    assert.ok([...right].length === 1 && [...bad].length === 3, `漢字たし算: 答え1字・まちがい3字（${parts}）`);
+    assert.equal(new Set([right, ...bad]).size, 4, `漢字たし算: 4つの字は重ならない（${parts}）`);
+    assert.ok(lv === 'e' || lv === 'h', `漢字たし算: 難しさ（${parts}）`);
+    if (lv === 'e') assert.ok(ps.length === 2 && !ps.some((c) => RADICALS[c]), `漢字たし算: やさしいは字どうしの2つだけ（${parts}）`);
+    assert.ok(!seenParts.has(parts), `漢字たし算: 同じ部品の問題を重ねない（${parts}）`);
+    seenParts.add(parts);
+  }
+  for (const lv of ['e', 'h']) assert.ok(KANJIPLUS.filter((x) => x[3] === lv).length >= 40, `漢字たし算: ${lv} の問題が40問以上`);
+  for (let seed = 0; seed < 20; seed++) {
+    for (const level of ['easy', 'hard']) {
+      const s = KP.init(3, seed, { rules: { level, rounds: 20 } });
+      assert.equal(s.qs.length, 20, '漢字たし算: 問題の数');
+      assert.equal(new Set(s.qs.map((x) => x.i)).size, 20, '漢字たし算: 同じ問題を2回出さない');
+      for (const x of s.qs) {
+        assert.equal(KANJIPLUS[x.i][3], level === 'hard' ? 'h' : 'e', '漢字たし算: 難しさの問題だけ出す');
+        assert.ok(x.opts.includes(KANJIPLUS[x.i][1]) && x.opts.length === 4, '漢字たし算: 正しい答えを入れた4つ');
+      }
+      assert.deepEqual(s.qs[2].opts, kpChoices(seed, 2, s.qs[2].i), '漢字たし算: 並びは種で決まる');
+    }
+  }
+  assert.deepEqual(kpParts(KANJIPLUS.findIndex((x) => x[0] === '木+木+木')), ['木', '木', '木'], '漢字たし算: 3つの部品');
+  let s = KP.init(3, 9);
+  s = KP.apply(s, { p: -1, t: 'next' });
+  const right = KANJIPLUS[s.qs[0].i][1];
+  const wrong = s.qs[0].opts.find((c) => c !== right);
+  assert.equal(KP.apply(s, { p: 0, t: 'ans', q: 0, c: '亜', ms: 100 }), null, '漢字たし算: 4つにない字は受け付けない');
+  s = KP.apply(s, { p: 0, t: 'ans', q: 0, c: wrong, ms: 900 });
+  assert.equal(KP.apply(s, { p: 0, t: 'ans', q: 0, c: right, ms: 1200 }), null, '漢字たし算: 1問に1回だけ');
+  s = KP.apply(s, { p: 1, t: 'ans', q: 0, c: right, ms: 2000 });
+  s = KP.apply(s, { p: 2, t: 'ans', q: 0, c: right, ms: 1500 });
+  s = KP.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [0, 2, 3], '漢字たし算: 速い順に点、まちがいは0点');
+  console.log('kanjiplus OK（やさしい', KANJIPLUS.filter((x) => x[3] === 'e').length, '問・むずかしい', KANJIPLUS.filter((x) => x[3] === 'h').length, '問）');
+}
+
+// ジグソー早解き（2026-11-06）
+{
+  const JG = GAMES.jigsaw;
+  const { EMOJIS: JG_EMOJIS, pictureOf, scrambleOf, replaySwaps, solveSwaps, isDone: jgDone } = await import('../app/js/games/jigsaw.js');
+  const { mulberry32: jgRnd } = await import('../app/js/games/util.js');
+  for (const e of JG_EMOJIS) assert.ok(![...e].some((c) => c.codePointAt(0) >= 0x1fa70), `ジグソー: 新しすぎる絵文字を使わない（${e}）`);
+  assert.deepEqual(pictureOf(42), pictureOf(42), 'ジグソー: 同じ種なら同じ絵');
+  const pic = pictureOf(7);
+  assert.ok(pic.items.length >= 7 && pic.items.length <= 10, 'ジグソー: 絵文字は7〜10個');
+  assert.equal(new Set(pic.items.map((x) => x.e)).size, pic.items.length, 'ジグソー: 同じ絵文字を重ねない');
+  for (const n of [3, 4, 5]) {
+    for (let seed = 0; seed < 20; seed++) {
+      const p = scrambleOf(n, jgRnd(seed));
+      assert.ok(p.every((v, i) => v !== i) && new Set(p).size === n * n, `ジグソー: ${n}×${n} はどのかけらも元の場所に無い`);
+      assert.ok(jgDone(replaySwaps(p, solveSwaps(p))), 'ジグソー: そろえる入れ替えでそろう');
+    }
+  }
+  assert.equal(replaySwaps([1, 0], [[0, 0]]), null, 'ジグソー: 同じ場所どうしの入れ替えは反則');
+  assert.equal(replaySwaps([1, 0], [[0, 2]]), null, 'ジグソー: 盤の外は反則');
+  let s = JG.init(3, 4, { rules: { size: 3 } });
+  assert.equal(s.size, 3, 'ジグソー: 大きさ 3×3');
+  assert.equal(JG.init(3, 4).size, 4, 'ジグソー: 最初は 4×4');
+  assert.equal(JG.init(3, 4, { rules: { size: 5 } }).qs[0].perm.length, 25, 'ジグソー: 5×5 は25枚');
+  assert.equal(s.qs.length, 3, 'ジグソー: 3問');
+  s = JG.apply(s, { p: -1, t: 'next' });
+  const sw = solveSwaps(s.qs[0].perm);
+  assert.equal(JG.apply(s, { p: 0, t: 'done', q: 0, swaps: sw.slice(0, -1), ms: 1000 }), null, 'ジグソー: そろっていない答えは受け付けない');
+  s = JG.apply(s, { p: 1, t: 'done', q: 0, swaps: sw, ms: 3000 });
+  s = JG.apply(s, { p: 0, t: 'done', q: 0, swaps: sw, ms: 2000 });
+  assert.equal(JG.apply(s, { p: 0, t: 'done', q: 0, swaps: sw, ms: 2000 }), null, 'ジグソー: 同じ手が2回届いても2回目は反則');
+  s = JG.apply(s, { p: 2, t: 'pass', q: 0 });
+  s = JG.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [3, 2, 0], 'ジグソー: 速い順に点、あきらめたら0点');
+  console.log('jigsaw OK');
+}
+
+// 一筆書き早解き（2026-11-06）
+{
+  const HF = GAMES.hitofude;
+  const { LEVELS: HF_LEVELS, makeFigure, isTrail, eulerPath, degreesOf } = await import('../app/js/games/hitofude.js');
+  const { mulberry32: hfRnd } = await import('../app/js/games/util.js');
+  for (const level of Object.keys(HF_LEVELS)) {
+    const L = HF_LEVELS[level];
+    let twoEnds = 0;
+    for (let seed = 0; seed < 60; seed++) {
+      const f = makeFigure(level, hfRnd(seed));
+      assert.ok(f, `一筆書き: ${level} の図が作れる（種 ${seed}）`);
+      assert.ok(f.pts.length >= L.v[0] && f.pts.length <= L.v[1], `一筆書き: ${level} の点の数（${f.pts.length}）`);
+      assert.ok(f.edges.length >= L.e[0] && f.edges.length <= L.e[1], `一筆書き: ${level} の線の数（${f.edges.length}）`);
+      assert.equal(new Set(f.edges.map(([a, b]) => a + '-' + b)).size, f.edges.length, '一筆書き: 同じ線を重ねない');
+      const odd = degreesOf(f).filter((d) => d % 2).length;
+      assert.ok(odd === 0 || odd === 2, '一筆書き: 線が奇数本の点は0か2つ（一筆で描ける）');
+      if (odd === 2) twoEnds++;
+      assert.ok(isTrail(f, eulerPath(f)), '一筆書き: 一筆書きの道が作れる');
+      // 交わる線が無い（同じますの2本のななめを両方使わない）: 線を点の座標で見て、端以外で交わらない
+      const P = (v) => [f.pts[v][0] * f.w, f.pts[v][1] * f.h];
+      const cross = (a, b, c, d) => {
+        const o = (p, q, r) => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
+        return o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0;
+      };
+      for (let i = 0; i < f.edges.length; i++) for (let j = i + 1; j < f.edges.length; j++) {
+        const [a, b] = f.edges[i], [c, d] = f.edges[j];
+        if (new Set([a, b, c, d]).size < 4) continue;
+        assert.ok(!cross(P(a), P(b), P(c), P(d)), `一筆書き: 線どうしが点でない所で交わらない（${level}・種 ${seed}）`);
+      }
+    }
+    assert.ok(twoEnds >= 30, `一筆書き: ${level} は描き始めを考える図（端が2つ）が半分以上（${twoEnds}/60）`);
+  }
+  const f0 = makeFigure('easy', hfRnd(3));
+  const good = eulerPath(f0);
+  assert.ok(isTrail(f0, good.slice().reverse()), '一筆書き: 逆から描いてもよい');
+  assert.ok(!isTrail(f0, good.slice(0, -1)), '一筆書き: 全部の線を描いていなければ完成でない');
+  assert.ok(!isTrail(f0, [...good.slice(0, 2), good[0], ...good.slice(1)]), '一筆書き: 同じ線を2回通るのは完成でない');
+  assert.deepEqual(makeFigure('hard', hfRnd(11)), makeFigure('hard', hfRnd(11)), '一筆書き: 種が同じなら同じ図');
+  let s = HF.init(3, 4, { rules: { level: 'easy' } });
+  assert.equal(s.qs.length, 3, '一筆書き: 3問');
+  assert.equal(HF.init(3, 4).level, 'normal', '一筆書き: 最初は ふつう');
+  s = HF.apply(s, { p: -1, t: 'next' });
+  const path = eulerPath(s.qs[0]);
+  assert.equal(HF.apply(s, { p: 0, t: 'done', q: 0, path: path.slice(0, -1), ms: 1000 }), null, '一筆書き: 描ききっていない答えは受け付けない');
+  s = HF.apply(s, { p: 1, t: 'done', q: 0, path, ms: 3000 });
+  s = HF.apply(s, { p: 0, t: 'done', q: 0, path, ms: 2000 });
+  assert.equal(HF.apply(s, { p: 0, t: 'done', q: 0, path, ms: 2000 }), null, '一筆書き: 同じ手が2回届いても2回目は反則');
+  s = HF.apply(s, { p: 2, t: 'pass', q: 0 });
+  s = HF.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [3, 2, 0], '一筆書き: 速い順に点、あきらめたら0点');
+  console.log('hitofude OK');
+}
+
 console.log('ALL OK');
