@@ -428,6 +428,14 @@ export default {
   startSound: 'shuffle',
   // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
   sound(a, b, m) { return m.t === 'next' ? 'shuffle' : m.t === 'bomb' ? 'call' : m.t === 'pass' ? 'pop' : m.t === 'play' && b.last?.effects?.length ? 'call' : 'card'; },
+  // 技の名前（2026-11-06 の UI・演出・アニメーションの案。card-games.md の「演出」）: 革命・8切り・しばりなど、出した組に起きたこと（last.effects）を大きな字で（main.js の cutInFx）。
+  // 帯の色は革命が紫・8切りが赤・ほかは青。革命（革命返し・階段革命も）では盤を一瞬白黒反転する
+  cutin(a, b, m) {
+    if (m.t !== 'play' || !b.last?.effects?.length) return null;
+    const fx = b.last.effects;
+    const rev = fx.some((x) => x.includes('革命'));
+    return { text: fx.join('・') + '！', color: rev ? '#7d3cc8' : fx.includes('8切り') ? '#d0312d' : '#2f6fb3', flash: rev ? 'invert' : null };
+  },
   // 次の対局のカード交換に使う順位（何回か勝負は合計点の順）
   carry(s, p) { return (s.match ? matchOrder(s) : s.ranking).indexOf(p); },
   cpuDelay(s) { return s.phase === 'gap' ? 4000 : undefined; }, // 何回か勝負: 回の結果は少し長めに見せる
@@ -659,7 +667,7 @@ export default {
       name.textContent = o.names[p];
       const count = document.createElement('div');
       count.className = 'cc-opp-count';
-      count.innerHTML = `<span class="ccard mini back"></span>×${s.hands[p].length}`;
+      count.innerHTML = `<span class="ccard mini back" data-fly-src="opp:${p}"></span>×${s.hands[p].length}`; // 出した札が飛んでくる所（2026-11-06）
       chip.append(name, count);
       if (M) {
         const pt = document.createElement('div');
@@ -709,7 +717,17 @@ export default {
     }
     const cards = document.createElement('div');
     cards.className = 'df-cards' + (o.fresh && s.last?.t === 'play' ? ' pop' : '');
-    if (s.field) for (const c of s.field.cards) cards.append(cardEl(c));
+    // 札がすっと動く（2026-11-06。main.js の flyPlay）: 自分が出した札は手札から（同じ鍵）、ほかの人の札はその人の席から裏返りながら
+    cards.dataset.flySrc = 'field'; // 配る札が飛んでくる所
+    const by = s.last?.t === 'play' ? s.last.p : null;
+    if (s.field) {
+      s.field.cards.forEach((c, j) => {
+        const e = cardEl(c);
+        e.dataset.fly = `c:${c}#${s.field.cards.slice(0, j).filter((x) => x === c).length}`;
+        if (by !== null && by !== me) Object.assign(e.dataset, { flyFrom: `opp:${by}`, flyTurn: '' });
+        cards.append(e);
+      });
+    }
     else cards.innerHTML = `<span class="df-empty">${s.phase === 'play' ? '場は空です（好きな組を出せます）' : ''}</span>`;
     field.append(cards);
     root.append(field);
@@ -794,10 +812,15 @@ export default {
 
       const hand = document.createElement('div');
       hand.className = 'df-hand';
+      const seen = {};
+      // 札がすっと動く（2026-11-06）: 新しく来た札は、渡してきた人の席から（交換など）か場のあたりから裏返りながら（対局の始めは配る）
+      const comeFrom = s.last?.to === me && s.last.p !== me ? `opp:${s.last.p}` : 'field';
       for (const c of s.hands[me]) {
         const can = giving || !!pd || usable.has(c);
         const pickable = myTurn && !bombing;
         const e = cardEl(c, pickable ? 'button' : 'div');
+        seen[c] = (seen[c] ?? -1) + 1;
+        Object.assign(e.dataset, { fly: `c:${c}#${seen[c]}`, flyFrom: comeFrom, flyTurn: '', flyDeal: '' });
         if (can) e.classList.add('usable');
         if (sel.cards.includes(c)) e.classList.add('selected');
         if (pickable) {

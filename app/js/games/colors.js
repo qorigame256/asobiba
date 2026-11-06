@@ -401,6 +401,24 @@ export default {
   cpuDelay(s) { return s.match?.gap ? 3000 : undefined; }, // 回の結果は少し長めに見せる
   startSound: 'shuffle',
   // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
+  // 技の名前（2026-11-06 の UI・演出・アニメーションの案。card-games.md の「演出」）: スキップ・リバース・ドロー2・ドロー4・7で交換・0で回す・
+  // 最後の1枚の宣言・チャレンジの結果を大きな字で（main.js の cutInFx）。帯の色は出した札の色（ドロー4は4色）。ワイルドと数字の札では出さない
+  cutin(a, b, m) {
+    const L = b.last;
+    if (!L || L === a.last) return null;
+    if (L.t === 'challenge') return L.bluff ? { text: 'チャレンジ成功！', color: '#3a9d55' } : { text: 'チャレンジ失敗…', color: '#6b6259' };
+    if (L.t !== 'play') return null;
+    const k = kindOf(L.card);
+    const color = { r: '#e04b3c', y: '#e8a913', g: '#3a9d55', b: '#2f6fb3' }[L.card[0]] ?? '#2d2a26';
+    if (k === 'W4') return { text: '+4 ドロー4！', color: 'linear-gradient(90deg, #e04b3c, #e8a913, #3a9d55, #2f6fb3)' };
+    if (k === 'D') return { text: '+2 ドロー2！', color };
+    if (k === 'S') return { text: '🚫 スキップ！', color };
+    if (k === 'R') return { text: '⇄ リバース！', color };
+    if (L.swap !== undefined) return { text: '7で交換！', color };
+    if (L.rotate) return { text: '0で回す！', color };
+    if (L.call) return { text: 'いろあわせ！', color: '#d9643a' };
+    return null;
+  },
   sound(a, b, m) {
     if (m.t === 'next') return 'shuffle';
     if (b.last?.call) return 'call';
@@ -647,7 +665,7 @@ export default {
       name.textContent = o.names[p];
       const count = document.createElement('div');
       count.className = 'cc-opp-count';
-      count.innerHTML = `<span class="ccard mini back"></span>×${s.hands[p].length}`;
+      count.innerHTML = `<span class="ccard mini back" data-fly-src="opp:${p}"></span>×${s.hands[p].length}`; // 出した札が飛んでくる所（2026-11-06）
       chip.append(name, count);
       if (M) {
         const pt = document.createElement('div');
@@ -678,6 +696,7 @@ export default {
     const canDraw = myTurn && s.drawn === null;
     const deck = document.createElement(canDraw ? 'button' : 'div');
     deck.className = 'ccard big back' + (canDraw ? ' playable' : '');
+    deck.dataset.flySrc = 'deck'; // 引いた札・配る札が飛んでくる所（2026-11-06）
     deck.innerHTML = s.pend
       ? `<span class="ccard-deck">${s.pend.n}枚<br>引く</span>`
       : `<span class="ccard-deck">山札<br><small>${s.deck.length}枚</small></span>`;
@@ -689,6 +708,10 @@ export default {
     const top = cardEl(s.discard[s.discard.length - 1]);
     top.classList.add('big');
     if (o.fresh && s.last?.t === 'play') top.classList.add('pop');
+    // 札がすっと動く（2026-11-06。main.js の flyPlay）: 自分が出した札は手札から、ほかの人の札はその人の席から裏返りながら、最初の札は山から
+    const mineTop = s.last?.t === 'play' && s.last.p === me;
+    Object.assign(top.dataset, { fly: `pile:${s.discard.length}`, flyFrom: mineTop ? `c:${s.last.card}#0` : s.last?.t === 'play' ? `opp:${s.last.p}` : 'deck', flyDeal: '' });
+    if (!mineTop) top.dataset.flyTurn = '';
     const state = document.createElement('div');
     state.className = 'cc-state';
     state.innerHTML = `<span class="cc-color c-${s.color}">${COLOR_NAME[s.color]}</span><span class="cc-dir">${s.dir === 1 ? '↻ 右回り' : '↺ 左回り'}</span>`;
@@ -736,6 +759,8 @@ export default {
       const ok = multi ? i !== picking.i && sameAs(picking.i).includes(i)
         : myTurn && (s.drawn === null || card === s.drawn) && canPlay(s, me, card);
       const e = cardEl(card, ok ? 'button' : 'div');
+      // 札がすっと動く（2026-11-06）: 同じ札が2枚あれば何枚目かで見分ける。新しく来た札は山から裏返りながら（対局の始めは配る）
+      Object.assign(e.dataset, { fly: `c:${card}#${mine.slice(0, i).filter((x) => x === card).length}`, flyFrom: 'deck', flyTurn: '', flyDeal: '' });
       if (ok) {
         e.type = 'button';
         e.classList.add('playable');

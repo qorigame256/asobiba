@@ -156,6 +156,7 @@ export default {
       name.textContent = nameP(p);
       const cnt = document.createElement('div');
       cnt.className = 'bb-count';
+      cnt.dataset.flySrc = `opp:${p}`; // 引いた札が飛んでくる所（2026-11-06）
       cnt.textContent = s.hands[p].length ? `${s.hands[p].length}枚` : '上がり';
       chip.append(name, cnt);
       if (rank >= 0) chip.append(tag('rank', `${rank + 1}抜け`));
@@ -232,6 +233,8 @@ export default {
       for (const c of s.hands[me].slice().sort((a, b) => order(a) - order(b))) {
         const e = cardEl(c);
         if (o.fresh && s.last?.p === me && !s.last.pair && s.last.card === c) e.classList.add('pop');
+        // 札がすっと動く（2026-11-06。main.js の flyPlay）: 引いた札は引いた相手の席から裏返りながら。対局の始めはまん中から配る
+        Object.assign(e.dataset, { fly: `c:${c}`, flyFrom: s.last ? `opp:${s.last.from}` : '@center', flyTurn: '', flyDeal: '' });
         if (held !== null && me === from && s.hands[me][held] === c) e.classList.add('bb-held');
         hand.append(e);
       }

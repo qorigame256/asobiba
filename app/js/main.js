@@ -32,7 +32,8 @@
 // stay = 勝ち残り（2026-10-06 本人の決定。盤のゲームのオンライン）。オンなら、もう一回で負けた人が観戦の人と交代する。line = 交代を待つ人の順番。
 //   どちらもホストが決めて全員へ送る（ほかの人の画面にも「次に入る人」を出すため）。
 
-import { GAMES, GAME_ORDER, winnersOf, seatPoints } from './games/index.js';
+import { GAMES, GAME_ORDER, winnersOf, seatPoints, CATEGORIES, categoryOf } from './games/index.js';
+import { SEAT_COLORS } from './games/party.js';
 import { connectRoom } from './net.js';
 import { esc } from './games/util.js';
 import { isOwner, unlockOwner, forgetOwner } from './owner.js';
@@ -52,7 +53,9 @@ const MAX_MEMBERS = 10; // 部屋に入れる人数の上限（観戦を含む�
 const CPU_DELAY_MS = 600; // CPU が手を打つまでの間（速すぎると何が起きたか追えない）
 const NAME_KEY = 'bg-name';
 const SPECTATOR = -1;
-const TURN_PING_MS = 5000; // これより長く待ったあとで自分の番が来たら、知らせる音を鳴らす（すぐ返ってきた番では鳴らさない）
+// これより長く待ったあとで自分の番が来たら、「番が来た」音・振動・名前の読み上げと「あなたのターン」の帯で知らせる（すぐ返ってきた番では知らせない）。
+// 2026-11-06 本人の指示で帯を3秒にし、続けて音・振動・読み上げも5秒から3秒にそろえた（本人の指示）
+const TURN_PING_MS = 3000;
 
 const el = (id) => document.getElementById(id);
 
@@ -307,7 +310,7 @@ function awardRanks() {
   return counts.map((n) => ({ n, ids: ids.filter((id) => w(id) === n) })); // 上から順に、同じ勝ち数の人をまとめる
 }
 
-function closeAward() { document.querySelector('.award-pop')?.remove(); }
+function closeAward() { dropPop(document.querySelector('.award-pop:not(.closing)')); }
 
 function showAward() {
   const games = S.tally?.games;
@@ -1084,7 +1087,12 @@ function lineup(game) {
 /* ---------- 画面 ---------- */
 
 function showScreen(name) {
-  for (const s of document.querySelectorAll('.screen')) s.hidden = s.id !== 'screen-' + name;
+  for (const s of document.querySelectorAll('.screen')) {
+    const on = s.id === 'screen-' + name;
+    const enter = on && s.hidden;
+    s.hidden = !on;
+    if (enter) enterFx(s, ENTER_KF); // 画面の切り替え（2026-11-06）: 隠れていた画面を出すときだけ、ふわっと
+  }
   window.scrollTo(0, 0);
   keepAwake(name === 'play');
   if (name !== 'play') renderNetBanner();
@@ -1242,20 +1250,31 @@ const READING = {
 };
 const toHira = (t) => String(t ?? '').toLowerCase().replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60)).replace(/\s+/g, '');
 const gameHay = (id) => toHira(`${GAMES[id].name}${READING[id] ?? ''}${GAMES[id].desc ?? ''}`);
+// 文字検索（2026-10-26）: 名前・読み・説明で札を絞る。当たる札の無い仲間は、見出しも仲間へ飛ぶボタンも隠す
 function filterGames() {
   const q = toHira(el('game-search')?.value);
   let shown = 0;
-  for (const card of el('game-list').children) {
-    const hit = !q || gameHay(card.dataset.id).includes(q);
-    card.hidden = !hit;
-    if (hit) shown++;
+  for (const sec of el('game-list').children) {
+    let n = 0;
+    for (const t of sec.querySelectorAll('.tile')) {
+      const hit = !q || gameHay(t.dataset.id).includes(q);
+      t.hidden = !hit;
+      if (hit) n++;
+    }
+    sec.hidden = !n;
+    const chip = el('game-cats').querySelector(`[data-cat="${sec.dataset.cat}"]`);
+    if (chip) chip.hidden = !n;
+    shown += n;
   }
   el('game-search-none').hidden = shown > 0 || !el('game-list').children.length;
 }
 
+/* ---------- ホームの一覧（2026-11-06 の UI・演出・アニメーションの案。本人が決めたことは room.md の「演出・アニメーション」） ---------- */
+// 絵と名前だけの小さな札を、仲間（games/index.js の CATEGORIES）ごとの見出しで分けて並べる。お気に入りは一番上にまとめ、仲間の中にも残す。
+// 上の帯（.home-find。検索の欄と仲間へ飛ぶボタン）は、下へ送っても画面の上に残る。札を押すと、説明と「部屋を作る」などのボタンが下から出る（openGameSheet）
 function renderHome() {
   const owner = canHost();
-  el('game-search').hidden = !owner;
+  el('game-find').hidden = !owner;
   el('game-search').oninput = filterGames;
   el('home-lead').textContent = owner
     ? '部屋を作って、友だちに招待リンクを送れば対戦できます。'
@@ -1263,54 +1282,118 @@ function renderHome() {
   el('game-list-title').hidden = !owner;
   renderOwnerBox(owner);
   const list = el('game-list');
+  const cats = el('game-cats');
   list.innerHTML = '';
+  cats.innerHTML = '';
   if (!owner) return;
   const favs = favorites();
-  for (const id of gameOrder()) {
-    const g = GAMES[id];
-    const card = document.createElement('article');
-    card.className = 'game-card' + (g.ready ? '' : ' not-ready') + (favs.includes(id) ? ' fav' : '');
-    card.dataset.id = id;
-    card.innerHTML = `<div class="game-icon" aria-hidden="true">${g.icon}</div><h3>${g.name}</h3><p>${g.desc}</p>`;
-    if (g.ready) {
-      const star = document.createElement('button');
-      star.type = 'button';
-      star.className = 'fav-btn';
-      star.textContent = favs.includes(id) ? '★' : '☆';
-      star.setAttribute('aria-pressed', String(favs.includes(id)));
-      star.setAttribute('aria-label', `${g.name}を お気に入り${favs.includes(id) ? 'から外す' : 'にする'}`);
-      star.onclick = () => { toggleFavorite(id); renderHome(); };
-      card.append(star);
-    }
-    if (g.ready) {
-      if (g.multi) {
-        const tag = document.createElement('span');
-        tag.className = 'tag';
-        tag.textContent = `${playersText(g)}・オンライン（${g.noCpu ? 'CPU なし' : '足りない分は CPU'}）`;
-        card.append(tag);
-      }
-      const actions = document.createElement('div');
-      actions.className = 'card-actions';
-      if (g.live) {
-        // 毎フレーム動くゲーム（エアホッケー）: CPU 戦・同じ画面の2人（指で触れる端末だけ）・オンライン（試作）
-        // onlineOnly = オンラインだけのゲーム（紙相撲。2026-11-05 本人の決定）。CPU 戦・同じ画面のボタンを出さない
-        if (!g.onlineOnly) actions.append(makeButton('CPU と対戦', () => startLive(id, 'cpu')));
-        if (!g.onlineOnly && navigator.maxTouchPoints > 0) actions.append(makeButton('この画面で2人で', () => startLive(id, 'two'), 'secondary'));
-        actions.append(makeButton('部屋を作る（試作）', () => createRoom(id), g.onlineOnly ? undefined : 'secondary'));
-      } else {
-        actions.append(makeButton('部屋を作る', () => createRoom(id)));
-        if (!g.multi && !g.noLocal) actions.append(makeButton('この画面で2人で', () => startLocal(id), 'secondary')); // noLocal = 隠す情報があるゲーム（海戦ゲーム）
-      }
-      card.append(actions);
-    } else {
-      const tag = document.createElement('span');
-      tag.className = 'tag';
-      tag.textContent = 'じゅんび中';
-      card.append(tag);
-    }
-    list.append(card);
+  const groups = [['fav', '★ お気に入り', GAME_ORDER.filter((id) => favs.includes(id))], ...CATEGORIES.map((c) => [c.key, c.name, GAME_ORDER.filter((id) => c.ids.includes(id))])];
+  for (const [key, name, ids] of groups) {
+    if (!ids.length) continue;
+    const sec = document.createElement('section');
+    sec.className = 'game-cat';
+    sec.dataset.cat = key;
+    const hd = document.createElement('h3');
+    hd.className = 'cat-h';
+    hd.textContent = `${name}（${ids.length}）`;
+    const grid = document.createElement('div');
+    grid.className = 'tiles';
+    for (const id of ids) grid.append(gameTile(id, favs.includes(id)));
+    sec.append(hd, grid);
+    list.append(sec);
+    if (key === 'fav') continue; // お気に入りは一番上なので、飛ぶボタンは要らない
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cat-btn';
+    b.dataset.cat = key;
+    b.textContent = name;
+    b.onclick = () => hd.scrollIntoView({ behavior: lessMotion() ? 'auto' : 'smooth', block: 'start' });
+    cats.append(b);
   }
   filterGames();
+}
+
+// ホームの札（絵と名前だけ）。名前と絵はコードに書いたものなので HTML のまま入れてよい
+function gameTile(id, fav) {
+  const g = GAMES[id];
+  const t = document.createElement('button');
+  t.type = 'button';
+  t.className = 'tile' + (g.ready ? '' : ' not-ready') + (fav ? ' fav' : '');
+  t.dataset.id = id;
+  t.innerHTML = `<span class="tile-ic" aria-hidden="true">${g.icon}</span><span class="tile-nm">${g.name}</span>`;
+  if (fav) t.setAttribute('aria-label', `${g.name}（お気に入り）`);
+  t.onclick = () => openGameSheet(id);
+  return t;
+}
+
+// 札を押すと下から出る小窓: 絵・名前・お気に入りの ☆・説明・人数と、前の札にあったボタン（部屋を作る など）。閉じ方は名前を聞く小窓と同じ（closeInvite）
+function openGameSheet(id) {
+  const g = GAMES[id];
+  closeInvite();
+  const pop = document.createElement('div');
+  pop.className = 'invite-pop sheet-pop';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-modal', 'true');
+  pop.setAttribute('aria-label', g.name);
+  const box = document.createElement('div');
+  box.className = 'invite-box game-sheet';
+  box.innerHTML = `<div class="sheet-head"><span class="sheet-ic" aria-hidden="true">${g.icon}</span><h3>${g.name}</h3></div><p class="sheet-desc">${g.desc}</p>`;
+  const tag = (text) => {
+    const x = document.createElement('span');
+    x.className = 'tag';
+    x.textContent = text;
+    box.append(x);
+  };
+  // 押したら小窓を閉じてから始める（部屋を作るは名前を聞く小窓に替わる）
+  const go = (fn) => () => { closeInvite(); fn(); };
+  if (g.ready) {
+    const star = document.createElement('button');
+    star.type = 'button';
+    star.className = 'fav-btn';
+    const showStar = () => {
+      const on = favorites().includes(id);
+      star.textContent = on ? '★' : '☆';
+      star.setAttribute('aria-pressed', String(on));
+      star.setAttribute('aria-label', `${g.name}を お気に入り${on ? 'から外す' : 'にする'}`);
+    };
+    star.onclick = () => {
+      // 一番上のお気に入りの段が増え減りしても、後ろの一覧で見ていた所がずれないよう、仲間の中のこの札の位置を合わせ直す
+      const anchor = () => el('game-list').querySelector(`.game-cat:not([data-cat="fav"]) .tile[data-id="${id}"]`);
+      const before = anchor()?.getBoundingClientRect().top;
+      toggleFavorite(id);
+      renderHome();
+      const after = anchor()?.getBoundingClientRect().top;
+      if (before !== undefined && after !== undefined) window.scrollBy(0, after - before);
+      showStar();
+    };
+    showStar();
+    box.querySelector('.sheet-head').append(star);
+    if (g.multi) tag(`${playersText(g)}・オンライン（${g.noCpu ? 'CPU なし' : '足りない分は CPU'}）`);
+    const actions = document.createElement('div');
+    actions.className = 'card-actions';
+    if (g.live) {
+      // 毎フレーム動くゲーム（エアホッケー）: CPU 戦・同じ画面の2人（指で触れる端末だけ）・オンライン（試作）
+      // onlineOnly = オンラインだけのゲーム（紙相撲。2026-11-05 本人の決定）。CPU 戦・同じ画面のボタンを出さない
+      if (!g.onlineOnly) actions.append(makeButton('CPU と対戦', go(() => startLive(id, 'cpu'))));
+      if (!g.onlineOnly && navigator.maxTouchPoints > 0) actions.append(makeButton('この画面で2人で', go(() => startLive(id, 'two')), 'secondary'));
+      actions.append(makeButton('部屋を作る（試作）', go(() => createRoom(id)), g.onlineOnly ? undefined : 'secondary'));
+    } else {
+      actions.append(makeButton('部屋を作る', go(() => createRoom(id))));
+      if (!g.multi && !g.noLocal) actions.append(makeButton('この画面で2人で', go(() => startLocal(id)), 'secondary')); // noLocal = 隠す情報があるゲーム（海戦ゲーム）
+    }
+    box.append(actions);
+  } else {
+    tag('じゅんび中');
+  }
+  const row = document.createElement('div');
+  row.className = 'invite-actions';
+  row.append(makeButton('閉じる', closeInvite, 'ghost small'));
+  box.append(row);
+  pop.append(box);
+  pop.addEventListener('click', (e) => { if (e.target === pop) closeInvite(); });
+  pop.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeInvite(); });
+  document.body.append(pop);
+  box.querySelector('.card-actions .btn')?.focus({ preventScroll: true });
 }
 
 // 持ち主の合言葉を入れる所。持ち主の端末では「登録を外す」だけ出す（友だちの端末で入れたときに外せるように）
@@ -1650,6 +1733,7 @@ function keepPlace(key, fn) {
 
 function render() {
   if (!S) return;
+  const flyBefore = flySnap(); // 札や駒がすっと動く（2026-11-06）: 描き直す前の場所（描き直しの途中では測らない）
   const body = document.body;
   body.style.minHeight = document.documentElement.scrollHeight + 'px';
   // 横に送れる名前の札（party.js の scoreChips の steady）は作り直されるので、送った位置を描き直しの前に覚えて後で戻す（並んでいる順で対応させる）
@@ -1660,6 +1744,17 @@ function render() {
     setTurnTitle(S?.myTurnNow);
     if (chipsX.some((x) => x > 0)) document.querySelectorAll('.cc-steady').forEach((x, i) => { if (chipsX[i]) x.scrollLeft = chipsX[i]; });
   }
+  // 画面の切り替え（2026-11-06）: 待合室と対局が入れ替わったとき・次の対局が始まったときに、状態の欄・盤・下の段をふわっと出す
+  if (!S) return;
+  const view = S.mode === 'online' && (!S.order || (S.lobbyView && !S.isHost)) ? 'lobby' : 'game:' + timerKey();
+  if (S.viewKey && S.viewKey !== view) enterFx([el('status'), el('board'), el('controls')], FADE_KF);
+  S.viewKey = view;
+  // 札や駒がすっと動く（2026-11-06）: 新しく届いた手で描き直したら前の場所から動かし、対局の始めは札を配る。
+  // それ以外の描き直しでは、動いている途中の物を続きから動かす
+  const deal = flyDealNow;
+  flyDealNow = false;
+  if (flyBefore || deal) flyPlay(flyBefore ?? new Map(), deal);
+  else if (flights.size) flyResume();
 }
 
 /* ---------- 番が来たらタブの名前で知らせる（2026-10-07。10回目の案。Claude の案から本人が推奨どおり選んだ） ---------- */
@@ -1736,7 +1831,7 @@ function renderPage() {
   S.myTurnNow = myTurnNow(game, st, res);
   if (!game.multi) tickClock(game, st, res);
   trackTime(res);
-  greetStart(res);
+  greetStart(res, game);
   if (res) countResult(res, st, game);
   if (res) countLocal(game, res);
   if (res) countFinished(`${S.code ?? 'local'}:${resultKey()}`);
@@ -1752,6 +1847,7 @@ function renderPage() {
   const prevLen = S.shownKey === key ? S.shownLen : null;
   const fresh = prevLen !== null && S.moves.length > prevLen;
   if (S.shownKey !== key && !S.moves.length && game.startSound) play(game.startSound);
+  if (S.shownKey !== key && !S.moves.length && !lessMotion()) flyDealNow = true; // 対局の始めに札を配る（2026-11-06。flyPlay）
   S.shownKey = key;
   S.shownLen = S.moves.length;
   const opts = { canMove: canMove(game, st, res), onMove: onBoardMove, fresh, me: watchSeat(game), view: boardView(game) };
@@ -1839,6 +1935,15 @@ function turnBand(game, st, res) {
     who.className = 'turn-name';
     who.textContent = S.mode === 'online' ? (i === me ? 'あなた' : nameOf(S.order[i])) : label && label !== sym ? label : `${i + 1}番`;
     card.append(mark, who);
+    // 考え中の「…」（2026-11-06 の UI・演出・アニメーションの案）: オンラインで、いまの番が自分のほかの人（CPU も）なら、その札の下で「…」を動かす。
+    // 札の大きさを変えないよう、札の下の縁に重ねる（.turn-dots は position: absolute）。動きを減らす設定の端末では出さない
+    if (i === t && i !== me && S.mode === 'online' && !lessMotion()) {
+      const dots = document.createElement('span');
+      dots.className = 'turn-dots';
+      dots.setAttribute('aria-hidden', 'true'); // 状態の欄に「○○のターン…」と出ている
+      dots.innerHTML = '<i></i><i></i><i></i>';
+      card.append(dots);
+    }
     band.append(card);
   });
   return band;
@@ -2304,6 +2409,260 @@ function confetti() {
   setTimeout(() => box.remove(), 3600);
 }
 
+/* ---------- 演出（2026-11-06 の UI・演出・アニメーションの案。本人が決めたことは room.md の「演出・アニメーション」） ---------- */
+// どれも1秒前後で消え、画面のどこかを押せばすぐ消える。演出そのものは押せない（pointer-events: none）ので、押した所の操作もそのまま効く。
+// 動きを減らす設定の端末では出さない（同じ中身は状態の欄に字で出ている）。画面の端からはみ出す帯も横スクロールを生まないよう、.fx-clip で切る。
+function lessMotion() { return matchMedia('(prefers-reduced-motion: reduce)').matches; } // 関数の宣言にしてある（ファイルの上のほうの描き直しからも呼ぶため）
+function showFx(node, ms) {
+  const clip = document.createElement('div');
+  clip.className = 'fx-clip';
+  clip.setAttribute('aria-hidden', 'true'); // 中身は状態の欄・読み上げにもあるので、画面の読み上げには重ねない
+  clip.append(node);
+  document.body.append(clip);
+  let gone = false;
+  const off = () => {
+    if (gone) return;
+    gone = true;
+    document.removeEventListener('pointerdown', off, true);
+    clip.classList.add('out');
+    setTimeout(() => clip.remove(), 300);
+  };
+  document.addEventListener('pointerdown', off, true);
+  setTimeout(off, ms);
+  return off;
+}
+const SHAKE_KF = [{ transform: 'none' }, { transform: 'translate(-4px, 2px)' }, { transform: 'translate(4px, -2px)' }, { transform: 'translate(-2px, 1px)' }, { transform: 'none' }];
+
+// 決着の判子: 自分が対局した人は「勝ち！」「負け」「引き分け」（3人以上で順位のあるゲームの間の順位は「2位」など）。
+// 勝ち負けは勝ちの音と同じ見方（sound.js の endSound）。観戦の人と同じ画面の対局は「○○の勝ち！」。判子は傾けない（2026-11-06 本人の指示）。
+// エアホッケー・紙相撲（live）はここを通らない。
+function stampOf(game, res, me, end) {
+  if (me !== null && me >= 0) {
+    if (end === 'win') return ['勝ち！', 'win'];
+    if (end === 'lose') return ['負け', 'lose'];
+    const i = Array.isArray(res.ranking) ? res.ranking.indexOf(me) : -1;
+    return i > 0 ? [`${i + 1}位`, 'rank'] : ['引き分け', 'draw'];
+  }
+  const nm = (p) => (game.multi ? nameOf(S.order[p]) : S.mode === 'local' ? game.players[p] : nameOf(roundOrder()[p]));
+  if (Array.isArray(res.winners)) {
+    const w = res.winners;
+    if (!w.length) return ['引き分け', 'draw'];
+    return [`${w.length === 2 ? `${nm(w[0])}・${nm(w[1])}` : nm(w[0]) + (w.length > 2 ? 'たち' : '')}の勝ち！`, 'watch'];
+  }
+  if (res.loser !== null && res.loser !== undefined) return [`${nm(res.loser)}の負け`, 'watch'];
+  if (res.draw || res.winner === null || res.winner === undefined) return ['引き分け', 'draw'];
+  return [`${nm(res.winner)}の勝ち！`, 'watch'];
+}
+function endStamp(game, res, me, end, delay) {
+  if (lessMotion()) return;
+  const [text, kind] = stampOf(game, res, me, end);
+  const key = timerKey();
+  setTimeout(() => {
+    if (!S || timerKey() !== key) return; // 待つ間に次の対局へ進んでいたら出さない
+    const s = document.createElement('div');
+    s.className = 'end-stamp ' + kind;
+    s.textContent = text; // 名前は外から来た文字なので textContent
+    showFx(s, 1700);
+    if (kind === 'win') setTimeout(() => el('board')?.animate(SHAKE_KF, { duration: 320 }), 200);
+  }, delay);
+}
+
+// あなたのターンの帯: オンラインで TURN_PING_MS より長く待ったあとで自分の番が来たとき（moveSound の「番が来た」の枝。音・読み上げと同じとき）
+function turnFx() {
+  if (lessMotion()) return;
+  const band = document.createElement('div');
+  band.className = 'turn-fx';
+  const t = document.createElement('span');
+  t.textContent = `${myMark() ? myMark() + ' ' : ''}あなたのターン`;
+  band.append(t);
+  showFx(band, 1400);
+}
+
+// 技の名前: 色の帯に大きな字が右から入って左へ抜ける（ゲームの cutin が返す { text, color, flash }）。color は帯の色（CSS の色か linear-gradient）。
+// flash = 'invert' なら盤を一瞬白黒反転する（大富豪の革命）。帯が出ている間（cutUntil まで）は、あなたのターンの帯を待たせる（重なると読めない）
+let cutUntil = 0;
+function cutInFx({ text, color, flash }) {
+  if (lessMotion()) return;
+  const box = document.createElement('div');
+  box.className = 'cut-fx';
+  box.style.setProperty('--c', color ?? 'var(--accent)');
+  const t = document.createElement('span');
+  t.textContent = text;
+  box.append(t);
+  showFx(box, 1250);
+  cutUntil = Date.now() + 1250;
+  if (flash === 'invert') el('board')?.animate([{ filter: 'none' }, { filter: 'invert(1) hue-rotate(180deg)', offset: 0.3 }, { filter: 'none' }], { duration: 750 });
+}
+
+// 画面の切り替え: 透明から少し持ち上げて出す（画面）・透明から出す（状態の欄・盤・下の段。盤には動きを付けるゲームがあるので位置は動かさない）。
+// 長さは測らない（描き直しの途中で長さを読まない決まり）。動きを減らす設定の端末では出さない
+const ENTER_KF = [{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }];
+const FADE_KF = [{ opacity: 0 }, { opacity: 1 }];
+function enterFx(nodes, kf) {
+  if (lessMotion()) return;
+  for (const n of [nodes].flat()) n?.animate(kf, { duration: 260, easing: 'cubic-bezier(.2, .8, .2, 1)' });
+}
+
+// 始まりの顔合わせ: オンラインの対局の始め（手がまだ無いところを初めて描いたとき）に、顔ぶれを1秒ほど出してから「スタート！」。
+// 2人は「あき VS ピコ」、3人以上は名前の札を2列に並べる。早押し・早解きとアクションの仲間（games/index.js の CATEGORIES）と、
+// 始まってすぐ速さを競うスピード（NO_INTRO）には出さない（始めを隠すと損をするため）。同じ画面の対局は名前が無いので出さない。
+// 札の色は席の色（盤のゲームは [data-game] ごとの --p0 など、5人目からは SEAT_COLORS）。名前は外から来た文字なので textContent
+const NO_INTRO = new Set(['speed']);
+function introFx(game) {
+  const ids = S.order ?? [];
+  if (lessMotion() || S.mode !== 'online' || !game || game.live || ids.length < 2 || NO_INTRO.has(S.gameId) || ['quick', 'action'].includes(categoryOf(S.gameId))) return;
+  const box = document.createElement('div');
+  box.className = 'vs-fx';
+  box.dataset.game = S.gameId;
+  const plate = (id, i) => {
+    const p = document.createElement('div');
+    p.className = 'vs-plate';
+    p.textContent = nameOf(id);
+    p.style.setProperty('--pc', `var(--p${i}, ${SEAT_COLORS[i % SEAT_COLORS.length]})`);
+    return p;
+  };
+  const row = document.createElement('div');
+  if (ids.length === 2) {
+    row.className = 'vs-row';
+    const vs = document.createElement('div');
+    vs.className = 'vs-mark';
+    vs.textContent = 'VS';
+    row.append(plate(ids[0], 0), vs, plate(ids[1], 1));
+    row.firstChild.classList.add('l');
+    row.lastChild.classList.add('r');
+  } else {
+    row.className = 'vs-grid';
+    ids.forEach((id, i) => {
+      const p = plate(id, i);
+      p.style.animationDelay = `${i * 80}ms`;
+      row.append(p);
+    });
+  }
+  box.append(row);
+  const t1 = ids.length === 2 ? 1000 : 1000 + ids.length * 40;
+  showFx(box, t1 + 550);
+  introUntil = Date.now() + t1 + 550; // 札を配るのは顔合わせが消えるころから（flyPlay）
+  setTimeout(() => {
+    if (!box.isConnected) return; // 押して飛ばした
+    const go = document.createElement('div');
+    go.className = 'vs-go';
+    go.textContent = 'スタート！';
+    box.replaceChildren(go);
+  }, t1);
+}
+
+/* ---------- 札や駒がすっと動く（2026-11-06 の UI・演出・アニメーションの案。本人が決めたことは card-games.md・shogi.md） ---------- */
+// ゲームは、動かしたい物に data-fly="鍵" を付けて描く（動く前と後で同じ物に同じ鍵。手札の札なら札の名前、将棋の駒ならマスなど）。
+// 新しく届いた手で描き直したとき、前の画面で同じ鍵の物があった所から、今の所へすっと動かす（FLIP: 今の所に描いてから、前の所までずらして戻す）。
+// 前の画面に同じ鍵の物が無いときは、data-fly-from="鍵" の所から飛んでくる。出どころの鍵は data-fly（動かす物）か data-fly-src（出どころになるだけの物。
+// 山札・ほかの人の席の札の印など）で付け、前の画面に無ければ今の画面の物を使う。"@center" は盤のまん中あたり。
+//   data-fly-turn … 飛んでくるとき、裏から表に返りながら来る（裏の模様は style.css の .fly-turn::after）
+//   data-fly-spin="180" … 飛んでくるとき、この角度だけ回った向きから始める（取った駒が持ち駒になるとき、向きが変わるため）
+//   data-fly-slide … 弧を描かずにまっすぐ滑る（盤の上で指した駒）
+//   data-fly-base … その物にふだんから付いている transform（将棋の相手の駒の rotate(180deg)。動きの間も消さないように）
+//   data-fly-deal … 対局の始め（まだ手が無い最初の描画）に、data-fly-from の所から配る（手札と最初の場の札）
+// 同じ所から何枚も飛ぶときは少しずつずらす。始まりの顔合わせ（introFx）が出ている間は、配るのを待つ（その間は札が山に重なって見える）。
+// 前の場所は render の最初（描き直す前）に、今の場所は描き終えてから測る（描き直しの途中で長さを測らない決まり）。動きを減らす設定の端末では動かさない。
+// 動いている途中で手の届かない描き直し（つながりの表示など）があったら、作り直された物を続きから動かす（flights に始めた時刻を覚えておく）
+let flyDealNow = false; // この描画で配る（renderPage が対局の始めに立てる）
+let introUntil = 0; // 始まりの顔合わせが消える時刻（introFx が入れる）
+const flights = new Map(); // 鍵 → { from, t0, delay, dur, via, turn, spin, slide }
+const flown = new WeakSet(); // 動かしている物（描き直されていない物に続きを重ねないように）
+const flyKey = (e) => e.dataset.fly ?? e.dataset.flySrc;
+// 盤の左上からの位置。中心は見えている所（動いている途中の物は、途中の所から続けるため）、大きさは transform を含めない大きさ
+// （始まったばかりの pop などで縮んだ大きさを測らないように。pop は中心を変えずに大きさだけ変えるので、中心は見えている所のままでよい）
+function flyBox(e, B) {
+  const r = e.getBoundingClientRect();
+  const w = e.offsetWidth ?? r.width;
+  const h = e.offsetHeight ?? r.height;
+  return { x: r.left + r.width / 2 - w / 2 - B.left, y: r.top + r.height / 2 - h / 2 - B.top, w, h };
+}
+function flySnap() {
+  if (!S || lessMotion() || S.shownKey !== S.gameId + ':' + S.round || !(S.moves.length > S.shownLen)) return null;
+  const board = el('board');
+  const list = board?.querySelectorAll('[data-fly], [data-fly-src]');
+  if (!list?.length) return null;
+  const B = board.getBoundingClientRect();
+  const m = new Map();
+  for (const e of list) {
+    const b = flyBox(e, B);
+    if (!m.has(flyKey(e)) && (b.w || b.h)) m.set(flyKey(e), b);
+  }
+  return m;
+}
+function flyPlay(before, deal) {
+  const board = el('board');
+  const list = board?.querySelectorAll(deal ? '[data-fly-deal]' : '[data-fly]');
+  if (!list?.length) return;
+  const B = board.getBoundingClientRect();
+  const here = new Map();
+  const at = (key) => {
+    if (key === '@center') return { x: B.width / 2 - 22, y: Math.min(B.height * 0.4, 260), w: 44, h: 62 };
+    if (!here.has(key)) {
+      const x = [...board.querySelectorAll('[data-fly], [data-fly-src]')].find((y) => flyKey(y) === key);
+      here.set(key, x ? flyBox(x, B) : null);
+    }
+    return here.get(key);
+  };
+  const wait = deal ? Math.max(0, introUntil - Date.now() - 250) : 0;
+  const count = new Map();
+  const t0 = Date.now();
+  for (const e of list) {
+    let from = deal ? null : before.get(e.dataset.fly);
+    const via = from ? null : e.dataset.flyFrom;
+    if (via) from = before.get(via) ?? at(via);
+    if (!from) continue;
+    const k = via ? (count.get(via) ?? 0) : 0;
+    if (via) count.set(via, k + 1);
+    const turn = !!via && e.hasAttribute('data-fly-turn');
+    const slide = e.hasAttribute('data-fly-slide');
+    const f = {
+      from, t0, delay: wait + k * (deal ? 70 : 90), dur: slide ? 300 : via ? (turn ? 470 : 400) : 280,
+      via: !!via, turn, spin: via ? Number(e.dataset.flySpin) || 0 : 0, slide,
+    };
+    if (flyAnim(e, f, flyBox(e, B))) flights.set(e.dataset.fly, f);
+  }
+}
+function flyResume() {
+  const board = el('board');
+  if (!board || lessMotion()) { flights.clear(); return; }
+  const B = board.getBoundingClientRect();
+  const now = Date.now();
+  for (const [key, f] of flights) {
+    const ago = now - f.t0;
+    if (ago >= f.delay + f.dur) { flights.delete(key); continue; }
+    const e = [...board.querySelectorAll('[data-fly]')].find((x) => x.dataset.fly === key);
+    if (e && !flown.has(e)) flyAnim(e, { ...f, delay: f.delay - ago }, flyBox(e, B));
+  }
+}
+function flyAnim(e, f, to) {
+  const dx = f.from.x + f.from.w / 2 - (to.x + to.w / 2);
+  const dy = f.from.y + f.from.h / 2 - (to.y + to.h / 2);
+  const near = f.via ? 2 : 3; // 同じ物が2〜3px ずれただけ（上の段の高さが少し変わったなど）では動かさない
+  if (Math.abs(dx) < near && Math.abs(dy) < near && !f.spin) return false;
+  // 前の大きさから始める（手札より大きく出る場の札・小さな印から飛ぶ札）。出どころが入れ物（場・山）のときは大きくなりすぎないよう 1.2 倍まで
+  const s0 = Math.min(1.2, Math.max(0.4, f.from.w / (to.w || 1)));
+  const lift = f.via && !f.slide ? Math.min(28, Math.hypot(dx, dy) * 0.15) : 0;
+  const tail = e.dataset.flyBase ? ' ' + e.dataset.flyBase : '';
+  const k = (x, y, s, r, sx) => `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) scale(${s.toFixed(3)}) rotate(${r}deg) scaleX(${sx})${tail}`;
+  if (getComputedStyle(e).position === 'static') e.style.position = 'relative'; // 前に重ねる（z-index を効かせる）ため
+  e.style.zIndex = '30';
+  if (f.turn) {
+    e.classList.add('fly-turn');
+    e.style.setProperty('--fly-ms', f.dur + 'ms');
+    e.style.setProperty('--fly-at', f.delay + 'ms');
+  }
+  flown.add(e);
+  e.animate([
+    { transform: k(dx, dy, s0, f.spin, 1) },
+    { transform: k(dx / 2, dy / 2 - lift, ((s0 + 1) / 2) * (f.via && !f.slide ? 1.06 : 1), f.spin / 2, f.turn ? 0 : 1), offset: 0.5 },
+    { transform: k(0, 0, 1, 0, 1) },
+  ], { duration: f.dur, delay: f.delay, easing: 'cubic-bezier(.3, .7, .3, 1)', fill: 'backwards' });
+  // 終わりは時間で決める（画面が隠れていて動きの終わりの知らせが遅れても、前に重ねたままにならないように）
+  setTimeout(() => { e.style.zIndex = ''; e.classList.remove('fly-turn'); }, Math.max(0, f.delay + f.dur) + 60);
+  return true;
+}
+
 // 新しく打たれた手の音。何手かまとめて届いたときは最後の手の音だけ。対局が終わったら勝ち負けの音。
 // 音はゲームの sound(前の局面, 今の局面, 手, 自分の番号) が名前で返す（無ければ盤のゲームは place、カードゲームは card）
 function moveSound(game, st, res, prevLen, mine) {
@@ -2319,6 +2678,7 @@ function moveSound(game, st, res, prevLen, mine) {
     if (isVoice(said)) { play(said); setTimeout(() => play(end), 700); } else play(end);
     if (end === 'win' || end === 'lose') haptic(end);
     if (end === 'win') confetti(); // 勝ちの音を鳴らす画面には紙吹雪
+    endStamp(game, res, me, end, isVoice(said) ? 700 : 0); // 決着の判子（勝ち負けの音と一緒に）
     greet('end', isVoice(said) ? 1900 : 1200);
     return;
   }
@@ -2338,13 +2698,24 @@ function moveSound(game, st, res, prevLen, mine) {
     try { name = game.sound ? game.sound(a, b, mm, me) : game.multi ? 'card' : 'place'; } catch { name = null; }
   }
   if (name) play(name);
-  if (mine && S.mode === 'online' && !game.realtime && !canMove(game, before, null) && Date.now() - S.waitFrom > TURN_PING_MS) {
-    setTimeout(() => { play('turn'); haptic('turn'); sayTurn(); }, 300);
+  // 技の名前（2026-11-06）: 音と同じく新しい手を後ろから見て、最初に技の名前のある手の名前を1つ出す（ゲームの cutin(前, 後, 手, 自分の番号)）
+  for (let k = steps.length - 1; k >= 0 && game.cutin; k--) {
+    const [a, b, mm] = steps[k];
+    let c = null;
+    try { c = game.cutin(a, b, mm, me); } catch { c = null; }
+    if (c) { cutInFx(c); break; }
+  }
+  if (mine && S.mode === 'online' && !game.realtime && !canMove(game, before, null)) {
+    const waited = Date.now() - S.waitFrom;
+    if (waited > TURN_PING_MS) {
+      setTimeout(() => { play('turn'); haptic('turn'); sayTurn(); }, 300);
+      setTimeout(turnFx, Math.max(300, cutUntil - Date.now())); // あなたのターンの帯（2026-11-06）。技の名前が出ていれば、そのあとに
+    }
   }
 }
 
 /* ---------- 番が来たら名前を読み上げ・あいさつ（2026-10-08 の23回目の案。Claude の案から本人が推奨どおり選んだ） ---------- */
-// 番が来たら名前を読み上げ: オンラインで5秒より長く待ったあとに自分の番が来たとき（「番が来た」音と同じとき）、音のあとに「○○さんのターン」と言う。
+// 番が来たら名前を読み上げ: オンラインで TURN_PING_MS（3秒。2026-11-06 に5秒から）より長く待ったあとに自分の番が来たとき（「番が来た」音と同じとき）、音のあとに「○○さんのターン」と言う。
 //   読むのは自分の端末に入れた自分の名前（マーク・🔰 は付けない）。名前が空なら「あなたのターン」（2026-10-26 本人の依頼で「番です」から替えた）。
 // あいさつ: 対局の始め（手がまだ無い局面を初めて描いたとき）に「よろしくお願いします」、決着した手が届いたときに勝ち負けの音のあとで「ありがとうございました」。
 //   画面の下に一言（toast）を出して読み上げる。オンラインも同じ画面の対局も。各自の端末が自分で出す（送らない）。
@@ -2365,11 +2736,14 @@ function greet(kind, delay = 0) {
 }
 
 // render から毎回呼ぶ。対局（ゲーム・回・種）ごとに、手がまだ無いところを初めて描いたときだけ始めのあいさつ
-function greetStart(res) {
+function greetStart(res, game) {
   const key = timerKey();
   if (S.greetKey === key) return;
   S.greetKey = key;
-  if (!S.moves.length && !res) greet('start', 300);
+  if (!S.moves.length && !res) {
+    greet('start', 300);
+    introFx(game);
+  }
 }
 
 function renderLobby(game) {
@@ -3280,7 +3654,18 @@ async function shareInvite() {
   }
 }
 
-function closeInvite() { document.querySelector('.invite-pop')?.remove(); }
+function closeInvite() { dropPop(document.querySelector('.invite-pop:not(.closing)')); }
+// 小窓を閉じる（2026-11-06 の画面の切り替え）: ふわっと消してから外す。消える間は押せず（.closing）、読み上げにも出さず、id も外す
+// （すぐ次の小窓を開くことがあり、同じ id が2つになると「あなたの名前」の字を押したとき消える方の欄へ行くため）
+function dropPop(pop) {
+  if (!pop) return;
+  if (lessMotion()) { pop.remove(); return; }
+  if (pop.contains(document.activeElement)) document.activeElement.blur();
+  pop.classList.add('closing');
+  pop.setAttribute('aria-hidden', 'true');
+  for (const x of pop.querySelectorAll('[id]')) x.removeAttribute('id');
+  setTimeout(() => pop.remove(), 160);
+}
 
 /* ---------- お問い合わせ・通報・ライセンス（2026-10-21 本人の決定。App Store の審査 1.2 の連絡先と通報） ---------- */
 // 窓口はこのアプリ用の Google フォーム（本人が作る。作ったら CONTACT_URL に入れる）。メールアドレスは出さない。

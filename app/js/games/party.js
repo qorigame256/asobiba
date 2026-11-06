@@ -48,7 +48,9 @@ export function winnersText(winners, me, pn) {
 // 参加者の札（名前と点数）を並べる。extra(p) で名前の下に足す HTML（esc 済みのもの）を返せる
 // steady = true: 札を1列に並べ（はみ出したら横に送る）、extra の行をいつも1行ぶん取っておく。札に字が入っても札の高さと段の数が変わらず、
 //   下のボタンが押し下げられない（2026-10-30 本人の依頼。ぴったりストップ・色ちがい早押し・ことわざかるた・ビンゴ）
-export function scoreChips(o, scores, { turn = null, won = [], extra = null, steady = false } = {}) {
+// gain = false: 点が増えても「+3」を出さない（数が点でないゲーム。綱引き連打の回数・ミニゴルフの打数・羽根つきの墨・玉入れの玉）
+export function scoreChips(o, scores, { turn = null, won = [], extra = null, steady = false, gain = true } = {}) {
+  if (gain) noteGains(o, scores);
   const box = document.createElement('div');
   box.className = 'cc-opps' + (steady ? ' cc-steady' : '');
   scores.forEach((v, p) => {
@@ -61,6 +63,7 @@ export function scoreChips(o, scores, { turn = null, won = [], extra = null, ste
     val.className = 'pt-score';
     val.innerHTML = `${v}<small>点</small>`;
     chip.append(name, val);
+    if (gain) showGain(chip, val, p, v);
     if (extra) {
       const x = extra(p);
       if (x || steady) {
@@ -82,6 +85,53 @@ function tag(cls, text) {
   t.className = 'cc-tag ' + cls;
   t.textContent = text;
   return t;
+}
+
+// 点が入ったら「+3」（2026-11-06 の UI・演出・アニメーションの案。本人が決めたことは party-games.md）:
+// 新しく届いた手（o.fresh）で点が増えた人の札に、増えた数を飛び出させ、数字をくるくる増やす（GAIN_MS の間）。
+// 札は描き直しのたびに作り直されるので、増えた時刻を覚えておき、その間に描き直したら続きから出す（将棋の王手の知らせと同じ考え方）。
+// 「+3」は札の中に出す（横に送れる札の段 .cc-steady は、はみ出した所が切れるため）。動きを減らす設定の端末では出さない。
+// どの札の組かは名前の並びと人数で見分ける（次の対局で点が0に戻ったときは、増えていないので出ない）。
+const GAIN_MS = 900;
+const COUNT_MS = 500;
+const gains = { key: '', vals: [], at: [], from: [] };
+function noteGains(o, scores) {
+  const key = (o.names || []).join('\u0001') + '#' + scores.length;
+  if (gains.key !== key) { Object.assign(gains, { key, vals: scores.slice(), at: [], from: [] }); return; }
+  const now = Date.now();
+  scores.forEach((v, p) => {
+    const was = gains.vals[p];
+    if (o.fresh && Number.isFinite(v) && Number.isFinite(was) && v > was) { gains.at[p] = now; gains.from[p] = was; }
+    gains.vals[p] = v;
+  });
+}
+const quiet = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+function showGain(chip, val, p, v) {
+  const t = Date.now() - (gains.at[p] ?? -Infinity);
+  if (t >= GAIN_MS || quiet()) return;
+  const from = gains.from[p];
+  const plus = document.createElement('span');
+  plus.className = 'pt-plus';
+  plus.textContent = '+' + Math.round((v - from) * 10) / 10;
+  plus.style.animationDelay = `-${t}ms`; // 描き直したときは続きから
+  chip.classList.add('gain');
+  chip.style.animationDelay = `-${t}ms`;
+  chip.append(plus);
+  // 「12」の字（後ろの <small>点</small> はそのまま）。札を受け取ったあとで .pt-score の中身を書き直すゲーム（価値観ならべの「クリア」など）があるので、字は毎回探し直す
+  const put = (x) => { const n = [...val.childNodes].find((c) => c.nodeType === 3); if (n) n.nodeValue = String(x); };
+  const whole = Number.isInteger(v) && Number.isInteger(from);
+  const start = Date.now() - t;
+  let first = true; // 最初の1回は札がまだ画面に付いていない（scoreChips の中で呼ぶため）
+  const step = () => {
+    const k = Math.min(1, (Date.now() - start) / COUNT_MS);
+    if (k >= 1 || (!first && !val.isConnected)) return put(v); // 描き直しで外れた札は止める
+    first = false;
+    const x = from + (v - from) * (1 - (1 - k) ** 3);
+    put(whole ? Math.round(x) : Math.round(x * 10) / 10);
+    requestAnimationFrame(step);
+  };
+  step();
+  setTimeout(() => put(v), Math.max(0, COUNT_MS - t) + 50); // 裏のタブで描き替えが止まっても、数は必ず正しい値に戻す
 }
 
 // 残り時間の帯。ms 後に空になる。帯の要素が画面から外れたら勝手に止まる

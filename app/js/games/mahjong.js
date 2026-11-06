@@ -996,16 +996,53 @@ function button(text, cls, fn) {
   return b;
 }
 
+// 和了を一つずつ見せる（2026-11-06 の UI・演出・アニメーションの案。本人が決めたことは mahjong.md の「演出」）:
+// 局の結果で、「ロン！」「ツモ！」の大きな字（game.cutin → main.js の cutInFx）のあと、題・牌・裏ドラ・役（1つずつ）・点（くるくる増える）・
+// 満貫などの判子（傾けない。決着の判子と同じ）・点の動きの順に出す。「次の局へ」のボタンは最初から出しておく（待たせない）。
+// 結果の欄は描き直しのたびに作り直されるので、出し始めた時刻（reveal.start）からの経過で、部品ごとの動きを途中から続ける（負の animation-delay）。
+// どこかを押すと最後まで飛ばす。新しく届いた手で局が終わったときだけ動かす（読み込み直し・あとから見た人には全部出ている形）。動きを減らす設定の端末では動かさない
+const REVEAL_LEAD = 950; // 大きな字が出ている間は待つ
+let reveal = { key: null, start: -Infinity };
+function revealAt(s, o) {
+  const key = `${s.seed}:${s.handNo}`;
+  if (reveal.key !== key) {
+    const go = !!o.fresh && s.h.end.type !== 'draw' && !(typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
+    reveal = { key, start: go ? Date.now() : -Infinity };
+    if (go) {
+      const skip = () => {
+        document.removeEventListener('pointerdown', skip, true);
+        if (reveal.key !== key) return;
+        reveal.start = -Infinity;
+        for (const x of document.querySelectorAll('.mj-end [data-at]')) { x.style.animation = 'none'; delete x.dataset.at; }
+        for (const x of document.querySelectorAll('.mj-end .mj-pts')) x.textContent = x.dataset.v;
+      };
+      document.addEventListener('pointerdown', skip, true);
+      setTimeout(() => document.removeEventListener('pointerdown', skip, true), 10000);
+    }
+  }
+  return Date.now() - reveal.start; // 出し始めてからの ms（Infinity なら全部出ている）
+}
+const RV_MS = { rise: 300, pop: 220, slide: 300, stamp: 380 };
+// 部品 x を start ms（出し始めから）に、動き kind で出す。t は今の経過。もう出終わっていれば何もしない
+function revealPart(x, kind, start, t) {
+  if (t >= start + RV_MS[kind]) return;
+  x.dataset.at = '1';
+  x.style.animation = `rv-${kind} ${RV_MS[kind]}ms cubic-bezier(.2, .8, .3, 1) ${Math.round(start - t)}ms both`;
+}
+
 function endPanel(s, o, me) {
   const h = s.h;
   const e = h.end;
   const box = document.createElement('div');
   box.className = 'mj-end';
   const name = (p) => (p === me ? 'あなた' : o.names[p]);
+  const t = e.type === 'draw' ? Infinity : revealAt(s, o);
   const title = document.createElement('h3');
   if (e.type === 'draw') title.textContent = `${e.title} 流局`;
   else title.textContent = `${e.title} ${name(e.winner)}の${e.type === 'tsumo' ? 'ツモ' : 'ロン'}和了`;
   box.append(title);
+  let next = REVEAL_LEAD; // 次の部品を出す時刻
+  revealPart(title, 'rise', next, t);
   if (e.type !== 'draw') {
     const hand = document.createElement('div');
     hand.className = 'mj-end-hand';
@@ -1015,12 +1052,17 @@ function endPanel(s, o, me) {
     hand.append(w);
     for (const m of e.melds) { const g = document.createElement('span'); g.className = 'mj-meld'; m.forEach((id) => g.append(tileEl(id, { small: true }))); hand.append(g); }
     box.append(hand);
+    next += 100;
+    for (const x of hand.children) { revealPart(x, 'pop', next, t); next += 35; }
+    next += 200;
     if (e.ura.length) {
       const u = document.createElement('div');
       u.className = 'mj-end-ura';
       u.append('裏ドラ表示 ');
       e.ura.forEach((id) => u.append(tileEl(id, { small: true })));
       box.append(u);
+      revealPart(u, 'rise', next, t);
+      next += 300;
     }
     const ul = document.createElement('ul');
     ul.className = 'mj-yaku';
@@ -1028,12 +1070,32 @@ function endPanel(s, o, me) {
       const li = document.createElement('li');
       li.innerHTML = `<span>${y.name}</span><span>${y.yakuman ? (y.yakuman > 1 ? `${y.yakuman}倍役満` : '役満') : `${y.han}翻`}</span>`;
       ul.append(li);
+      revealPart(li, 'slide', next, t);
+      next += 380;
     }
     box.append(ul);
     const sum = document.createElement('p');
     sum.className = 'mj-sum';
-    sum.textContent = `${e.fu ? `${e.fu}符 ` : ''}${e.han}翻${e.limit ? ` ${e.limit}` : ''}　${e.points.toLocaleString()}点`;
+    const line = document.createElement('span');
+    line.textContent = `${e.fu ? `${e.fu}符 ` : ''}${e.han}翻　`;
+    const pts = document.createElement('b');
+    pts.className = 'mj-pts';
+    pts.dataset.v = e.points.toLocaleString();
+    pts.textContent = pts.dataset.v;
+    line.append(pts, '点');
+    sum.append(line);
     box.append(sum);
+    revealPart(sum, 'rise', next, t);
+    countUp(pts, e.points, next, t);
+    next += 800;
+    if (e.limit) {
+      const lim = document.createElement('span');
+      lim.className = 'mj-limit';
+      lim.textContent = e.limit;
+      sum.append(lim);
+      revealPart(lim, 'stamp', next, t);
+      next += 350;
+    }
   } else {
     const p = document.createElement('p');
     const ten = e.tenpai.map((t, i) => (t ? name(i) : null)).filter(Boolean);
@@ -1042,6 +1104,7 @@ function endPanel(s, o, me) {
   }
   const table = document.createElement('ul');
   table.className = 'mj-deltas';
+  revealPart(table, 'rise', next, t);
   for (let p = 0; p < s.n; p++) {
     const li = document.createElement('li');
     const d = e.deltas[p];
@@ -1050,13 +1113,33 @@ function endPanel(s, o, me) {
     table.append(li);
   }
   box.append(table);
-  if (e.over) box.insertAdjacentHTML('beforeend', '<p class="mj-note">これで対局は終わりです</p>');
+  if (e.over) {
+    box.insertAdjacentHTML('beforeend', '<p class="mj-note">これで対局は終わりです</p>');
+    revealPart(box.lastChild, 'rise', next, t);
+  }
   if (me >= 0 && o.canMove && !h.acks.includes(me)) {
     box.append(button(e.over ? '最終結果へ' : '次の局へ', 'primary', () => o.onMove({ a: 'ok', n: s.seq })));
   } else if (me >= 0) {
     box.insertAdjacentHTML('beforeend', '<p class="mj-note">ほかの人を待っています…（30秒で自動で進みます）</p>');
   }
   return box;
+}
+
+// 点をくるくる増やす（和了を一つずつ見せる）。start ms（出し始めから）に 0 から始めて 750ms で value に。描き直しで外れたら止める。
+// 裏のタブで描き替えが止まっても、最後は必ず正しい点にする
+function countUp(x, value, start, t) {
+  const COUNT = 750;
+  if (t >= start + COUNT) return;
+  const t0 = Date.now() - t; // 出し始めた時刻
+  const step = () => {
+    if (!x.isConnected && x.dataset.go) return;
+    x.dataset.go = '1';
+    const k = Math.min(1, Math.max(0, (Date.now() - t0 - start) / COUNT));
+    x.textContent = reveal.start === -Infinity || k >= 1 ? x.dataset.v : Math.round(value * (1 - (1 - k) ** 3)).toLocaleString();
+    if (k < 1 && reveal.start !== -Infinity) requestAnimationFrame(step);
+  };
+  step();
+  setTimeout(() => { if (x.isConnected) x.textContent = x.dataset.v; }, Math.max(0, start + COUNT - t) + 50);
 }
 
 function render(root, s, o) {
@@ -1255,6 +1338,20 @@ export default {
   apply: applyMove,
   result(s) { return s.over ? { winner: s.ranking[0], ranking: s.ranking, scores: s.scores.slice() } : null; },
   // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
+  // 技の名前（2026-11-06 の UI・演出・アニメーションの案。mahjong.md の「演出」）: リーチ・ポン・チー・カン・ロン・ツモで大きな字（main.js の cutInFx）。
+  // ロン・ツモの字のあとに結果の欄を一つずつ出す（endPanel の REVEAL_LEAD）
+  cutin(a, b, m) {
+    if (b.h.phase === 'end' && a.h.phase !== 'end') return b.h.end.type === 'draw' ? null : { text: b.h.end.type === 'tsumo' ? 'ツモ！' : 'ロン！', color: '#c62d1f' };
+    if (a.handNo !== b.handNo) return null; // 次の局へ進んだ手（鳴きの数を前の局と比べない）
+    if (m.a === 'd' && m.r) return { text: 'リーチ！', color: '#e0663c' };
+    if (m.a === 'ankan' || m.a === 'kakan') return { text: 'カン！', color: '#7d3cc8' };
+    for (let p = 0; p < b.n; p++) {
+      if (b.h.melds[p].length <= a.h.melds[p].length) continue;
+      const k = b.h.melds[p][b.h.melds[p].length - 1].type;
+      return k === 'pon' ? { text: 'ポン！', color: '#2e9a52' } : k === 'chi' ? { text: 'チー！', color: '#2f6fb3' } : { text: 'カン！', color: '#7d3cc8' };
+    }
+    return null;
+  },
   sound(a, b, m) {
     if (b.h.phase === 'end' && a.h.phase !== 'end') return b.h.end.type === 'draw' ? 'question' : b.h.end.type; // 流局か、和了（'ron' | 'tsumo'。読み上げ）
     const melds = (s) => s.h.melds.reduce((n, x) => n + x.length, 0);

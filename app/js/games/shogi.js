@@ -549,6 +549,10 @@ export default {
         const e = document.createElement(ok ? 'button' : 'span');
         e.className = 'sg-hand-piece' + (ok ? ' playable' : '') + (ui.drop === d && side === s.turn ? ' selected' : '');
         e.innerHTML = `<span class="sg-piece${side === bottom ? '' : ' flip'}">${KANJI[d]}</span>${n > 1 ? `<small>${n}</small>` : ''}`;
+        // 駒がすっと動く（2026-11-06。main.js の flyPlay）: 取った駒は、取ったマス（at:マス。駒の鍵は直前に動いた駒だと mv: なのでマスで指す）から
+        // 向きを変えながら持ち駒へ飛んでくる（前に同じ駒を持っていたときは、前と同じ鍵の物があるので飛ばない）
+        e.dataset.fly = `hand:${side}:${d}`;
+        if (s.last && !s.last.resign && !s.last.d) Object.assign(e.dataset, { flyFrom: `at:${s.last.t}`, flySpin: '180' });
         if (ok) {
           e.type = 'button';
           e.onclick = () => {
@@ -589,6 +593,7 @@ export default {
       const isMovable = can && mine && movable.has(i);
       const cell = document.createElement(isTarget || isMovable ? 'button' : 'div');
       cell.className = 'sg-cell';
+      cell.dataset.flySrc = `at:${i}`; // 取った駒が飛び立つ所（2026-11-06）
       if (s.last && !s.last.resign && s.last.t === i) cell.classList.add('last', ...(o.fresh ? ['pop'] : []));
       if (i === ui.from) cell.classList.add('selected');
       if (isTarget) cell.classList.add('target');
@@ -600,6 +605,11 @@ export default {
         const p = document.createElement('span');
         p.className = 'sg-piece' + (owner === bottom ? '' : ' flip') + (t > 8 ? ' promoted' : '');
         p.textContent = t === KING && owner === 1 ? '王' : KANJI[t];
+        // 駒がすっと動く（2026-11-06）: 指した駒は元のマスから滑り、打った駒は持ち駒から飛んでくる
+        const moved = s.last && !s.last.resign && s.last.t === i;
+        p.dataset.fly = moved ? `mv:${s.ply}` : `sq:${i}`;
+        if (moved) Object.assign(p.dataset, s.last.d ? { flyFrom: `hand:${s.last.side}:${s.last.d}` } : { flyFrom: `sq:${s.last.f}`, flySlide: '' });
+        if (owner !== bottom) p.dataset.flyBase = 'rotate(180deg)';
         cell.append(p);
       }
       if (isTarget || isMovable) {

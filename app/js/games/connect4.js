@@ -17,7 +17,7 @@
 const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
 export const NEUTRAL = -1; // じゃま石
 
-import { CPU_SETTING, boardCpu, mulberry32 } from './util.js';
+import { CPU_SETTING, boardCpu, mulberry32, winLine } from './util.js';
 
 // 盤（列 w・段 h）の4つ並びの窓の一覧。マスごとに、そのマスを含む窓の番号も持つ
 const WINDOWS = {};
@@ -366,6 +366,11 @@ export default {
         col.append(cell);
       }
       root.append(col);
+    }
+    // そろった列に線（2026-11-06）。最後のコマが落ちきってから引く（落ちる時間は style.css の .c4-disc.drop と同じ式）
+    if (res?.cells.length) {
+      const fall = Number.isInteger(s.last) ? 120 + (Math.floor(s.last / s.w) + 1) * 50 : 0;
+      winLine(root, [...root.querySelectorAll('.c4-disc.win')].map((d) => d.parentElement), o.fresh, 'c4:' + res.cells, fall + 80);
     }
     if (!s.pop) return;
     // ポップアウト: 盤の下に、列ごとの「抜く」ボタン（自分のコマが一番下にある列だけ押せる）

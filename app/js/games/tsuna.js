@@ -244,6 +244,7 @@ export default {
     const K = teamsOf(s);
     const tm = (p) => teamOf(p, K);
     const chips = scoreChips(o, s.taps, {
+      gain: false, // 押した回数は点でない（押すたびに出るとうるさい）
       extra: (p) => `<span style="color:${['var(--red-ink, #c0392b)', '#777', '#2f6fb3'][tm(p)]}">${TEAM[tm(p)]}</span>`,
     });
     for (const v of chips.querySelectorAll('.pt-score small')) v.textContent = '回';

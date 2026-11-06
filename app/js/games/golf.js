@@ -458,6 +458,7 @@ export default {
   render(root, s, o) {
     const me = meOf(o);
     const chips = scoreChips(o, s.pl.map((P) => total(P) + (P.done ? 0 : P.n)), {
+      gain: false, // 打数は少ないほうがよいので「+1」を出さない
       extra: (p) => (s.pl[p].done ? '<span class="pt-ok">おわり</span>' : `<span>${s.pl[p].h + 1}H</span>`),
     });
     chips.querySelectorAll('.pt-score small').forEach((x) => { x.textContent = '打'; });

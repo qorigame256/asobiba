@@ -23,7 +23,7 @@
 //   （h はスプリットした2つ目の手なら 1。無ければ 0）/ 進行役（p = -1）: { t: 'next', r }
 
 import { mulberry32, shuffle, esc } from './util.js';
-import { makeDeck, rankOf, cardEl, backEl } from './cards.js';
+import { makeDeck, rankOf, cardEl, backEl, turnUp } from './cards.js';
 import { scoreChips, leaders, ranks, winnersText, timeBar } from './party.js';
 
 const BET = 10;
@@ -307,7 +307,11 @@ export default {
     dHead.innerHTML = `親（CPU）${showDealer ? ` <b>${handText(s.dealer)}</b>` : ''}`;
     const dCards = document.createElement('div');
     dCards.className = 'bj-cards';
-    s.dealer.forEach((c, i) => dCards.append(showDealer || i === 0 ? cardEl(c) : backEl()));
+    s.dealer.forEach((c, i) => {
+      const e = showDealer || i === 0 ? cardEl(c) : backEl();
+      if (showDealer && i > 0) turnUp(e, `bj:${s.seed}:${s.round}:${i}`, o.fresh, (i - 1) * 150); // 結果で親の札が順にくるっと返る（2026-11-06）
+      dCards.append(e);
+    });
     dealer.append(dHead, dCards);
     table.append(dealer);
 

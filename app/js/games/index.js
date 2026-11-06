@@ -46,6 +46,9 @@
 //   sound(前の局面, 今の局面, 手, 自分の番号) → 新しい手が届いたときに鳴らす音の名前 | null（鳴らさない）。
 //     無ければ盤のゲームは place、カードゲームは card。対局が終わった手では呼ばれず、勝ち負けの音が鳴る（main.js の moveSound）,
 //   startSound（対局の始めに鳴らす音の名前。カードゲームの shuffle）
+// 技の名前（任意。2026-11-06。いまは大富豪・いろあわせ・麻雀）:
+//   cutin(前の局面, 今の局面, 手, 自分の番号) → { text: 大きく出す字, color: 帯の色, flash?: 'invert'（盤の色を一瞬反転） } | null。
+//     新しい手が届いたときに、届いた手の新しい順に呼び、最初に返ってきた1つを出す（main.js の cutInFx。出ている間は「あなたのターン」の帯を待たせる）
 //
 // 毎フレーム動くゲーム（live: true。エアホッケー・紙相撲）が持つもの: id / name / icon / desc / ready / players（席の呼び名）/ settings / seatCount（任意。上と同じ）,
 //   mount(要素, { mode: 'cpu' | 'two' | 'online', status: 状態表示の要素, me（オンライン: 席の番号、観戦は -1）, names, rules,
@@ -158,6 +161,25 @@ export const GAMES = {
 for (const [id, lines] of Object.entries(HOWTO)) if (GAMES[id]) GAMES[id].howto = lines;
 // 遊び方の図（howto-fig.js）。「？遊び方」の上に出し、howto の文は「くわしく」に畳む
 for (const [id, figs] of Object.entries(FIGS)) if (GAMES[id]) GAMES[id].howtoFigs = figs;
+
+// ホームの一覧の仲間（2026-11-06 の UI・演出・アニメーションの案。本人が決めたことは room.md の「演出・アニメーション」）。
+// ゲームを足したら、どれか1つの ids に入れる（tools/test-logic.mjs が、どのゲームもちょうど1つに入っているかを見ている）。仲間の中の並びは GAME_ORDER の順。
+// 分け方は rules のファイルにほぼ合わせた（Claude の判断。extra-games の手遊び・ヒット＆ブローはパーティー、戦争・神経衰弱はトランプなのでカード・牌）。
+// main.js の始まりの顔合わせ（introFx）は、quick と action のゲームには出さない
+export const CATEGORIES = [
+  { key: 'board', name: '盤のゲーム', ids: ['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'hasami', 'shogi'] },
+  { key: 'card', name: 'カード・牌', ids: ['colors', 'daifugo', 'poker', 'speed', 'babanuki', 'doubt', 'sevens', 'blackjack', 'hitai', 'sensou', 'memory', 'mahjong'] },
+  {
+    key: 'party', name: 'パーティー',
+    ids: ['hitblow', 'yubisuma', 'tamebeam', 'acchi', 'kaidan', 'yacht', 'sugoroku', 'bingo', 'seri', 'nim', 'taru', 'fusen', 'amida', 'kaburi', 'fukuwarai', 'kioku', 'umigame', 'wordwolf', 'ishin', 'kachikan', 'oogiri', 'jinro', 'oekaki'],
+  },
+  {
+    key: 'quick', name: '早押し・早解き',
+    ids: ['flags', 'kanji', 'mannaka', 'kanjiplus', 'oxquiz', 'nearpin', 'kage', 'eitango', 'karuta', 'make10', 'anzan', 'numtouch', 'kotoba', 'narabe', 'slide', 'jigsaw', 'nanpure', 'tsunagi', 'hitofude', 'meiro', 'targets', 'mikiri', 'isutori', 'iroji', 'atodashi', 'pittari', 'typing'],
+  },
+  { key: 'action', name: 'アクション', ids: ['danmaku', 'tamaire', 'tsuna', 'nawa', 'hane', 'sumo', 'bowling', 'golf', 'darts', 'kingyo', 'tower', 'billiards', 'machigai', 'bombs', 'daruma', 'hockey'] },
+];
+export const categoryOf = (id) => CATEGORIES.find((c) => c.ids.includes(id))?.key ?? null;
 
 // 結果から勝った人のプレイヤー番号の一覧（引き分けは空）
 export function winnersOf(res) {

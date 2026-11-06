@@ -45,3 +45,22 @@ export function backEl() {
   e.className = 'pcard back';
   return e;
 }
+
+// 札を裏返す動き（2026-11-06 の UI・演出・アニメーションの案。神経衰弱・ブラックジャックの親の伏せ札・ポーカーの見せ合い。本人が決めたことは card-games.md・extra-games.md）。
+// 表で描いた札 e に、裏から表へくるっと返る動きを付ける（style.css の .pcard.turn-up。裏の模様は ::after で重ね、半分回ったところで消す）。
+// 盤は描き直しのたびに作り直されるので、返し始めた時刻を key ごとに覚え、返している間に描き直したら続きから返す。
+// fresh = 新しく届いた手で表になった（読み込み直し・あとから見た人には表のまま出す）。同じ key は2回目の fresh でも始め直さないので、
+// key には対局ごとに変わるもの（種・配った札の並び）を入れる。delay = 何 ms 遅れて返すか（何枚かを順に返すとき）。動きを減らす設定の端末では style.css が止める
+const TURN_MS = 420;
+const turned = new Map();
+export function turnUp(e, key, fresh, delay = 0) {
+  const now = Date.now();
+  if (fresh && !turned.has(key)) {
+    turned.set(key, now);
+    if (turned.size > 200) turned.delete(turned.keys().next().value);
+  }
+  const t = now - (turned.get(key) ?? -Infinity);
+  if (t >= delay + TURN_MS) return;
+  e.classList.add('turn-up');
+  e.style.setProperty('--ago', `${delay - t}ms`);
+}

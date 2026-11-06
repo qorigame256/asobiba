@@ -183,6 +183,7 @@ export default {
       name.textContent = nameP(p);
       const cnt = document.createElement('div');
       cnt.className = 'bb-count';
+      cnt.dataset.flySrc = `opp:${p}`; // 出した札が飛んでくる所（2026-11-06）
       cnt.textContent = `${s.hands[p].length}枚`;
       chip.append(name, cnt);
       // ダウトで札を引き取った人に「＋◯枚」（2026-10-26 本人の依頼で、増えた枚数を次のダウトの結果まで出したままにする）
@@ -218,7 +219,13 @@ export default {
     const cards = document.createElement('div');
     cards.className = 'db-cards';
     if (s.phase === 'doubt') {
-      for (const _ of s.played.cards) cards.append(backEl());
+      // 札がすっと動く（2026-11-06。main.js の flyPlay）: 自分が出した札は手札から（同じ鍵）、ほかの人の札はその人の席から（伏せたまま）
+      for (const c of s.played.cards) {
+        const e = backEl();
+        e.dataset.fly = `c:${c}`;
+        if (s.played.p !== me) e.dataset.flyFrom = `opp:${s.played.p}`;
+        cards.append(e);
+      }
       if (o.fresh) cards.classList.add('pop');
     } else if (s.reveal && s.reveal.by !== null) {
       for (const c of s.reveal.cards) {
@@ -295,6 +302,7 @@ export default {
       const lit = num ? [num] : opts;
       for (const c of hand.slice().sort((a, b) => rankOf(a) - rankOf(b))) {
         const e = cardEl(c, can ? 'button' : 'div');
+        Object.assign(e.dataset, { fly: `c:${c}`, flyFrom: '@center', flyTurn: '', flyDeal: '' }); // 新しく来た札（場の札を引き取ったとき）はまん中から。対局の始めは配る（2026-11-06）
         if (lit.includes(rankOf(c)) && s.phase === 'play') e.classList.add('usable');
         if (picked.has(c)) e.classList.add('selected');
         if (can) {

@@ -21,7 +21,7 @@
 //   はさみ取りは、ほかの1人の石がちょうど2つ並んだ両側を自分の石ではさむと取れる（2つは同じ人の石。違う人の石が混ざっていたら取れない）。
 //   2人のときの局面は前と全く同じ形（3人のときだけ np: 3）。CPU は2人と同じ考え方で、守りは次の番の人を重く見る。
 
-import { CPU_SETTING, mulberry32 } from './util.js';
+import { CPU_SETTING, mulberry32, winLine } from './util.js';
 
 const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
 const DIRS8 = [...DIRS, ...DIRS.map(([r, c]) => [-r, -c])];
@@ -417,5 +417,6 @@ export default {
       }
       root.append(cell);
     }
+    if (res?.cells.length) winLine(root, [...root.querySelectorAll('.gm-stone.win')].map((x) => x.parentElement), o.fresh, 'gm:' + res.cells); // そろった列に線（2026-11-06）。位置は石の置かれた点で測る（置いたばかりの石は大きさが動いているため）
   },
 };

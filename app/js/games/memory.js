@@ -19,7 +19,7 @@
 // 手: { p, t: 'flip', i: 何枚目の札か }。めくった札がもう表なら反則なので、同じ手が2回来ても2回目は弾かれる。
 
 import { mulberry32, shuffle } from './util.js';
-import { makeDeck, rankOf, suitOf, rankLabel, cardEl, backEl, cardLabel } from './cards.js';
+import { makeDeck, rankOf, suitOf, rankLabel, cardEl, backEl, cardLabel, turnUp } from './cards.js';
 
 const SIZES = { 48: { top: 12, cols: 8 }, 36: { top: 9, cols: 6 }, 24: { top: 6, cols: 6 } };
 
@@ -215,7 +215,7 @@ export default {
           e.classList.add('usable');
           e.onclick = () => o.onMove({ t: 'flip', i });
         }
-        if (o.fresh && s.last && (s.last.i === i || s.last.b === i)) e.classList.add('pop');
+        if (s.last && (s.last.i === i || s.last.b === i)) turnUp(e, `mm:${s.cards.join('')}:${s.step}:${i}`, o.fresh); // めくった札がくるっと返る（2026-11-06）
       } else if (can && !fresh.includes(i)) { // 裏に戻したはずれの2枚も、ほかの裏の札と同じにめくれる
         e = document.createElement('button');
         e.type = 'button';

@@ -185,7 +185,7 @@ export default {
     root.className = 'board kj hn';
     const wrap = document.createElement('div');
     wrap.className = 'kj-wrap';
-    wrap.append(scoreChips(o, s.ink, { won, extra, steady: true }));
+    wrap.append(scoreChips(o, s.ink, { won, extra, steady: true, gain: false }));
     wrap.querySelectorAll('.pt-score').forEach((x) => { x.innerHTML = x.innerHTML.replace('<small>点</small>', '<small>墨</small>'); });
     root.append(wrap);
     Object.assign(ui, { root, same, wrap });

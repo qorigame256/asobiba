@@ -270,6 +270,9 @@ export function render(root, s, o, players) {
       e.className = 'sg-hand-piece' + (ok ? ' playable' : '') + (ui.drop === d && side === s.turn ? ' selected' : '');
       e.innerHTML = `<span class="sg-piece p${side}${side === bottom ? '' : ' flip'}">${ICON[d]}</span>${n > 1 ? `<small>${n}</small>` : ''}`;
       e.setAttribute('aria-label', `${NAME[d]}${n}枚`);
+      // 駒がすっと動く（2026-11-06。main.js の flyPlay）: 取った駒は、取ったマスから向きを変えながら持ち駒へ飛んでくる（shogi.js と同じ）
+      e.dataset.fly = `hand:${side}:${d}`;
+      if (s.last && !s.last.resign && !s.last.d) Object.assign(e.dataset, { flyFrom: `at:${s.last.t}`, flySpin: '180' });
       if (ok) {
         e.type = 'button';
         e.onclick = () => { ui = { ...ui, from: null, drop: ui.drop === d ? null : d }; draw(); };
@@ -306,6 +309,7 @@ export function render(root, s, o, players) {
     const isMovable = can && mine && movable.has(i);
     const cell = document.createElement(isTarget || isMovable ? 'button' : 'div');
     cell.className = 'sg-cell';
+    cell.dataset.flySrc = `at:${i}`; // 取った駒が飛び立つ所（2026-11-06）
     if (s.last && !s.last.resign && s.last.t === i) cell.classList.add('last', ...(o.fresh ? ['pop'] : []));
     if (i === ui.from) cell.classList.add('selected');
     if (isTarget) cell.classList.add('target');
@@ -317,6 +321,11 @@ export function render(root, s, o, players) {
       p.className = `sg-piece p${owner}` + (owner === bottom ? '' : ' flip');
       p.textContent = ICON[t];
       p.setAttribute('aria-label', `${players[owner]}の${NAME[t]}`);
+      // 駒がすっと動く（2026-11-06）: 指した駒は元のマスから滑り、打った駒は持ち駒から飛んでくる（shogi.js と同じ）
+      const moved = s.last && !s.last.resign && s.last.t === i;
+      p.dataset.fly = moved ? `mv:${s.ply}` : `sq:${i}`;
+      if (moved) Object.assign(p.dataset, s.last.d ? { flyFrom: `hand:${s.last.side}:${s.last.d}` } : { flyFrom: `sq:${s.last.f}`, flySlide: '' });
+      if (owner !== bottom) p.dataset.flyBase = 'rotate(180deg)';
       cell.append(p);
     }
     if (isTarget || isMovable) {

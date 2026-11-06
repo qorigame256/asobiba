@@ -22,7 +22,7 @@
 //   全員が同時に押すので、この間だけホストが手を足し直す（concurrent。main.js の rebase）。
 
 import { mulberry32, shuffle } from './util.js';
-import { SUITS, JOKER, suitOf, rankOf, makeDeck, cardEl, backEl } from './cards.js';
+import { SUITS, JOKER, suitOf, rankOf, makeDeck, cardEl, backEl, turnUp } from './cards.js';
 import { since } from './party.js';
 
 const START_CHIPS = 1000;
@@ -547,7 +547,11 @@ export default {
         const row = document.createElement('div');
         row.className = 'pk-mini';
         const open = shown && !h.folded[p];
-        for (const c of h.cards[p]) row.append(open ? cardEl(c) : backEl());
+        h.cards[p].forEach((c, j) => {
+          const e = open ? cardEl(c) : backEl();
+          if (open) turnUp(e, `pk:${s.seed}:${s.handNo}:${p}:${j}`, o.fresh, (k - 1) * 120 + j * 50); // 見せ合いで札がくるっと返る（2026-11-06）
+          row.append(e);
+        });
         if (!h.folded[p]) chip.append(row);
       }
       const tags = [];

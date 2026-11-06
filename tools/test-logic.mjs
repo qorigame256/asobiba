@@ -6171,6 +6171,12 @@ for (const id of GAME_ORDER) {
     assert.ok(typeof x.c === 'string' && x.c && [...x.c].length <= 30, `${id} の図の一言（30文字まで）: ${x.c}`);
   }
 }
+// ホームの一覧の仲間（2026-11-06）: どのゲームもちょうど1つの仲間に入っている（入っていないゲームはホームに出ない）
+{
+  const { CATEGORIES } = await import('../app/js/games/index.js');
+  for (const id of GAME_ORDER) assert.equal(CATEGORIES.filter((c) => c.ids.includes(id)).length, 1, `${id} はホームの一覧の仲間のちょうど1つに入っている`);
+  for (const c of CATEGORIES) for (const id of c.ids) assert.ok(GAME_ORDER.includes(id), `仲間 ${c.key} の ${id} はゲームの一覧にある`);
+}
 
 // 2026-10-10 の Codex の点検（bd1687a..7032e05）で見つかったもの
 {
@@ -9289,6 +9295,40 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   const loose = HN.apply(HN.init(3, 5, { rules: { window: 'loose' } }), { p: -1, t: 'serve', n: 0 });
   assert.equal(HN.referee(loose).ms - HN.referee(HN.apply(HN.init(3, 5), { p: -1, t: 'serve', n: 0 })).ms, hnWin(1600, 'loose') - hnWin(1600), '36回目: 羽根つきの落とした扱いまでの時間も輪に合う');
   console.log('36回目の案 OK');
+}
+
+// 技の名前（2026-11-06 の UI・演出・アニメーションの案。main.js の cutInFx）: 大富豪・いろあわせ・麻雀の cutin は null か { text, color } を返し、
+// CPU どうしの対局で実際に出る（詳細設定は最初の値。麻雀は1局だけ）
+{
+  const defs = (G) => Object.fromEntries((G.settings ?? []).map((x) => [x.key, x.def]));
+  const cutins = (G, n, rules, seeds) => {
+    const got = new Set();
+    for (const seed of seeds) {
+      let st = G.init(n, seed, { rules });
+      for (let guard = 0; guard < 20000 && !G.result(st); guard++) {
+        const p = [...Array(n).keys()].find((q) => G.canAct(st, q));
+        const m = p === undefined ? G.referee?.(st)?.move : G.cpu(st, p);
+        if (!m) break;
+        const mm = { ...m, p: p ?? -1 };
+        const nx = G.apply(st, mm);
+        assert.ok(nx, `${G.name}: CPU の手が通らない`);
+        const c = G.cutin(st, nx, mm, 0);
+        assert.ok(c === null || (typeof c.text === 'string' && c.text && typeof c.color === 'string' && c.color), `${G.name}: 技の名前の形 ${JSON.stringify(c)}`);
+        if (c) got.add(c.text);
+        st = nx;
+      }
+      assert.ok(G.result(st), `${G.name}: CPU どうしで最後まで`);
+    }
+    return got;
+  };
+  const df = cutins(GAMES.daifugo, 4, defs(GAMES.daifugo), [1, 2, 3, 4, 5, 6]);
+  assert.ok([...df].some((x) => x.includes('8切り')), `大富豪: 8切りの字が出る ${[...df]}`);
+  const cl = cutins(GAMES.colors, 3, defs(GAMES.colors), [1, 2, 3, 4]);
+  for (const x of ['🚫 スキップ！', '⇄ リバース！', '+2 ドロー2！', '+4 ドロー4！']) assert.ok(cl.has(x), `いろあわせ: ${x} が出る`);
+  const mj = cutins(GAMES.mahjong, 4, { ...defs(GAMES.mahjong), length: 'one' }, [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.ok(mj.has('ロン！') || mj.has('ツモ！'), `麻雀: 和了の字が出る ${[...mj]}`);
+  assert.ok(mj.has('リーチ！') || mj.has('ポン！') || mj.has('チー！'), `麻雀: 鳴きかリーチの字が出る ${[...mj]}`);
+  console.log('技の名前 OK', [...df].join(' '), '/', [...cl].join(' '), '/', [...mj].join(' '));
 }
 
 console.log('ALL OK');

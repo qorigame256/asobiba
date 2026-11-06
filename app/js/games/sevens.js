@@ -209,6 +209,7 @@ export default {
       name.textContent = nameP(p);
       const cnt = document.createElement('div');
       cnt.className = 'bb-count';
+      cnt.dataset.flySrc = `opp:${p}`; // 出した札が飛んでくる所（2026-11-06）
       cnt.textContent = s.outs.includes(p) ? '失格' : s.hands[p].length ? `${s.hands[p].length}枚` : '上がり';
       const pass = document.createElement('div');
       pass.className = 'sv-pass';
@@ -230,6 +231,7 @@ export default {
     // 場（マークごとに A〜K の13マス）
     const field = document.createElement('div');
     field.className = 'sv-field';
+    field.dataset.flySrc = 'field';
     for (const su of SUITS) {
       const row = document.createElement('div');
       row.className = 'sv-row';
@@ -243,6 +245,9 @@ export default {
           if (o.fresh && s.last?.t === 'joker') e.classList.add('pop');
         } else if (s.field[c]) {
           e = cardEl(c);
+          // 札がすっと動く（2026-11-06。main.js の flyPlay）: 自分が出した札は手札から（同じ鍵）、ほかの人の札はその人の席から裏返りながら
+          e.dataset.fly = `c:${c}`;
+          if (s.last && s.last.p !== me) Object.assign(e.dataset, { flyFrom: `opp:${s.last.p}`, flyTurn: '' });
           if (s.field[c] === 'out') e.classList.add('sv-dumped');
           if (o.fresh && s.last?.t === 'play' && s.last.c === c) e.classList.add('pop');
         } else {
@@ -289,6 +294,7 @@ export default {
       for (const c of s.hands[me]) {
         const usable = can.includes(c);
         const e = cardEl(c, usable ? 'button' : 'div');
+        Object.assign(e.dataset, { fly: `c:${c}`, flyFrom: 'field', flyTurn: '', flyDeal: '' }); // 対局の始めは場から配る（2026-11-06）
         if (usable) {
           e.classList.add('usable');
           if (c === JOKER && picking) e.classList.add('picked');

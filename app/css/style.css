@@ -155,32 +155,42 @@ p { margin: 0; }
 .mark-btn:first-child { font-size: .85rem; }
 .mark-btn.on { border-color: var(--accent, #d9643a); box-shadow: 0 0 0 2px var(--accent, #d9643a) inset; }
 
-.game-search { width: 100%; box-sizing: border-box; font: inherit; padding: 10px 14px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--field, #fff); color: var(--ink); margin: 0 0 12px; }
-.game-search-none { color: var(--muted); margin: 0 0 12px; }
-.game-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
-}
-.game-card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.game-card h3 { margin: 0; font-size: 1.1rem; }
-.game-card p { color: var(--muted); font-size: .9rem; flex: 1; }
-.game-icon { font-size: 2rem; line-height: 1; }
-.card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-.card-actions .btn { flex: 1; padding: 9px 10px; font-size: .92rem; white-space: nowrap; }
-.game-card.not-ready { opacity: .55; }
-.game-card { position: relative; }
-.fav-btn { position: absolute; top: 8px; right: 8px; width: 40px; height: 40px; border: 0; background: none; font-size: 1.5rem; line-height: 1; color: #c9a227; cursor: pointer; border-radius: 10px; }
+/* ホームの一覧（2026-11-06。main.js の renderHome・openGameSheet）: 上の帯（検索の欄と仲間へ飛ぶボタン）は画面の上に残り、
+   仲間ごとの見出しの下に、絵と名前だけの小さな札を3列（広い画面は5列）で並べる。札を押すと説明とボタンが下から出る */
+.home-find { position: sticky; top: env(safe-area-inset-top); z-index: 5; display: grid; gap: 8px; margin: 0 -6px; padding: 6px 6px 8px; background: var(--bg); }
+.home-find::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: env(safe-area-inset-top); background: var(--bg); } /* iPhone の時計の下に一覧が透けないように */
+.game-search { width: 100%; box-sizing: border-box; font: inherit; padding: 10px 14px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--field, #fff); color: var(--ink); margin: 0; }
+.game-search-none { color: var(--muted); margin: 8px 0 12px; }
+.game-cats { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; touch-action: pan-x; padding-bottom: 2px; }
+.game-cats::-webkit-scrollbar { display: none; }
+.cat-btn { flex: none; font: inherit; font-size: .82rem; font-weight: 700; padding: 5px 12px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+.cat-btn:active { background: var(--line); }
+.cat-h { font-size: .9rem; font-weight: 800; color: var(--muted); margin: 14px 2px 8px; scroll-margin-top: calc(118px + env(safe-area-inset-top)); }
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+@media (min-width: 600px) { .tiles { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+.tile { position: relative; font: inherit; display: grid; justify-items: center; align-content: start; gap: 3px; min-width: 0; padding: 10px 4px 8px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; text-align: center; transition: transform .1s; }
+.tile:active { transform: scale(.96); }
+.tile:focus-visible, .cat-btn:focus-visible { outline: 3px solid var(--win); outline-offset: 2px; }
+.tile-ic { font-size: 1.9rem; line-height: 1.15; }
+.tile-nm { font-size: .78rem; font-weight: 700; line-height: 1.3; min-height: 2.6em; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tile.fav { border-color: #e2c45a; }
+.tile.fav::after { content: "★"; position: absolute; top: 2px; right: 6px; font-size: .8rem; color: #c9a227; }
+.tile.not-ready { opacity: .55; }
+@media (prefers-reduced-motion: reduce) { .tile { transition: none; } .tile:active { transform: none; } }
+/* 札を押すと下から出る小窓（小窓の仕組みは .invite-pop と同じ） */
+.invite-pop.sheet-pop { align-items: flex-end; } /* .invite-pop（後ろに書いてある）の真ん中寄せより強くする */
+.sheet-pop > .game-sheet { max-width: 460px; display: grid; gap: 10px; text-align: left; border-radius: 18px; animation-name: sheet-up; }
+@keyframes sheet-up { from { opacity: 0; transform: translateY(48px); } }
+.sheet-head { display: flex; align-items: center; gap: 10px; }
+.sheet-head h3 { margin: 0; flex: 1; min-width: 0; font-size: 1.2rem; }
+.sheet-ic { font-size: 2.3rem; line-height: 1; flex: none; }
+.sheet-desc { color: var(--muted); font-size: .92rem; }
+.game-sheet .tag { justify-self: start; }
+.game-sheet .invite-actions { margin-top: 0; }
+.card-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.card-actions .btn { flex: 1; padding: 10px 10px; font-size: .95rem; white-space: nowrap; }
+.fav-btn { flex: none; width: 44px; height: 44px; border: 0; background: none; font-size: 1.6rem; line-height: 1; color: #c9a227; cursor: pointer; border-radius: 10px; }
 .fav-btn:hover { background: var(--line); }
-.game-card.fav { border-color: #e2c45a; }
 .lobby-history { margin-top: 8px; font-size: .9rem; }
 .lobby-history summary { cursor: pointer; color: var(--muted); }
 .lobby-history ol { margin: 6px 0 0; padding-left: 1.4em; }
@@ -216,6 +226,53 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .confetti { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 50; }
 .confetti i { position: absolute; top: -12px; width: 8px; height: 13px; border-radius: 2px; opacity: .95; animation: confetti-fall 2.4s ease-in forwards; }
 @keyframes confetti-fall { to { transform: translate(var(--dx), 105vh) rotate(var(--rot)); opacity: .8; } }
+/* 演出（2026-11-06 の UI・演出・アニメーションの案。main.js の showFx）。画面全体に重ね、押せない（下の操作を邪魔しない）。はみ出した帯で横スクロールが出ないよう切る */
+.fx-clip { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 55; }
+.fx-clip.out { animation: fx-out .3s ease-in forwards; }
+@keyframes fx-out { to { opacity: 0; } }
+/* 決着の判子（main.js の endStamp）。傾けない（本人の指示）。紙の色の地に朱の判子なので、どのスキンでも同じ色のまま */
+.end-stamp {
+  position: absolute; left: 50%; top: 45%; max-width: calc(100vw - 32px); text-align: center; overflow-wrap: anywhere;
+  font-family: "Yu Mincho", "Hiragino Mincho ProN", serif; font-weight: 900; line-height: 1.1; font-size: clamp(2.6rem, 13vw, 4.6rem);
+  padding: .14em .42em .18em; border: 6px solid currentColor; border-radius: 18px; background: rgba(255, 253, 248, .92); color: #c62d1f;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .25); transform: translate(-50%, -50%); animation: end-stamp-in .42s cubic-bezier(.2, .8, .3, 1) both;
+}
+.end-stamp.lose { color: #3f5f8f; }
+.end-stamp.draw, .end-stamp.rank { color: #6b6259; }
+.end-stamp.watch { color: #b8541f; font-size: clamp(1.7rem, 8vw, 3rem); }
+@keyframes end-stamp-in {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(2.6); }
+  60% { opacity: 1; transform: translate(-50%, -50%) scale(.92); }
+  78% { transform: translate(-50%, -50%) scale(1.04); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+/* 始まりの顔合わせ（main.js の introFx）。席の色の札が左右から入り、まんなかに VS。3人以上は2列に並ぶ。そのあと「スタート！」 */
+.vs-fx { position: absolute; inset: 0; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, .38); animation: fx-in .2s ease-out both; }
+@keyframes fx-in { from { opacity: 0; } }
+.vs-row { display: flex; align-items: center; gap: 10px; max-width: 100%; }
+.vs-grid { display: grid; grid-template-columns: repeat(2, minmax(0, auto)); gap: 10px 12px; max-width: 100%; }
+.vs-plate {
+  padding: 8px 14px; border-radius: 14px; background: var(--panel); color: var(--ink); border: 3px solid var(--pc, var(--line)); font-weight: 800; font-size: 1.05rem;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, .3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 40vw; animation: vs-pop .3s cubic-bezier(.2, .8, .3, 1.4) both;
+}
+.vs-row .vs-plate { max-width: calc(50vw - 60px); }
+.vs-plate.l { animation: vs-left .38s cubic-bezier(.2, .8, .2, 1) both; }
+.vs-plate.r { animation: vs-right .38s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes vs-left { from { opacity: 0; transform: translateX(-60vw); } }
+@keyframes vs-right { from { opacity: 0; transform: translateX(60vw); } }
+@keyframes vs-pop { from { opacity: 0; transform: scale(.3); } }
+.vs-mark { flex: none; font-family: "Yu Mincho", "Hiragino Mincho ProN", serif; font-weight: 900; font-size: 1.7rem; color: #fff; background: #c62d1f; border-radius: 999px; padding: .05em .45em; box-shadow: 0 4px 12px rgba(0, 0, 0, .3); animation: vs-pop .35s .25s cubic-bezier(.2, .8, .3, 1.4) both; }
+.vs-go { font-size: clamp(2rem, 10vw, 2.8rem); font-weight: 900; letter-spacing: .06em; color: var(--accent-ink); background: var(--accent); border-radius: 18px; padding: .1em .6em; box-shadow: 0 8px 20px rgba(0, 0, 0, .3); animation: vs-pop .3s cubic-bezier(.2, .8, .3, 1.4) both; }
+/* 技の名前（main.js の cutInFx）。斜めの色の帯が開き、大きな字が右から入って左へ抜ける */
+.cut-fx { position: absolute; left: 0; right: 0; top: 42%; transform: translateY(-50%); display: grid; place-items: center; }
+.cut-fx::before { content: ""; position: absolute; left: -15%; right: -15%; top: -12px; bottom: -12px; background: var(--c); box-shadow: 0 8px 20px rgba(0, 0, 0, .3); animation: cut-bar 1.2s cubic-bezier(.2, .8, .2, 1) both; }
+.cut-fx span { position: relative; max-width: 92vw; text-align: center; overflow-wrap: anywhere; color: #fff; font-weight: 900; font-size: clamp(1.8rem, 9.5vw, 3.2rem); letter-spacing: .06em; line-height: 1.15; text-shadow: 0 3px 0 rgba(0, 0, 0, .3), 0 0 2px rgba(0, 0, 0, .5); animation: cut-txt 1.2s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes cut-bar { 0% { transform: skewY(-6deg) scaleY(0); } 14% { transform: skewY(-6deg) scaleY(1); } 80% { transform: skewY(-6deg) scaleY(1); opacity: 1; } 100% { transform: skewY(-6deg) scaleY(0); opacity: 0; } }
+@keyframes cut-txt { 0% { transform: translateX(60vw); opacity: 0; } 18% { transform: translateX(-2vw); opacity: 1; } 26% { transform: translateX(0); } 78% { transform: translateX(0); opacity: 1; } 100% { transform: translateX(-30vw); opacity: 0; } }
+/* あなたのターンの帯（main.js の turnFx）。画面を左から右へ横切る */
+.turn-fx { position: absolute; left: -6%; right: -6%; top: calc(42% - 32px); height: 64px; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); box-shadow: 0 6px 18px rgba(0, 0, 0, .25); animation: turn-fx 1.4s cubic-bezier(.2, .8, .2, 1) both; }
+.turn-fx span { font-weight: 900; font-size: 1.5rem; letter-spacing: .08em; transform: skewX(12deg); white-space: nowrap; }
+@keyframes turn-fx { 0% { transform: translateX(-110%) skewX(-12deg); } 22% { transform: translateX(0) skewX(-12deg); } 78% { transform: translateX(0) skewX(-12deg); } 100% { transform: translateX(110%) skewX(-12deg); } }
 .pred-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; width: 100%; font-weight: 700; } /* 勝敗予想（「🔮 予想」を押したときだけ出る） */
 .pred-mine { color: var(--muted); font-size: .85rem; }
 .status-sub.pred { color: #6a4fa0; }
@@ -275,6 +332,17 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .board button.btn { padding: 10px 18px; border-radius: 999px; cursor: pointer; font-weight: 700; }
 .board button.btn.secondary { background: var(--panel); border: 1.5px solid var(--line); }
 .board button.btn.ghost { padding: 8px 10px; color: var(--muted); }
+/* そろった列に線を引く（util.js の winLine。マルバツ・四目並べ・五目並べ。2026-11-06）。
+   線は引き終えた形を元にし、伸びる動きは from だけ書く（描き直しで続きから引くとき、JS が animation-delay を負にする） */
+.board.ttt, .board.tttw, .board.ttt9, .board.c4, .board.gm, .gob .ttt { position: relative; }
+.board svg.win-line { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; fill: none; z-index: 2; }
+.win-line path { fill: none; stroke: var(--ink); stroke-linecap: round; stroke-dasharray: 1 2; stroke-dashoffset: 0; }
+.win-line .soft { stroke-width: calc(var(--lw) * 2.4); opacity: .16; animation: win-draw .36s ease-out both; }
+.win-line .core { stroke-width: var(--lw); opacity: .85; animation: win-draw .34s ease-out both; }
+.c4 .win-line path, .gm .win-line path { stroke: #2a2118; } /* 盤の色がどのスキンでも同じなので、線の色も変えない */
+.c4 .win-line .soft { stroke: #fff; opacity: .5; }
+@keyframes win-draw { from { stroke-dashoffset: 1.05; } }
+@media (prefers-reduced-motion: reduce) { .win-line path { animation: none !important; } }
 
 /* ---------- マルバツ ---------- */
 .ttt {
@@ -720,6 +788,13 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .mj-deltas .minus { color: #c62d1f; }
 .mj-note { margin: 0; color: var(--muted); font-size: .85rem; }
 .mj-end .btn { align-self: center; }
+/* 和了を一つずつ見せる（2026-11-06。mahjong.js の endPanel と revealAt）。部品ごとに animation を付け、描き直しても途中から続ける */
+.mj-sum { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 4px 10px; font-variant-numeric: tabular-nums; }
+.mj-limit { font-family: "Yu Mincho", "Hiragino Mincho ProN", serif; font-weight: 900; font-size: 1.3rem; line-height: 1.2; color: #c62d1f; border: 3px solid currentColor; border-radius: 8px; padding: 0 .3em; background: var(--panel); }
+@keyframes rv-rise { from { opacity: 0; transform: translateY(8px); } }
+@keyframes rv-pop { from { opacity: 0; transform: scale(.4); } }
+@keyframes rv-slide { from { opacity: 0; transform: translateX(-18px); } }
+@keyframes rv-stamp { 0% { opacity: 0; transform: scale(2.3); } 70% { opacity: 1; transform: scale(.92); } 100% { transform: scale(1); } }
 
 /* ---------- エアホッケー ---------- */
 .board.hk { display: flex; flex-direction: column; align-items: center; gap: 10px; }
@@ -1006,6 +1081,16 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
   font-family: Georgia, "Times New Roman", serif; font-size: 27cqw;
 }
 .pcard.joker .pc-idx { font-size: 15cqw; color: #c62d1f; }
+/* 札を裏返す（cards.js の turnUp。神経衰弱・ブラックジャックの親の伏せ札・ポーカーの見せ合い。2026-11-06）。
+   札を横に縮めて広げ、半分のところまでは裏の模様（::after。.pcard.back と同じ柄）を重ねて見せる。--ago は JS が入れる開始の遅れ（描き直しで続きからなら負） */
+.pcard.turn-up { animation: card-turn .42s ease-in-out both; animation-delay: var(--ago, 0ms); }
+.pcard.turn-up::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: repeating-linear-gradient(45deg, #2f6fb3 0 5px, #3d7fc4 5px 10px); box-shadow: 0 0 0 2px #fff inset; animation: card-turn-back .42s step-end both; animation-delay: var(--ago, 0ms); }
+@keyframes card-turn { 0% { transform: perspective(400px) rotateY(0); } 50% { transform: perspective(400px) rotateY(90deg); } 100% { transform: perspective(400px) rotateY(0); } }
+@keyframes card-turn-back { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .pcard.turn-up { animation: none; } .pcard.turn-up::after { display: none; } }
+/* 札がすっと動く（main.js の flyPlay。2026-11-06）: 飛びながら裏から表に返る札は、半分まで裏の模様を重ねる（--fly-ms・--fly-at は JS が入れる。動きを減らす設定の端末では飛ばない） */
+.fly-turn::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: repeating-linear-gradient(45deg, #2f6fb3 0 5px, #3d7fc4 5px 10px); box-shadow: 0 0 0 2px #fff inset; pointer-events: none; animation: card-turn-back var(--fly-ms, .47s) step-end both; animation-delay: var(--fly-at, 0ms); }
+.ccard.fly-turn::after { background: #1f1c1a; box-shadow: none; }
 .pcard.back { background: repeating-linear-gradient(45deg, #2f6fb3 0 5px, #3d7fc4 5px 10px); box-shadow: 0 0 0 2px #fff inset, 0 0 0 1px rgba(0, 0, 0, .2), 0 1px 3px rgba(0, 0, 0, .25); }
 .board button.pcard { background-color: #fff; background-size: 100% 100%; background-repeat: no-repeat; border: 0; color: #222; }
 .board button.pcard.red { color: #d23a2e; }
@@ -1240,7 +1325,6 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .mm-grid .pcard.taken { opacity: .18; box-shadow: none; }
 .mm-grid .pcard.open { box-shadow: 0 0 0 2px var(--accent); }
 .mm-grid .pcard.got { opacity: 1; box-shadow: 0 0 0 3px var(--win); }
-.mm-grid .pcard.pop { animation: pop .25s ease-out; }
 .mm-grid .mm-hint { /* 見た札のヒント（伏せた札の真ん中に小さく数字） */
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); min-width: 42%; padding: 4% 3%;
   background: rgba(255, 255, 255, .92); color: #2f4f7a; border-radius: 4px; text-align: center; line-height: 1;
@@ -1253,6 +1337,14 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 /* ---------- パーティーゲーム共通（点数の札・残り時間の帯） ---------- */
 .cc-opp.me { background: var(--soft, #fff7ef); }
 .pt-score { font-size: 1.15rem; font-weight: 700; line-height: 1.2; }
+/* 点が入ったら「+3」（2026-11-06。party.js の showGain）。札の中に出す（横に送れる段では、はみ出すと切れるため） */
+.cc-opp { position: relative; }
+.cc-opp.gain { animation: cc-gain .6s ease-out; }
+@keyframes cc-gain { 25% { background: var(--hi, #fff1c2); } }
+.pt-plus { --rise: -20px; position: absolute; left: 50%; top: 38%; font-weight: 900; font-size: 1.2rem; color: #e08a00; text-shadow: 0 1px 0 var(--panel), 0 0 4px var(--panel); pointer-events: none; white-space: nowrap; animation: pt-plus .9s ease-out both; }
+/* 1行の小さな札（的の早押し・アクション・間違い探し）では、札の段の上で切れないよう低く浮かせる */
+.tg .pt-plus, .ac .pt-plus, .mg .pt-plus { --rise: -8px; top: 10%; font-size: 1rem; }
+@keyframes pt-plus { 0% { opacity: 0; transform: translate(-50%, 6px) scale(.6); } 25% { opacity: 1; transform: translate(-50%, -4px) scale(1.15); } 100% { opacity: 0; transform: translate(-50%, var(--rise)) scale(1); } }
 .pt-score small { font-size: .7rem; font-weight: 400; color: var(--muted); margin-left: 1px; }
 .pt-extra { font-size: .78rem; color: var(--muted); }
 /* 札に字が入っても高さと段の数を変えない（party.js の scoreChips の steady）。真ん中寄せは端の札の margin で（はみ出したとき左が切れないように） */
@@ -1893,6 +1985,12 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 
 /* 招待の小窓（QR コード） */
 .invite-pop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: calc(16px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom)); background: rgba(0, 0, 0, .45); }
+/* 小窓の開け閉め（2026-11-06 の画面の切り替え。main.js の dropPop）: 地が薄く出て、箱が少し下から持ち上がる。閉じるときは地ごと薄くなって消える */
+.invite-pop { animation: fx-in .2s ease-out both; }
+.invite-pop > * { animation: pop-rise .26s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes pop-rise { from { opacity: 0; transform: translateY(16px) scale(.97); } }
+.invite-pop.closing { pointer-events: none; animation: fx-out .16s ease-in forwards; }
+@media (prefers-reduced-motion: reduce) { .invite-pop, .invite-pop > *, .sheet-pop > .game-sheet { animation: none; } }
 .invite-box { background: var(--panel); border-radius: var(--radius); padding: 18px 16px; width: 100%; max-width: 340px; text-align: center; box-shadow: 0 10px 30px rgba(0, 0, 0, .25); }
 .invite-title { font-weight: 700; font-size: 1.1rem; margin-bottom: 10px; }
 .invite-qr { width: 220px; height: 220px; margin: 0 auto; display: flex; align-items: center; justify-content: center; background: #fff; border-radius: 8px; }
@@ -2010,6 +2108,13 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .turn-mark { font-size: 1.5rem; line-height: 1.1; font-weight: 700; }
 .turn-name { font-size: .8rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .turn-arrow { color: var(--muted); font-weight: 700; }
+/* 考え中の「…」（2026-11-06。main.js の turnBand）: いまの番の人（自分のほか）の札の下の縁で動く。札の大きさは変えない */
+.turn-card { position: relative; }
+.turn-dots { position: absolute; left: 50%; bottom: -7px; transform: translateX(-50%); display: inline-flex; gap: 3px; align-items: center; padding: 3px 6px; border-radius: 999px; background: var(--panel); border: 1.5px solid var(--accent); color: var(--accent); }
+.turn-dots i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; animation: turn-dot 1s infinite ease-in-out; }
+.turn-dots i:nth-child(2) { animation-delay: .15s; }
+.turn-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes turn-dot { 0%, 60%, 100% { transform: translateY(0); opacity: .35; } 30% { transform: translateY(-3px); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .turn-card { transition: none; } .turn-card.now { transform: none; } }
 
 /* ---------- もう一回は全員の OK で（2026-10-26） ---------- */

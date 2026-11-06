@@ -20,7 +20,7 @@
 //   3〜4人と同じ広い盤（大きさは詳細設定「広い盤の大きさ」）で、4つ並べたら勝ち。おまかせは 6×6
 //   （CPU どうしで 5×5 は半分が引き分け、6×6 より広いと引き分けはほぼ無い）。CPU も3〜4人と同じ wideCpu。
 
-import { CPU_SETTING, boardCpu } from './util.js';
+import { CPU_SETTING, boardCpu, winLine } from './util.js';
 
 const LINES = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
 const MARKS = [
@@ -304,6 +304,7 @@ function renderGob(root, s, o) {
     grid.append(cell);
   });
   root.append(handRow(1 - bottom), grid, handRow(bottom));
+  if (res?.cells.length) winLine(grid, [...grid.querySelectorAll(':scope > .win')], o.fresh, 'gob:' + res.cells); // そろった列に線（2026-11-06）
 }
 
 /* ---------- 3〜4人のマルバツ（広い盤） ---------- */
@@ -437,6 +438,7 @@ function renderWide(root, s, o) {
     if (res?.cells.includes(i)) cell.classList.add('win');
     root.append(cell);
   });
+  if (res?.cells.length) winLine(root, [...root.querySelectorAll(':scope > .win')], o.fresh, 'tttw:' + res.cells); // そろった列に線（2026-11-06）
 }
 
 /* ---------- 画面 ---------- */
@@ -483,6 +485,7 @@ function renderBig(root, s, o) {
     }
     root.append(box);
   }
+  if (res?.cells.length) winLine(root, [...root.querySelectorAll(':scope > .win')], o.fresh, 'ttt9:' + res.cells); // そろった列に線（2026-11-06）
 }
 
 export default {
@@ -608,5 +611,6 @@ export default {
       if (res?.cells.includes(i)) cell.classList.add('win');
       root.append(cell);
     });
+    if (res?.cells.length) winLine(root, [...root.querySelectorAll(':scope > .win')], o.fresh, 'ttt:' + res.cells); // そろった列に線（2026-11-06）
   },
 };

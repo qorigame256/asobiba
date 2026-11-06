@@ -406,6 +406,7 @@ export default {
   render(root, s, o) {
     const me = o.me >= 0 ? o.me : null;
     const chips = scoreChips(o, pointsOf(s), {
+      gain: false, // 玉が入るたびに出るとうるさい
       extra: (p) => `<span style="color:${teamOf(p) ? '#777' : 'var(--red-ink, #c0392b)'}">${TEAM[teamOf(p)]}</span>`,
     });
     const key = `${s.seed}:${me}`;
