@@ -14,6 +14,10 @@
 // 2026-11-05 の35回目の案（本人が選んだ。分かれ目は Claude の判断）:
 //   - 詳細設定「落とせる回数」（鍵は drops）: 3回・5回（最初）・7回。だれかがその回数落としたら終わり。7回のために落書きを2つ足した（上の6・7）。
 //     長さなので、おまかせでは抽選しない（main.js の KEEP_KEYS）。5回のときは局面に max を持たない（前と全く同じ形）。
+// 2026-11-06 の36回目の案（本人が選んだ。分かれ目は Claude の判断）:
+//   - 詳細設定「打ち返す輪の大きさ」（鍵は window）: ゆるい（W は D の24%・いちばん狭くて0.18秒）・ふつう（最初。17%・0.13秒）・きびしい（12%・0.09秒）。
+//     ぴったり度も輪の幅で割るので、ゆるいでは同じずれでも速い羽根が返りやすい。CPU のずれも輪の幅に合わせる（返す割合は変えない＝弱めのまま）。
+//     難しさなので、おまかせでは抽選しない（main.js の KEEP_KEYS の window）。ふつうのときは局面に win を持たない（前と全く同じ形）。
 //   - CPU は羽根が遅いほど上手（1.6秒で9割、0.6秒で5割5分ほど返す）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → serve → fly → (hit → fly …) → drop → serve … → end
 // 手: { p: -1, t: 'serve' | 'drop', n } / { p, t: 'hit', n: 何本目の羽根か, ms: 羽根が出てから押すまで } / { p, t: 'miss', n }
@@ -31,10 +35,13 @@ const READY_MS = 2500;
 const DROP_MS = 2200;
 const LATE_MS = 2500;
 
-export const windowOf = (d) => Math.max(130, Math.round(d * 0.17));
+// 輪の大きさ（詳細設定。鍵は window）: [D に対する割合, いちばん狭いときのミリ秒]
+export const WINDOWS = { loose: [0.24, 180], normal: [0.17, 130], tight: [0.12, 90] };
+const winKey = (w) => (WINDOWS[w] ? w : 'normal');
+export const windowOf = (d, win) => { const [k, min] = WINDOWS[winKey(win)]; return Math.max(min, Math.round(d * k)); };
 // 押した時刻 ms の、ぴったり度（0〜1）。輪の外なら null
-export function qualityOf(d, ms) {
-  const w = windowOf(d);
+export function qualityOf(d, ms, win) {
+  const w = windowOf(d, win);
   const off = Math.abs(ms - d);
   return off <= w ? 1 - off / w : null;
 }
@@ -69,12 +76,14 @@ export default {
   maxPlayers: 6,
   settings: [
     { key: 'drops', label: '落とせる回数', desc: 'だれかがこの回数落としたら終わり', def: 5, choices: DROPS },
+    { key: 'window', label: '打ち返す輪の大きさ', desc: '押すタイミングがどこまでずれてよいか。ゆるいは輪が大きく、きびしいは小さい', def: 'normal', choices: [['normal', 'ふつう'], ['loose', 'ゆるい'], ['tight', 'きびしい']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const s = { n, seed, phase: 'ready', ink: Array(n).fill(0), from: n - 1, to: 0, d: START_D, k: 0, hits: 0, dropped: null, last: null, step: 0, best: 0 };
     const max = Number(rules.drops);
     if (max !== INK_MAX && DROPS.some(([v]) => v === max)) s.max = max;
+    if (rules.window === 'loose' || rules.window === 'tight') s.win = rules.window; // ふつうのときは局面に win を持たない（前と全く同じ形）
     return s;
   },
 
@@ -104,7 +113,7 @@ export default {
   referee(s) {
     if (s.phase === 'ready') return { key: 'ready', ms: READY_MS, move: { t: 'serve', n: s.k } };
     if (s.phase === 'drop') return { key: 'drop' + s.k, ms: DROP_MS, move: { t: 'serve', n: s.k } };
-    if (s.phase === 'fly') return { key: 'fly' + s.k, ms: s.d + windowOf(s.d) + LATE_MS, move: { t: 'drop', n: s.k } };
+    if (s.phase === 'fly') return { key: 'fly' + s.k, ms: s.d + windowOf(s.d, s.win) + LATE_MS, move: { t: 'drop', n: s.k } };
     return null;
   },
 
@@ -129,8 +138,8 @@ export default {
     }
     if (s0.phase !== 'fly' || !Number.isInteger(m.p) || m.p !== s0.to) return null;
     if (m.t === 'miss') return dropAt(s0, m.p);
-    if (m.t !== 'hit' || typeof m.ms !== 'number' || !(m.ms >= 0) || m.ms > s0.d + windowOf(s0.d) + LATE_MS + 1000) return null;
-    const q = qualityOf(s0.d, Math.round(m.ms));
+    if (m.t !== 'hit' || typeof m.ms !== 'number' || !(m.ms >= 0) || m.ms > s0.d + windowOf(s0.d, s0.win) + LATE_MS + 1000) return null;
+    const q = qualityOf(s0.d, Math.round(m.ms), s0.win);
     if (q === null) return dropAt(s0, m.p);
     const s = clone(s0);
     s.step += 1;
@@ -150,7 +159,7 @@ export default {
     const key = fKey(s, s.k) + ':' + p;
     let plan = cpuPlan.get(key);
     if (!plan) {
-      const w = windowOf(s.d);
+      const w = windowOf(s.d, s.win);
       const good = Math.random() < Math.max(0.5, Math.min(0.92, 0.55 + 0.37 * (s.d - MIN_D) / (START_D - MIN_D)));
       const off = good ? (Math.random() * 2 - 1) * w * 0.9 : (Math.random() < 0.5 ? -1 : 1) * w * (1.1 + Math.random() * 0.6);
       plan = { ms: Math.max(0, Math.round(s.d + off)) };
@@ -266,7 +275,7 @@ export default {
         const [x0, y0] = pos[s.from];
         const [x1, y1] = pos[s.to];
         const len = Math.hypot(x1 - x0, y1 - y0); // 見た目だけ（ゲームの決まりには使わない）
-        const w = windowOf(s.d);
+        const w = windowOf(s.d, s.win);
         // 輪: 羽根がこの中にいる間に押せば打ち返せる
         g.strokeStyle = s.to === me ? '#e0a100' : 'rgba(224,161,0,.55)';
         g.lineWidth = 3;
@@ -328,6 +337,6 @@ export default {
     setTimeout(() => {
       if (!cv.isConnected || pressed.has(pk) || !o.canMove) return;
       press({ t: 'miss', n });
-    }, Math.max(0, s.d + windowOf(s.d) + 100 - since(key)));
+    }, Math.max(0, s.d + windowOf(s.d, s.win) + 100 - since(key)));
   },
 };

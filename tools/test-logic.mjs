@@ -9193,4 +9193,87 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('hitofude OK');
 }
 
+// 2026-11-06 の36回目の案（ニアピン・ジグソー・一筆書きの問題の数・紙相撲の何回戦・シルエットの答えの数・金魚すくいの時間・羽根つきの輪の大きさ）
+{
+  // 問題の数
+  const NP = GAMES.nearpin, JG = GAMES.jigsaw, HF = GAMES.hitofude;
+  assert.equal(NP.init(3, 7).qs.length, 10, '36回目: ニアピンは最初10問');
+  for (const r of [15, 20]) {
+    const q = NP.init(3, 7, { rules: { rounds: r } }).qs;
+    assert.equal(q.length, r, `36回目: ニアピンの問題の数 ${r}問`);
+    assert.equal(new Set(q).size, r, `36回目: ニアピン ${r}問でも同じ問題を2回出さない`);
+  }
+  assert.equal(NP.init(3, 7, { rules: { rounds: 99 } }).qs.length, 10, '36回目: ニアピンの知らない問題の数は10問');
+  for (const [G, name, rules] of [[JG, 'ジグソー', { size: 3 }], [HF, '一筆書き', { level: 'easy' }]]) {
+    const three = G.init(2, 9, { rules }).qs;
+    assert.equal(three.length, 3, `36回目: ${name}は最初3問`);
+    assert.equal(G.init(2, 9, { rules: { ...rules, rounds: 1 } }).qs.length, 1, `36回目: ${name}の問題の数 1問`);
+    const five = G.init(2, 9, { rules: { ...rules, rounds: 5 } }).qs;
+    assert.equal(five.length, 5, `36回目: ${name}の問題の数 5問`);
+    assert.deepEqual(five.slice(0, 3), three, `36回目: ${name}の5問の初めの3問は3問のときと同じ（種から順に作る）`);
+    let s = G.init(2, 9, { rules: { ...rules, rounds: 1 } });
+    s = G.apply(s, { p: -1, t: 'next' });
+    s = G.apply(s, { p: 0, t: 'pass', q: 0 });
+    s = G.apply(s, { p: 1, t: 'pass', q: 0 });
+    s = G.apply(s, { p: -1, t: 'close' });
+    s = G.apply(s, { p: -1, t: 'next' });
+    assert.equal(s.phase, 'end', `36回目: ${name}の1問は1問で終わる`);
+  }
+  // 紙相撲の何回戦（画面の中で数えるので、数の取り方だけ見る）
+  const { roundsOf: smRounds } = await import('../app/js/games/sumo.js');
+  assert.deepEqual([smRounds({}), smRounds({ rounds: 1 }), smRounds({ rounds: 5 }), smRounds({ rounds: 4 }), smRounds(undefined)], [3, 1, 5, 3, 3], '36回目: 紙相撲の何回戦');
+  // シルエットクイズの答えの数
+  const SK = GAMES.kage;
+  const { choicesOf: skChoices } = await import('../app/js/games/kage.js');
+  const { KAGE } = await import('../app/js/games/kage-data.js');
+  const s4 = SK.init(3, 21), s6 = SK.init(3, 21, { rules: { choice: 6 } });
+  s4.qs.forEach((x, q) => {
+    assert.equal(x.opts.length, 4, '36回目: シルエットは最初4択');
+    assert.deepEqual(skChoices(21, q, x.i), skChoices(21, q, x.i, 4), '36回目: シルエットの4択は前と全く同じ札');
+  });
+  for (let seed = 1; seed <= 40; seed++) {
+    for (const x of SK.init(2, seed, { rules: { choice: 6 } }).qs) {
+      const [, right, kind] = KAGE[x.i];
+      assert.equal(x.opts.length, 6, '36回目: シルエットの6択は6つ');
+      assert.equal(new Set(x.opts).size, 6, '36回目: シルエットの6択に同じ名前が無い');
+      assert.ok(x.opts.includes(right), '36回目: シルエットの6択に正しい名前がある');
+      assert.ok(x.opts.every((n) => KAGE.find((k) => k[1] === n)[2] === kind), '36回目: シルエットの6択は同じ仲間');
+    }
+  }
+  let k6 = SK.apply(s6, { p: -1, t: 'next' });
+  const k6x = k6.qs[0];
+  const wrong6 = k6x.opts.filter((c) => c !== KAGE[k6x.i][1]).at(-1);
+  k6 = SK.apply(k6, { p: 0, t: 'ans', q: 0, c: wrong6, ms: 1000 });
+  assert.equal(k6.miss[0], true, '36回目: シルエットの6択の5つ目以降の札も答えとして受け付ける');
+  // 金魚すくいの時間
+  const KG = GAMES.kingyo;
+  const { limitOf: kgLimit } = await import('../app/js/games/kingyo.js');
+  assert.ok(!('time' in KG.init(2, 3)) && !('time' in KG.init(2, 3, { rules: { time: 60 } })), '36回目: 金魚すくいの60秒は局面に time を持たない（前と全く同じ形）');
+  for (const t of [30, 60, 90]) {
+    let s = KG.init(2, 3, { rules: { time: t } });
+    assert.equal(kgLimit(s), t * 1000, `36回目: 金魚すくいの時間 ${t}秒`);
+    s = KG.apply(s, { p: -1, t: 'start' });
+    const ref = KG.referee(s);
+    const ref60 = KG.referee(KG.apply(KG.init(2, 3), { p: -1, t: 'start' }));
+    assert.equal(ref.ms - ref60.ms, t * 1000 - 60000, `36回目: 金魚すくいの締め切りが ${t}秒に合う`);
+  }
+  // 羽根つきの輪の大きさ
+  const HN = GAMES.hane;
+  const { windowOf: hnWin, qualityOf: hnQ } = await import('../app/js/games/hane.js');
+  assert.ok(hnWin(1600, 'loose') > hnWin(1600) && hnWin(1600) > hnWin(1600, 'tight'), '36回目: 羽根つきの輪は ゆるい＞ふつう＞きびしい');
+  assert.equal(hnWin(1600, 'normal'), hnWin(1600), '36回目: 羽根つきの ふつうは前と同じ輪');
+  assert.equal(hnWin(600, 'tight'), 90, '36回目: きびしいの輪はいちばん狭くて0.09秒');
+  assert.ok(!('win' in HN.init(3, 5)) && !('win' in HN.init(3, 5, { rules: { window: 'normal' } })), '36回目: 羽根つきの ふつうは局面に win を持たない');
+  const off = Math.round((hnWin(1600) + hnWin(1600, 'tight')) / 2); // ふつうなら入り、きびしいなら外れるずれ
+  assert.ok(hnQ(1600, 1600 + off) !== null && hnQ(1600, 1600 + off, 'tight') === null, '36回目: 羽根つきの ぴったり度も輪の大きさで決まる');
+  for (const [win, ok] of [['normal', true], ['tight', false]]) {
+    let s = HN.apply(HN.init(3, 5, { rules: { window: win } }), { p: -1, t: 'serve', n: 0 });
+    s = HN.apply(s, { p: 1, t: 'hit', n: s.k, ms: s.d + off });
+    assert.equal(s.ink[1] === 0, ok, `36回目: 羽根つきの ${win} で同じずれを押すと${ok ? '返せる' : '落とす'}`);
+  }
+  const loose = HN.apply(HN.init(3, 5, { rules: { window: 'loose' } }), { p: -1, t: 'serve', n: 0 });
+  assert.equal(HN.referee(loose).ms - HN.referee(HN.apply(HN.init(3, 5), { p: -1, t: 'serve', n: 0 })).ms, hnWin(1600, 'loose') - hnWin(1600), '36回目: 羽根つきの落とした扱いまでの時間も輪に合う');
+  console.log('36回目の案 OK');
+}
+
 console.log('ALL OK');

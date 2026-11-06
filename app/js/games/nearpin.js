@@ -10,6 +10,7 @@
 //   - 打てるのは7桁まで（1から10までをかけた 3628800 が入るように）。
 //   - 目盛りは、正解と全員の答えのいちばん小さい数からいちばん大きい数まで（同じなら正解の前後）。名前の札は重ならないよう段を分ける。
 //   - CPU は4〜14秒で答える。年の問題は正解から最大140年ずれ、12以下の答えは最大3ずれ、ほかは正解の半分〜2倍くらいを、上から2桁の切りのよい数にする。
+//   - 詳細設定「問題の数」（2026-11-06 の36回目の案。鍵は rounds）: 10問（最初）・15問・20問。おまかせでは抽選しない（main.js の KEEP_KEYS の rounds）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next … → end（フラッシュ暗算と同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q: 何問目（0 から）, v: 答え, ms: 問題が出てから答えるまで }
 //   q が今の問題と同じで、その人がまだ答えていないときだけ受け付けるので、同じ手が2回届いても2回目は反則になる。
@@ -19,6 +20,8 @@ import { since, scoreChips, leaders, winnersText, timeBar, secText, SEAT_COLORS 
 import { NEARPIN } from './nearpin-data.js';
 
 export const ROUNDS = 10;
+const ROUND_CHOICES = [[10, '10問'], [15, '15問'], [20, '20問']];
+const roundsOf = (r) => (ROUND_CHOICES.some(([v]) => v === Number(r.rounds)) ? Number(r.rounds) : ROUNDS);
 const LIMIT = 20000;
 const READY_MS = 3000;
 const SHOWN_MS = 6000;
@@ -79,9 +82,12 @@ export default {
   realtime: true,
   minPlayers: 2,
   maxPlayers: 10,
+  settings: [
+    { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 10, choices: ROUND_CHOICES },
+  ],
 
-  init(n, seed) {
-    const qs = shuffle([...NEARPIN.keys()], mulberry32(seed)).slice(0, ROUNDS);
+  init(n, seed, { rules = {} } = {}) {
+    const qs = shuffle([...NEARPIN.keys()], mulberry32(seed)).slice(0, roundsOf(rules));
     return { n, seed, qs, q: -1, phase: 'ready', ans: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
   },
 

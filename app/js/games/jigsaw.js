@@ -11,6 +11,8 @@
 //   - 制限時間は 3×3 が60秒・4×4 が120秒・5×5 が180秒。最初にそろえた人から20秒で締め切る（制限時間のほうが先なら制限時間で）。あきらめる（この問題をとばす）もできる。
 //   - 送るのは入れ替えた2か所の並び（swaps）。apply で最初の並びから入れ替え直し、本当にそろうかを確かめる。
 //   - CPU は 3×3 は8割・4×4 は6割5分・5×5 は5割の問題を、制限時間の2.5〜7.5割のころにそろえる。そろえない問題は同じころにあきらめる。
+//   - 詳細設定「問題の数」（2026-11-06 の36回目の案。鍵は rounds）: 1問・3問（最初）・5問（数字つなぎ早解きと同じ）。おまかせでは抽選しない（main.js の KEEP_KEYS の rounds）。
+//     問題は種から順に作るので、3問の対局と5問の対局の初めの3問は同じ絵になる（同じ種なら）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（15パズル早解きと同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, swaps: [[a, b]…], ms } / { p, t: 'pass', q }
 
@@ -23,6 +25,8 @@ const SHOWN_MS = 4000;
 const GRACE_MS = 1500;
 const AFTER_MS = 20000;
 export const QUESTIONS = 3;
+const ROUNDS = [[3, '3問'], [1, '1問'], [5, '5問']];
+const roundsOf = (r) => (ROUNDS.some(([v]) => v === Number(r.rounds)) ? Number(r.rounds) : QUESTIONS);
 const LIMITS = { 3: 60000, 4: 120000, 5: 180000 };
 const MAX_SWAPS = 400;
 const sizeOf = (r) => ([3, 5].includes(Number(r.size)) ? Number(r.size) : 4);
@@ -143,6 +147,7 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'size', label: '大きさ', desc: '3×3 はかんたん・4×4 はふつう・5×5 はむずかしい', def: 4, choices: [[4, '4×4'], [3, '3×3（かんたん）'], [5, '5×5（むずかしい）']] },
+    { key: 'rounds', label: '問題の数', desc: '1回の対局で解く問題の数', def: 3, choices: ROUNDS },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -150,7 +155,7 @@ export default {
     const size = sizeOf(r);
     const rnd = mulberry32(seed);
     const qs = [];
-    for (let q = 0; q < QUESTIONS; q++) qs.push({ pic: Math.floor(rnd() * 2 ** 31), perm: scrambleOf(size, rnd) });
+    for (let q = 0; q < roundsOf(r); q++) qs.push({ pic: Math.floor(rnd() * 2 ** 31), perm: scrambleOf(size, rnd) });
     return { n, seed, rules: r, size, qs, q: -1, phase: 'ready', solved: Array(n).fill(null), passed: Array(n).fill(false), scores: Array(n).fill(0), last: null, log: [], step: 0 };
   },
 

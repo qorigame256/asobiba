@@ -2425,6 +2425,8 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 @media (prefers-reduced-motion: reduce) { .sk-pic.show { animation: none; } }
 .sk-choices { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; touch-action: manipulation; }
 .board button.btn.sk-choice { min-height: 64px; padding: 6px; border-radius: 12px; font-size: 1.15rem; font-weight: 800; overflow-wrap: anywhere; }
+.sk-choices.six { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.sk-choices.six .btn.sk-choice { min-height: 56px; font-size: 1rem; }
 .board button.btn.sk-choice.ok { background: #2f8a4a; border-color: #2f8a4a; color: #fff; }
 .board button.btn.sk-choice.ng { background: #d9534f; border-color: #d9534f; color: #fff; }
 .board button.btn.sk-choice.off { opacity: .55; }

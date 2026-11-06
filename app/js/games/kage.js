@@ -7,7 +7,9 @@
 //   - 1問の制限時間は15秒。だれかが正解したら4秒で締め切る。全員が答えたら1.5秒。1問に1回だけ答えられる。
 //   - 問題は種で全部の絵から選ぶ（同じ対局で同じ絵は出さない）。まちがいの3つも種で選ぶので全員同じ。
 //   - 影は CSS の filter（brightness(0)）で作る。答えを見せるときに色の付いた絵に戻す。
-//   - CPU は2.5〜9秒で答え、6割5分当てる。
+//   - CPU は2.5〜9秒で答え、6割5分当てる（6択のときは5割5分。人にとっても難しくなるので、CPU だけ強くならないように）。
+//   - 詳細設定「答えの数」（2026-11-06 の36回目の案。鍵は choice）: 4択（最初）・6択。6択はまちがいを同じ仲間から5つ選ぶ（いちばん少ない仲間でも10あるので足りる）。
+//     まちがいを選ぶ乱数の進み方は4択と同じなので、4択の問題は前と全く同じ。6択の札は3列に並べる。おまかせでは抽選しない（main.js の KEEP_KEYS の choice。難しさなので）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（まんなかの漢字と同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q, c: 選んだ名前, ms }
 
@@ -18,6 +20,8 @@ import { KAGE, KINDS } from './kage-data.js';
 
 const ROUNDS = [[10, '10問'], [15, '15問'], [20, '20問']];
 const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 10);
+const CHOICES = [[4, '4択'], [6, '6択']];
+const countOf = (r) => (Number(r.choice) === 6 ? 6 : 4);
 const LIMIT = 15000;
 const READY_MS = 3000;
 const SHOWN_MS = 3000;
@@ -28,10 +32,10 @@ const qKey = (s, q = s.q) => `kage:${s.seed}:${q}`;
 const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice(), miss: s.miss.slice() });
 const doneOf = (s, p) => s.solved[p] !== null || s.miss[p];
 // 4つの答えの札（正しい名前と、同じ仲間のほかの名前3つ）。種と何問目かから作るので全員同じ
-export function choicesOf(seed, q, i) {
+export function choicesOf(seed, q, i, count = 4) {
   const [, name, kind] = KAGE[i];
   const rnd = mulberry32((seed * 151 + q * 23 + 5) >>> 0);
-  const pool = shuffle(KAGE.filter(([, n, k]) => k === kind && n !== name).map(([, n]) => n), rnd).slice(0, 3);
+  const pool = shuffle(KAGE.filter(([, n, k]) => k === kind && n !== name).map(([, n]) => n), rnd).slice(0, count - 1);
   return shuffle([name, ...pool], rnd);
 }
 const cpuPlan = new Map();
@@ -48,13 +52,14 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 10, choices: ROUNDS },
+    { key: 'choice', label: '答えの数', desc: '影の名前をいくつの中から選ぶか。6択は似た名前が増えてむずかしい', def: 4, choices: CHOICES },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const r = { rounds: 10, ...rules };
     const rnd = mulberry32(seed);
     const order = shuffle([...KAGE.keys()], rnd).slice(0, roundsOf(r));
-    const qs = order.map((i, q) => ({ i, opts: choicesOf(seed, q, i) }));
+    const qs = order.map((i, q) => ({ i, opts: choicesOf(seed, q, i, countOf(r)) }));
     return {
       n, seed, rules: r, qs, q: -1, phase: 'ready',
       solved: Array(n).fill(null), miss: Array(n).fill(false), said: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0,
@@ -135,7 +140,7 @@ export default {
     let plan = cpuPlan.get(key);
     if (!plan) {
       const right = KAGE[x.i][1];
-      const ok = Math.random() < 0.65;
+      const ok = Math.random() < (x.opts.length > 4 ? 0.55 : 0.65);
       const wrong = x.opts.filter((c) => c !== right);
       plan = { at: 2500 + Math.random() * 6500, c: ok ? right : wrong[Math.floor(Math.random() * wrong.length)] };
       cpuPlan.set(key, plan);
@@ -192,7 +197,7 @@ export default {
     if (document.activeElement?.classList?.contains('kj-choice')) document.activeElement.blur(); // 前の問題で押した札に残った focus を外す（難読漢字と同じ）
     const can = s.phase === 'open' && me !== null && o.canMove && !doneOf(s, me) && since(key) < LIMIT;
     const grid = document.createElement('div');
-    grid.className = 'kj-choices sk-choices';
+    grid.className = 'kj-choices sk-choices' + (x.opts.length > 4 ? ' six' : '');
     const mine = me !== null ? s.said[me] : null;
     const btns = x.opts.map((c) => {
       const b = document.createElement('button');
@@ -222,7 +227,7 @@ export default {
     if (me === null) note.textContent = '観戦中';
     else if (s.phase === 'open' && s.solved[me] !== null) note.textContent = `⭕ 正解！（${secText(s.solved[me])}）`;
     else if (s.phase === 'open' && s.miss[me]) note.textContent = '❌ ざんねん。次の問題を待とう';
-    else if (s.phase === 'open') note.textContent = '4つから1つ選んでください（答えられるのは1回だけ）';
+    else if (s.phase === 'open') note.textContent = `${x.opts.length}つから1つ選んでください（答えられるのは1回だけ）`;
     wrap.append(note);
     if (can) {
       setTimeout(() => {

@@ -17,6 +17,8 @@
 //   - CPU は2.5〜4.5秒に1回すくおうとし、5割5分ですくえる（1匹）。1回ごとに2割2分でポイが破れる（局面の破れた枚数から続ける）。
 // 2026-11-04 の34回目の案（本人が選んだ。分かれ目は Claude の判断）:
 //   - 詳細設定「ポイの数」（鍵は poi）: 1枚・3枚（最初。前と同じ）・5枚。CPU のポイの数も同じ。
+//   - 詳細設定「時間」（2026-11-06 の36回目の案。鍵は time）: 30秒・60秒（最初）・90秒。60秒のときは局面に time を持たない（前と全く同じ形）。
+//     CPU の腕前（すくう間・入る見込み・破れる見込み）は変えない。おまかせでは抽選しない（main.js の KEEP_KEYS の time）。
 //   - 詳細設定「ぬし」（鍵は nushi）: なし（最初）・あり。生まれる金魚の4%が大きな「ぬし」（10点・重さ0.85）になる。
 //     重いので、水に入れてすぐ（およそ0.75秒のうちに）持ち上げないとポイが破れて逃げる。ほかの金魚と一緒にはすくいにくい。
 //     ぬしかどうかは金魚の色と動きを決めたあとの乱数で決める（なしのときの金魚は前と全く同じ）。ぬしはゆっくり泳ぐ。CPU はすくおうとした回の1%でぬし（10点）をすくう。
@@ -29,6 +31,8 @@ import { play } from '../sound.js';
 
 const READY_MS = 3000;
 const LIMIT = 60000;
+const TIMES = [[60, '60秒'], [30, '30秒'], [90, '90秒']];
+export const limitOf = (s) => (TIMES.some(([v]) => v === s.time) ? s.time * 1000 : LIMIT);
 const GRACE_MS = 1500;
 export const TANK_H = 0.7;
 export const NF = 16;
@@ -93,6 +97,7 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'poi', label: 'ポイの数', desc: '1人が使えるポイの枚数', def: 3, choices: POIS },
+    { key: 'time', label: '時間', desc: '金魚をすくえる時間', def: 60, choices: TIMES },
     { key: 'nushi', label: 'ぬし', desc: 'ごくまれに大きな「ぬし」（10点）が出る。重いので、水に入れてすぐ持ち上げないとポイが破れる', def: false },
   ],
 
@@ -101,6 +106,7 @@ export default {
     // 最初の値（3枚・ぬしなし）のときは前と全く同じ形にする
     if (POIS.some(([v]) => v === rules.poi) && rules.poi !== 3) s.poi = rules.poi;
     if (rules.nushi === true) s.nushi = true;
+    if (TIMES.some(([v]) => v === rules.time) && rules.time !== 60) s.time = rules.time;
     return s;
   },
 
@@ -118,7 +124,7 @@ export default {
     if (s.phase === 'ready') return { key: 'ready', ms: READY_MS, move: { t: 'start' } };
     if (s.phase === 'play') {
       if (s.out.every((x) => x)) return { key: 'allout', ms: 1200, move: { t: 'end' } };
-      return { key: 'play', ms: LIMIT + GRACE_MS, move: { t: 'end' } };
+      return { key: 'play', ms: limitOf(s) + GRACE_MS, move: { t: 'end' } };
     }
     return null;
   },
@@ -159,7 +165,7 @@ export default {
     let plan = cpuPlan.get(pk);
     if (!plan) { plan = { next: 2500 + Math.random() * 2000 }; cpuPlan.set(pk, plan); if (cpuPlan.size > 100) cpuPlan.delete(cpuPlan.keys().next().value); }
     const t = since(key(s) + ':play');
-    if (t < plan.next || t >= LIMIT) return null;
+    if (t < plan.next || t >= limitOf(s)) return null;
     plan.next = t + 2500 + Math.random() * 2000;
     if (Math.random() < 0.22) return { t: 'break', n: brokeOf(s, p) }; // ポイの数だけ破れたら局面がおしまいにする
     if (Math.random() >= 0.55) return null;
@@ -190,7 +196,7 @@ export default {
     root.append(wrap);
     ui = { mount, wrap, chips, state: s };
     if (s.phase === 'ready') {
-      wrap.insertAdjacentHTML('beforeend', `<div class="kj-card"><div class="kj-word small">よーい…</div><div class="kj-sub">押している間ポイが水の中に入り、離すとすくえる・${pointsText(s)}・ポイは${poisOf(s)}枚・60秒</div></div>`);
+      wrap.insertAdjacentHTML('beforeend', `<div class="kj-card"><div class="kj-word small">よーい…</div><div class="kj-sub">押している間ポイが水の中に入り、離すとすくえる・${pointsText(s)}・ポイは${poisOf(s)}枚・${limitOf(s) / 1000}秒</div></div>`);
       return;
     }
     if (s.phase === 'end') return;
@@ -198,7 +204,7 @@ export default {
     if (loc?.key !== tk) loc = { key: tk, gen: Array(NF).fill(0), back: Array(NF).fill(0), dur: 1, left: poisOf(s), broke: 0, brokeAt: -1e9, scoops: [], out: false };
     const card = document.createElement('div');
     card.className = 'kj-card kg-card';
-    card.append(timeBar(tk, LIMIT));
+    card.append(timeBar(tk, limitOf(s)));
     const cv = document.createElement('canvas');
     cv.className = 'kg-canvas';
     card.append(cv);
@@ -206,7 +212,7 @@ export default {
     note.className = 'cc-log';
     wrap.append(card, note);
 
-    const playing = () => ui.state.phase === 'play' && me !== null && o.canMove && !loc.out && since(tk) < LIMIT;
+    const playing = () => ui.state.phase === 'play' && me !== null && o.canMove && !loc.out && since(tk) < limitOf(s);
     const sendOwn = () => {
       const st = ui.state;
       if (me === null || st.phase !== 'play') return;
@@ -224,7 +230,7 @@ export default {
       const mine = me !== null ? st.scores[me] + loc.scoops.slice(st.cnt[me]).reduce((a, x) => a + x.v, 0) : 0;
       note.textContent = me === null ? '観戦中'
         : loc.out ? `ポイがなくなりました（${mine}点）。ほかの人を待っています`
-        : since(tk) >= LIMIT ? `時間です（${mine}点）`
+        : since(tk) >= limitOf(s) ? `時間です（${mine}点）`
         : `ポイ ${'🥅'.repeat(loc.left)}（のこり${loc.left}枚）・${pointsText(st)}`;
       if (st.phase === 'play' && me !== null && st.cnt[me] > loc.scoops.length) { // 開き直したとき: 局面の数から続ける
         while (loc.scoops.length < st.cnt[me]) loc.scoops.push({ v: 1, c: 1 });
@@ -288,7 +294,7 @@ export default {
     const up = () => {
       if (!poi) return;
       const t = tNow();
-      const got = t < LIMIT ? under(poi.x, poi.y, t) : [];
+      const got = t < limitOf(s) ? under(poi.x, poi.y, t) : [];
       poi = null;
       if (!got.length || !playing()) return;
       const left = lift(loc.dur, got.map(([, k]) => k));
@@ -375,6 +381,6 @@ export default {
       requestAnimationFrame(draw);
     };
     requestAnimationFrame(draw);
-    setTimeout(() => { if (ui?.wrap === wrap) ui.update(); }, Math.max(0, LIMIT - since(tk)) + 50);
+    setTimeout(() => { if (ui?.wrap === wrap) ui.update(); }, Math.max(0, limitOf(s) - since(tk)) + 50);
   },
 };

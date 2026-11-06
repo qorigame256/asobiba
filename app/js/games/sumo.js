@@ -16,6 +16,8 @@
 //   - ぶつかると、向かい合う向きの速さを分け合う（はね返り 0.2）。押している方が押し勝つ。
 //   - 1回戦は最大30秒。時間が来たら残っている人のうちぐらつきのいちばん少ない人の勝ち（並んだら引き分け）。最後の2人が同時に落ちたら引き分け。
 //   - 回の始めに2秒数え、回の終わりは2.5秒見せる。3回戦のあと、勝った回数の多い人が勝ち（並んだら同じ順位）。終わったらホストが「もう一回」を押せる。
+//   - 詳細設定「何回戦」（2026-11-06 の36回目の案。鍵は rounds）: 1回・3回（最初）・5回。数えるのは勝った回数のまま（5回戦で3勝しても5回まで戦う）。
+//     おまかせでは抽選しない（main.js の KEEP_KEYS の rounds）。
 //   - CPU は 0.2〜0.34秒に1回トンをし、ぐらつきが 0.55 を超えたら7割の見込みで0.6秒休む（休まないこともあるので、ときどき自分で倒れる）。
 //   - 音: 自分のトンは place（小さめ）、だれかが倒れた・落ちたら punch、回の勝ちが自分なら goal・ほかの人なら pop、3回戦の終わりに win / lose。
 //   - 通信: ゲストはトンを押すたびにホストへ送る（届いたか確かめない。抜けたトンは押さなかったことになる）。前のトンからの間はゲストの端末で測って一緒に送り、
@@ -29,6 +31,8 @@ const COLORS = ['#d9643a', '#2f6fb3', '#2e9a52', '#d4a20c'];
 export const RING = 1;
 export const BODY = 0.14;
 export const ROUNDS = 3;
+const ROUND_CHOICES = [[3, '3回戦'], [1, '1回勝負'], [5, '5回戦']];
+export const roundsOf = (rules) => (ROUND_CHOICES.some(([v]) => v === Number(rules?.rounds)) ? Number(rules.rounds) : ROUNDS);
 export const PUSH = 0.35;
 const MAX_V = 0.9;
 const FRICTION = 3;
@@ -161,6 +165,7 @@ function mount(root, opts) {
   root.className = 'board sm';
   root.innerHTML = '';
   const n = Math.max(2, Math.min(4, Number(opts.rules?.players) || 2));
+  const rounds = roundsOf(opts.rules);
   const me = opts.me >= 0 && opts.me < n ? opts.me : -1;
   const host = !!opts.isHost;
   const names = (opts.names ?? []).slice(0, n);
@@ -212,9 +217,9 @@ function mount(root, opts) {
       const rk = ranksOf(game.wins);
       if (me < 0) main = `${rk.map((v, p) => (v === 1 ? p : -1)).filter((p) => p >= 0).map((p) => esc(seatName(p))).join('と')}の勝ち！`;
       else main = rk[me] === 1 ? (rk.filter((v) => v === 1).length > 1 ? '同じ数で1位！🎉' : 'あなたの勝ち！🎉') : `あなたは${rk[me]}位`;
-    } else if (game.phase === 'count') main = `${game.round + 1}回戦（全${ROUNDS}回）　はっけよい…`;
+    } else if (game.phase === 'count') main = rounds === 1 ? `1回勝負　はっけよい…` : `${game.round + 1}回戦（全${rounds}回）　はっけよい…`;
     else if (game.phase === 'show') main = game.last === -1 ? '引き分け！' : `${esc(seatName(game.last))}の勝ち！`;
-    else main = `${game.round + 1}回戦（全${ROUNDS}回）`;
+    else main = rounds === 1 ? `1回勝負` : `${game.round + 1}回戦（全${rounds}回）`;
     opts.status.innerHTML = `<div class="status-main">${main}</div><div class="status-sub">${tally}<br>オンラインは試作です（ホストの端末が動きを計算しています）。</div>`;
   }
 
@@ -227,7 +232,7 @@ function mount(root, opts) {
     }
     if (game.phase === 'show') {
       if (game.phaseT >= SHOW_SEC) {
-        if (game.round + 1 >= ROUNDS) { game.over = true; finish(); }
+        if (game.round + 1 >= rounds) { game.over = true; finish(); }
         else { game.round += 1; game.phase = 'count'; game.phaseT = 0; ring = startRound(n); cpuState.clear(); }
         sendState(true);
         showStatus();
@@ -417,7 +422,7 @@ function mount(root, opts) {
   function adopt(d) {
     const g = d.g;
     if (!g || !Number.isInteger(d.ep) || d.ep < 0 || !Array.isArray(d.w) || d.w.length !== n || !Array.isArray(g.wins) || g.wins.length !== n) return;
-    if (!['count', 'fight', 'show'].includes(g.phase) || !Number.isInteger(g.round) || g.round < 0 || g.round >= ROUNDS) return;
+    if (!['count', 'fight', 'show'].includes(g.phase) || !Number.isInteger(g.round) || g.round < 0 || g.round >= rounds) return;
     ep = d.ep;
     game = { ep, round: g.round, wins: g.wins.map((v) => Math.max(0, Math.trunc(Number(v) || 0))), phase: g.phase, phaseT: Number(g.phaseT) || 0, last: Number.isInteger(g.last) ? g.last : null, over: !!g.over };
     ring = startRound(n);
@@ -512,6 +517,7 @@ export default {
   liveCpu() { return true; },
   settings: [
     { key: 'players', label: '人数', desc: '1つの土俵で同時に戦う人数。人が足りなければ CPU を選べる', def: 2, choices: [[2, '2人'], [3, '3人'], [4, '4人']] },
+    { key: 'rounds', label: '何回戦', desc: '勝った回数で決める。1回なら一発勝負', def: 3, choices: ROUND_CHOICES },
   ],
   mount,
 };

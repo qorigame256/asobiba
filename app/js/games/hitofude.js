@@ -12,6 +12,7 @@
 //   - 送るのは通った点の並び（path）。apply で、となりどうしが線で、全部の線をちょうど1回ずつ通っているか確かめる。
 //   - 制限時間は やさしい60秒・ふつう90秒・むずかしい150秒。最初に描けた人から20秒で締め切る（制限時間のほうが先なら制限時間で）。あきらめる（この問題をとばす）もできる。
 //   - CPU は やさしいは7割5分・ふつうは6割・むずかしいは4割5分の問題を、制限時間の2.5〜7.5割のころに描く。描かない問題は同じころにあきらめる。
+//   - 詳細設定「問題の数」（2026-11-06 の36回目の案。鍵は rounds）: 1問・3問（最初）・5問（数字つなぎ早解きと同じ）。おまかせでは抽選しない（main.js の KEEP_KEYS の rounds）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（数字つなぎ早解きと同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, path: [点…], ms } / { p, t: 'pass', q }
 
@@ -24,6 +25,8 @@ const SHOWN_MS = 4000;
 const GRACE_MS = 1500;
 const AFTER_MS = 20000;
 export const QUESTIONS = 3;
+const ROUNDS = [[3, '3問'], [1, '1問'], [5, '5問']];
+const roundsOf = (r) => (ROUNDS.some(([v]) => v === Number(r.rounds)) ? Number(r.rounds) : QUESTIONS);
 export const LEVELS = {
   easy: { label: 'やさしい', w: 3, h: 3, v: [6, 8], e: [8, 11], limit: 60000, cpu: 0.75 },
   normal: { label: 'ふつう', w: 4, h: 4, v: [10, 12], e: [14, 18], limit: 90000, cpu: 0.6 },
@@ -153,6 +156,7 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'level', label: '難しさ', desc: 'やさしい: 点6〜8個／ふつう: 点10〜12個／むずかしい: 点15個くらい', def: 'normal', choices: Object.entries(LEVELS).map(([k, v]) => [k, v.label]) },
+    { key: 'rounds', label: '問題の数', desc: '1回の対局で描く問題の数', def: 3, choices: ROUNDS },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -160,7 +164,7 @@ export default {
     const level = levelOf(r);
     const rnd = mulberry32(seed);
     const qs = [];
-    while (qs.length < QUESTIONS) { const f = makeFigure(level, rnd); if (f) qs.push(f); }
+    while (qs.length < roundsOf(r)) { const f = makeFigure(level, rnd); if (f) qs.push(f); }
     return { n, seed, rules: r, level, qs, q: -1, phase: 'ready', solved: Array(n).fill(null), passed: Array(n).fill(false), scores: Array(n).fill(0), last: null, log: [], step: 0 };
   },
 
