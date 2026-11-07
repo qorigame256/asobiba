@@ -19,6 +19,8 @@
 //   パス: その問題を降りる（{ p, t: 'pass', q }）。全員が正解かパスなら次の問題へ。CPU は正解しない問題では、答える予定の時刻にパスする。
 //   残り時間を数字でも出す（party.js の timeBar の secs）。
 //   4つから選ぶ: 送りがなのある漢字（躊躇う など）では、まちがいの読みも同じ送りがなで終わるものから選ぶ（送りがなで答えが分かってしまうため）。
+// 難しさ「読み間違いやすい」（2026-11-07 本人の依頼）: 早急（さっきゅう）のように、よく読みまちがえる漢字。問題は kanji-data.js の misread。
+//   4つから選ぶでは、よくある読みまちがいを必ず混ぜる（choicesOf の wrong）。正解を見せるときに読みまちがいも添える。ぜんぶまぜるには入れない（NANDOKU）。
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'try', q: 問題番号, text: 答え, ms, n: その問題で何回目の答えか } / { p, t: 'pass', q }
 
 import { mulberry32, shuffle, esc } from './util.js';
@@ -32,8 +34,9 @@ const GRACE_MS = 1500;
 const AFTER_MS = 5000; // 誰かが正解してから締め切るまで（ほかの人も答えられるように）
 const PTS = [3, 2]; // 速い順の点。それより後ろは1点
 const HINT_AT = 0.4; // ヒント（詳細設定）を出すのは、制限時間のこの割合がたったとき
-const LEVELS = { easy: 'ふつう', hard: 'むずかしい', expert: '超むずかしい', mix: 'ぜんぶまぜる' };
-const CPU_RATE = { easy: 0.55, hard: 0.4, expert: 0.3, mix: 0.4 };
+const LEVELS = { easy: 'ふつう', hard: 'むずかしい', expert: '超むずかしい', mix: 'ぜんぶまぜる', misread: '読み間違いやすい' };
+const CPU_RATE = { easy: 0.55, hard: 0.4, expert: 0.3, mix: 0.4, misread: 0.45 };
+const NANDOKU = ['easy', 'hard', 'expert']; // 難読漢字の3つの難しさ（ぜんぶまぜるはこの3つ。読み間違いやすいは入れない。2026-11-07 本人の決定）
 const CHOICES = 4; // 答え方「4つから選ぶ」のボタンの数
 // まちがいの読みを作るときの、近い音のかな（同じ行の別の段と、濁点を付け外ししたもの）
 const ROWS = ['あいうえお', 'かきくけこ', 'がぎぐげご', 'さしすせそ', 'ざじずぜぞ', 'たちつてと', 'だぢづでど', 'なにぬねの', 'はひふへほ', 'ばびぶべぼ', 'まみむめも', 'らりるれろ', 'やゆよ'];
@@ -47,17 +50,20 @@ function nearKana(c) {
 const limitOf = (s) => Number(s.rules.time) * 1000;
 const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 10);
 const qKey = (s, q = s.q) => `kanji:${s.seed}:${q}`;
-const poolOf = (level) => (level === 'mix' ? [...KANJI.easy, ...KANJI.hard, ...KANJI.expert] : KANJI[level] ?? KANJI.easy);
+const poolOf = (level) => (level === 'mix' ? NANDOKU.flatMap((l) => KANJI[l]) : KANJI[level] ?? KANJI.easy);
 export const isRight = (yomis, text) => yomis.includes(kana(text));
 
 // 答え方「4つから選ぶ」の4つの読み。正しい読みは最初の読み。ほかの3つは、その漢字と同じ難しさのほかの問題の最初の読みから、
 // 答えと同じ読み・同じ読みどうしを除いて、文字数の近いものを選ぶ。並べ方とまちがいの選び方は種と何問目かだけで決まる
-export function choicesOf(seed, q, [word, yomis]) {
+export function choicesOf(seed, q, [word, yomis, miss = []]) {
   const rnd = mulberry32((Math.imul(seed >>> 0, 0x9e3779b1) ^ Math.imul(q + 1, 0x85ebca6b)) >>> 0);
   const level = Object.keys(KANJI).find((l) => KANJI[l].some(([w]) => w === word)) ?? 'easy';
   const ans = yomis[0];
   const len = [...ans].length;
   const used = new Set(yomis);
+  // 難しさ「読み間違いやすい」の問題は、よくある読みまちがい（kanji-data.js の > の後ろ）を必ず混ぜる（2026-11-07 本人の決定）。ほかの問題では空なので前と同じ
+  const wrong = miss.filter((y) => !used.has(y)).slice(0, CHOICES - 1);
+  for (const y of wrong) used.add(y);
   const others = [];
   for (const [w, ys] of shuffle(KANJI[level], rnd)) {
     if (w === word || used.has(ys[0])) continue;
@@ -68,9 +74,9 @@ export function choicesOf(seed, q, [word, yomis]) {
   // 同じ難しさで足りなければほかの難しさから、それでも足りなければ答えの送りがなでない1文字を別のかなに替えた読みを作る（Claude の判断）
   const tail = okuri(word);
   const near = (a, b) => Math.abs([...a].length - len) - Math.abs([...b].length - len); // 文字数の差が小さい順（同じ中はまぜた順のまま）
-  if (!tail) return shuffle([ans, ...others.sort(near).slice(0, CHOICES - 1)], rnd);
-  const pick = others.filter((y) => y.endsWith(tail)).sort(near);
-  for (const [w, ys] of shuffle(Object.values(KANJI).flat(), rnd)) {
+  if (!tail) return shuffle([ans, ...wrong, ...others.sort(near).slice(0, CHOICES - 1 - wrong.length)], rnd);
+  const pick = [...wrong, ...others.filter((y) => y.endsWith(tail)).sort(near)];
+  for (const [w, ys] of shuffle(NANDOKU.flatMap((l) => KANJI[l]), rnd)) {
     if (pick.length >= CHOICES - 1) break;
     if (w !== word && ys[0].endsWith(tail) && !used.has(ys[0])) { used.add(ys[0]); pick.push(ys[0]); }
   }
@@ -151,7 +157,7 @@ export default {
   minPlayers: 2,
   maxPlayers: 10,
   settings: [
-    { key: 'level', label: '難しさ', desc: '出る漢字の難しさ', def: 'easy', choices: Object.entries(LEVELS) },
+    { key: 'level', label: '難しさ', desc: '出る漢字の難しさ（「読み間違いやすい」は、ふだんの言葉でよく読みまちがえる漢字）', def: 'easy', choices: Object.entries(LEVELS) },
     { key: 'time', label: '制限時間', desc: '1問あたりの時間', def: '25', choices: [['15', '15秒'], ['25', '25秒'], ['40', '40秒']] },
     { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 10, choices: ROUNDS },
     { key: 'hint', label: 'ヒント', desc: '制限時間の4割（25秒なら10秒）がたつと、読みの1文字目を見せる', def: false },
@@ -316,7 +322,7 @@ export default {
       root.append(wrap);
       return;
     }
-    const [word, yomis] = s.qs[s.q];
+    const [word, yomis, miss] = s.qs[s.q];
     const key = qKey(s);
     const limit = limitOf(s);
     card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div><div class="kj-word"></div>`;
@@ -337,6 +343,12 @@ export default {
       ans.className = 'kj-answer';
       ans.textContent = `読み: ${yomis.join('／')}`;
       card.append(ans);
+      if (miss) { // 読み間違いやすい漢字は、よくある読みまちがいも添える（Claude の判断）
+        const ng = document.createElement('div');
+        ng.className = 'kj-sub';
+        ng.textContent = `「${miss.join('」「')}」は読みまちがい`;
+        card.append(ng);
+      }
     }
     wrap.append(card);
 

@@ -2896,6 +2896,30 @@ const allWords = [...KANJI.easy, ...KANJI.hard, ...KANJI.expert];
 assert.ok(allWords.length >= 200, '問題は200語以上');
 assert.equal(new Set(allWords.map(([w]) => w)).size, allWords.length, '同じ漢字が2回入っている');
 for (const [w, ys] of allWords) for (const y of ys) assert.match(y, /^[ぁ-ゖー]+$/, '読みはひらがなだけ: ' + w);
+// 難しさ「読み間違いやすい」（2026-11-07）: ほかの難しさと漢字がかぶらない・読みまちがいは不正解・4つから選ぶに読みまちがいが入る・ぜんぶまぜるには出ない
+{
+  const mis = KANJI.misread;
+  assert.ok(mis.length >= 20, '読み間違いやすいも20問出せる');
+  const every = [...allWords, ...mis];
+  assert.equal(new Set(every.map(([w]) => w)).size, every.length, '読み間違いやすいの漢字がほかとかぶる');
+  const { choicesOf } = await import('../app/js/games/kanji.js');
+  for (const x of mis) {
+    const [w, ys, miss] = x;
+    assert.ok(miss?.length, '読みまちがいがある: ' + w);
+    for (const y of [...ys, ...miss]) assert.match(y, /^[ぁ-ゖー]+$/, '読みはひらがなだけ: ' + w);
+    for (const m of miss) assert.ok(!isRight(ys, m), '読みまちがいは不正解: ' + w);
+    for (let seed = 0; seed < 5; seed++) {
+      const c = choicesOf(seed, seed, x);
+      assert.equal(new Set(c).size, 4, '4つとも違う: ' + w);
+      assert.ok(c.includes(ys[0]) && c.includes(miss[0]), '正しい読みと読みまちがいが入る: ' + w + ' ' + c.join(','));
+    }
+  }
+  const misWords = new Set(mis.map(([w]) => w));
+  for (let seed = 0; seed < 30; seed++) {
+    assert.ok(KJ.init(2, seed, { rules: { level: 'mix', rounds: 20 } }).qs.every(([w]) => !misWords.has(w)), 'ぜんぶまぜるに読み間違いやすいは出ない');
+    assert.ok(KJ.init(2, seed, { rules: { level: 'misread' } }).qs.every(([w]) => misWords.has(w)), '読み間違いやすいだけが出る');
+  }
+}
 assert.ok(isRight(['あじさい'], 'アジサイ'), 'カタカナでも正解');
 assert.ok(isRight(['あじさい'], ' あじ さい '), '空白は無視');
 assert.ok(isRight(['なす', 'なすび'], 'なすび'), '読みが複数あればどれでも');
@@ -2931,7 +2955,7 @@ assert.deepEqual(s.scores, [2, 0, 3], '正解した人は全員が点。届い�
   const { pointsOf } = await import('../app/js/games/kanji.js');
   assert.deepEqual(pointsOf([5000, null, 3000, 3000, 9000]), [1, 0, 3, 3, 1], '同じ速さは同じ点で、次は2つ飛ばして1点');
 }
-for (const level of ['easy', 'hard', 'expert', 'mix']) {
+for (const level of ['easy', 'hard', 'expert', 'mix', 'misread']) {
   const st = KJ.init(2, 7, { rules: { level } });
   assert.equal(new Set(st.qs.map(([w]) => w)).size, 10, '10問とも違う漢字: ' + level);
 }
@@ -2939,7 +2963,7 @@ for (const level of ['easy', 'hard', 'expert', 'mix']) {
 {
   const { choicesOf } = await import('../app/js/games/kanji.js');
   const levelOf = (w) => Object.keys(KANJI).find((l) => KANJI[l].some(([x]) => x === w));
-  for (const level of ['easy', 'hard', 'expert', 'mix']) {
+  for (const level of ['easy', 'hard', 'expert', 'mix', 'misread']) {
     for (let k = 0; k < 40; k++) {
       const seed = k * 7919 + 13;
       const st = KJ.init(3, seed, { rules: { level, choice: true } });
@@ -2951,10 +2975,10 @@ for (const level of ['easy', 'hard', 'expert', 'mix']) {
         assert.equal(new Set(o).size, 4, '4つが重ならない: ' + o);
         assert.equal(o.filter((x) => isRight(ys, x)).length, 1, '正解は1つだけ: ' + w + ' ' + o);
         assert.ok(o.includes(ys[0]), '正解は最初の読み');
-        const pool = KANJI[levelOf(w)].map(([, y]) => y[0]);
+        const pool = KANJI[levelOf(w)].flatMap(([, y, miss = []]) => [y[0], ...miss]); // 読み間違いやすいは、よくある読みまちがいも混ぜる（2026-11-07）
         // 送りがなのある漢字は、そろえるためにほかの難しさの読みや作った読みも使う（2026-10-26。下の「送りがながそろう」で見る）
         if (!/[ぁ-ゖ]$/.test(w)) assert.ok(o.every((x) => pool.includes(x)), 'まちがいは同じ難しさの問題の読み: ' + w);
-        assert.deepEqual(o, choicesOf(seed, i, [w, ys]), '種と何問目かから作る');
+        assert.deepEqual(o, choicesOf(seed, i, st.qs[i]), '種と何問目かから作る');
       });
     }
   }
