@@ -22,7 +22,7 @@
 
 import { mulberry32, shuffle, esc } from './util.js';
 import { since } from './party.js';
-import { speak } from '../sound.js';
+import { speak, preloadVoice } from '../sound.js';
 
 const LETTERS = 'BINGO';
 const YOMI = { B: 'ビー', I: 'アイ', N: 'エヌ', G: 'ジー', O: 'オー' };
@@ -68,6 +68,10 @@ const reachCount = (open) => LINES.filter((l) => l.filter((i) => open[i]).length
 const reachText = (k) => (k === 1 ? 'リーチ' : k === 2 ? 'ダブルリーチ' : k === 3 ? 'トリプルリーチ' : `${k}重リーチ`);
 
 let spoken = null;
+let preloaded = null; // 声のファイルを前もって取った対局の種
+// 読み上げる言葉（tools/voice-texts.mjs が声のファイルを作るのに使う）
+const sayNumber = (v) => `${YOMI[letterOf(v)]}、${v}`;
+export const VOICE_TEXTS = Array.from({ length: 75 }, (_, i) => sayNumber(i + 1));
 const cpuPlan = new Map();
 
 export default {
@@ -190,6 +194,7 @@ export default {
   },
 
   render(root, s, o) {
+    if (s.rules.voice && preloaded !== s.seed) { preloaded = s.seed; preloadVoice(VOICE_TEXTS); }
     const me = o.me >= 0 ? o.me : null;
     const nameP = (p) => (p === me && !o.watching ? 'あなた' : o.names[p]);
     const drawn = drawnSet(s);
@@ -235,7 +240,7 @@ export default {
         + `<div class="bg-prev">${s.order.slice(Math.max(0, s.k - 7), s.k - 1).reverse().map((x) => `<span>${x}</span>`).join('')}</div>`
         + `<div class="kj-sub">${s.k}個目 / 75</div>`;
       const key = `${s.seed}:${s.k}`;
-      if (s.rules.voice && s.phase === 'play' && spoken !== key) { spoken = key; speak(`${YOMI[letterOf(v)]}、${v}`, 'bingo'); }
+      if (s.rules.voice && s.phase === 'play' && spoken !== key) { spoken = key; speak(sayNumber(v), 'bingo'); }
     } else ball.innerHTML = '<div class="kj-word small">よーい…</div><div class="kj-sub">まもなく最初の数字が出ます</div>';
     root.append(ball);
 

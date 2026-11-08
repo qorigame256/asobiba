@@ -27,6 +27,7 @@
 
 import { mulberry32 } from './util.js';
 import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
+import { speak, preloadVoice } from '../sound.js';
 
 const TOTAL = 15;
 const STAGES = [ // 何問目から・制限時間の倍率・点の倍率・長いお題の出やすさ
@@ -165,15 +166,10 @@ let local = null; // { key, pose, ms, n } この端末で動かしている旗
 let spoken = '';
 const cpuPlan = new Map(); // ホストだけ: 'qKey:p' → { at, pose }
 
-function speak(text) {
-  try {
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'ja-JP';
-    u.rate = 1.15;
-    speechSynthesis.cancel();
-    speechSynthesis.speak(u);
-  } catch { /* 読み上げが使えない端末 */ }
-}
+// お題の読み上げ（詳細設定「読み上げ」）。お題は「赤上げて」などの部品を「、」でつないだ文なので、部品ごとの声のファイルをつないで読む
+// （VOICE_TEXTS が部品の一覧。tools/voice-texts.mjs が声のファイルを作るのに使う）。2026-11-08 から、ほかの音と同じく 🔇 のときは言わない
+export const VOICE_TEXTS = ['あまのじゃく！', ...Object.values(FLAG).flatMap((f) => Object.values(VERB).flatMap((v) => ['て', 'ないで', 'ない'].map((e) => `${f}${v}${e}`)))];
+const sayCommand = (text, marked) => speak([...(marked ? ['あまのじゃく！'] : []), ...text.split('、')], 'flags', { cut: true, rate: 1.15 });
 
 // ほかの人の旗（2026-10-26 本人の依頼）。小さな旗で、いまの形（まだ動かしていなければ始めの形）を出す。
 // 答えは手の一覧で全員に届いているので、送るものは増やしていない。脱落した人は薄くする
@@ -401,6 +397,7 @@ export default {
     const card = document.createElement('div');
     card.className = 'fl-card';
     if (s.phase === 'ready') {
+      if (s.rules.voice) preloadVoice(VOICE_TEXTS);
       card.innerHTML = `<div class="fl-q">よーい…</div><div class="fl-sub">${yellow ? '赤・白・黄色' : '赤と白'}の旗をお題どおりに動かしてください</div>`
         + (contrary === 'all' ? '<div class="fl-sub">👿 あまのじゃく: どのお題も逆に動かします（「赤上げて」なら赤を下げる。「〜ないで」は動かさない）</div>'
           : contrary === 'mix' ? '<div class="fl-sub">👿 の印が付いたお題だけ逆に動かします（「赤上げて」なら赤を下げる。「〜ないで」は動かさない）</div>' : '')
@@ -417,7 +414,7 @@ export default {
 
     if (local?.key !== key) local = { key, pose: { ...startPose(s) }, ms: 0, n: 0 };
     const marked = isMarked(s);
-    if (s.phase === 'open' && s.rules.voice && spoken !== key) { spoken = key; speak(marked ? `あまのじゃく！ ${cmd.text}` : cmd.text); }
+    if (s.phase === 'open' && s.rules.voice && spoken !== key) { spoken = key; sayCommand(cmd.text, marked); }
 
     const mul = stageOf(s.q).mul;
     card.innerHTML = `<div class="fl-num">第${s.q + 1}問 / ${TOTAL}${mul > 1 ? `<span class="fl-stage">点数×${mul}</span>` : ''}`

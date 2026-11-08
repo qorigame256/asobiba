@@ -39,7 +39,7 @@ import { esc } from './games/util.js';
 import { isOwner, unlockOwner, forgetOwner } from './owner.js';
 import { IS_APP, WEB_URL } from './platform.js';
 import { isBad, mask, BAD_TEXT_NOTE } from './filter.js';
-import { play, endSound, isMuted, setMuted, isVoice, speak } from './sound.js';
+import { play, endSound, isMuted, setMuted, isVoice, speak, GREET } from './sound.js';
 import { initAds, setAdsMuted, setBanner, countFinished, beforeLeaveResult, canBuyNoAds, hasNoAds, onNoAdsChange, noAdsPrice, buyNoAds, restoreNoAds, onOwnedChange, owns, priceOf, buy, restore } from './ads.js';
 import { initNative, haptic, canHaptic, hapticsOn, setHapticsOn, canAchieve, openAchievements, notePlayed, noteResult, noteRoomSize, canShare, shareScreen, canRank, loadBoard } from './native.js';
 import { readRecords, noteGame, recordKey, rulesText, allBoards, initRecords, onRecords } from './records.js';
@@ -2727,7 +2727,6 @@ function sayTurn() {
   speak(name ? `${name}さんの たーん` : 'あなたの たーん', 'turn-voice');
 }
 
-const GREET = { start: 'よろしくお願いします', end: 'ありがとうございました' };
 function greet(kind, delay = 0) {
   setTimeout(() => {
     toast(`🙇 ${GREET[kind]}`);
@@ -3678,6 +3677,8 @@ const LICENSES = [
   ['inappropriate-words-ja（言葉のふるいの一覧のもと）', 'Copyright (c) 2020 K Hashimoto'],
   // CC BY 4.0 は作者の表示と、手を入れたことの表示が条件（どの音が OtoLogic かは sound.js の先頭）
   ['効果音の一部', 'OtoLogic（https://otologic.jp/）', 'CC BY 4.0（https://creativecommons.org/licenses/by/4.0/deed.ja）。長さと大きさを整えて使っています'],
+  // VOICEVOX の規約で、使った声の表記が要る（2026-11-08。声の作りは sound.js の先頭）
+  ['声', 'VOICEVOX:雨晴はう ／ VOICEVOX:猫使ビィ', 'VOICEVOX（https://voicevox.hiroshiba.jp/）で作った声を使っています'],
   // アプリ版の殻と広告の部品（native/package.json）。ウェブ版には入っていないので出さない
   ...(IS_APP ? [
     ['Capacitor（アプリの殻）', 'Copyright (c) 2017-present Drifty Co.'],

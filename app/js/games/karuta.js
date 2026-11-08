@@ -14,7 +14,7 @@
 import { mulberry32, shuffle, esc } from './util.js';
 import { KOTOWAZA } from './karuta-data.js';
 import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
-import { speak } from '../sound.js';
+import { speak, preloadVoice } from '../sound.js';
 
 const FIELD = 8;
 const CHAR_MS = 220; // 前半の文字を1文字ずつ出す間
@@ -54,6 +54,9 @@ export function deal(seed, count, size = FIELD) {
 
 let cpuPlan = new Map();
 let spoken = null;
+let preloaded = null; // 声のファイルを前もって取った対局の種
+// 読み上げる言葉（前半の読み。tools/voice-texts.mjs が声のファイルを作るのに使う）
+export const VOICE_TEXTS = KOTOWAZA.map((k) => k[2]);
 
 export default {
   id: 'karuta',
@@ -167,6 +170,7 @@ export default {
   },
 
   render(root, s, o) {
+    if (s.rules.voice && preloaded !== s.seed) { preloaded = s.seed; preloadVoice(s.reads.map((i) => KOTOWAZA[i][2])); }
     const me = o.me >= 0 ? o.me : null;
     const won = s.phase === 'end' ? leaders(s.scores) : [];
     const extra = (p) => {

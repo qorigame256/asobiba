@@ -22,18 +22,28 @@
 //   ★call interface-sounds / maximize_006          ★win interface-sounds / confirmation_004   ★lose digital-audio / phaserDown1
 //   ★draw_game music-jingles / jingles_PIZZI08
 // 勝ち・負け・正解・番が来た・ゴールは、2026-10-03 にも本人が試聴ページで聞いて選んでいた。
-// 和了は音のファイルではなく、ブラウザの読み上げで「ロン！」「ツモ！」と言う（SAY。日本語の声で CC0 の素材が無かったため）。
-// リーチも読み上げで「リーチ！」と言う（2026-10-04 本人の決定。前は鐘の音 impact-sounds / impactBell_heavy_000）。
-// 将棋の王手も読み上げで「王手！」と言う（2026-10-07 詳細設定「王手の知らせ」。ありのときだけ）。
+// 和了は効果音でなく声で「ロン！」「ツモ！」と言う（SAY）。リーチも声で「リーチ！」（2026-10-04 本人の決定。前は鐘の音 impact-sounds / impactBell_heavy_000）。
+// 将棋の王手も声で「王手！」と言う（2026-10-07 詳細設定「王手の知らせ」。ありのときだけ）。
+//
+// 声（2026-11-08 から）: 決まった言葉は VOICEVOX（雨晴はう・猫使ビィ。どちらも「ノーマル」）で前もって作った app/voice/<hau|bee>/<voiceId>.mp3 を鳴らし、
+// 読むたびに2人のどちらかをくじで選ぶ（本人の決定）。作るのは tools/make-voice.mjs（言葉の一覧は tools/voice-texts.mjs、作った言葉の一覧は voice-list.js）。
+// 一覧に無い言葉（「○○さんのたーん」）と、ファイルが読めなかったときは、今までどおりブラウザの読み上げ（say）で言う。
+// mp3 にしたのは数が多い（2人 × 約170）ため。WAV だと1つ 30〜60KB になる。mp3 は iPhone の Safari でも鳴らせる（ogg は鳴らないことがある）。
 //
 // 鳴らすのは Web Audio（ブラウザの音の仕組み）。スマホは画面に触れるまで音を出せないので、最初に触れたときに準備する。
 // iPhone はマナーモード（消音スイッチ）のときは鳴らない。オン・オフはこの端末に覚える（localStorage）。
 
+import { VOICE_IDS } from './voice-list.js';
+
 const NAMES = ['place', 'card', 'draw', 'shuffle', 'chip', 'pop', 'punch', 'stone', 'turn', 'correct', 'wrong', 'question', 'hit',
   'win', 'lose', 'draw_game', 'call', 'smack', 'wall', 'goal', 'flip', 'drop', 'dice', 'boom', 'stab', 'line', 'tile', 'pins'];
-// 読み上げで出す音（名前 → 言う言葉）。声は端末ごとに違う
-const SAY = { ron: 'ロン！', tsumo: 'ツモ！', riichi: 'リーチ！', oute: '王手！' }; // oute は将棋の「王手の知らせ」
+// 声で出す音（名前 → 言う言葉）
+export const SAY = { ron: 'ロン！', tsumo: 'ツモ！', riichi: 'リーチ！', oute: '王手！' }; // oute は将棋の「王手の知らせ」
 export const isVoice = (name) => name in SAY;
+// 対局の始めと終わりのあいさつ（main.js の greet が出す）
+export const GREET = { start: 'よろしくお願いします', end: 'ありがとうございました' };
+const VOICES = ['hau', 'bee']; // app/voice/ の下のフォルダの名前（雨晴はう・猫使ビィ）
+const PART_GAP = 0.06; // 言葉を部品でつないで読むときの間（秒。旗揚げのお題）
 const MASTER = 0.6; // 音ごとの大きさはファイルの中でそろえてあるので、ここでは全部に同じ倍率を掛けるだけ（前は音ごとの GAIN で下げていた）
 // 読み上げの大きさ（0〜1）。2026-10-26 本人の声「あなたの番ですの声が大きすぎる」で 0.9 から下げた。
 // iPhone の Safari は読み上げの大きさの指定を聞かないことがあり、その端末では本体の音量で決まる（未確認）
@@ -65,6 +75,7 @@ function unlock() {
         .then((buf) => { buffers[name] = buf; })
         .catch(() => { /* 読めない音は鳴らさないだけ */ });
     }
+    preloadVoice([...Object.values(SAY), ...Object.values(GREET)]);
   }
   if (ctx.state !== 'running') ctx.resume().catch(() => {});
   // iPhone は、画面に触れた流れの中で一度読み上げておかないと、あとから読み上げられない。
@@ -90,17 +101,72 @@ function keep(u) {
   setTimeout(drop, 15000);
 }
 
-function say(text) {
+// ブラウザの読み上げ。rate は速さ（旗揚げは 1.15）、cut なら言いかけの読み上げを止めてから言う
+function say(text, { rate, cut } = {}) {
   try {
     const u = new SpeechSynthesisUtterance(text);
     u.lang = 'ja-JP';
     const v = speechSynthesis.getVoices().find((x) => x.lang?.startsWith('ja'));
     if (v) u.voice = v;
     u.volume = VOICE_VOL;
+    if (rate) u.rate = rate;
     keep(u);
+    if (cut) speechSynthesis.cancel();
     if (speechSynthesis.paused) speechSynthesis.resume(); // 他のアプリへ移って戻ったあと、止まったままになる端末がある
     speechSynthesis.speak(u);
   } catch { /* 読み上げが使えない端末 */ }
+}
+
+// 言葉 → 声のファイルの名前（FNV-1a の32ビットを16進8けた）。tools/make-voice.mjs も同じものでファイルを作る
+export function voiceId(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193) >>> 0;
+  return h.toString(16).padStart(8, '0');
+}
+const hasVoice = (text) => VOICE_IDS.has(voiceId(text));
+
+// 声のファイルは、届いたままの形（mp3 のバイト列）で覚えておき、鳴らすたびに音の形に直す（直したものを全部持つと、ビンゴ・かるたで数十 MB になるため）
+const voiceBytes = new Map(); // 'hau/xxxxxxxx' → Promise<ArrayBuffer>
+function voiceFile(voice, text) {
+  const k = `${voice}/${voiceId(text)}`;
+  if (!voiceBytes.has(k)) {
+    const p = fetch(`voice/${k}.mp3`).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(r.status)));
+    p.catch(() => voiceBytes.delete(k)); // 読めなかったら次はもう一度取りに行く
+    voiceBytes.set(k, p);
+  }
+  return voiceBytes.get(k);
+}
+// これから言う言葉の声のファイルを前もって取っておく（ビンゴ・かるた・旗揚げは対局の始めに呼ぶ）。🔇 のときは取らない
+export function preloadVoice(texts) {
+  if (muted || typeof fetch === 'undefined') return;
+  for (const t of texts) if (hasVoice(t)) for (const v of VOICES) voiceFile(v, t).catch(() => {});
+}
+const voicing = {}; // key → いま鳴らしている声の音源（cut で止めるため）
+// parts を声のファイルでつないで言う。全部の部品にファイルがあれば true（鳴らすのは読み込んでから）。読めなかったらブラウザの読み上げで言い直す
+function playVoice(parts, key, opts) {
+  if (!parts.every(hasVoice)) return false;
+  const voice = VOICES[Math.floor(Math.random() * VOICES.length)];
+  const asked = performance.now();
+  Promise.all(parts.map((t) => voiceFile(voice, t).then((b) => ctx.decodeAudioData(b.slice(0)))))
+    .then((bufs) => {
+      if (muted) return;
+      if (performance.now() - asked > 3000) return; // 遅れすぎた声は言わない（次の問題が出ていることがある）
+      if (opts.cut) for (const src of voicing[key] ?? []) try { src.stop(); } catch { /* もう止まっている */ }
+      const g = ctx.createGain();
+      g.gain.value = MASTER;
+      g.connect(ctx.destination);
+      let t = ctx.currentTime + 0.02;
+      voicing[key] = bufs.map((buf) => {
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.connect(g);
+        src.start(t);
+        t += buf.duration + PART_GAP;
+        return src;
+      });
+    })
+    .catch(() => say(parts.join('、'), opts));
+  return true;
 }
 if (typeof window !== 'undefined') { // tools/ の自動確認（Node）から読まれたときは何もしない
   for (const ev of ['pointerdown', 'keydown', 'touchend']) window.addEventListener(ev, unlock, { capture: true, passive: true });
@@ -111,7 +177,7 @@ export function play(name, vol = 1) {
   if (muted || !ctx) return;
   const now = performance.now();
   if (now - (lastAt[name] ?? -1e9) < GAP_MS) return;
-  if (isVoice(name)) { lastAt[name] = now; say(SAY[name]); return; }
+  if (isVoice(name)) { lastAt[name] = now; talk([SAY[name]], name, {}); return; }
   if (ctx.state !== 'running' || !buffers[name]) return;
   lastAt[name] = now;
   const src = ctx.createBufferSource();
@@ -122,14 +188,19 @@ export function play(name, vol = 1) {
   src.start();
 }
 
-// 決まった言葉でない文を読み上げる（番が来たときの「○○さんのターン」・対局の始めと終わりのあいさつ。2026-10-08 の23回目の案）。
+// 文を声で言う（番が来たときの「○○さんのターン」・あいさつ・ビンゴ・かるた・旗揚げ）。text は文か、つないで読む部品の配列（旗揚げのお題）。
+// opts.cut なら同じ key で言いかけの声を止めてから言う。opts.rate はブラウザの読み上げで言うときの速さ。
 // 音と同じく 🔇 のときと、まだ画面に触れていないときは言わない。key ごとに GAP_MS より短い間の重なりは1回だけ
-export function speak(text, key = 'speak') {
-  if (muted || !ctx || !text) return;
+export function speak(text, key = 'speak', opts = {}) {
+  const parts = (Array.isArray(text) ? text : [text]).filter(Boolean);
+  if (muted || !ctx || !parts.length) return;
   const now = performance.now();
   if (now - (lastAt[key] ?? -1e9) < GAP_MS) return;
   lastAt[key] = now;
-  say(text);
+  talk(parts, key, opts);
+}
+function talk(parts, key, opts) {
+  if (!playVoice(parts, key, opts)) say(parts.join('、'), opts);
 }
 
 // 対局が終わったときの音。自分の勝ち → win、負け → lose、引き分け → draw_game。

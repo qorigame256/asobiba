@@ -9355,4 +9355,31 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('技の名前 OK', [...df].join(' '), '/', [...cl].join(' '), '/', [...mj].join(' '));
 }
 
+// 声のファイル（2026-11-08）: 決まった言葉はどれも、2人の声（app/voice/hau・bee）のファイルがそろって voice-list.js に入っている。
+// 落ちたら VOICEVOX を起動して node tools/make-voice.mjs（言葉を足した・変えたとき）
+{
+  const fs = await import('node:fs');
+  const { VOICE_TEXTS } = await import('./voice-texts.mjs');
+  const { voiceId } = await import('../app/js/sound.js');
+  const { VOICE_IDS } = await import('../app/js/voice-list.js');
+  const seen = new Map();
+  for (const { text } of VOICE_TEXTS) {
+    const id = voiceId(text);
+    assert.ok(!seen.has(id) || seen.get(id) === text, `声のファイルの名前がぶつかる: ${text} / ${seen.get(id)}`);
+    seen.set(id, text);
+    assert.ok(VOICE_IDS.has(id), `声のファイルが一覧に無い: ${text}`);
+    for (const v of ['hau', 'bee']) assert.ok(fs.existsSync(new URL(`../app/voice/${v}/${id}.mp3`, import.meta.url)), `${v} の声のファイルが無い: ${text}`);
+  }
+  // 旗揚げのお題は「、」で区切った部品がどれも声の一覧にある（お題の作り方を変えて部品が増えたら、ここで落ちる）
+  const { VOICE_TEXTS: parts } = await import('../app/js/games/flags.js');
+  for (const rules of [{}, { yellow: 'on' }, { yellow: 'on', contrary: 'mix' }]) {
+    for (let seed = 1; seed <= 40; seed++) {
+      for (const c of GAMES.flags.init(3, seed, { rules }).cmds) {
+        for (const part of c.text.split('、')) assert.ok(parts.includes(part), `旗揚げの部品が声の一覧に無い: ${part}（${c.text}）`);
+      }
+    }
+  }
+  console.log('声のファイル OK', seen.size, '語');
+}
+
 console.log('ALL OK');
