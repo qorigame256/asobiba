@@ -7030,6 +7030,101 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('iroji OK');
 }
 
+// 多いのはどっち（2026-11-09）: 左右の数はちがい、多い方が正解・後半ほど差が小さい・点は重ならず箱に収まる・速い順に点・CPU どうしで最後まで
+{
+  const G = GAMES.ooi;
+  const { makeQuestions, ratioOf, LIMIT } = await import('../app/js/games/ooi.js');
+  for (let seed = 0; seed < 20; seed++) {
+    for (const k of [5, 10, 20]) {
+      const qs = makeQuestions(k, seed);
+      assert.equal(qs.length, k);
+      qs.forEach((x, q) => {
+        const big = Math.max(...x.counts);
+        assert.ok(x.counts[0] !== x.counts[1] && x.counts[x.side] === big && big >= 10 && big <= 25, '多いのはどっち: 多い方が正解');
+        assert.equal(big - Math.min(...x.counts), Math.max(1, Math.round(big * ratioOf(q, k))), '多いのはどっち: 差は問題の番号で決まる');
+        x.dots.forEach((ds, c) => {
+          assert.equal(ds.length, x.counts[c], '多いのはどっち: 点の数');
+          for (const d of ds) assert.ok(d.x - d.r >= 0 && d.x + d.r <= 1 && d.y - d.r >= 0 && d.y + d.r <= 1, '多いのはどっち: 点は箱に収まる');
+          for (let i = 0; i < ds.length; i++) for (let j = i + 1; j < ds.length; j++) assert.ok(Math.hypot(ds[i].x - ds[j].x, ds[i].y - ds[j].y) > ds[i].r + ds[j].r, '多いのはどっち: 点は重ならない');
+        });
+      });
+    }
+  }
+  assert.ok(ratioOf(0, 10) > ratioOf(9, 10) && ratioOf(9, 10) > 0.1, '多いのはどっち: 後半ほど差が小さい');
+  assert.deepEqual(G.init(2, 5, { rules: {} }).qs, G.init(2, 5, { rules: { rounds: 10 } }).qs, '多いのはどっち: 最初は10問');
+  let s = G.apply(G.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  const ans = s.qs[0].side;
+  s = G.apply(s, { p: 0, t: 'ans', q: 0, c: 1 - ans, ms: 300 });
+  assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, c: ans, ms: 400 }), null, '多いのはどっち: まちがえたらその問題はもう押せない');
+  assert.equal(G.apply(s, { p: 1, t: 'ans', q: 0, c: 2, ms: 400 }), null, '多いのはどっち: 左右のほかは弾く');
+  assert.equal(G.apply(s, { p: 1, t: 'ans', q: 0, c: ans, ms: LIMIT + 400 }), null, '多いのはどっち: 時間を過ぎた手は弾く');
+  s = G.apply(s, { p: 1, t: 'ans', q: 0, c: ans, ms: 900 });
+  s = G.apply(s, { p: 2, t: 'ans', q: 0, c: ans, ms: 700 });
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [0, 2, 3], '多いのはどっち: 速い順に3・2点、まちがいは0点（減らない）');
+  for (const rules of [{}, { rounds: 5 }, { rounds: 20 }]) {
+    const st = runCpus(G, 5, 8, rules, 100, 5000);
+    assert.ok(G.result(st) && st.scores.some((v) => v > 0), `多いのはどっち: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('ooi OK');
+}
+
+// 雪合戦（2026-11-09）: 当たりの受け付け・脱落・全滅で終わり・残りのライフで勝ち負け・陣地と壁・雪玉は壁で止まる
+{
+  const G = GAMES.yuki;
+  const Y = await import('../app/js/games/yuki.js');
+  const run = (st, ms) => ms.reduce((x, m) => { const y = G.apply(x, m); assert.ok(y, JSON.stringify(m)); return y; }, st);
+  let t = run(G.init(4, 3, { rules: {} }), [{ p: -1, t: 'go' }, { p: 1, t: 'hit', k: 0, by: 0, b: '0:a0' }]);
+  assert.deepEqual([t.hits, t.got], [[0, 1, 0, 0], [1, 0, 0, 0]], '雪合戦: 当たりと当てた数');
+  assert.equal(G.apply(t, { p: 1, t: 'hit', k: 0, by: 0, b: '0:a0' }), null, '雪合戦: 同じ当たりは2回数えない');
+  assert.equal(G.apply(t, { p: 1, t: 'hit', k: 1, by: 3, b: '3:a0' }), null, '雪合戦: 味方の雪玉には当たらない');
+  assert.equal(G.apply(t, { p: 1, t: 'hit', k: 1, by: 9, b: '9:a0' }), null, '雪合戦: いない席は弾く');
+  t = run(t, [{ p: 1, t: 'hit', k: 1, by: 2, b: '2:a0' }, { p: 1, t: 'hit', k: 2, by: 0, b: '0:a1' }]);
+  assert.equal(t.dead[1], true, '雪合戦: ライフ3で3回当たったら脱落');
+  assert.equal(G.apply(t, { p: 1, t: 'hit', k: 3, by: 0, b: '0:a2' }), null, '雪合戦: 脱落した人には当たらない');
+  assert.equal(G.canAct(t, 1), false);
+  t = run(t, [{ p: 3, t: 'hit', k: 0, by: 2, b: '2:a1' }, { p: 3, t: 'hit', k: 1, by: 2, b: '2:a2' }]);
+  assert.equal(t.phase, 'play');
+  t = run(t, [{ p: 3, t: 'hit', k: 2, by: 0, b: '0:a3' }]);
+  assert.equal(t.phase, 'end', '雪合戦: 相手チームが全員脱落したら終わり');
+  assert.deepEqual(G.result(t).winners, [0, 2], '雪合戦: 赤（偶数の席）の勝ち');
+  // 時間切れ: 残りのライフの合計で決める。同じなら引き分け
+  let u = run(G.init(2, 1, { rules: { lives: '5' } }), [{ p: -1, t: 'go' }, { p: 0, t: 'hit', k: 0, by: 1, b: '1:x0' }, { p: -1, t: 'end' }]);
+  assert.deepEqual([G.result(u).teams, G.result(u).winners], [[4, 5], [1]], '雪合戦: 時間切れは残りのライフが多い方の勝ち');
+  u = run(G.init(2, 1, { rules: {} }), [{ p: -1, t: 'go' }, { p: -1, t: 'end' }]);
+  assert.equal(G.result(u).draw, true, '雪合戦: 同じなら引き分け');
+  assert.equal(G.apply(u, { p: 0, t: 'hit', k: 0, by: 1, b: '1:x0' }), null, '雪合戦: 終わったあとは当たらない');
+  assert.equal(G.referee(G.apply(G.init(2, 1, { rules: {} }), { p: -1, t: 'go' })).ms, 90000 + 1500, '雪合戦: 最初は90秒');
+  // 陣地と壁
+  assert.equal(Y.WALLS.length, 6);
+  for (let n = 2; n <= 10; n += 2) {
+    for (let p = 0; p < n; p++) {
+      const sp = Y.spawnOf(p, n);
+      assert.ok(Y.teamOf(p) === 0 ? sp.y > Y.MID : sp.y < Y.MID, '雪合戦: 始めは自分の陣地');
+      assert.ok(Y.WALLS.every((w) => !(sp.x > w.x - Y.PR && sp.x < w.x + w.w + Y.PR && sp.y > w.y - Y.PR && sp.y < w.y + w.h + Y.PR)), '雪合戦: 始めは壁に重ならない');
+    }
+  }
+  const pl = { x: 0.5, y: 1.2, tx: 0.5, ty: 0.1 };
+  for (let i = 0; i < 400; i++) Y.walk(pl, 0, 0.02);
+  assert.ok(pl.y >= Y.MID + Y.PR - 1e-9, '雪合戦: 真ん中の線を越えて歩けない');
+  const pw = { x: 0.22, y: 1.1, tx: 0.22, ty: 0.7 };
+  for (let i = 0; i < 400; i++) Y.walk(pw, 0, 0.02);
+  assert.ok(pw.y > 0.845, '雪合戦: 壁を通り抜けない');
+  const flyTo = (x, y, tx, ty) => { const b = Y.throwBall(x, y, tx, ty); let k = 0; while (Y.stepBall(b, 0.01) && k++ < 400) { /* 進める */ } return b; };
+  assert.ok(flyTo(0.22, 1.1, 0.22, 0.2).y > 0.78, '雪合戦: 壁の裏から真っすぐ投げると自分の壁で止まる');
+  assert.ok(flyTo(0.36, 1.2, 0.36, 0.2).y < 0, '雪合戦: 壁のない所は向こうの端まで飛ぶ');
+  assert.equal(Y.crossesMid(Y.throwBall(0.22, 1.1, 0.22, 0.2)), false, '雪合戦: CPU は自分の壁へ投げない');
+  assert.equal(Y.crossesMid(Y.throwBall(0.36, 1.2, 0.36, 0.2)), true);
+  assert.equal(Y.crossesMid(Y.throwBall(0.64, 0.1, 0.64, 1.2)), true, '雪合戦: 白の陣地から下へ投げても見分ける');
+  // 雪玉が陣地の端から端まで行くのにかかる時間（見てからよけられる）
+  assert.ok((Y.H - 0.2) / Y.BALL_V > 1.2, '雪合戦: 雪玉は速すぎない');
+  for (const rules of [{}, { lives: '1', time: '60' }]) {
+    const st = runCpus(G, 4, 2, rules, 200, 2000);
+    assert.ok(G.result(st), `雪合戦: CPU どうしで時間まで進む ${JSON.stringify(rules)}`);
+  }
+  console.log('yuki OK');
+}
+
 // すごろく: マスの置き方・さいころは種と回数で決まる・マスの働き・ぴったり・入れ替え・1回休み・CPU どうしで最後まで
 {
   const G = GAMES.sugoroku;

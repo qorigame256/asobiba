@@ -145,17 +145,19 @@ import nearpin from './nearpin.js';
 import kanjiplus from './kanjiplus.js';
 import jigsaw from './jigsaw.js';
 import hitofude from './hitofude.js';
+import ooi from './ooi.js';
+import yuki from './yuki.js';
 import { HOWTO } from './howto.js';
 import { FIGS } from './howto-fig.js';
 
 // 準備中のゲームを一覧に出すとき: soon('id', '名前', '絵文字')
 export const soon = (id, name, icon) => ({ id, name, icon, desc: 'じゅんび中', ready: false });
 
-export const GAME_ORDER = ['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'colors', 'daifugo', 'poker', 'speed', 'babanuki', 'doubt', 'sevens', 'blackjack', 'hitai', 'hitblow', 'sensou', 'yubisuma', 'tamebeam', 'acchi', 'kaidan', 'memory', 'yacht', 'sugoroku', 'bingo', 'seri', 'nim', 'taru', 'fusen', 'amida', 'kaburi', 'fukuwarai', 'flags', 'kanji', 'mannaka', 'kanjiplus', 'oxquiz', 'nearpin', 'kage', 'eitango', 'karuta', 'make10', 'anzan', 'numtouch', 'kotoba', 'narabe', 'slide', 'jigsaw', 'nanpure', 'tsunagi', 'hitofude', 'meiro', 'targets', 'mikiri', 'isutori', 'iroji', 'atodashi', 'pittari', 'kioku', 'typing', 'danmaku', 'tamaire', 'tsuna', 'nawa', 'hane', 'sumo', 'bowling', 'golf', 'darts', 'kingyo', 'tower', 'billiards', 'machigai', 'bombs', 'daruma', 'umigame', 'wordwolf', 'ishin', 'kachikan', 'oogiri', 'jinro', 'oekaki', 'hockey', 'hasami', 'shogi', 'mahjong'];
+export const GAME_ORDER = ['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'colors', 'daifugo', 'poker', 'speed', 'babanuki', 'doubt', 'sevens', 'blackjack', 'hitai', 'hitblow', 'sensou', 'yubisuma', 'tamebeam', 'acchi', 'kaidan', 'memory', 'yacht', 'sugoroku', 'bingo', 'seri', 'nim', 'taru', 'fusen', 'amida', 'kaburi', 'fukuwarai', 'flags', 'kanji', 'mannaka', 'kanjiplus', 'oxquiz', 'nearpin', 'kage', 'eitango', 'karuta', 'make10', 'anzan', 'numtouch', 'kotoba', 'narabe', 'slide', 'jigsaw', 'nanpure', 'tsunagi', 'hitofude', 'meiro', 'targets', 'mikiri', 'isutori', 'iroji', 'ooi', 'atodashi', 'pittari', 'kioku', 'typing', 'danmaku', 'tamaire', 'yuki', 'tsuna', 'nawa', 'hane', 'sumo', 'bowling', 'golf', 'darts', 'kingyo', 'tower', 'billiards', 'machigai', 'bombs', 'daruma', 'umigame', 'wordwolf', 'ishin', 'kachikan', 'oogiri', 'jinro', 'oekaki', 'hockey', 'hasami', 'shogi', 'mahjong'];
 export const GAMES = {
   tictactoe, connect4, reversi, colors, daifugo, poker, speed, hitblow, sensou, yubisuma, memory, nim, flags, kanji, targets, umigame, shogi, mahjong, hockey,
   gomoku, dots, babanuki, doubt, yacht, wordwolf, jinro, sevens, mancala, oekaki, seri, blackjack, kaisen, pittari, typing, danmaku, tamaire, machigai, bombs, hasami, hitai, kioku, tamebeam, make10, ishin, karuta, acchi, daruma, slide, nanpure, mikiri, bingo, meiro, iroji, sugoroku, taru,
-  isutori, cube4, kaidan, atodashi, bowling, tsuna, eitango, kaburi, anzan, golf, billiards, numtouch, mannaka, oxquiz, kotoba, oogiri, fukuwarai, nawa, darts, amida, narabe, kingyo, tower, fusen, kage, hane, kachikan, tsunagi, sumo, nearpin, kanjiplus, jigsaw, hitofude,
+  isutori, cube4, kaidan, atodashi, bowling, tsuna, eitango, kaburi, anzan, golf, billiards, numtouch, mannaka, oxquiz, kotoba, oogiri, fukuwarai, nawa, darts, amida, narabe, kingyo, tower, fusen, kage, hane, kachikan, tsunagi, sumo, nearpin, kanjiplus, jigsaw, hitofude, ooi, yuki,
 };
 // 遊び方（howto.js）。対局画面の「？遊び方」で出す（main.js の renderHowto）
 for (const [id, lines] of Object.entries(HOWTO)) if (GAMES[id]) GAMES[id].howto = lines;
@@ -175,9 +177,9 @@ export const CATEGORIES = [
   },
   {
     key: 'quick', name: '早押し・早解き',
-    ids: ['flags', 'kanji', 'mannaka', 'kanjiplus', 'oxquiz', 'nearpin', 'kage', 'eitango', 'karuta', 'make10', 'anzan', 'numtouch', 'kotoba', 'narabe', 'slide', 'jigsaw', 'nanpure', 'tsunagi', 'hitofude', 'meiro', 'targets', 'mikiri', 'isutori', 'iroji', 'atodashi', 'pittari', 'typing'],
+    ids: ['flags', 'kanji', 'mannaka', 'kanjiplus', 'oxquiz', 'nearpin', 'kage', 'eitango', 'karuta', 'make10', 'anzan', 'numtouch', 'kotoba', 'narabe', 'slide', 'jigsaw', 'nanpure', 'tsunagi', 'hitofude', 'meiro', 'targets', 'mikiri', 'isutori', 'iroji', 'ooi', 'atodashi', 'pittari', 'typing'],
   },
-  { key: 'action', name: 'アクション', ids: ['danmaku', 'tamaire', 'tsuna', 'nawa', 'hane', 'sumo', 'bowling', 'golf', 'darts', 'kingyo', 'tower', 'billiards', 'machigai', 'bombs', 'daruma', 'hockey'] },
+  { key: 'action', name: 'アクション', ids: ['danmaku', 'tamaire', 'yuki', 'tsuna', 'nawa', 'hane', 'sumo', 'bowling', 'golf', 'darts', 'kingyo', 'tower', 'billiards', 'machigai', 'bombs', 'daruma', 'hockey'] },
 ];
 export const categoryOf = (id) => CATEGORIES.find((c) => c.ids.includes(id))?.key ?? null;
 

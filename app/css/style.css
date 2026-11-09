@@ -2183,6 +2183,15 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .board button.ir-btn { min-height: 4.2rem; border: 0; border-radius: 14px; color: #fff; font: inherit; font-size: 1.5rem; font-weight: 800; text-shadow: 0 1px 2px rgba(0, 0, 0, .4); cursor: pointer; }
 .board button.ir-btn:disabled { opacity: .55; cursor: default; }
 .board button.ir-btn.ans { opacity: 1; box-shadow: 0 0 0 4px var(--win); }
+/* 多いのはどっち（箱は どの色の組でも同じ見た目なので色を直に書く） */
+.oi-pad { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: min(100%, 420px); margin: 6px auto 0; touch-action: manipulation; }
+.board button.oi-box { position: relative; aspect-ratio: 1; padding: 0; border: 3px solid #c9b48a; border-radius: 14px; background: #fffaf0; color: #5a4a30; cursor: pointer; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.board button.oi-box:disabled { cursor: default; }
+.board button.oi-box.picked { border-color: #e8a913; }
+.board button.oi-box.ans { border-color: var(--win); box-shadow: 0 0 0 4px var(--win); }
+.oi-dots { position: absolute; inset: 0; width: 100%; height: 100%; fill: #2f6fb3; }
+.oi-q { font-size: 3rem; font-weight: 900; color: #c9b48a; }
+.oi-lab { position: absolute; left: 50%; bottom: 4px; transform: translateX(-50%); padding: 0 8px; border-radius: 8px; background: rgba(255, 250, 240, .9); font-size: .95rem; font-weight: 800; color: #5a4a30; pointer-events: none; }
 /* すごろく */
 .sgr-board { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; touch-action: manipulation; }
 .sgr-cell { position: relative; aspect-ratio: 1; min-width: 0; border: 1.5px solid var(--line); border-radius: 8px; background: var(--field); display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 1px; overflow: hidden; }
