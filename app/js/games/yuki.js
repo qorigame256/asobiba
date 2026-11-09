@@ -136,9 +136,20 @@ export function throwBall(x, y, tx, ty) {
 /* ---------- 画面 ---------- */
 
 let ui = null;
-const sims = new Map(); // CPU の動き（ホストの端末だけ。鍵は `${seed}:${席}`）
+export const sims = new Map(); // CPU の動き（ホストの端末だけ。鍵は `${seed}:${席}`）
 
 const simKey = (s, p) => `${s.seed}:${p}`;
+// CPU が動かさなくなった席（観戦の人が入った・出た人が戻った）の CPU の動きを捨てる（ホストの step が毎回呼ぶ）。
+// 残すと、その席の人から届く位置を捨てて止まって見え、またその席を CPU が代わると古い当たりの数を使い続けて当たりが手にならない（2026-11-09 Codex の点検）。
+// 最後の位置は見た目の位置（ghosts）へ移し、また CPU が代わるときは cpu() が今の当たりの数と位置から作り直す。
+export function releaseSims(s, o, ghosts) {
+  for (let p = 0; p < s.n; p++) {
+    const c = o.cpu?.[p] ? null : sims.get(simKey(s, p));
+    if (!c) continue;
+    ghosts?.set(p, { x: c.x, y: c.y });
+    sims.delete(simKey(s, p));
+  }
+}
 const playing = (s) => s.phase === 'play' && since(goKey(s)) / 1000 < durOf(s);
 
 // 盤の座標 ↔ 画面の座標（白の人は上下左右を回す）
@@ -363,6 +374,7 @@ function step() {
   const dt = Math.min(0.05, (now - ui.last) / 1000);
   ui.last = now;
   const live = playing(s);
+  releaseSims(s, o, ui.ghosts);
   const n = Math.max(1, Math.ceil(dt / 0.01));
   const cpus = live ? [...Array(s.n).keys()].filter((p) => !s.dead[p] && sims.has(simKey(s, p)) && o.cpu?.[p]) : [];
   for (let i = 0; i < n; i++) {
@@ -529,7 +541,9 @@ export default {
     if (!c) {
       const sp = ui?.ghosts.get(p) ?? spawnOf(p, s.n); // 部屋を出た人の席は、最後に見えた所から続ける
       const now = performance.now();
-      c = { x: sp.x, y: sp.y, nextMove: now + 300, nextThrow: now + 900 + Math.random() * 800, hits: s.hits[p], hitList: Array(s.hits[p]).fill(null), safeUntil: 0, thrown: 0, tag: Math.random().toString(36).slice(2, 6), seen: new Set() };
+      // 当たったあとの当たらない時間も、人だったときの続きから（ホストの画面の点滅の終わり。当たった直後に代わると続けて当たっていた。2026-11-09 Codex の点検）
+      const safe = ui?.blink.get(p) ?? 0;
+      c = { x: sp.x, y: sp.y, nextMove: now + 300, nextThrow: now + 900 + Math.random() * 800, hits: s.hits[p], hitList: Array(s.hits[p]).fill(null), safeUntil: safe, thrown: 0, tag: Math.random().toString(36).slice(2, 6), seen: new Set() };
       sims.set(key, c);
       if (sims.size > 40) sims.delete(sims.keys().next().value);
     }

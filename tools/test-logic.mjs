@@ -7194,6 +7194,24 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.ok(G.result(st), `雪合戦: CPU どうしで時間まで進む ${JSON.stringify(rules)}`);
   }
   Y.useWalls({});
+  // 2026-11-09 Codex の点検: CPU が代わった席に人が戻り、また CPU が代わったら、今の当たりの数から作り直す（古い数のままだと当たりが手にならない）
+  {
+    const s0 = run(G.init(4, 77, { rules: {} }), [{ p: -1, t: 'go' }]);
+    assert.equal(G.cpu(s0, 1), null);
+    assert.equal(Y.sims.get('77:1').hits, 0);
+    const s1 = run(s0, [{ p: 1, t: 'hit', k: 0, by: 0, b: '0:z0' }]); // 人に戻っている間に当たった
+    const ghosts = new Map();
+    Y.releaseSims(s1, { cpu: [true, true, true, true] }, ghosts);
+    assert.ok(Y.sims.has('77:1'), '雪合戦: CPU が動かしている席の動きは残す');
+    Y.releaseSims(s1, { cpu: [true, false, true, true] }, ghosts);
+    assert.ok(!Y.sims.has('77:1') && ghosts.has(1), '雪合戦: 人に戻った席の CPU の動きを捨て、最後の位置を見た目の位置へ移す');
+    G.cpu(s1, 1);
+    const c = Y.sims.get('77:1');
+    assert.equal(c.hits, 1, '雪合戦: また CPU が代わったら今の当たりの数から');
+    c.hits += 1; c.hitList.push({ by: 2, b: '2:z1' }); // ホストの画面で当たった
+    assert.deepEqual(G.cpu(s1, 1), { t: 'hit', k: 1, by: 2, b: '2:z1' }, '雪合戦: 作り直した CPU の当たりが手になる');
+    Y.sims.clear();
+  }
   console.log('yuki OK');
 }
 
