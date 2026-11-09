@@ -9557,4 +9557,18 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('声のファイル OK', seen.size, '語');
 }
 
+// 見出しの字体（2026-11-09。tools/make-fonts.mjs）: 今のコードのゲームの名前・仲間の名前・技の名前の字が、切り出した字体に全部入っているか。
+// 落ちたら、元の字体のフォルダを渡して node tools/make-fonts.mjs で作り直す（入っていない字はほかの字体で出るだけで、崩れはしない）
+{
+  const { FONT_TEXT } = await import('./font-texts.mjs');
+  const fs = await import('node:fs');
+  const made = JSON.parse(fs.readFileSync(new URL('./font-chars.json', import.meta.url), 'utf8'));
+  for (const [name, text] of Object.entries(FONT_TEXT)) {
+    assert.ok(fs.existsSync(new URL(`../app/fonts/${name}.woff`, import.meta.url)), `字体: app/fonts/${name}.woff がある`);
+    const lack = [...text].filter((c) => !made[name]?.includes(c));
+    assert.equal(lack.join(''), '', `字体: ${name}.woff に入っていない字（node tools/make-fonts.mjs で作り直す）`);
+  }
+  console.log('見出しの字体 OK');
+}
+
 console.log('ALL OK');

@@ -608,7 +608,7 @@ export default {
         // 駒がすっと動く（2026-11-06）: 指した駒は元のマスから滑り、打った駒は持ち駒から飛んでくる
         const moved = s.last && !s.last.resign && s.last.t === i;
         p.dataset.fly = moved ? `mv:${s.ply}` : `sq:${i}`;
-        if (moved) Object.assign(p.dataset, s.last.d ? { flyFrom: `hand:${s.last.side}:${s.last.d}` } : { flyFrom: `sq:${s.last.f}`, flySlide: '' });
+        if (moved) Object.assign(p.dataset, s.last.d ? { flyFrom: `hand:${s.last.side}:${s.last.d}` } : { flyFrom: `sq:${s.last.f}`, flySlide: '', flyLift: '' }); // flyLift: 浮いたまま滑る（2026-11-09）
         if (owner !== bottom) p.dataset.flyBase = 'rotate(180deg)';
         cell.append(p);
       }

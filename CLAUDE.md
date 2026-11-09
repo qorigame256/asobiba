@@ -164,7 +164,7 @@
 - `app/js/ads.js` … App Store 版の広告と追跡の許可と「広告を消す」の課金（ウェブ版では何もしない。作りは `.claude/rules/appstore.md`）。
 - `app/js/native.js` … App Store 版の振動・実績（Game Center）・画像で保存と共有（ウェブ版では何もしない。iPhone 側は `native/plugins/asobiba-native`。作りは `.claude/rules/appstore.md`）。
 - `app/privacy.html` … プライバシーポリシー（ウェブ版・アプリ版で共通。https://qorigame256.github.io/asobiba/privacy.html を App Store Connect にも登録する）。
-- `app/js/records.js` … 自分の記録（遊んだ対局・人がいた対局の勝ち・自己ベスト・CPU 図鑑）と Game Center のランキングの番号。`app/js/skin.js` … スキン（色の一覧・使えるか・当てる）。
+- `app/js/records.js` … 自分の記録（遊んだ対局・人がいた対局の勝ち・自己ベスト・CPU 図鑑）と Game Center のランキングの番号。`app/js/skin.js` … スキン（色の一覧・使えるか・当てる）。`app/js/season.js` … 季節の飾り（ホームと待合室。出す・止めるは `main.js` の `updateSeason`）。
 - `app/js/filter.js` … 汚い言葉のふるい。一覧は `app/js/ngwords.js`（`tools/make-ngwords.mjs` が別のアプリの一覧から作る。手で直さない。元の場所は Git に入れない `tools/local-paths.json` の `ngwordsDir`）。
 - `native/` … App Store 版の殻（Capacitor。`native/ios/` が Xcode のプロジェクト）。`tools/build-native.mjs` が `app/` を `native/www/` へ写して組み立てる（作りは `.claude/rules/appstore.md`）。
 - `app/js/sound.js` … 効果音を鳴らす（オン・オフ、勝ち負けの音の選び方）。音のファイルは `app/sounds/<名前>.wav`。
@@ -191,6 +191,7 @@
   試聴ページなどほかのフォルダを見せるときは無音にしない。公開サイトとアプリ版はこのサーバーを通らないので影響しない。
   ES モジュールはファイルを直接ダブルクリックで開くと動かないため。
 - `tools/test-logic.mjs` … ルールの自動確認（`node tools/test-logic.mjs`）。
+- `app/fonts/*.woff` … 見出し・判子・帯の字体（使う字だけ）。`tools/make-fonts.mjs` が Git に入れない `tools/fonts-src/` の元の字体から切り出す（使う字の一覧は `tools/font-texts.mjs`。ゲームや技の名前を足して字が足りないと `tools/test-logic.mjs` が落ちるので、作り直す）。
 - `tools/test-records.mjs` … 自分の記録・ランキングの番号（24個）・自己ベストの数字の取り方の自動確認（数秒）。
 - `tools/test-filter.mjs` … 汚い言葉のふるいの自動確認（数秒。表記のゆれ・例外・隠す位置・ゲームのデータが当たらないこと）。
 - `tools/make-key.mjs` … 持ち主の合言葉から鍵の要約を作る（本人が PowerShell で動かす。合言葉を替えるときも同じ）。

@@ -723,6 +723,9 @@ function riverEl(h, p, tg) {
   h.rivers[p].forEach((x, i) => {
     if (i % 6 === 0) { row = document.createElement('div'); row.className = 'mj-river-row'; box.append(row); }
     const t = tileEl(x.id, { side: x.riichi });
+    // 捨て牌が河へ滑る（2026-11-09。main.js の flyPlay）: 自分の牌は手牌の同じ鍵の牌から、ほかの人の牌はその人の伏せた手牌から飛んでくる
+    Object.assign(t.dataset, { fly: `mj:${x.id}`, flyFrom: `mjh:${p}` });
+    if (x.riichi) t.dataset.flyBase = 'rotate(-90deg)'; // リーチの横向きの牌（style.css の .mj-tile.side）
     if (x.taken) t.classList.add('taken');
     if (tg && x.tsumogiri) { t.classList.add('tg'); t.title = 'ツモ切り'; }
     row.append(t);
@@ -741,6 +744,7 @@ function tableEl(s, o, me, watching) {
   const turns = s.n === 3 ? [0, -90, 90] : s.n === 5 ? [0, -72, -144, 144, 72] : [0, -90, 180, 90];
   const center = document.createElement('div');
   center.className = 'mj-center';
+  center.dataset.flySrc = 'wall'; // ツモった牌が飛んでくる所（2026-11-09）
   const mid = document.createElement('div');
   mid.className = 'mj-center-mid';
   mid.innerHTML = `<b></b><span></span>`;
@@ -752,6 +756,7 @@ function tableEl(s, o, me, watching) {
     const seat = document.createElement('div');
     seat.className = 'mj-zone' + (i === 0 ? ' mine' : '');
     seat.style.transform = `rotate(${turns[i]}deg)`;
+    seat.dataset.flyRot = turns[i]; // 席ごと回してあるので、牌を滑らせる向きを直す（main.js の flyAnim）
     seat.append(riverEl(h, p, s.rules.tsumogiri));
     const edge = document.createElement('div');
     edge.className = 'mj-edge';
@@ -761,6 +766,7 @@ function tableEl(s, o, me, watching) {
     if (i > 0 || watching) {
       const hidden = document.createElement('span');
       hidden.className = 'mj-hidden';
+      hidden.dataset.flySrc = `mjh:${p}`; // この人の捨て牌が飛び立つ所（2026-11-09）
       const drew = h.turn === p && h.drawn !== null && h.hands[p].includes(h.drawn);
       h.hands[p].forEach((_, j) => {
         const t = tileEl(0, { back: true });
@@ -1211,6 +1217,9 @@ function render(root, s, o) {
     const b = document.createElement(ok ? 'button' : 'span');
     b.className = 'mj-hand-tile' + (isDrawn ? ' drawn' : '') + (ui.sel === id ? ' selected' : '') + (ok ? ' playable' : '') + (myTurn && !ok ? ' dim' : '') + (safe?.has(kindOf(id)) ? ' safe' : '');
     if (safe?.has(kindOf(id))) b.title = 'リーチした人の現物（ロンされない牌）';
+    // 捨て牌が河へ滑る（2026-11-09）: 手牌の牌に河の牌と同じ鍵を付ける（切ると手牌から河へ滑り、残りの牌は詰まる）。ツモった牌は卓のまん中から入る
+    b.dataset.fly = `mj:${id}`;
+    if (isDrawn) b.dataset.flyFrom = 'wall';
     b.append(tileEl(id));
     if (ok) {
       b.type = 'button';

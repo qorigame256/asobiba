@@ -550,6 +550,8 @@ export default {
         h.cards[p].forEach((c, j) => {
           const e = open ? cardEl(c) : backEl();
           if (open) turnUp(e, `pk:${s.seed}:${s.handNo}:${p}:${j}`, o.fresh, (k - 1) * 120 + j * 50); // 見せ合いで札がくるっと返る（2026-11-06）
+          // 札を配る動き（2026-11-09。main.js の flyPlay）: 勝負ごとに、場から伏せた札が配られてくる（勝負の番号を鍵に入れて、勝負が変わったら新しい札として飛ばす）
+          else Object.assign(e.dataset, { fly: `pk:${s.handNo}:${p}:${j}`, flyFrom: 'table', flyDeal: '' });
           row.append(e);
         });
         if (!h.folded[p]) chip.append(row);
@@ -575,6 +577,7 @@ export default {
 
     const table = document.createElement('div');
     table.className = 'pk-table';
+    table.dataset.flySrc = 'table'; // 配る札が飛んでくる所（2026-11-09）
     const phaseName = { bet1: '1回目の賭け', draw: '札の交換', bet2: '2回目の賭け', end: '勝負' }[h.phase];
     const limit = s.rules.end === 'hands' ? ` / ${s.rules.hands}回` : '';
     table.innerHTML = simple(s)
@@ -616,6 +619,8 @@ export default {
       const drawing = myTurn && h.phase === 'draw';
       h.cards[me].forEach((c, i) => {
         const e = cardEl(c, drawing ? 'button' : 'div');
+        // 札を配る動き（2026-11-09）: 場から裏向きで飛んできて表に返る。鍵は札の名前なので、交換で入った札も場から飛んでくる
+        Object.assign(e.dataset, { fly: `pk:${s.handNo}:m:${c}`, flyFrom: 'table', flyTurn: '', flyDeal: '' });
         if (h.folded[me]) e.classList.add('folded');
         if (drawing) {
           if (pick.idx.includes(i)) e.classList.add('selected');

@@ -300,6 +300,7 @@ export default {
     const showDealer = s.phase === 'result';
     const table = document.createElement('div');
     table.className = 'bj-table';
+    table.dataset.flySrc = 'shoe'; // 配る札・引いた札が飛んでくる所（2026-11-09。卓のまん中から）
     const dealer = document.createElement('div');
     dealer.className = 'bj-dealer';
     const dHead = document.createElement('div');
@@ -310,6 +311,8 @@ export default {
     s.dealer.forEach((c, i) => {
       const e = showDealer || i === 0 ? cardEl(c) : backEl();
       if (showDealer && i > 0) turnUp(e, `bj:${s.seed}:${s.round}:${i}`, o.fresh, (i - 1) * 150); // 結果で親の札が順にくるっと返る（2026-11-06）
+      // 札を配る動き（2026-11-09。main.js の flyPlay）: 回ごとに場のまん中から配られてくる。結果で返る札には付けない（くるっと返る動きとぶつかるため）
+      else if (!showDealer) Object.assign(e.dataset, { fly: `bj:${s.round}:d:${i}`, flyFrom: 'shoe', flyDeal: '' });
       dCards.append(e);
     });
     dealer.append(dHead, dCards);
@@ -333,12 +336,17 @@ export default {
         }
         return done ? (total(cards).v > 21 ? 'バースト' : bjOf(s, p, cards) ? 'ブラックジャック！' : isFive(s, cards) ? 'ファイブカード！' : 'スタンド') : '考え中…';
       };
+      // 札を配る動き（2026-11-09。main.js の flyPlay）: 配る札・引いた札は卓のまん中から裏向きで飛んできて表に返る。
+      // 鍵は「その人の何枚目の同じ札か」（山札が何組かあり同じ札がありうるため）。スプリットで2つ目の手へ移った札は、鍵が同じなので元の場所から滑る
+      const seen = {};
       const cardsRow = (cards, fresh) => {
         const row = document.createElement('div');
         row.className = 'bj-cards';
         cards.forEach((c, i) => {
           const e = cardEl(c);
           if (fresh && o.fresh && i === cards.length - 1 && cards.length > 2) e.classList.add('pop');
+          seen[c] = (seen[c] ?? 0) + 1;
+          Object.assign(e.dataset, { fly: `bj:${s.round}:${p}:${c}#${seen[c]}`, flyFrom: 'shoe', flyTurn: '', flyDeal: '' });
           row.append(e);
         });
         return row;
@@ -407,6 +415,7 @@ export default {
 function renderBet(root, s, o, me, nameP) {
   const table = document.createElement('div');
   table.className = 'bj-table';
+  table.dataset.flySrc = 'shoe'; // 賭けたあとに配る札の出どころ（2026-11-09。これが無いと、配る前の画面に飛ぶ元が無く、札が飛ばない）
   const dealer = document.createElement('div');
   dealer.className = 'bj-dealer';
   dealer.innerHTML = '<div class="bj-head">親（CPU）</div><div class="bj-head"><small>全員が賭ける額を選んだら札を配ります</small></div>';

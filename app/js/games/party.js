@@ -149,6 +149,12 @@ export function timeBar(key, limit, { secs = false } = {}) {
     const left = Math.max(0, 1 - since(key) / limit);
     fill.style.width = (left * 100).toFixed(1) + '%';
     bar.classList.toggle('low', left < 0.3);
+    // 残り時間の帯の終わり（2026-11-09 本人の選択。本人の指示で控えめに）: 残り5秒で帯がゆっくり小さく脈打ち、帯の右上に秒の数字を小さく出す。
+    // 8秒より短い帯は、ほとんどの間ずっと脈打ってしまうので出さない（Claude の判断）。秒を字で出す帯（secs）は数字を重ねない
+    const leftMs = left * limit;
+    const hurry = limit >= 8000 && left > 0 && leftMs <= 5000;
+    bar.classList.toggle('hurry', hurry);
+    if (!num) bar.dataset.sec = hurry ? String(Math.ceil(leftMs / 1000)) : '';
     if (num) {
       num.textContent = `残り ${Math.ceil((left * limit) / 1000)}秒`;
       num.classList.toggle('low', left < 0.3);

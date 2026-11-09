@@ -2648,3 +2648,95 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .ft-pt { fill: var(--panel); stroke: var(--ink); stroke-width: .05; }
 .ft-pt.tip { fill: var(--accent); stroke: var(--accent); }
 .ft-pt.start { fill: #e74c3c; stroke: #e74c3c; }
+
+/* ---------- 盤と卓の質感（2026-11-09 本人の選択。room.md「演出・アニメーションの2回目」） ----------
+   画像を使わず、木の盤には木目（縦の筋を3つ重ねた模様）と縁の厚み、緑の卓には羅紗（細かいざらつき）と木の縁を描く。
+   色の組（スキン）では変えない（盤・卓・石・駒の色は今までどおり、どの色の組でも同じ）。
+   将棋盤は、マスのすき間（gap）で引いていた線をやめ、盤そのものに木目を描いてマスを透かし、線はマスの右と下の内側の影（box-shadow）で引く
+   （マスごとに木目を描くと、模様がマスごとに繰り返して見えるため）。選んだ・最後に指したマスの色は今までどおり上に塗る。 */
+:root {
+  --grain: repeating-linear-gradient(90deg, rgba(120, 70, 20, .09) 0 1px, transparent 1px 6px, rgba(120, 70, 20, .05) 6px 7px, transparent 7px 11px),
+    repeating-linear-gradient(90deg, transparent 0 17px, rgba(120, 70, 20, .1) 17px 19px, transparent 19px 31px, rgba(255, 240, 200, .16) 31px 33px, transparent 33px 46px),
+    linear-gradient(90deg, transparent, rgba(150, 90, 30, .1) 22%, transparent 38%, rgba(150, 90, 30, .08) 63%, transparent 80%, rgba(150, 90, 30, .1));
+  --felt: radial-gradient(ellipse at 50% 35%, rgba(255, 255, 255, .09), transparent 65%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.05 0 0 0 0 0.2 0 0 0 0 0.12 0 0 0 0.5 -0.12'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  --board-edge: 0 5px 0 #8f6430, 0 9px 14px rgba(0, 0, 0, .22);
+  --felt-edge: inset 0 0 0 4px #6b4524, inset 0 0 0 5px #3b2410, inset 0 0 16px 5px rgba(0, 0, 0, .3);
+}
+.sg-grid { gap: 0; padding: 0; background: var(--grain), linear-gradient(100deg, #efcd8c, #e6c17a 40%, #edca86 70%, #e4bc72); border: 3px solid #6b4a1f; box-shadow: var(--board-edge); }
+.sg .sg-cell { background: transparent; box-shadow: inset -1px -1px 0 rgba(80, 52, 18, .9); } /* 右と下に1本ずつ（左と上の端は盤の枠） */
+.gm { background: var(--grain), linear-gradient(95deg, #e8bf72, #ddb064 50%, #e5bb6e); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .15), var(--board-edge); }
+.mc-wrap { background: var(--grain), #8a5a35; box-shadow: inset 0 2px 6px rgba(0, 0, 0, .3), 0 5px 0 #5e3b20, 0 9px 14px rgba(0, 0, 0, .22); }
+.df-field, .pk-table, .bb-field, .db-field, .sv-field, .bj-table { background: var(--felt), #2e6b47; box-shadow: var(--felt-edge); }
+.mj-table { background: var(--felt), #1f6b4a; box-shadow: var(--felt-edge); }
+
+/* ---------- 季節の飾り・開いたときのタイトル（2026-11-09。js/season.js と main.js の openingTitle） ---------- */
+/* 季節の飾りは画面全体に重ねる（押せないので下の物はそのまま押せる）。小窓やお知らせより下 */
+.season-fx { position: fixed; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; z-index: 40; }
+#screen-home.opening .op-ch { display: inline-block; animation: op-ch .38s cubic-bezier(.2, .8, .3, 1.3) both; animation-delay: calc(var(--i) * 70ms); }
+@keyframes op-ch { from { opacity: 0; transform: perspective(200px) rotateX(90deg) translateY(-6px); } }
+#screen-home.opening .op-up { animation: op-up .32s ease-out both; animation-delay: calc(480ms + var(--op, 0) * 28ms); }
+@keyframes op-up { from { opacity: 0; transform: translateY(10px); } }
+
+/* ---------- 残り時間の帯の終わり（2026-11-09。games/party.js の timeBar。本人の指示で控えめに） ----------
+   残り5秒で、帯の中身（色の部分）がゆっくり小さく脈打ち、帯の右上に秒の数字（data-sec）を小さく出す。画面のふちは光らせない */
+.pt-timebar.hurry { position: relative; overflow: visible; }
+.pt-timebar.hurry > div { animation: tb-soft .9s ease-in-out infinite alternate; }
+@keyframes tb-soft { to { transform: scaleY(1.35); } }
+.pt-timebar.hurry[data-sec]:not([data-sec=""])::after { content: attr(data-sec); position: absolute; right: 0; bottom: calc(100% + 2px); font-size: .8rem; font-weight: 800; line-height: 1; color: #e04b3c; font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .pt-timebar.hurry > div { animation: none; } }
+
+/* ---------- 連勝の炎（2026-11-09。main.js の addFlame） ---------- */
+.turn-flame { position: absolute; top: -14px; right: -10px; display: grid; place-items: center; pointer-events: none; z-index: 1; }
+.turn-flame .tf-f { font-size: var(--fs, 1rem); line-height: 1; display: block; transform-origin: 50% 90%; animation: tf-flick .5s ease-in-out infinite alternate; }
+.turn-flame .tf-n { position: absolute; bottom: -2px; right: -5px; min-width: 1.3em; padding: 0 .3em; border-radius: 999px; background: #e04b3c; color: #fff; font-size: .62rem; font-weight: 900; line-height: 1.4; text-align: center; }
+@keyframes tf-flick { from { transform: scale(1) rotate(-4deg); } to { transform: scale(1.1, 1.18) rotate(4deg); } }
+.turn-flame.grow .tf-f { animation: tf-flare .45s ease-out, tf-flick .5s .45s ease-in-out infinite alternate; }
+@keyframes tf-flare { 0% { transform: scale(.6); } 50% { transform: scale(1.6); } 100% { transform: scale(1); } }
+.turn-smoke { position: absolute; top: -16px; right: -8px; font-size: 1.2rem; pointer-events: none; animation: tf-smoke .8s ease-out forwards; }
+@keyframes tf-smoke { 0% { opacity: 0; transform: scale(.5); } 25% { opacity: 1; } 100% { opacity: 0; transform: translate(10px, -24px) scale(1.5); } }
+@media (prefers-reduced-motion: reduce) { .turn-flame .tf-f, .turn-flame.grow .tf-f { animation: none; } .turn-smoke { display: none; } }
+/* 札を配る動きで、ほかの人の席へ飛ぶ裏向きの札（2026-11-09。main.js の dealToOthers。小さいので縁を細く） */
+.fly-ghost { z-index: 30; }
+.fly-ghost.ccard { border-width: 2px; border-radius: 5px; }
+.fly-ghost.ccard::before { inset: 22% 16%; }
+
+/* ---------- 選んだ駒が浮く（2026-11-09。将棋・3×4・5五・はさみ将棋。動かしたあとに浮いたまま滑るのは main.js の flyAnim の data-fly-lift） ----------
+   選んだマスを黄色く塗るのをやめ、駒を少し持ち上げて大きくし、下に影（::before の楕円）を落とす。
+   駒は clip-path で形を切っているので、駒そのものに影（filter）を付けると影も切られて見えない。そのためマスの側に影を描く。
+   持ち駒から打つ駒を選んだとき（.sg-hand-piece.selected）は今までどおり */
+.sg .sg-cell.selected { background: transparent; }
+.sg .sg-cell .sg-piece { transition: transform .18s ease-out; }
+.sg .sg-cell.selected .sg-piece { position: relative; z-index: 2; transform: translateY(-14%) scale(1.12); }
+.sg .sg-cell.selected .sg-piece.flip { transform: rotate(180deg) translateY(14%) scale(1.12); }
+.sg .sg-cell.selected::before { content: ""; position: absolute; left: 16%; right: 16%; bottom: 3%; height: 18%; border: 0; border-radius: 50%; background: radial-gradient(ellipse at center, rgba(40, 20, 0, .45), transparent 70%); pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .sg .sg-cell .sg-piece { transition: none; } }
+
+/* ---------- 結果の表彰台（2026-11-09。main.js の podiumFx。.fx-clip の中に出す） ---------- */
+.podium-fx { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(92vw, 360px); padding: 16px 12px 12px; border-radius: 18px; background: var(--panel); border: 1.5px solid var(--line); box-shadow: 0 10px 30px rgba(0, 0, 0, .3); display: grid; gap: 8px; animation: pd-in .25s ease-out both; }
+@keyframes pd-in { from { opacity: 0; transform: translate(-50%, -46%); } }
+.pd-stage { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; gap: 6px; height: 200px; }
+.pd-col { display: grid; justify-items: center; align-content: end; gap: 4px; height: 100%; min-width: 0; }
+.pd-name { font-weight: 800; font-size: .85rem; padding: 2px 8px; border-radius: 10px; background: var(--panel); border: 2px solid var(--line); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; animation: op-up .3s calc(var(--at) + 300ms) ease-out both; }
+.pd-name.me { border-color: var(--accent); }
+.pd-block { width: 100%; border-radius: 10px 10px 0 0; display: grid; align-content: start; justify-items: center; padding-top: 6px; transform-origin: 50% 100%; animation: pd-rise .42s var(--at) cubic-bezier(.2, .8, .3, 1.15) both; }
+@keyframes pd-rise { from { transform: scaleY(0); } }
+.pd-rk { font-family: "Yu Mincho", "Hiragino Mincho ProN", serif; font-weight: 900; font-size: 1.6rem; line-height: 1; }
+.pd-sc { font-weight: 800; font-size: .95rem; font-variant-numeric: tabular-nums; }
+.pd-1 .pd-block { height: 110px; background: linear-gradient(#f3c74b, #d9a520); color: #3a2a05; }
+.pd-2 .pd-block { height: 80px; background: linear-gradient(#cfd6de, #a5afba); color: #26303a; }
+.pd-3 .pd-block { height: 58px; background: linear-gradient(#e2a877, #b97a47); color: #3a210c; }
+.pd-crown { font-size: 1.6rem; line-height: 1; animation: pd-crown .5s 1000ms cubic-bezier(.3, .7, .4, 1.4) both; }
+@keyframes pd-crown { from { opacity: 0; transform: translateY(-40px) rotate(-30deg); } }
+.pd-rest { margin: 0; text-align: center; font-size: .82rem; color: var(--muted); font-variant-numeric: tabular-nums; animation: op-up .3s 1000ms ease-out both; }
+
+/* 見出しの字体（2026-11-09 本人の選択。場面ごとに変える。room.md「演出・アニメーションの2回目」）: 使う字だけ切り出したファイル（tools/make-fonts.mjs）。
+   タイトル・画面の見出し・ゲームの名前は丸ゴシック、判子は筆、あなたのターンの帯・技の名前は極太。入っていない字は後ろの字体で出る。
+   太さの幅を書いておくと、ブラウザが字を太らせて潰さない（どれも1つの太さしか持たないため）。人が打った字（名前など）には当てない */
+@font-face { font-family: "asobi-maru"; src: url("../fonts/zenmaru.woff") format("woff"); font-weight: 400 900; font-display: swap; }
+@font-face { font-family: "asobi-fude"; src: url("../fonts/yuji.woff") format("woff"); font-weight: 400 900; font-display: swap; }
+@font-face { font-family: "asobi-goku"; src: url("../fonts/dela.woff") format("woff"); font-weight: 400 900; font-display: swap; }
+h1, h2, .sheet-head h3, .cat-h, .tile-nm, .lobby-game-name { font-family: "asobi-maru", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", system-ui, sans-serif; }
+.end-stamp { font-family: "asobi-fude", "Yu Mincho", "Hiragino Mincho ProN", serif; }
+.end-stamp .nm { font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", system-ui, sans-serif; font-weight: 800; font-size: .8em; }
+.turn-fx span, .cut-fx span { font-family: "asobi-goku", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", system-ui, sans-serif; }

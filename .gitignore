@@ -6,3 +6,6 @@ tools/local-paths.json
 # App Store 版（native/）: 道具と組み立てた中身は作り直せるので入れない
 native/node_modules/
 native/www/
+
+# 見出しの字体の元（大きいので入れない。tools/make-fonts.mjs が使う字だけ app/fonts/ へ切り出す）
+tools/fonts-src/

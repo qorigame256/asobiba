@@ -388,6 +388,12 @@ export default {
           if (deg === 90 || deg === -90) piece.style.transform = `rotate(${deg}deg)`;
         } else piece.className = 'sg-piece' + (v === bottom ? '' : ' flip') + (v === 1 ? ' promoted' : '');
         piece.textContent = NAMES[v];
+        // 選んだ駒が浮く（2026-11-09。main.js の flyPlay）: 動かした駒は元のマスから浮いたまま滑ってきて置かれる（将棋と同じ形）
+        const moved = s.last && s.last.t === i && Number.isInteger(s.last.f);
+        piece.dataset.fly = moved ? `mv:${s.ply}` : `sq:${i}`;
+        if (moved) Object.assign(piece.dataset, { flyFrom: `sq:${s.last.f}`, flySlide: '', flyLift: '' });
+        const base = piece.style.transform || (piece.classList.contains('flip') ? 'rotate(180deg)' : '');
+        if (base) piece.dataset.flyBase = base;
         cell.append(piece);
       }
       if (isTarget || isMovable) {
