@@ -17,6 +17,10 @@
 //     局面の当たりの数が端末の数より少ないあいだは0.5秒ごとに送り直す（2色爆弾・金魚すくいと同じわけ。ゲストの手がすれ違って消えることがある）。
 //   - 雪玉の通り道と壁は全員同じなので、壁で消えるのはどの画面でも同じ。投げた人の画面と当てられた人の画面で、人の位置は通信の分だけずれる。
 //   - CPU（と部屋を出た人の席）はホストの端末が動かし、当たりもホストの画面で決める（cpu() が当たりを手にする）。CPU の位置と雪玉はホストが送る。
+// 2026-11-09 の37回目の案（本人が選んだ。分かれ目は Claude の判断）:
+//   - 詳細設定「壁の数」（鍵は walls）: なし・3つ（最初。前と同じ置き場所）・5つ（3つに、真ん中の壁と同じ段の左右の端寄りに1つずつ足す）。
+//     遊び方の違いなのでおまかせで抽選してよい。壁なしでは CPU は壁の裏へ歩かず、いつも空いた所へ歩く。
+//   - 壁はモジュールの walls に持ち、render と cpu が対局の詳細設定に合わせる（useWalls）。歩く・雪玉・描く・CPU は全部これを見る。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready →(3秒)→ go → play →(時間＋待ち)→ end。片方のチームが全員脱落したら、その手で end。
 // 手: { p: -1, t: 'go' | 'end' } / { p, t: 'hit', k, by, b }
 
@@ -40,13 +44,20 @@ const TEAM_COLOR = ['#e04b3c', '#f4f4f4'];
 const TEAM_EDGE = ['#8f2318', '#555'];
 export const teamOf = (p) => p % 2;
 
-// 壁（赤の陣地の分。白の陣地は真ん中を中心に回した形）
-const WALLS0 = [
+// 壁（赤の陣地の分。白の陣地は真ん中を中心に回した形）。詳細設定「壁の数」で なし・3つ（最初。前と同じ）・5つ
+const WALLS3 = [
   { x: 0.12, y: 0.8, w: 0.2, h: 0.045 },
   { x: 0.68, y: 0.8, w: 0.2, h: 0.045 },
   { x: 0.4, y: 1.0, w: 0.2, h: 0.045 },
 ];
-export const WALLS = [...WALLS0, ...WALLS0.map((r) => ({ x: 1 - r.x - r.w, y: H - r.y - r.h, w: r.w, h: r.h }))];
+const WALLS5 = [...WALLS3, { x: 0.04, y: 1.0, w: 0.16, h: 0.045 }, { x: 0.8, y: 1.0, w: 0.16, h: 0.045 }];
+const both = (ws) => [...ws, ...ws.map((r) => ({ x: 1 - r.x - r.w, y: H - r.y - r.h, w: r.w, h: r.h }))]; // 前の半分が赤・後ろの半分が白
+export const wallCountOf = (rules) => ([0, 3, 5].includes(Number(rules?.walls)) ? Number(rules.walls) : 3);
+export const wallsOf = (rules) => both([[], [], [], WALLS3, [], WALLS5][wallCountOf(rules)]);
+export const WALLS = wallsOf({}); // 最初の3つ（自動確認の目安）
+// いま遊んでいる対局の壁。全員同じ詳細設定なので、どの端末でも同じ壁になる（render と cpu が対局の詳細設定に合わせる）
+let walls = WALLS;
+export const useWalls = (rules) => { walls = wallsOf(rules); return walls; };
 
 const livesOf = (s) => ([1, 3, 5].includes(Number(s.rules.lives)) ? Number(s.rules.lives) : 3);
 const durOf = (s) => ([60, 90, 120].includes(Number(s.rules.time)) ? Number(s.rules.time) : 90);
@@ -89,7 +100,7 @@ export function walk(pl, team, dt) {
   }
   pl.x = clamp(pl.x, PR, 1 - PR);
   pl.y = team === 0 ? clamp(pl.y, MID + PR, H - PR) : clamp(pl.y, PR, MID - PR);
-  for (const w of WALLS) {
+  for (const w of walls) {
     const c = circleRect(pl.x, pl.y, PR, w);
     if (c) { pl.x += c.nx * c.depth; pl.y += c.ny * c.depth; }
   }
@@ -100,7 +111,7 @@ export function stepBall(b, dt) {
   b.x += b.vx * dt;
   b.y += b.vy * dt;
   if (b.x < -BR || b.x > 1 + BR || b.y < -BR || b.y > H + BR) return false;
-  return !WALLS.some((w) => circleRect(b.x, b.y, BR, w));
+  return !walls.some((w) => circleRect(b.x, b.y, BR, w));
 }
 // 雪玉が自分の陣地の壁に当たらずに真ん中の線を越えるか（CPU が壁の裏から自分の壁へ投げないように）
 export function crossesMid(ball) {
@@ -160,7 +171,7 @@ function draw() {
   ctx.stroke();
   ctx.setLineDash([]);
   // 壁
-  for (const w of WALLS) {
+  for (const w of walls) {
     const [ax, ay] = view(w.x, w.y);
     const [bx, by] = view(w.x + w.w, w.y + w.h);
     const x0 = Math.min(ax, bx) * k; const y0 = Math.min(ay, by) * k;
@@ -289,9 +300,10 @@ function stepCpu(c, p, s, dt, now) {
   const t = teamOf(p);
   if (now >= c.nextMove) {
     c.nextMove = now + 1200 + Math.random() * 1400;
-    if (Math.random() < 0.5) {
+    const per = walls.length / 2; // 1チームの壁の数
+    if (per > 0 && Math.random() < 0.5) {
       // 自分の陣地の壁の裏（真ん中から遠い側）へ
-      const w = WALLS[t * 3 + Math.floor(Math.random() * 3)];
+      const w = walls[t * per + Math.floor(Math.random() * per)];
       c.tx = w.x + Math.random() * w.w;
       c.ty = t === 0 ? w.y + w.h + PR + 0.01 : w.y - PR - 0.01;
     } else {
@@ -445,10 +457,11 @@ export default {
   settings: [
     { key: 'lives', label: 'ライフ', desc: '何回当たったら脱落するか', def: '3', choices: [['1', '1'], ['3', '3'], ['5', '5']] },
     { key: 'time', label: '時間', desc: '1回の勝負の長さ。決まらなければ残りのライフの合計で決める', def: '90', choices: [['60', '60秒'], ['90', '90秒'], ['120', '120秒']] },
+    { key: 'walls', label: '壁の数', desc: '自分の陣地にある雪の壁の数。なしは打ち合い、5つは隠れ合いになる', def: '3', choices: [['0', 'なし'], ['3', '3つ'], ['5', '5つ']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { lives: '3', time: '90', ...rules };
+    const r = { lives: '3', time: '90', walls: '3', ...rules };
     return { n, seed, rules: r, phase: 'ready', hits: Array(n).fill(0), got: Array(n).fill(0), dead: Array(n).fill(false), hitB: Array(n).fill(null), step: 0 };
   },
 
@@ -510,6 +523,7 @@ export default {
   cpuDelay(s) { return s.phase === 'play' ? 120 : 500; },
   cpu(s, p) {
     if (s.phase !== 'play' || s.dead[p]) return null;
+    useWalls(s.rules);
     const key = simKey(s, p);
     let c = sims.get(key);
     if (!c) {
@@ -551,6 +565,7 @@ export default {
   },
 
   render(root, s, o) {
+    useWalls(s.rules);
     const me = o.me >= 0 && !o.watching ? o.me : null;
     const lives = livesOf(s);
     const chips = scoreChips(o, s.got, {

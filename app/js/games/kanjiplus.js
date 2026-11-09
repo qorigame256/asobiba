@@ -9,6 +9,10 @@
 //   - 1問の制限時間は20秒。だれかが正解したら5秒で締め切る。全員が答えたら1.5秒（まんなかの漢字と同じ）。
 //   - まちがいの3字は問題ごとに書いておき、並びは種で混ぜる（全員同じ）。
 //   - CPU は3〜10秒で答え、やさしいは7割・むずかしいは5割5分当てる。
+// 2026-11-09 の37回目の案（本人の選択: 難しさに「3つの字」を足す。分かれ目は Claude の判断）:
+//   - 難しさ「3つの字」（値は three）: 部品が3つの問題だけを出す（「むずかしい」に入っていた10問と、このとき足した27問）。
+//     足した27問は難しさ 't' にして「むずかしい」には混ぜない（「やさしい」「むずかしい」の問題を前と同じにするため）。
+//   - CPU は「むずかしい」と同じく5割5分当てる。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（まんなかの漢字と同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q, c: 選んだ字, ms }
 
@@ -18,9 +22,9 @@ import { pointsOf } from './make10.js';
 import { KANJIPLUS, RADICALS } from './kanjiplus-data.js';
 
 const ROUNDS = [[10, '10問'], [15, '15問'], [20, '20問']];
-const LEVELS = [['easy', 'やさしい'], ['hard', 'むずかしい']];
+const LEVELS = [['easy', 'やさしい'], ['hard', 'むずかしい'], ['three', '3つの字']];
 const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 10);
-const levelOf = (r) => (r.level === 'hard' ? 'h' : 'e');
+const levelOf = (r) => (r.level === 'hard' ? 'h' : r.level === 'three' ? 't' : 'e');
 const LIMIT = 20000;
 const READY_MS = 3000;
 const SHOWN_MS = 3500;
@@ -49,14 +53,14 @@ export default {
   minPlayers: 2,
   maxPlayers: 10,
   settings: [
-    { key: 'level', label: '難しさ', desc: 'やさしい: 「日＋月＝明」のような字どうし／むずかしい: 「氵＋工＝江」のような部首の形や、3つの字の組み合わせ', def: 'easy', choices: LEVELS },
+    { key: 'level', label: '難しさ', desc: 'やさしい: 「日＋月＝明」のような字どうし／むずかしい: 「氵＋工＝江」のような部首の形や、3つの字の組み合わせ／3つの字: 「言＋身＋寸」のような3つの組み合わせだけ', def: 'easy', choices: LEVELS },
     { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 10, choices: ROUNDS },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const r = { level: 'easy', rounds: 10, ...rules };
     const lv = levelOf(r);
-    const pool = [...KANJIPLUS.keys()].filter((i) => KANJIPLUS[i][3] === lv);
+    const pool = [...KANJIPLUS.keys()].filter((i) => (lv === 't' ? partsOf(i).length === 3 : KANJIPLUS[i][3] === lv));
     const order = shuffle(pool, mulberry32(seed)).slice(0, roundsOf(r));
     const qs = order.map((i, q) => ({ i, opts: choicesOf(seed, q, i) }));
     return {
@@ -139,7 +143,7 @@ export default {
     let plan = cpuPlan.get(key);
     if (!plan) {
       const right = KANJIPLUS[x.i][1];
-      const ok = Math.random() < (levelOf(s.rules) === 'h' ? 0.55 : 0.7);
+      const ok = Math.random() < (levelOf(s.rules) !== 'e' ? 0.55 : 0.7);
       const wrong = x.opts.filter((c) => c !== right);
       plan = { at: 3000 + Math.random() * 7000, c: ok ? right : wrong[Math.floor(Math.random() * wrong.length)] };
       cpuPlan.set(key, plan);

@@ -7066,6 +7066,49 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     const st = runCpus(G, 5, 8, rules, 100, 5000);
     assert.ok(G.result(st) && st.scores.some((v) => v > 0), `多いのはどっち: CPU どうしで最後まで ${JSON.stringify(rules)}`);
   }
+  // 2026-11-09 の37回目の案: あまのじゃく（rev）・箱の数（boxes）・点の見える時間（flash）
+  const { revOf, flashOf } = await import('../app/js/games/ooi.js');
+  for (let seed = 0; seed < 20; seed++) {
+    for (const k of [5, 10, 20]) {
+      const plain = makeQuestions(k, seed);
+      assert.deepEqual(makeQuestions(k, seed, { rev: false, boxes: 2 }), plain, '多いのはどっち: 設定を変えないときは前と同じ問題');
+      const rv = makeQuestions(k, seed, { rev: true });
+      assert.equal(rv.filter((x) => x.rev).length, revOf(k), '多いのはどっち: あまのじゃくは問題の3割');
+      assert.ok(!rv[0].rev && !plain.some((x) => x.rev), '多いのはどっち: 1問目とあまのじゃくなしはふつう');
+      rv.forEach((x, q) => {
+        assert.deepEqual(x.counts, plain[q].counts, '多いのはどっち: あまのじゃくでも点の数は同じ');
+        const want = x.rev ? Math.min(...x.counts) : Math.max(...x.counts);
+        assert.equal(x.counts[x.side], want, '多いのはどっち: あまのじゃくの問題は少ない方が正解');
+      });
+      for (const rev of [false, true]) {
+        makeQuestions(k, seed, { rev, boxes: 3 }).forEach((x, q) => {
+          assert.equal(x.counts.length, 3);
+          assert.equal(x.dots.length, 3);
+          const t = x.counts[x.side];
+          const rest = x.counts.filter((_, c) => c !== x.side);
+          assert.ok(rest.every((v) => (x.rev ? v > t : v < t)), '多いのはどっち: 箱3つでも答えはひとつ');
+          const near = x.rev ? Math.min(...rest) : Math.max(...rest);
+          const big = x.rev ? near : t;
+          assert.equal(Math.abs(near - t), Math.max(1, Math.round(big * ratioOf(q, k))), '多いのはどっち: 箱3つでもいちばん近い箱との差は2つのときと同じ');
+          assert.ok(Math.min(...x.counts) >= 3 && Math.max(...x.counts) <= 25, '多いのはどっち: 箱3つの点は3〜25個');
+        });
+      }
+    }
+  }
+  assert.ok(makeQuestions(20, 3, { boxes: 3 }).some((x) => x.side === 1) && makeQuestions(20, 3, { boxes: 3 }).some((x) => x.side === 2), '多いのはどっち: 箱3つの答えの位置はまざる');
+  assert.equal(flashOf({}), 700);
+  assert.equal(flashOf({ flash: 400 }), 400);
+  assert.equal(flashOf({ flash: 123 }), 700, '多いのはどっち: 一覧に無い時間は最初の値');
+  {
+    let s3 = G.apply(G.init(2, 9, { rules: { boxes: 3 } }), { p: -1, t: 'next' });
+    assert.equal(G.apply(s3, { p: 0, t: 'ans', q: 0, c: 3, ms: 400 }), null, '多いのはどっち: 箱3つで4つ目は弾く');
+    s3 = G.apply(s3, { p: 0, t: 'ans', q: 0, c: s3.qs[0].side, ms: 400 });
+    assert.equal(s3.solved[0], 400, '多いのはどっち: 箱3つで正解');
+  }
+  for (const rules of [{ rev: true, boxes: 3, flash: 400 }, { rev: true }]) {
+    const st = runCpus(G, 4, 8, rules, 100, 5000);
+    assert.ok(G.result(st), `多いのはどっち: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
   console.log('ooi OK');
 }
 
@@ -7122,6 +7165,35 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     const st = runCpus(G, 4, 2, rules, 200, 2000);
     assert.ok(G.result(st), `雪合戦: CPU どうしで時間まで進む ${JSON.stringify(rules)}`);
   }
+  // 2026-11-09 の37回目の案: 壁の数（walls）
+  assert.deepEqual(Y.wallsOf({}), Y.WALLS, '雪合戦: 最初の壁は3つ');
+  assert.deepEqual(Y.wallsOf({ walls: '3' }), Y.WALLS);
+  assert.deepEqual(Y.wallsOf({ walls: '7' }), Y.WALLS, '雪合戦: 一覧に無い数は3つ');
+  assert.equal(Y.wallsOf({ walls: '0' }).length, 0);
+  const w5 = Y.wallsOf({ walls: '5' });
+  assert.equal(w5.length, 10);
+  w5.forEach((w, i) => {
+    assert.ok(w.x >= 0 && w.x + w.w <= 1 && (i < 5 ? w.y > Y.MID : w.y + w.h < Y.MID), '雪合戦: 5つの壁は自分の陣地の中');
+    w5.forEach((v, j) => { if (i < j) assert.ok(w.x + w.w <= v.x || v.x + v.w <= w.x || w.y + w.h <= v.y || v.y + v.h <= w.y, '雪合戦: 壁どうしは重ならない'); });
+  });
+  for (let n = 2; n <= 10; n += 2) {
+    for (let p = 0; p < n; p++) {
+      const sp = Y.spawnOf(p, n);
+      assert.ok(w5.every((w) => !(sp.x > w.x - Y.PR && sp.x < w.x + w.w + Y.PR && sp.y > w.y - Y.PR && sp.y < w.y + w.h + Y.PR)), '雪合戦: 壁5つでも始めは壁に重ならない');
+    }
+  }
+  Y.useWalls({ walls: '0' });
+  assert.ok(flyTo(0.22, 1.1, 0.22, 0.2).y < 0, '雪合戦: 壁なしでは壁の裏だった所からも向こうまで飛ぶ');
+  Y.useWalls({ walls: '5' });
+  assert.ok(flyTo(0.12, 1.1, 0.12, 0.2).y > 0.98, '雪合戦: 壁5つでは足した壁で止まる');
+  Y.useWalls({ walls: '0' });
+  assert.ok(flyTo(0.12, 1.1, 0.12, 0.2).y < 0, '雪合戦: 壁なしではそこも止まらない');
+  Y.useWalls({});
+  for (const rules of [{ walls: '0' }, { walls: '5' }]) {
+    const st = runCpus(G, 4, 2, rules, 200, 2000);
+    assert.ok(G.result(st), `雪合戦: CPU どうしで時間まで進む ${JSON.stringify(rules)}`);
+  }
+  Y.useWalls({});
   console.log('yuki OK');
 }
 
@@ -9196,25 +9268,33 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.ok(ps.length >= 2 && ps.length <= 3 && ps.every((c) => [...c].length === 1), `漢字たし算: 部品は1字ずつ2〜3個（${parts}）`);
     assert.ok([...right].length === 1 && [...bad].length === 3, `漢字たし算: 答え1字・まちがい3字（${parts}）`);
     assert.equal(new Set([right, ...bad]).size, 4, `漢字たし算: 4つの字は重ならない（${parts}）`);
-    assert.ok(lv === 'e' || lv === 'h', `漢字たし算: 難しさ（${parts}）`);
+    assert.ok(lv === 'e' || lv === 'h' || lv === 't', `漢字たし算: 難しさ（${parts}）`);
+    if (lv === 't') assert.equal(ps.length, 3, `漢字たし算: 't' は3つの字だけ（${parts}）`);
     if (lv === 'e') assert.ok(ps.length === 2 && !ps.some((c) => RADICALS[c]), `漢字たし算: やさしいは字どうしの2つだけ（${parts}）`);
     assert.ok(!seenParts.has(parts), `漢字たし算: 同じ部品の問題を重ねない（${parts}）`);
     seenParts.add(parts);
   }
   for (const lv of ['e', 'h']) assert.ok(KANJIPLUS.filter((x) => x[3] === lv).length >= 40, `漢字たし算: ${lv} の問題が40問以上`);
   for (let seed = 0; seed < 20; seed++) {
-    for (const level of ['easy', 'hard']) {
+    for (const level of ['easy', 'hard', 'three']) {
       const s = KP.init(3, seed, { rules: { level, rounds: 20 } });
       assert.equal(s.qs.length, 20, '漢字たし算: 問題の数');
       assert.equal(new Set(s.qs.map((x) => x.i)).size, 20, '漢字たし算: 同じ問題を2回出さない');
       for (const x of s.qs) {
-        assert.equal(KANJIPLUS[x.i][3], level === 'hard' ? 'h' : 'e', '漢字たし算: 難しさの問題だけ出す');
+        if (level === 'three') assert.equal(kpParts(x.i).length, 3, '漢字たし算: 3つの字では部品が3つの問題だけ出す');
+        else assert.equal(KANJIPLUS[x.i][3], level === 'hard' ? 'h' : 'e', '漢字たし算: 難しさの問題だけ出す');
         assert.ok(x.opts.includes(KANJIPLUS[x.i][1]) && x.opts.length === 4, '漢字たし算: 正しい答えを入れた4つ');
       }
       assert.deepEqual(s.qs[2].opts, kpChoices(seed, 2, s.qs[2].i), '漢字たし算: 並びは種で決まる');
     }
   }
   assert.deepEqual(kpParts(KANJIPLUS.findIndex((x) => x[0] === '木+木+木')), ['木', '木', '木'], '漢字たし算: 3つの部品');
+  assert.ok(KANJIPLUS.filter((x) => x[0].split('+').length === 3).length >= 30, '漢字たし算: 3つの字の問題が30問以上');
+  {
+    const seen = new Set();
+    for (let seed = 0; seed < 60; seed++) KP.init(2, seed, { rules: { level: 'three', rounds: 20 } }).qs.forEach((x) => seen.add(KANJIPLUS[x.i][3]));
+    assert.ok(seen.has('h') && seen.has('t'), '漢字たし算: 3つの字では前からの10問と足した問題の両方が出る');
+  }
   let s = KP.init(3, 9);
   s = KP.apply(s, { p: -1, t: 'next' });
   const right = KANJIPLUS[s.qs[0].i][1];
@@ -9226,7 +9306,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   s = KP.apply(s, { p: 2, t: 'ans', q: 0, c: right, ms: 1500 });
   s = KP.apply(s, { p: -1, t: 'close' });
   assert.deepEqual(s.scores, [0, 2, 3], '漢字たし算: 速い順に点、まちがいは0点');
-  console.log('kanjiplus OK（やさしい', KANJIPLUS.filter((x) => x[3] === 'e').length, '問・むずかしい', KANJIPLUS.filter((x) => x[3] === 'h').length, '問）');
+  console.log('kanjiplus OK（やさしい', KANJIPLUS.filter((x) => x[3] === 'e').length, '問・むずかしい', KANJIPLUS.filter((x) => x[3] === 'h').length, '問・3つの字', KANJIPLUS.filter((x) => x[0].split('+').length === 3).length, '問）');
 }
 
 // ジグソー早解き（2026-11-06）
