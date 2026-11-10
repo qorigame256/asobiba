@@ -7215,6 +7215,139 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('yuki OK');
 }
 
+// 打ち上げ花火（2026-11-10）: 高さは人数ぶんすべて違い範囲に収まる・いちばん高い人の勝ち・形は高さに関わらない・選び直しは弾く・CPU どうしで最後まで
+{
+  const G = GAMES.hanabi;
+  const H = await import('../app/js/games/hanabi.js');
+  for (let seed = 0; seed < 40; seed++) {
+    for (let n = 2; n <= 10; n++) {
+      const hs = H.heightsOf(seed, seed % 5, n);
+      assert.equal(new Set(hs).size, n, '打ち上げ花火: 高さはみんな違う');
+      assert.ok(hs.every((h) => h >= H.HMIN && h <= H.HMAX), '打ち上げ花火: 高さは範囲の中');
+    }
+  }
+  const sameHeights = (picks) => {
+    let s = G.init(4, 9, { rules: {} });
+    picks.forEach((k, p) => { s = G.apply(s, { p, t: 'pick', r: 0, k }); });
+    return G.apply(s, { p: -1, t: 'launch' }).last.heights;
+  };
+  assert.deepEqual(sameHeights([0, 0, 0, 0]), sameHeights([7, 3, 5, 1]), '打ち上げ花火: 選んだ形は高さに関わらない');
+  let s = G.init(3, 21, { rules: {} });
+  s = G.apply(s, { p: 0, t: 'pick', r: 0, k: 2 });
+  assert.equal(G.apply(s, { p: 0, t: 'pick', r: 0, k: 3 }), null, '打ち上げ花火: 選び直しは弾く');
+  assert.equal(G.apply(s, { p: 1, t: 'pick', r: 1, k: 3 }), null, '打ち上げ花火: ほかの回の手は弾く');
+  assert.equal(G.apply(s, { p: 1, t: 'pick', r: 0, k: H.SHAPES.length }), null, '打ち上げ花火: 無い形は弾く');
+  s = G.apply(s, { p: -1, t: 'launch' });
+  assert.ok(s.picks.every((k) => Number.isInteger(k) && k >= 0 && k < H.SHAPES.length), '打ち上げ花火: 選ばなかった人の形も決まる');
+  assert.equal(G.result(s), null, '打ち上げ花火: 打ち上げの間は結果を出さない');
+  s = G.apply(s, { p: -1, t: 'done' });
+  const r1 = G.result(s);
+  const hs = s.last.heights;
+  assert.deepEqual(r1.winners, [hs.indexOf(Math.max(...hs))], '打ち上げ花火: いちばん高い人の勝ち');
+  assert.deepEqual(r1.place, hs.map((h) => 1 + hs.filter((x) => x > h).length), '打ち上げ花火: 順位は高さの順');
+  for (const rules of [{}, { rounds: 3 }, { rounds: 5 }]) {
+    const st = runCpus(G, 6, 13, rules, 100, 5000);
+    assert.ok(G.result(st), `打ち上げ花火: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+    assert.equal(st.wins.reduce((a, v) => a + v, 0), rules.rounds ?? 1, '打ち上げ花火: 1回に1人だけ勝つ');
+  }
+  console.log('hanabi OK');
+}
+
+// 流しそうめん（2026-11-10）: 取るのは ms のいちばん小さい人（届く順に関わらない）・1つの品に1人1回・点の数え方・CPU どうしで最後まで
+{
+  const G = GAMES.somen;
+  const S = await import('../app/js/games/somen.js');
+  for (let seed = 0; seed < 20; seed++) {
+    const items = S.itemsOf(seed, 60000);
+    assert.ok(items.length > 30 && items.every((x, i) => x.at < 60000 && (i === 0 || x.at > items[i - 1].at)), '流しそうめん: 品は時刻の順で時間の中');
+  }
+  let s = G.apply(G.init(3, 5, { rules: {} }), { p: -1, t: 'start' });
+  const i = s.items.findIndex((x) => x.k === 'cherry');
+  const a = G.apply(G.apply(s, { p: 0, t: 'grab', i, ms: 900 }), { p: 1, t: 'grab', i, ms: 700 });
+  const b = G.apply(G.apply(s, { p: 1, t: 'grab', i, ms: 700 }), { p: 0, t: 'grab', i, ms: 900 });
+  assert.deepEqual(a.scores, [0, 3, 0], '流しそうめん: いちばん速い人がさくらんぼ（3点）を取る');
+  assert.deepEqual(a.scores, b.scores, '流しそうめん: 届く順に関わらない');
+  assert.equal(G.apply(a, { p: 1, t: 'grab', i, ms: 600 }), null, '流しそうめん: 1つの品に1人1回');
+  assert.equal(G.apply(s, { p: 2, t: 'grab', i, ms: S.FLOW_MS + 500 }), null, '流しそうめん: 流れ切ったあとは弾く');
+  const c = s.items.findIndex((x) => x.k === 'chili');
+  assert.deepEqual(G.apply(s, { p: 2, t: 'grab', i: c, ms: 500 }).scores, [0, 0, -2], '流しそうめん: 唐辛子は −2点');
+  for (const rules of [{}, { time: 45 }]) {
+    const st = runCpus(G, 5, 11, rules, 100, 5000);
+    assert.ok(G.result(st), `流しそうめん: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+    let sum = 0;
+    st.claims.forEach((cl, k) => { if (cl.length) sum += S.KINDS[st.items[k].k].v; });
+    assert.equal(st.scores.reduce((x, v) => x + v, 0), sum, '流しそうめん: 点の合計は取られた品の点の合計');
+  }
+  console.log('somen OK');
+}
+
+// 切り紙あて（2026-11-10）: 正解は切り口を折り目で写したもので折り目について対称・4つの模様は見た目がはっきり違う・速い順に点・CPU どうしで最後まで
+{
+  const G = GAMES.kirigami;
+  const K = await import('../app/js/games/kirigami.js');
+  const mapAll = (f, polys) => polys.map((p) => p.map(f));
+  for (const folds of [1, 2, 3]) {
+    for (let seed = 0; seed < 12; seed++) {
+      for (const x of K.makeQuestions(10, seed, folds)) {
+        const right = x.choices[x.side];
+        const rr = K.raster(right);
+        for (const g of K.GROUP[folds]) assert.ok(K.diff(rr, K.raster(mapAll(g, right))) <= 2, `切り紙あて: 正解は折り目について対称（${folds}回）`);
+        const rs = x.choices.map(K.raster);
+        for (let u = 0; u < 4; u++) for (let v = u + 1; v < 4; v++) assert.ok(K.diff(rs[u], rs[v]) >= K.MIN_DIFF, '切り紙あて: 4つの模様は見た目が違う');
+        assert.ok(x.cuts.length >= 2 && x.cuts.every((p) => p.length >= 3), '切り紙あて: 切り口が2つ以上');
+      }
+    }
+  }
+  assert.deepEqual(G.init(2, 4, { rules: {} }).qs, G.init(2, 4, { rules: { level: 'normal', rounds: 10 } }).qs, '切り紙あて: 最初は2回折り・10問');
+  let s = G.apply(G.init(3, 8, { rules: {} }), { p: -1, t: 'next' });
+  const ans = s.qs[0].side;
+  s = G.apply(s, { p: 0, t: 'ans', q: 0, c: (ans + 1) % 4, ms: 300 });
+  assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, c: ans, ms: 400 }), null, '切り紙あて: まちがえたらその問題はもう押せない');
+  assert.equal(G.apply(s, { p: 1, t: 'ans', q: 0, c: ans, ms: K.limitOf({}) + 400 }), null, '切り紙あて: 時間を過ぎた手は弾く');
+  s = G.apply(s, { p: 1, t: 'ans', q: 0, c: ans, ms: 2900 });
+  s = G.apply(s, { p: 2, t: 'ans', q: 0, c: ans, ms: 2100 });
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [0, 2, 3], '切り紙あて: 速い順に3・2点、まちがいは0点（減らない）');
+  for (const rules of [{}, { level: 'easy', rounds: 5 }, { level: 'hard', rounds: 20 }]) {
+    const st = runCpus(G, 5, 8, rules, 100, 8000);
+    assert.ok(G.result(st) && st.scores.some((v) => v > 0), `切り紙あて: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('kirigami OK');
+}
+
+// 色水づくり（2026-11-10）: 混ぜた色の向き・割合で決まる・ぴったりの人が3点・同じ手は2回目を弾く・捨てる・決定のあとは落とせない・CPU どうしで最後まで
+{
+  const G = GAMES.iromizu;
+  const I = await import('../app/js/games/iromizu.js');
+  const [or, og, ob] = I.mixColor([1, 1, 0, 0]);
+  assert.ok(or > og && og > ob, '色水づくり: 赤＋黄はだいだい色');
+  const [gr, gg, gb] = I.mixColor([0, 1, 1, 0]);
+  assert.ok(gg > gr && gg > gb, '色水づくり: 黄＋青は緑');
+  assert.deepEqual(I.mixColor([2, 1, 0, 1]), I.mixColor([4, 2, 0, 2]), '色水づくり: 数ではなく割合で決まる');
+  assert.ok(I.mixColor([1, 0, 0, 2])[1] > I.mixColor([1, 0, 0, 0])[1], '色水づくり: 白を足すと明るくなる');
+  for (let seed = 0; seed < 30; seed++) for (const t of I.makeTargets(8, seed)) assert.ok(t.reduce((x, v) => x + v, 0) <= 15 && t.slice(0, 3).filter((v) => v > 0).length >= 2, '色水づくり: お手本は2色以上で作れる');
+  let s = G.apply(G.init(3, 6, { rules: {} }), { p: -1, t: 'next' });
+  const goal = s.targets[0];
+  // 0 はお手本どおり、1 は少しずらす、2 は何も落とさない
+  let k = 0;
+  goal.forEach((v, c) => { for (let j = 0; j < v; j++) s = G.apply(s, { p: 0, t: 'drop', r: 0, c, k: k++ }); });
+  s = G.apply(s, { p: 1, t: 'drop', r: 0, c: 0, k: 0 });
+  assert.equal(G.apply(s, { p: 1, t: 'drop', r: 0, c: 0, k: 0 }), null, '色水づくり: 同じ手の2回目は弾く');
+  s = G.apply(s, { p: 1, t: 'reset', r: 0, k: 1 });
+  assert.deepEqual(s.mix[1], [0, 0, 0, 0], '色水づくり: 水を捨てると最初から');
+  s = G.apply(s, { p: 1, t: 'drop', r: 0, c: 3, k: 2 });
+  s = G.apply(s, { p: 0, t: 'ok', r: 0, k });
+  assert.equal(G.apply(s, { p: 0, t: 'drop', r: 0, c: 1, k: k + 1 }), null, '色水づくり: 決定のあとは落とせない');
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.equal(s.last.gaps[0], 0, '色水づくり: お手本どおりなら差は0');
+  assert.deepEqual(s.scores, [3, 2, 0], '色水づくり: 近い順に3・2点、落とさなかった人は0点');
+  for (const rules of [{}, { rounds: 3 }, { rounds: 8 }]) {
+    const st = runCpus(G, 5, 12, rules, 100, 8000);
+    assert.ok(G.result(st) && st.scores.some((v) => v > 0), `色水づくり: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('iromizu OK');
+}
+
 // すごろく: マスの置き方・さいころは種と回数で決まる・マスの働き・ぴったり・入れ替え・1回休み・CPU どうしで最後まで
 {
   const G = GAMES.sugoroku;
