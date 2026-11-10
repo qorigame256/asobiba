@@ -64,6 +64,7 @@
 
 
 import { mulberry32, shuffle } from './util.js';
+import { fanHand } from './cards.js';
 
 const COLORS = ['r', 'y', 'g', 'b'];
 const COLOR_NAME = { r: '赤', y: '黄', g: '緑', b: '青' };
@@ -776,6 +777,7 @@ export default {
       if (order >= 0) { e.classList.add('picked'); e.dataset.order = order + 2; } else if (multi && i === picking.i) e.dataset.order = 1;
       hand.append(e);
     });
+    fanHand(hand, myTurn); // 手札を扇形に持つ（2026-11-10）
     root.append(hand);
 
     if (myTurn && (s.drawn !== null || s.rules?.call)) {

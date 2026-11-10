@@ -356,6 +356,7 @@ export default {
           if (win.has(i)) disc.classList.add('win');
           if (i === s.last) {
             disc.classList.add('last');
+            disc.dataset.last = 'still'; // 決め手のスロー（main.js の slowFinish）: 寄せるだけで、落ちる動きは今のまま
             if (o.fresh) {
               disc.classList.add('drop');
               disc.style.setProperty('--fall', r + 1);

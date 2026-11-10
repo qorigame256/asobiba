@@ -35,7 +35,7 @@
 import { GAMES, GAME_ORDER, winnersOf, seatPoints, CATEGORIES, categoryOf } from './games/index.js';
 import { SEAT_COLORS } from './games/party.js';
 import { connectRoom } from './net.js';
-import { esc } from './games/util.js';
+import { esc, lineHold, finishLine } from './games/util.js';
 import { isOwner, unlockOwner, forgetOwner } from './owner.js';
 import { IS_APP, WEB_URL } from './platform.js';
 import { isBad, mask, BAD_TEXT_NOTE } from './filter.js';
@@ -666,6 +666,7 @@ function lobbyGameCard(game) {
   if (S.lobbyGame !== game.id) {
     if (S.lobbyGame) S.lobbyGameAt = Date.now();
     S.lobbyGame = game.id;
+    S.lobbyFigAt = Date.now(); // 遊び方の図をめくる（lobbyFigs）を1枚目から
   }
   const box = document.createElement('div');
   box.className = 'lobby-game';
@@ -673,9 +674,41 @@ function lobbyGameCard(game) {
   if (ago < 2000) { box.classList.add('changed'); box.style.animationDelay = `-${ago}ms`; }
   box.innerHTML = `<div class="lobby-game-head"><span class="lobby-game-icon" aria-hidden="true">${game.icon ?? ''}</span>`
     + `<div><small>いま選んでいるゲーム</small><b class="lobby-game-name">${esc(game.name)}</b><p>${esc(game.desc ?? '')}</p></div></div>`;
-  if (game.howtoFigs?.length) box.append(howtoFigs(game.howtoFigs.slice(0, 2)));
+  if (game.howtoFigs?.length) box.append(lobbyFigs(game.howtoFigs));
   return box;
 }
+// 待合室の見本（2026-11-10 本人の選択「遊び方の図をめくる」。room.md「演出・アニメーションの3回目」）: 遊び方の図を1枚ずつ、マスが順に出て
+// 光る所が光り一言が出る形で、紙芝居のように繰り返す。待合室は人の出入り・準備OK などで何度も描き直すので、ゲームを選んだ時刻（S.lobbyFigAt）からの
+// 経過でいまの1枚と進み具合を決めて animation-delay に入れ、描き直しても続きから動かす。1枚が終わったら下の setInterval が次の1枚に替える（待合室は描き直さない）。
+// 図は全部同じ場所に重ね、高さは一番高い図に合わせる（替わるたびに下の欄が動かないように）。Claude の判断: 1枚 3.6秒。
+// 動きを減らす設定の端末と図が1枚のゲームでは、今までどおり2枚まで並べて止めて出す
+const FLIP_MS = 3600; // style.css の .hf-flip の hf-cycle と同じ長さ
+function lobbyFigs(figs) {
+  if (lessMotion() || figs.length < 2) return howtoFigs(figs.slice(0, 2));
+  const wrap = howtoFigs(figs);
+  wrap.classList.add('hf-flip');
+  for (const fig of wrap.children) {
+    const cells = fig.querySelectorAll('.hf-cell, .hf-card, .hf-text');
+    cells.forEach((c, k) => c.style.setProperty('--k', String(k)));
+    fig.style.setProperty('--nc', String(cells.length));
+  }
+  flipSync(wrap, true);
+  return wrap;
+}
+function flipSync(wrap, fresh) {
+  const t = Math.max(0, Date.now() - (S?.lobbyFigAt ?? 0));
+  const i = Math.floor(t / FLIP_MS) % wrap.children.length;
+  if (!fresh && wrap.dataset.i === String(i)) return;
+  wrap.dataset.i = String(i);
+  [...wrap.children].forEach((fig, j) => {
+    fig.classList.toggle('on', j === i);
+    fig.style.setProperty('--ph', `${fresh ? -(t % FLIP_MS) : 0}ms`); // 描き直しで作った図は途中から、替わった図は始めから
+  });
+}
+setInterval(() => {
+  const w = document.querySelector('.hf-flip');
+  if (w?.isConnected) flipSync(w, false);
+}, 200);
 // 待合室の下に出す、準備OK と投票の欄（ゲストはボタンと投票の一覧、ホストは数だけ）
 /* ---------- 部屋の名前（2026-10-07 本人の決定）: ホストが部屋に名前を付け、部屋の欄・招待の小窓に出す ---------- */
 // Claude の判断: 16文字まで。外から来た文字なので、出すときは textContent か esc() を通す。state の roomName で送る。空なら出さない。
@@ -1107,7 +1140,29 @@ function updateSeason() {
   const home = !el('screen-home').hidden;
   const lobby = !el('screen-play').hidden && S?.viewKey === 'lobby';
   showSeason(home || lobby);
+  updateSky(home || lobby);
 }
+
+// 時刻で変わる空気（2026-11-10 本人の選択。room.md「演出・アニメーションの3回目」）: ホームと待合室の上のほうを、端末の時計でうっすら色づける
+// （朝 5〜10時・昼 10〜16時・夕方 16〜19時・夜 19〜5時。色は style.css の .sky-tint）。本人の指示で見本の最初の形より控えめ。
+// 暗い色の組（color-scheme が dark のスキン。夜・墨と朱・星空）では出さない（本人が推奨を承認）。地の後ろに敷くので、札や欄の上には重ならない。
+// 時刻の変わり目は1分ごとに見直す。Claude の判断: 動きを減らす設定の端末でも出す（色が変わるだけで動かないため。替わるときのふわっとした変化だけ止める）
+let skyEl = null;
+let skyOn = false;
+const skyOf = (h) => (h >= 5 && h < 10 ? 'morning' : h >= 10 && h < 16 ? 'noon' : h >= 16 && h < 19 ? 'evening' : 'night');
+function updateSky(on = skyOn) {
+  skyOn = on;
+  if (!skyEl) {
+    skyEl = document.createElement('div');
+    skyEl.className = 'sky-tint';
+    skyEl.setAttribute('aria-hidden', 'true');
+    document.body.prepend(skyEl);
+  }
+  const dark = getComputedStyle(document.documentElement).colorScheme === 'dark';
+  skyEl.dataset.t = skyOf(new Date().getHours());
+  skyEl.classList.toggle('on', on && !dark);
+}
+setInterval(() => { if (skyEl) updateSky(); }, 60000);
 
 // 開いたときのタイトル（2026-11-09 本人の選択。出すのはその日に初めて開いたときだけ）: 「みんなの遊び場」の字を1文字ずつめくるように出し、
 // 続いてホームの中身をふわっと並べる。1.5秒で終わり、どこかを押せばすぐ終わる。日付は端末に覚える（覚えられない端末では出さない）。
@@ -1362,6 +1417,11 @@ function gameTile(id, fav) {
   t.innerHTML = `<span class="tile-ic" aria-hidden="true">${g.icon}</span><span class="tile-nm">${g.name}</span>`;
   if (fav) t.setAttribute('aria-label', `${g.name}（お気に入り）`);
   t.onclick = () => openGameSheet(id);
+  // ホームの札が動く（2026-11-10 本人の選択。room.md「演出・アニメーションの3回目」）: 触る（PC は上にのせる）と、中の絵が仲間ごとに違う動きをする（動きは style.css の .tile[data-cat]）
+  t.dataset.cat = categoryOf(id) ?? '';
+  const wiggle = () => { const ic = t.firstElementChild; ic.classList.remove('ic-move'); void ic.offsetWidth; ic.classList.add('ic-move'); };
+  t.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') wiggle(); });
+  t.addEventListener('pointerdown', wiggle);
   return t;
 }
 
@@ -1773,6 +1833,7 @@ function keepPlace(key, fn) {
 function render() {
   if (!S) return;
   const flyBefore = flySnap(); // 札や駒がすっと動く（2026-11-06）: 描き直す前の場所（描き直しの途中では測らない）
+  const cleanFrom = cleanSnap(); // 片付けの動き（2026-11-10）: 決着した盤から次の対局へ進むなら、いまの石や駒の写しと場所
   const body = document.body;
   body.style.minHeight = document.documentElement.scrollHeight + 'px';
   // 横に送れる名前の札（party.js の scoreChips の steady）は作り直されるので、送った位置を描き直しの前に覚えて後で戻す（並んでいる順で対応させる）
@@ -1787,6 +1848,7 @@ function render() {
   if (!S) return;
   const view = S.mode === 'online' && (!S.order || (S.lobbyView && !S.isHost)) ? 'lobby' : 'game:' + timerKey();
   if (S.viewKey && S.viewKey !== view) enterFx([el('status'), el('board'), el('controls')], FADE_KF);
+  if (cleanFrom && cleanFrom.next === view) cleanPlay(cleanFrom);
   S.viewKey = view;
   updateSeason();
   // 札や駒がすっと動く（2026-11-06）: 新しく届いた手で描き直したら前の場所から動かし、対局の始めは札を配る。
@@ -1826,6 +1888,7 @@ function autoPlayers() {
 }
 
 function renderPage() {
+  if (S.mode === 'online') noteMembers(); // 人が入ったら札が飛び込む（memberFx）
   if (S.mode === 'online' && S.isHost && !S.order) autoPlayers();
   resultUp = false;
   setBanner(false); // 待合室だけ下で出し直す（出し入れは ads.js がまとめるので、続けて呼んでもちらつかない）
@@ -1860,7 +1923,11 @@ function renderPage() {
   const st = waiting ? null : replay(S);
   if (!waiting && !st) waiting = '対局のデータを読み直しています…';
   if (waiting) {
-    status.innerHTML = `<div class="status-main small">${waiting}</div>`;
+    // つながるまでの待ち画面（2026-11-10 本人の選択。room.md「演出・アニメーションの3回目」）: つないでいる間と部屋の情報を待つ間は、
+    // これから遊ぶゲームの絵（まだ分からなければ 🎲）を上で跳ねさせる。満員・つながらなかったときは出さない
+    const hop = S.mode === 'online' && !S.full && S.conn !== 'error' && !game && !lessMotion()
+      ? `<div class="wait-hop" aria-hidden="true"><span class="wh-ic">${GAMES[S.gameId]?.icon ?? '🎲'}</span><span class="wh-sh"></span></div>` : '';
+    status.innerHTML = `${hop}<div class="status-main small">${waiting}</div>`;
     board.innerHTML = '';
     board.className = 'board';
     return;
@@ -1891,6 +1958,8 @@ function renderPage() {
   S.shownKey = key;
   S.shownLen = S.moves.length;
   const opts = { canMove: canMove(game, st, res), onMove: onBoardMove, fresh, me: watchSeat(game), view: boardView(game) };
+  const slow = fresh && res && slowWanted(game, prevLen); // 決め手のスロー（2026-11-10）: 線を引くのを盤を描く前に遅らせておく
+  if (slow) lineHold.until = Date.now() + SLOW_LINE - 160; // winLine はこの時刻からいつもの 160ms 待って引く
   if (game.multi) {
     Object.assign(opts, {
       names: S.order.map(nameOf),
@@ -1904,10 +1973,14 @@ function renderPage() {
     });
   }
   game.render(board, st, opts);
+  lineHold.until = 0;
+  const hold = slow ? slowFinish(board) : 0;
+  rollNums(status); // 点の数字が回る（2026-11-10）
+  rollNums(board);
   if (beginner && opts.canMove && BEG_GAMES.has(S.gameId) && [...board.querySelectorAll('.playable, .usable, button')].some((e) => getComputedStyle(e).getPropertyValue('--beg').trim() === '1')) {
     status.insertAdjacentHTML('beforeend', '<div class="status-sub beg-hint">🔰 光っている所が、いま選べる所です</div>');
   }
-  if (fresh) moveSound(game, st, res, prevLen, opts.canMove);
+  if (fresh) moveSound(game, st, res, prevLen, opts.canMove, hold);
   if (!opts.canMove && S.couldMove !== false) S.waitFrom = Date.now();
   S.couldMove = opts.canMove;
 
@@ -1944,12 +2017,15 @@ function renderPage() {
 // Claude の判断: 番が決まらない場面（全員が同時に動く・turn が null）と決着のあとは出さない。席の印はゲームの players（○・× など）。
 // 色の名前（黒・白・赤…）は色の丸にする。カードゲームは印が無いので席の番号。CPU は名前に 🤖 が付く（nameOf）。逆回り（いろあわせの dir）なら矢印も逆。
 const COLOR_DOT = { 黒: '⚫', 白: '⚪', 赤: '🔴', 黄: '🟡', 緑: '🟢', 紫: '🟣', 青: '🔵' };
+// 2026-11-10 から、決着のあとも勝った人がいれば帯を出し、勝った人の札に王冠を落とす（下の「前の対局の勝者に王冠」。いまの番の印と「…」は出さない）
 function turnBand(game, st, res) {
-  if (res || game.realtime || !game.turn) return null;
-  const t = game.turn(st);
-  if (!Number.isInteger(t) || t < 0) return null;
+  if (game.realtime || !game.turn) return null;
+  const t = res ? -1 : game.turn(st);
+  if (!res && (!Number.isInteger(t) || t < 0)) return null;
   const n = S.mode === 'online' ? S.order?.length ?? 0 : game.multi ? 0 : boardSeats(S.gameId, S.rules);
   if (n < 2 || t >= n) return null;
+  const crowned = res ? new Set(winnersOf(res).filter((p) => p < n)) : null;
+  if (crowned && !crowned.size) return null; // 引き分けは今までどおり出さない
   const me = myPlayer();
   const band = document.createElement('div');
   band.className = 'turn-band';
@@ -1985,6 +2061,7 @@ function turnBand(game, st, res) {
       card.append(dots);
     }
     if (S.mode === 'online') addFlame(card, S.order[i]);
+    if (crowned?.has(i)) addCrown(card);
     band.append(card);
   });
   if (S.mode === 'online') flameSeen = { key: S.streak?.key ?? null, n: { ...(S.streak?.wins ?? {}) } };
@@ -1996,6 +2073,21 @@ function turnBand(game, st, res) {
 // 増えていれば炎をふくらませ、止まっていれば（2以上 → 2未満）煙を1回出す。顔ぶれやゲームが変わった（連勝の鍵が変わった）ときは比べない（Claude の判断）。
 // 順番の帯の無いゲーム（全員が同時に動く早押しなど）には出ない（状態の欄の「🔥 ○○ 3連勝中」は今までどおり）
 let flameSeen = { key: null, n: {} };
+// 前の対局の勝者に王冠（2026-11-10 本人の選択。room.md「演出・アニメーションの3回目」）: 決着したら、勝った人の順番の帯の札の角に 👑 を落とし、
+// 次の対局が始まるまで（結果の画面の間）残す。連勝の炎と両方出す（本人が推奨を承認）。落ちる動きは決着ごとに1回で、描き直しても続きから（落ち始めた時刻を覚える）。
+// Claude の判断: 決め手のスロー（slowFinish）の間は落とさず、判子と同じころに落とす
+let crownAt = { key: null, t: 0 };
+function addCrown(card) {
+  const key = `${timerKey()}:${S.moves.length}`;
+  if (crownAt.key !== key) crownAt = { key, t: Date.now() };
+  const c = document.createElement('span');
+  c.className = 'turn-crown';
+  c.setAttribute('aria-hidden', 'true'); // 勝った人は状態の欄に出ている
+  c.textContent = '👑';
+  c.style.animationDelay = `${crownAt.t - Date.now()}ms`;
+  card.classList.add('won');
+  card.append(c);
+}
 function addFlame(card, id) {
   const st = S.streak;
   if (!st || st.key !== streakKey() || !id) return;
@@ -2541,6 +2633,154 @@ function endStamp(game, res, me, end, delay) {
   }, delay);
 }
 
+// 決め手のスロー（2026-11-10 本人の選択。room.md「演出・アニメーションの3回目」）: 盤のゲームで勝負が決まった手が新しく届いたとき、
+// まわりを暗くして盤をその手へ少し寄せ、石がゆっくり落ちて盤が小さく揺れ、一拍おいてから線（util.js の lineHold）と判子・勝ち負けの音を出す。
+// どこかを押すとすぐ最後まで飛ばす。寄せる先はゲームが最後の手の物に付ける data-last（"still" は寄せるだけで落とさない。駒が滑ってくる将棋・はさみ将棋、
+// 列を落ちてくる四目並べ・立体四目並べ）。Claude の判断: 付けたのはマルバツ・四目並べ・立体四目並べ・リバーシ・五目並べ・はさみ将棋・将棋
+// （点と線・マンカラ・海戦ゲームは決め手が1つの石でないので付けない）。寄せるのは 1.04 倍まで（スマホ幅で盤が画面の外へはみ出さないように）。
+// 盤は描き直しで作り直されるので、途中で描き直されたら石の動きはそこで終わる（寄せと暗さは盤の入れ物と body に付けてあるので残る）
+const SLOW_GAMES = new Set(['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'hasami', 'shogi']);
+const SLOW_LAND = 560; // 石が着くまで
+const SLOW_LINE = 900; // 線を引き始めるまで（winLine のいつもの 160ms を含む）
+const SLOW_HOLD = 1250; // 勝ち負けの音・判子まで
+let slowNow = null; // 決め手のスローの途中 { key, jobs, clean }
+function slowWanted(game, prevLen) {
+  if (game.multi || game.live || !SLOW_GAMES.has(game.id) || lessMotion()) return false;
+  const before = replay({ ...S, moves: S.moves.slice(0, prevLen) });
+  return !!before && !game.result(before);
+}
+function slowFinish(board) {
+  slowSkip();
+  const target = board.querySelector('[data-last]');
+  const r = target?.getBoundingClientRect();
+  if (!r?.width) return 0;
+  const br = board.getBoundingClientRect();
+  const cx = r.left + r.width / 2;
+  const cy = r.top + r.height / 2;
+  const dim = document.createElement('div');
+  dim.className = 'slow-dim';
+  dim.setAttribute('aria-hidden', 'true');
+  dim.style.setProperty('--x', cx.toFixed(0) + 'px');
+  dim.style.setProperty('--y', cy.toFixed(0) + 'px');
+  dim.style.setProperty('--r', Math.max(34, r.width * 1.2).toFixed(0) + 'px');
+  document.body.append(dim);
+  board.style.transformOrigin = `${(cx - br.left).toFixed(0)}px ${(cy - br.top).toFixed(0)}px`;
+  board.style.transition = 'transform .45s cubic-bezier(.3, .7, .3, 1)';
+  board.style.transform = 'scale(1.04)';
+  const drop = target.dataset.last !== 'still';
+  if (drop) {
+    target.animate([
+      { transform: 'translateY(-22px) scale(1.6)', opacity: 0 },
+      { opacity: 1, offset: 0.6 },
+      { transform: 'none', opacity: 1 },
+    ], { duration: SLOW_LAND, easing: 'cubic-bezier(.5, 0, .75, 0)', fill: 'backwards' });
+  }
+  const s = { key: timerKey(), jobs: [] };
+  s.clean = () => {
+    if (s.cleaned) return;
+    s.cleaned = true;
+    document.removeEventListener('pointerdown', slowSkip, true);
+    dim.classList.add('out');
+    setTimeout(() => dim.remove(), 320);
+    board.style.transition = 'transform .3s ease';
+    board.style.transform = '';
+    setTimeout(() => { if (!board.style.transform) { board.style.transition = ''; board.style.transformOrigin = ''; } }, 340);
+    if (slowNow === s) slowNow = null;
+  };
+  slowNow = s;
+  document.addEventListener('pointerdown', slowSkip, true);
+  if (drop) slowAt(SLOW_LAND, () => board.animate([{ translate: '0 0' }, { translate: '0 2px' }, { translate: '0 -1px' }, { translate: '0 0' }], { duration: 220, easing: 'ease-out' }), false);
+  slowAt(SLOW_HOLD, s.clean, true, true);
+  crownLater(SLOW_HOLD); // 王冠（addCrown。帯は盤より先に描いてある）も判子と同じころに落とす
+  return SLOW_HOLD;
+}
+function crownLater(ms) {
+  crownAt.t = Date.now() + ms;
+  for (const c of document.querySelectorAll('.turn-crown')) c.style.animationDelay = `${ms}ms`;
+}
+// ms 後に fn。決め手のスローの途中でなければすぐ。skip = 押して飛ばしたときも（すぐ）呼ぶか、always = 次の対局へ進んでいても呼ぶか
+function slowAt(ms, fn, skip = true, always = false) {
+  const s = slowNow;
+  if (!ms || !s) { if (skip) fn(); return; }
+  const job = { fn, skip, always, done: false };
+  job.t = setTimeout(() => {
+    job.done = true;
+    if (always || (S && timerKey() === s.key)) fn();
+  }, ms);
+  s.jobs.push(job);
+}
+function slowSkip() {
+  const s = slowNow;
+  if (!s) return;
+  slowNow = null;
+  finishLine();
+  crownLater(0);
+  for (const job of s.jobs) {
+    if (job.done) continue;
+    job.done = true;
+    clearTimeout(job.t);
+    if (job.skip && (job.always || (S && timerKey() === s.key))) setTimeout(job.fn, 0); // 押した手の pointerdown が、出したばかりの判子をすぐ消さないように
+  }
+  s.clean();
+}
+
+// 点の数字が回る（2026-11-10 本人の選択。room.md「演出・アニメーションの3回目」）: ゲームが data-roll（鍵）と data-v（数）を付けた数字は、
+// 前に出した数から変わったら、パッと変えずに数え上がる・数え下がる形で変え、増えた分・減った分（+6・−5）を小さく浮かべる。
+// 本人の指示で、数え終わりに数字をふくらませる強調はしない。盤や状態の欄は描き直しのたびに作り直されるので、鍵ごとに数え始めた時刻を覚え、
+// 描き直した数字も同じ時刻の値から続ける。鍵は対局ごとに分ける（次の対局の始めの数からは数えない）。data-comma があれば 25,000 のように区切る。
+// Claude の判断: 付けたのはリバーシの石の数と麻雀の持ち点（パーティーゲームなどの点数の札は前から「+3」で数え上がる）。数える時間は 0.5秒、区切りのある数は 0.9秒
+const rolls = new Map(); // 鍵 → { from, to, t, ms }
+let rollRaf = 0;
+function rollNums(root) {
+  const quiet = lessMotion();
+  const now = performance.now();
+  for (const e of root.querySelectorAll('[data-roll]')) {
+    const v = Number(e.dataset.v);
+    if (!Number.isFinite(v)) continue;
+    const key = `${timerKey()}:${e.dataset.roll}`;
+    const r = rolls.get(key);
+    if (!r) { rolls.set(key, { from: v, to: v, t: 0, ms: 0 }); continue; }
+    if (r.to !== v) {
+      const cur = rollAt(r, now);
+      Object.assign(r, { from: cur, to: v, t: now, ms: quiet ? 0 : 'comma' in e.dataset ? 900 : 500, d: v - cur, done: quiet });
+    }
+    if (rollAt(r, now) !== v) {
+      e.textContent = rollText(rollAt(r, now), e);
+      const age = now - r.t;
+      if (age < 1000 && r.d) {
+        const d = document.createElement('span');
+        d.className = 'roll-d ' + (r.d > 0 ? 'up' : 'dn');
+        d.setAttribute('aria-hidden', 'true');
+        d.textContent = (r.d > 0 ? '+' : '−') + rollText(Math.abs(r.d), e);
+        d.style.animationDelay = `${-age}ms`;
+        e.append(d);
+      }
+    }
+  }
+  if (rolls.size > 200) rolls.delete(rolls.keys().next().value);
+  if (!rollRaf) rollRaf = requestAnimationFrame(rollStep);
+}
+function rollAt(r, now) {
+  if (!r.ms || now - r.t >= r.ms) return r.to;
+  const k = (now - r.t) / r.ms;
+  return Math.round(r.from + (r.to - r.from) * (1 - (1 - k) ** 3));
+}
+const rollText = (x, e) => ('comma' in e.dataset ? (Math.round(x / 100) * 100).toLocaleString() : String(x));
+function rollStep() {
+  rollRaf = 0;
+  const now = performance.now();
+  let more = false;
+  for (const e of document.querySelectorAll('[data-roll]')) {
+    const r = S && rolls.get(`${timerKey()}:${e.dataset.roll}`);
+    if (!r || r.done) continue;
+    if (now - r.t >= r.ms) r.done = true; else more = true; // 終わりの数を必ず1回書く（画面が隠れていて間が飛んでも）
+    const n = e.firstChild;
+    const txt = rollText(rollAt(r, now), e);
+    if (n?.nodeType === 3) n.nodeValue = txt; else e.prepend(txt);
+  }
+  if (more) rollRaf = requestAnimationFrame(rollStep);
+}
+
 // 結果の表彰台（2026-11-09 本人の選択。room.md「演出・アニメーションの2回目」）: 点数で競うゲームで3人以上のとき、判子のあとに
 // 3位→2位→1位の順に台がせり上がり、点数が0から数え上がり、1位に王冠が落ちる。4位からは下に1行で。押せばすぐ消える（showFx）。
 // Claude の判断: 「点数で競う」は結果が席ごとの点（scores。ranking があるゲームは pts も）を持つゲーム。チーム戦（teams）と引き分け（draw）は出さない。
@@ -2646,6 +2886,65 @@ const FADE_KF = [{ opacity: 0 }, { opacity: 1 }];
 function enterFx(nodes, kf) {
   if (lessMotion()) return;
   for (const n of [nodes].flat()) n?.animate(kf, { duration: 260, easing: 'cubic-bezier(.2, .8, .2, 1)' });
+}
+
+// 片付けの動き（2026-11-10 本人の選択。room.md「演出・アニメーションの3回目」）: 決着した盤から同じゲームの次の対局へ進んだとき（もう一回・勝ち残りなど）、
+// 前の盤の石や駒の写しを同じ場所に重ね、ばらばらの順で盤の右下に出る箱へ吸いこませる（新しい盤はその下でいつもどおり出る）。1秒ほどで、どこかを押せばすぐ消える。
+// 写しは画面に固定した入れ物（盤と同じ class を付け、盤の地・枠は style.css の .clean-fx で消す）に入れるので、途中で描き直しても動きは続く。
+// Claude の判断: 盤のゲームだけ（カードゲームは次の対局の始めに札を配る動きがあり、重ねるとごちゃつくため付けない）。3人将棋（盤を SVG で描く）と
+// 点と線の線・海戦ゲームの船は CLEAN_SEL に入れていないので片付けない。動かすのは個別の translate・scale（駒の向きの transform を崩さないように）。写すのは120個まで
+const CLEAN_SEL = '.rv-disc, .gm-stone, .c4-disc, .cb-disc, .ttt-cell > svg, .gob-pc, .sg-piece, .mc-stones > *';
+function cleanSnap() {
+  if (!resultUp || !S?.viewKey?.startsWith(`game:${S.gameId}:`) || lessMotion()) return null;
+  const game = GAMES[S.gameId];
+  if (!game || game.multi || game.live) return null;
+  const next = S.mode === 'online' && (!S.order || (S.lobbyView && !S.isHost)) ? 'lobby' : 'game:' + timerKey();
+  if (next === S.viewKey || !next.startsWith(`game:${S.gameId}:`)) return null;
+  const board = el('board');
+  const items = [...board.querySelectorAll(CLEAN_SEL)].slice(0, 120)
+    .map((e) => ({ e, r: e.getBoundingClientRect() }))
+    .filter(({ r }) => r.width > 0 && r.bottom > 0 && r.top < innerHeight)
+    .map(({ e, r }) => ({ e: e.cloneNode(true), r }));
+  return items.length ? { next, cls: board.className, br: board.getBoundingClientRect(), items } : null;
+}
+function cleanPlay(c) {
+  const fx = document.createElement('div');
+  fx.className = c.cls + ' clean-fx';
+  fx.setAttribute('aria-hidden', 'true');
+  const bx = Math.min(innerWidth - 40, c.br.right - 30);
+  const by = Math.min(innerHeight - 30, c.br.bottom - 18);
+  const box = document.createElement('div');
+  box.className = 'clean-box';
+  box.style.left = `${(bx - 29).toFixed(0)}px`;
+  box.style.top = `${(by - 23).toFixed(0)}px`;
+  const n = c.items.length;
+  const gap = Math.min(22, 480 / n);
+  const order = c.items.map((x) => [x, Math.random()]).sort((a, b) => a[1] - b[1]).map(([x]) => x);
+  order.forEach(({ e, r }, k) => {
+    for (const a of ['data-fly', 'data-fly-from', 'data-last', 'id']) e.removeAttribute(a);
+    Object.assign(e.style, { position: 'fixed', left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px`, margin: '0', animation: 'none', transition: 'none' });
+    fx.append(e);
+    const dx = (bx - (r.left + r.width / 2)).toFixed(1);
+    const dy = (by - (r.top + r.height / 2)).toFixed(1);
+    e.animate([
+      { translate: '0 0', scale: '1', opacity: 1 },
+      { translate: `${dx}px ${dy}px`, scale: '.4', opacity: 1, offset: 0.85 },
+      { translate: `${dx}px ${dy}px`, scale: '.3', opacity: 0 },
+    ], { duration: 460, delay: 120 + k * gap, easing: 'cubic-bezier(.5, 0, .7, .4)', fill: 'both' });
+  });
+  fx.append(box); // 箱は写しより前に出す（吸いこまれて見えるように）
+  document.body.append(fx);
+  const total = 120 + n * gap + 460 + 260;
+  box.style.setProperty('--clean-ms', `${total.toFixed(0)}ms`);
+  let gone = false;
+  const off = () => {
+    if (gone) return;
+    gone = true;
+    document.removeEventListener('pointerdown', off, true);
+    fx.remove();
+  };
+  document.addEventListener('pointerdown', off, true);
+  setTimeout(off, total);
 }
 
 // 始まりの顔合わせ: オンラインの対局の始め（手がまだ無いところを初めて描いたとき）に、顔ぶれを1秒ほど出してから「スタート！」。
@@ -2867,7 +3166,7 @@ function flyAnim(e, f, to) {
 
 // 新しく打たれた手の音。何手かまとめて届いたときは最後の手の音だけ。対局が終わったら勝ち負けの音。
 // 音はゲームの sound(前の局面, 今の局面, 手, 自分の番号) が名前で返す（無ければ盤のゲームは place、カードゲームは card）
-function moveSound(game, st, res, prevLen, mine) {
+function moveSound(game, st, res, prevLen, mine, hold = 0) {
   const before = replay({ ...S, moves: S.moves.slice(0, prevLen) });
   if (!before) return;
   const me = myPlayer();
@@ -2877,11 +3176,15 @@ function moveSound(game, st, res, prevLen, mine) {
     let said = null; // 麻雀の最後の局の「ロン！」など
     try { said = game.sound?.(before, st, m, me); } catch { /* 終局の手に音の決めごとが合わなくても、勝ち負けの音は鳴らす */ }
     const end = endSound(res, me);
-    if (isVoice(said)) { play(said); setTimeout(() => play(end), 700); } else play(end);
-    if (end === 'win' || end === 'lose') haptic(end);
-    if (end === 'win') confetti(); // 勝ちの音を鳴らす画面には紙吹雪
-    endStamp(game, res, me, end, isVoice(said) ? 700 : 0); // 決着の判子（勝ち負けの音と一緒に）
-    greet('end', isVoice(said) ? 1900 : 1200);
+    // 決め手のスロー（slowFinish）のときは、石が着いたときに置いた音、一拍おいてから勝ち負けの音・判子（押して飛ばせばすぐ）
+    if (hold) slowAt(SLOW_LAND, () => play(said && !isVoice(said) ? said : 'place'), false);
+    slowAt(hold, () => {
+      if (isVoice(said)) { play(said); setTimeout(() => play(end), 700); } else play(end);
+      if (end === 'win' || end === 'lose') haptic(end);
+      if (end === 'win') confetti(); // 勝ちの音を鳴らす画面には紙吹雪
+      endStamp(game, res, me, end, isVoice(said) ? 700 : 0); // 決着の判子（勝ち負けの音と一緒に）
+      greet('end', isVoice(said) ? 1900 : 1200);
+    });
     return;
   }
   // 手が2つ以上まとめて届いたとき、前は最後の1手の音だけ鳴らしていたので、最後がほかの人の「鳴らさない」手だと無音になった（2026-10-26 本人の声「効果音がならないゲームがある」）。
@@ -2958,12 +3261,12 @@ function renderLobby(game) {
     : '<div class="status-main">待合室</div><div class="status-sub">部屋を作った人が始めるのを待っています…<br>準備ができたら「準備OK」を押してください。</div>';
 
   const { humans, watchers, cpus, seats, max } = lineup(game);
-  const row = (text, cls = '') => `<li class="${cls}">${text}</li>`;
+  const row = (text, cls = '', m = '') => `<li class="${cls}"${m ? ` data-m="${esc(m)}"` : ''}>${text}</li>`;
   const short = game.noCpu && humans.length + cpus < game.minPlayers;
   let html = `<p class="lobby-note">${seats ? `${seats}人` : playersText(game)}で遊べます。${game.noCpu ? (cpus ? `CPU は${cpus}人だけ入ります。` : 'CPU は入れません。') : '足りない分は CPU が入ります。'}</p><ul class="lobby-list">`;
   for (const id of humans) {
     const marks = [id === S.myId ? 'あなた' : '', id === S.members[0] ? '部屋を作った人' : ''].filter(Boolean).join('・');
-    html += row(`${esc(nameOf(id))}${marks ? ` <small>（${marks}）</small>` : ''}`);
+    html += row(`${esc(nameOf(id))}${marks ? ` <small>（${marks}）</small>` : ''}`, '', id);
   }
   for (let i = 1; i <= cpus; i++) html += row(`CPU${i}`, 'cpu');
   html += '</ul>';
@@ -2976,6 +3279,7 @@ function renderLobby(game) {
     : `<p class="lobby-total">${humans.length + cpus}人で遊びます</p>`;
   board.className = 'board lobby';
   board.innerHTML = html;
+  memberFx(board.querySelector('.lobby-list'));
   board.prepend(lobbyGameCard(game));
   if (S.isHost && S.members.length > 1) board.append(benchPanel(game));
   const tally = tallyLine();
@@ -3014,6 +3318,18 @@ function renderBoardLobby(game) {
     : '<div class="status-main">待合室</div><div class="status-sub">部屋を作った人が始めるのを待っています…<br>準備ができたら「準備OK」を押してください。</div>';
   board.className = 'board lobby';
   board.innerHTML = `<p class="lobby-note">${n}人で対局します。ほかの人は観戦します。</p>`;
+  // 部屋の人の名前の札（2026-11-10。人が入ったら札が飛び込む（memberFx）ために、盤のゲームの待合室にも並べた）
+  const faces = document.createElement('ul');
+  faces.className = 'lobby-faces';
+  faces.setAttribute('aria-label', '部屋の人');
+  for (const id of S.members) {
+    const li = document.createElement('li');
+    li.dataset.m = id;
+    li.textContent = nameOf(id) + (id === S.myId ? '（あなた）' : '');
+    faces.append(li);
+  }
+  board.append(faces);
+  memberFx(faces);
   board.prepend(lobbyGameCard(game));
   const pick = boardPick();
   const label = (v) => (v === 'cpu' ? 'CPU' : nameOf(v) + (v === S.myId ? '（あなた）' : ''));
@@ -3287,6 +3603,43 @@ function rulesPanel(game) {
     det.append(label);
   }
   return det;
+}
+
+// 人が入ったら札が飛び込む（2026-11-10 本人の選択。room.md「演出・アニメーションの3回目」）: 待合室の人の札（data-m に人の id）のうち、
+// 入ったばかりの人の札は上から落ちて収まり、出た人は 👋 と手を振ってから消える（本人の指示で短く。0.55秒）。
+// 待合室は何度も描き直すので、入った・出た時刻を覚え（noteMembers。描き直しのたびに部屋の人を見比べる）、経過を animation-delay に入れて続きから動かす。
+// 出た人の札は覚えた名前で写しを足し、時間がたったら消す（部屋の人には入っていないので、次の描き直しでは作られない）。
+// Claude の判断: 部屋に入った最初の描き直しでは動かさない（もともといた人まで落ちてこないように）。入り直し（replaceMember）も出て入った形で動く
+const MEMBER_FX_MS = 550;
+const memberSeen = { room: null, ids: [], at: {}, left: [] };
+function noteMembers() {
+  const now = Date.now();
+  if (memberSeen.room !== S.code) Object.assign(memberSeen, { room: S.code, ids: S.members.slice(), at: {}, left: [] });
+  for (const id of S.members) if (!memberSeen.ids.includes(id)) memberSeen.at[id] = now;
+  for (const id of memberSeen.ids) if (!S.members.includes(id)) memberSeen.left.push({ id, name: nameOf(id), t: now });
+  memberSeen.ids = S.members.slice();
+  memberSeen.left = memberSeen.left.filter((x) => now - x.t < MEMBER_FX_MS);
+}
+function memberFx(list) {
+  if (!list || lessMotion()) return;
+  const now = Date.now();
+  for (const li of list.querySelectorAll('[data-m]')) {
+    const age = now - (memberSeen.at[li.dataset.m] ?? -Infinity);
+    if (age < MEMBER_FX_MS) { li.classList.add('m-enter'); li.style.setProperty('--age', `${age}ms`); }
+  }
+  for (const x of memberSeen.left) {
+    const age = now - x.t;
+    const li = document.createElement('li');
+    li.className = 'm-leave';
+    li.style.setProperty('--age', `${age}ms`);
+    li.setAttribute('aria-hidden', 'true');
+    const wave = document.createElement('span');
+    wave.className = 'm-wave';
+    wave.textContent = '👋';
+    li.append(wave, ' ', x.name); // 名前は外から来た文字なので textContent
+    list.append(li);
+    setTimeout(() => li.remove(), Math.max(0, MEMBER_FX_MS - age));
+  }
 }
 
 // ホストだけに出す「部屋の人」。知らない人が入ってきたら退出させられる
@@ -4088,12 +4441,12 @@ function openSkins() {
         if (!ok && kind === 'unlock') b.insertAdjacentHTML('beforeend', `<span class="skin-need">🔒 ${esc(needText(sk, rec).text)}</span>`);
         if (!ok && kind === 'buy') b.insertAdjacentHTML('beforeend', `<span class="skin-need">${prices[sk.id] === undefined ? '値段を確かめています…' : prices[sk.id] ? `🛒 ${esc(prices[sk.id])}` : 'いまは買えません'}</span>`);
         b.onclick = async () => {
-          if (ok) { setSkin(sk.id); draw(); return; }
+          if (ok) { setSkin(sk.id); updateSky(); draw(); return; }
           if (kind !== 'buy' || busy || !prices[sk.id]) return;
           busy = true;
           const r = await buy(productOf(sk));
           busy = false;
-          if (r === 'bought') { setSkin(sk.id); toast(`「${sk.name}」を買いました。ありがとうございます`); }
+          if (r === 'bought') { setSkin(sk.id); updateSky(); toast(`「${sk.name}」を買いました。ありがとうございます`); }
           else if (r === 'pending') toast('承認を待っています。承認されると使えるようになります');
           else if (r === 'error') toast('買えませんでした。時間をおいてもう一度お試しください');
           if (pop.isConnected) draw();

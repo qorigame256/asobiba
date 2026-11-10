@@ -12,7 +12,7 @@
 // 全員が同時に動く（realtime）。同じ手が2回来ても、札はもう手札に無い・同じ回には1回しか押せないので2回目は弾かれる。
 
 import { mulberry32, shuffle, esc } from './util.js';
-import { makeDeck, rankOf, rankLabel, cardEl, backEl, cardLabel } from './cards.js';
+import { makeDeck, rankOf, rankLabel, cardEl, backEl, cardLabel, fanHand } from './cards.js';
 import { since, timeBar } from './party.js';
 
 const MAX_PLAYS = 400;
@@ -314,6 +314,7 @@ export default {
         }
         row.append(e);
       }
+      fanHand(row, !!can); // 手札を扇形に持つ（2026-11-10）
       root.append(head);
       if (say) root.append(say);
       root.append(row);

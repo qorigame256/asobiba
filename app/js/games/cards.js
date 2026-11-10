@@ -46,6 +46,25 @@ export function backEl() {
   return e;
 }
 
+// 手札を扇形に持つ（2026-11-10 の UI・演出・アニメーションの案の3回目。本人が決めたことは card-games.md）。
+// box（自分の手札を並べた入れ物。札を全部入れてから呼ぶ）の札をゆるい扇形にする。up = いま自分が札を選べる（手札を持ち上げ、光っている札をもう少し浮かせる）。
+// でなければ少し沈めて暗くする。重なり具合は style.css の .fan-hand が入れ物の幅と札の数から決める（描き直しの途中で長さを測らないため）。
+// 傾きは個別の rotate・translate で付け、transform は使わない（札が飛ぶ動き（main.js の flyPlay）・選んだ札を上げる transform とぶつからないように）。
+// Claude の判断: 両端の傾きは合わせて26度まで・1枚ずつは4度まで、両端の下がりは9px
+export function fanHand(box, up) {
+  const items = [...box.children];
+  const n = items.length;
+  box.classList.add('fan-hand', up ? 'fan-up' : 'fan-down');
+  box.style.setProperty('--n', String(Math.max(2, n)));
+  const half = Math.max(1, (n - 1) / 2);
+  const step = Math.min(4, 26 / Math.max(1, n - 1));
+  items.forEach((e, i) => {
+    const t = i - (n - 1) / 2;
+    e.style.setProperty('--fr', (t * step).toFixed(2) + 'deg');
+    e.style.setProperty('--fy', ((t / half) ** 2 * 9).toFixed(1) + 'px');
+  });
+}
+
 // 札を裏返す動き（2026-11-06 の UI・演出・アニメーションの案。神経衰弱・ブラックジャックの親の伏せ札・ポーカーの見せ合い。本人が決めたことは card-games.md・extra-games.md）。
 // 表で描いた札 e に、裏から表へくるっと返る動きを付ける（style.css の .pcard.turn-up。裏の模様は ::after で重ね、半分回ったところで消す）。
 // 盤は描き直しのたびに作り直されるので、返し始めた時刻を key ごとに覚え、返している間に描き直したら続きから返す。

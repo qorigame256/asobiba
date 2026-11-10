@@ -81,10 +81,17 @@ export const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', 
 // 位置は描き終えてから測る（requestAnimationFrame。描き直しの途中で長さを読まない決まりに当たらないように）。動きを減らす設定の端末では伸ばさない
 const LINE_MS = 410; // style.css の .win-line の2本（.34s と .05s 遅れの .36s）が引き終わるまで
 let lineAt = { key: null, t: -Infinity };
+// 決め手のスロー（2026-11-10。main.js の slowFinish）: 線を引き始めるのをこの時刻まで遅らせる（main.js が盤を描く前に決める）。
+// finishLine はすぐ引き終えた形にする（押して飛ばしたとき）
+export const lineHold = { until: 0 };
+export function finishLine() {
+  lineAt = { ...lineAt, t: Date.now() - 10000 };
+  if (typeof document !== 'undefined') for (const p of document.querySelectorAll('svg.win-line path')) p.style.animation = 'none';
+}
 export function winLine(box, cells, fresh, key, delay = 160) {
   if (cells.length < 2 || typeof requestAnimationFrame !== 'function') return;
   const now = Date.now();
-  if (fresh && !(lineAt.key === key && now - lineAt.t < 3000)) lineAt = { key, t: now };
+  if (fresh && !(lineAt.key === key && now - lineAt.t < 3000)) lineAt = { key, t: Math.max(now, lineHold.until) };
   requestAnimationFrame(() => {
     if (!box.isConnected || cells.some((c) => !c.isConnected)) return; // 描き直しで外れた
     const R = box.getBoundingClientRect();

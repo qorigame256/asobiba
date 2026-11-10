@@ -65,6 +65,14 @@
 :root:is([data-skin="yoru"], [data-skin="sumi"], [data-skin="hoshi"]) :is([data-game="gomoku"], [data-game="reversi"]) .pl.p0 { text-shadow: 0 0 1px #fff, 0 0 3px #fff; }
 :root:is([data-skin="yoru"], [data-skin="sumi"], [data-skin="hoshi"]) { --red-ink: #ff8a7a; }
 body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: var(--bg-img, none); pointer-events: none; }
+/* 時刻で変わる空気（2026-11-10。main.js の updateSky）。地の後ろ（body::before の上）に敷く。本人の指示で控えめ（見本の直した版と同じ濃さ） */
+.sky-tint { position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: 0; transition: opacity 1.4s ease; }
+.sky-tint.on { opacity: 1; }
+.sky-tint[data-t="morning"] { background: linear-gradient(180deg, rgba(255, 205, 160, .34), rgba(255, 232, 205, .1) 40%, transparent 68%); }
+.sky-tint[data-t="noon"] { background: linear-gradient(180deg, rgba(170, 215, 255, .22), transparent 52%); }
+.sky-tint[data-t="evening"] { background: linear-gradient(180deg, rgba(255, 140, 105, .3), rgba(255, 185, 150, .12) 42%, transparent 75%); }
+.sky-tint[data-t="night"] { background: radial-gradient(1px 1px at 12% 6%, rgba(255, 255, 255, .7) 50%, transparent 51%), radial-gradient(1px 1px at 41% 3%, rgba(255, 255, 255, .7) 50%, transparent 51%), radial-gradient(1px 1px at 83% 5%, rgba(255, 255, 255, .7) 50%, transparent 51%), linear-gradient(180deg, rgba(35, 50, 110, .36), rgba(60, 70, 125, .1) 45%, transparent 80%); }
+@media (prefers-reduced-motion: reduce) { .sky-tint { transition: none; } }
 
 * { box-sizing: border-box; }
 
@@ -177,6 +185,19 @@ p { margin: 0; }
 .tile.fav::after { content: "★"; position: absolute; top: 2px; right: 6px; font-size: .8rem; color: #c9a227; }
 .tile.not-ready { opacity: .55; }
 @media (prefers-reduced-motion: reduce) { .tile { transition: none; } .tile:active { transform: none; } }
+/* ホームの札が動く（2026-11-10。main.js の gameTile が触ったときに .ic-move を付け直す）: 盤はくるりと回る・カードはめくれる・パーティーは跳ねる・早押しは震える・アクションは弾む */
+.tile { perspective: 300px; }
+.tile[data-cat="board"] .tile-ic.ic-move { animation: ic-spin .7s cubic-bezier(.3, .7, .3, 1); }
+.tile[data-cat="card"] .tile-ic.ic-move { animation: ic-flip .55s ease-in-out; transform-origin: 20% 90%; }
+.tile[data-cat="party"] .tile-ic.ic-move { animation: ic-hop .6s ease-out; transform-origin: 50% 100%; }
+.tile[data-cat="quick"] .tile-ic.ic-move { animation: ic-buzz .45s linear; }
+.tile[data-cat="action"] .tile-ic.ic-move { animation: ic-boing .6s cubic-bezier(.3, 1.8, .5, 1); }
+@keyframes ic-spin { to { transform: rotateY(360deg); } }
+@keyframes ic-flip { 40% { transform: rotate(-14deg) translateY(-3px); } 70% { transform: rotate(6deg); } }
+@keyframes ic-hop { 15% { transform: scale(1.12, .86); } 45% { transform: translateY(-10px) rotate(-12deg); } 70% { transform: translateY(0) scale(1.08, .9); } }
+@keyframes ic-buzz { 10%, 50%, 90% { transform: translateX(-2px) rotate(-6deg); } 30%, 70% { transform: translateX(2px) rotate(6deg); } }
+@keyframes ic-boing { 30% { transform: scale(1.3); } }
+@media (prefers-reduced-motion: reduce) { .tile .tile-ic.ic-move { animation: none; } }
 /* 札を押すと下から出る小窓（小窓の仕組みは .invite-pop と同じ） */
 .invite-pop.sheet-pop { align-items: flex-end; } /* .invite-pop（後ろに書いてある）の真ん中寄せより強くする */
 .sheet-pop > .game-sheet { max-width: 460px; display: grid; gap: 10px; text-align: left; border-radius: 18px; animation-name: sheet-up; }
@@ -230,6 +251,16 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .fx-clip { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 55; }
 .fx-clip.out { animation: fx-out .3s ease-in forwards; }
 @keyframes fx-out { to { opacity: 0; } }
+/* 片付けの動き（2026-11-10。main.js の cleanPlay）: 前の盤の石や駒の写しを入れる、画面に固定した入れ物。盤と同じ class を付けて石や駒の見た目を保ち、
+   盤そのものの地・枠・並べ方はここで消す（!important は、ゲームごとの .board.xx の指定より強くするため） */
+.board.clean-fx { position: fixed !important; inset: 0 !important; width: auto !important; height: auto !important; margin: 0 !important; padding: 0 !important; display: block !important; background: none !important; border: 0 !important; box-shadow: none !important; transform: none !important; pointer-events: none; z-index: 40; overflow: hidden; }
+.board.clean-fx::before, .board.clean-fx::after { display: none !important; }
+.clean-box { position: fixed; width: 58px; height: 46px; border-radius: 6px 6px 8px 8px; background: linear-gradient(180deg, #8a5a2b, #6e4520); box-shadow: inset 0 3px 0 rgba(255, 255, 255, .18), 0 4px 8px rgba(0, 0, 0, .25); animation: clean-box var(--clean-ms, 1.1s) ease both; }
+@keyframes clean-box { 0% { opacity: 0; transform: translateY(8px) scale(.7); } 12%, 85% { opacity: 1; transform: none; } 100% { opacity: 0; transform: scale(.9); } }
+/* 決め手のスロー（2026-11-10。main.js の slowFinish）: 決め手の石のまわりだけ明るく残して暗くする。押せない（押せば main.js が飛ばす） */
+.slow-dim { position: fixed; inset: 0; pointer-events: none; z-index: 45; background: radial-gradient(circle at var(--x) var(--y), transparent var(--r), rgba(20, 14, 8, .42) calc(var(--r) * 3.4)); animation: slow-dim-in .35s ease-out both; }
+.slow-dim.out { animation: fx-out .3s ease-in forwards; }
+@keyframes slow-dim-in { from { opacity: 0; } }
 /* 決着の判子（main.js の endStamp）。傾けない（本人の指示）。紙の色の地に朱の判子なので、どのスキンでも同じ色のまま */
 .end-stamp {
   position: absolute; left: 50%; top: 45%; max-width: calc(100vw - 32px); text-align: center; overflow-wrap: anywhere;
@@ -823,6 +854,16 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .lobby-list li { background: var(--field); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; font-weight: 700; }
 .lobby-list li small { color: var(--muted); font-weight: 400; }
 .lobby-list li.cpu { color: var(--muted); border-style: dashed; }
+/* 盤のゲームの待合室の、部屋の人の名前の札（2026-11-10） */
+.lobby-faces { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.lobby-faces li { background: var(--field); border: 1px solid var(--line); border-radius: 999px; padding: 2px 12px; font-weight: 700; font-size: .88rem; }
+/* 人が入ったら札が飛び込む（2026-11-10。main.js の memberFx）。--age = 入った・出たからの経過（描き直しても続きから動かす） */
+.m-enter { animation: m-enter .55s cubic-bezier(.25, 1.5, .5, 1) both; animation-delay: calc(0ms - var(--age, 0ms)); }
+@keyframes m-enter { from { transform: translateY(-22px) scale(.85); opacity: 0; } 60% { opacity: 1; } }
+.m-leave { animation: m-leave .25s ease-in forwards; animation-delay: calc(300ms - var(--age, 0ms)); }
+@keyframes m-leave { to { transform: translateX(30px); opacity: 0; } }
+.m-wave { display: inline-block; transform-origin: 70% 80%; animation: m-wave .3s ease-in-out both; animation-delay: calc(0ms - var(--age, 0ms)); }
+@keyframes m-wave { 25% { transform: rotate(-20deg); } 50% { transform: rotate(14deg); } 75% { transform: rotate(-10deg); } }
 .lobby-total { font-weight: 700; text-align: center; margin-top: 8px; }
 .lobby-ready, .lobby-vote { margin: 8px 0 0; font-size: .9rem; } /* 準備OK・次のゲームの投票 */
 /* 待合室の「いま選んでいるゲーム」（2026-11-03）。ゲームが替わったら2秒光る */
@@ -1705,6 +1746,19 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .board .bb-backs button.pcard.back.usable:hover { transform: translateY(-6px); }
 .bb-hand, .db-hand { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; }
 .bb-hand .pcard { width: 48px; }
+/* 手札を扇形に持つ（2026-11-10。cards.js の fanHand）。重なりは入れ物の幅（100cqw）と札の数（--n）・札の幅（--cw）から決め、
+   ちょうど入るなら重ねない（すき間4pxまで）。札の3分の1は見えるまで重ね、それでも入らなければ2段にする。
+   傾きは個別の rotate・translate（transform は札の飛ぶ動き・選んだ札を上げるのに使っているので触らない） */
+.board .fan-hand { --cw: 44px; container-type: inline-size; flex-wrap: wrap; gap: 8px 0; padding-top: 12px; transition: translate .35s ease, filter .35s ease; }
+.board .cc-hand.fan-hand { --cw: 52px; }
+.board .pk-hand.fan-hand { --cw: 58px; }
+.board .bb-hand.fan-hand { --cw: 48px; }
+.board .fan-hand > * { rotate: var(--fr, 0deg); translate: 0 var(--fy, 0px); transform-origin: 50% 150%; transition: translate .3s ease, rotate .3s ease; }
+.board .fan-hand > * + * { margin-left: clamp(calc(var(--cw) * -0.66), (100cqw - 20px - var(--n) * var(--cw)) / (var(--n) - 1), 4px); } /* 20px は、両端の札が傾いてはみ出す分と、端数で最後の1枚が次の段へ落ちないための余り */
+.board .fan-hand.fan-up { translate: 0 -4px; }
+.board .fan-hand.fan-up > :is(.playable, .usable) { translate: 0 calc(var(--fy, 0px) - 8px); }
+.board .fan-hand.fan-down { translate: 0 6px; filter: brightness(.9) saturate(.8); }
+@media (prefers-reduced-motion: reduce) { .board .fan-hand, .board .fan-hand > * { transition: none; } }
 .bb-hand .pcard.pop { animation: pop .3s ease-out; box-shadow: 0 0 0 3px var(--accent); }
 /* 引く札を見せる（ババ抜きの詳細設定）: つままれている札を持ち上げて黄色の枠 */
 .board .bb-backs .pcard.bb-held, .bb-hand .pcard.bb-held { transform: translateY(-10px); box-shadow: 0 0 0 3px #f5c518; }
@@ -2029,6 +2083,18 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .hf-card.red { color: #d0312d; }
 .hf-text { font-size: .9rem; padding: 0 1px; }
 .hf-fig figcaption { font-size: .82rem; line-height: 1.4; text-align: center; }
+/* 待合室の見本（2026-11-10。main.js の lobbyFigs）: 図を同じ場所に重ね、いまの1枚（.on）だけ、マスが順に出て光る所が光り一言が出る。
+   --k = 何番目のマス、--nc = マスの数、--ph = 描き直しで途中から動かすときの遅れ（負の値）。hf-cycle の長さは main.js の FLIP_MS と同じ */
+.hf.hf-flip { display: grid; }
+.hf-flip > .hf-fig { grid-area: 1 / 1; visibility: hidden; }
+.hf-flip > .hf-fig.on { visibility: visible; animation: hf-cycle 3.6s linear both; animation-delay: var(--ph, 0ms); }
+@keyframes hf-cycle { 0% { opacity: 0; } 5%, 93% { opacity: 1; } 100% { opacity: 0; } }
+.hf-flip > .hf-fig.on :is(.hf-cell, .hf-card, .hf-text) { animation: hf-pop .3s cubic-bezier(.3, 1.5, .5, 1) both; animation-delay: calc(var(--k, 0) * 70ms + 150ms + var(--ph, 0ms)); }
+.hf-flip > .hf-fig.on .hf-cell.hi { animation: hf-pop .3s cubic-bezier(.3, 1.5, .5, 1) both, hf-hi .5s ease-out both; animation-delay: calc(var(--k, 0) * 70ms + 150ms + var(--ph, 0ms)), calc(var(--nc, 0) * 70ms + 350ms + var(--ph, 0ms)); }
+.hf-flip > .hf-fig.on figcaption { animation: hf-cap .4s ease-out both; animation-delay: calc(var(--nc, 0) * 70ms + 550ms + var(--ph, 0ms)); }
+@keyframes hf-pop { from { opacity: 0; transform: scale(.4); } }
+@keyframes hf-hi { from { outline-color: transparent; background-color: transparent; } }
+@keyframes hf-cap { from { opacity: 0; transform: translateY(4px); } }
 .howto-more summary { cursor: pointer; color: var(--muted); font-size: .85rem; margin: 2px 0; }
 .howto-rules { margin: 8px 0 2px; padding-top: 6px; border-top: 1px dashed var(--line); font-size: .85rem; }
 .howto-rules span { color: var(--muted); }
@@ -2770,6 +2836,24 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 @media (prefers-reduced-motion: reduce) { .pt-timebar.hurry > div { animation: none; } }
 
 /* ---------- 連勝の炎（2026-11-09。main.js の addFlame） ---------- */
+/* 点の数字が回る（2026-11-10。main.js の rollNums）: 増えた分・減った分を数字の上に小さく浮かべて消す。数え終わりに数字はふくらませない（本人の指示） */
+[data-roll] { position: relative; display: inline-block; font-variant-numeric: tabular-nums; }
+.roll-d { position: absolute; left: 50%; bottom: 100%; translate: -50% 0; font-size: .72rem; font-weight: 900; line-height: 1; white-space: nowrap; pointer-events: none; animation: roll-d 1s ease-out both; }
+.roll-d.up { color: #2e9a52; }
+.roll-d.dn { color: var(--red-ink, #c64a3a); }
+@keyframes roll-d { from { transform: translateY(2px); opacity: 0; } 20% { opacity: 1; } to { transform: translateY(-12px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .roll-d { display: none; } }
+/* つながるまでの待ち画面（2026-11-10。main.js の renderPage の waiting）: ゲームの絵が影を縮めながら跳ねる */
+.wait-hop { position: relative; width: 70px; height: 70px; margin: 4px auto 6px; display: grid; justify-items: center; }
+.wait-hop .wh-ic { font-size: 2.4rem; line-height: 1; display: inline-block; transform-origin: 50% 100%; animation: wh-hop 1.1s cubic-bezier(.45, 0, .55, 1) infinite; }
+.wait-hop .wh-sh { position: absolute; bottom: 2px; width: 34px; height: 7px; border-radius: 50%; background: rgba(0, 0, 0, .18); animation: wh-sh 1.1s cubic-bezier(.45, 0, .55, 1) infinite; }
+@keyframes wh-hop { 0%, 100% { transform: translateY(26px) scale(1.12, .88); } 15% { transform: translateY(20px) scale(.95, 1.06); } 50% { transform: translateY(0) rotate(8deg); } 85% { transform: translateY(22px); } }
+@keyframes wh-sh { 0%, 100% { transform: scale(1); opacity: .9; } 50% { transform: scale(.55); opacity: .4; } }
+/* 前の対局の勝者に王冠（2026-11-10。main.js の addCrown）: 決着のあとの帯で、勝った人の札の左上の角に落ちてくる（炎は右上なので重ならない） */
+.turn-card.won { opacity: 1; border-color: var(--win); }
+.turn-crown { position: absolute; top: -16px; left: -10px; font-size: 1.3rem; line-height: 1; rotate: -18deg; pointer-events: none; z-index: 1; filter: drop-shadow(0 2px 2px rgba(0, 0, 0, .25)); animation: tc-drop .6s cubic-bezier(.3, 1.5, .5, 1) both; }
+@keyframes tc-drop { from { transform: translateY(-50px) rotate(-40deg); opacity: 0; } 60% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .turn-crown { animation: none; } }
 .turn-flame { position: absolute; top: -14px; right: -10px; display: grid; place-items: center; pointer-events: none; z-index: 1; }
 .turn-flame .tf-f { font-size: var(--fs, 1rem); line-height: 1; display: block; transform-origin: 50% 90%; animation: tf-flick .5s ease-in-out infinite alternate; }
 .turn-flame .tf-n { position: absolute; bottom: -2px; right: -5px; min-width: 1.3em; padding: 0 .3em; border-radius: 999px; background: #e04b3c; color: #fff; font-size: .62rem; font-weight: 900; line-height: 1.4; text-align: center; }

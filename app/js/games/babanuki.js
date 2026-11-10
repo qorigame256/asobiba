@@ -13,7 +13,7 @@
 //   CPU はつままずにすぐ引く。ありのときだけ局面に peek: true を持つ。
 
 import { mulberry32, shuffle } from './util.js';
-import { makeDeck, rankOf, suitOf, cardEl, backEl, cardLabel, JOKER } from './cards.js';
+import { makeDeck, rankOf, suitOf, cardEl, backEl, cardLabel, JOKER, fanHand } from './cards.js';
 
 const clone = (s) => ({ ...s, hands: s.hands.map((h) => h.slice()), out: s.out.slice() });
 
@@ -238,6 +238,7 @@ export default {
         if (held !== null && me === from && s.hands[me][held] === c) e.classList.add('bb-held');
         hand.append(e);
       }
+      fanHand(hand, !!o.canMove); // 手札を扇形に持つ（2026-11-10）
       root.append(head, hand);
     }
   },

@@ -790,7 +790,7 @@ function tableEl(s, o, me, watching) {
     side.className = 'mj-side' + (h.phase === 'turn' && h.turn === p ? ' active' : '');
     side.style.transform = `rotate(${turns[i]}deg)`;
     const wind = WIND_NAMES[(p - dealerOf(s) + s.n) % s.n];
-    side.innerHTML = `<span class="mj-wind${p === dealerOf(s) ? ' dealer' : ''}">${wind}</span><span class="mj-score">${s.scores[p].toLocaleString()}</span>`
+    side.innerHTML = `<span class="mj-wind${p === dealerOf(s) ? ' dealer' : ''}">${wind}</span><span class="mj-score" data-roll="mj${p}" data-v="${s.scores[p]}" data-comma="">${s.scores[p].toLocaleString()}</span>`
       + (h.riichi[p] ? '<span class="mj-stick" title="リーチ"></span>' : '');
     center.append(side);
   }

@@ -14,7 +14,7 @@
 // 手: { p, t: 'play', c: 札 } / { p, t: 'play', c: 'JK', at: 置く所 } / { p, t: 'pass' }
 
 import { mulberry32, shuffle } from './util.js';
-import { makeDeck, suitOf, rankOf, cardEl, cardLabel, SUITS, SUIT_MARK, JOKER } from './cards.js';
+import { makeDeck, suitOf, rankOf, cardEl, cardLabel, SUITS, SUIT_MARK, JOKER, fanHand } from './cards.js';
 
 const clone = (s) => ({ ...s, hands: s.hands.map((h) => h.slice()), field: { ...s.field }, passes: s.passes.slice(), done: s.done.slice(), outs: s.outs.slice() });
 const ORDER = (c) => (c === JOKER ? 99 : SUITS.indexOf(suitOf(c)) * 13 + rankOf(c));
@@ -304,6 +304,7 @@ export default {
         } else if (o.canMove) e.classList.add('dim');
         hand.append(e);
       }
+      fanHand(hand, !!o.canMove); // 手札を扇形に持つ（2026-11-10）
       root.append(hand);
       if (o.canMove && !forced) {
         const act = document.createElement('div');

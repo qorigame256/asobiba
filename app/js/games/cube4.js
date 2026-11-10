@@ -243,6 +243,7 @@ export default {
         if (v !== null) {
           const d = document.createElement('span');
           d.className = 'cb-disc p' + v + (win.has(i) ? ' win' : '') + (i === s.last ? ' last' : '');
+          if (i === s.last) d.dataset.last = 'still'; // 決め手のスロー（main.js の slowFinish）: 寄せるだけ
           cell.append(d);
         }
         g.append(cell);

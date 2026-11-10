@@ -377,6 +377,7 @@ export default {
       cell.className = 'sg-cell';
       if (s.last && (s.last.t === i || s.last.f === i)) cell.classList.add('last');
       if (s.last?.t === i && o.fresh) cell.classList.add('pop');
+      if (s.last?.t === i) cell.dataset.last = 'still'; // 決め手のスロー（main.js の slowFinish）: 駒は滑ってくるので寄せるだけ
       if (caught.has(i)) cell.classList.add('caught');
       if (i === ui.from) cell.classList.add('selected');
       if (isTarget) cell.classList.add('target');

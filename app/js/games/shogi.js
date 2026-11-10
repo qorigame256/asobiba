@@ -595,6 +595,7 @@ export default {
       cell.className = 'sg-cell';
       cell.dataset.flySrc = `at:${i}`; // 取った駒が飛び立つ所（2026-11-06）
       if (s.last && !s.last.resign && s.last.t === i) cell.classList.add('last', ...(o.fresh ? ['pop'] : []));
+      if (s.last && !s.last.resign && s.last.t === i) cell.dataset.last = 'still'; // 決め手のスロー（main.js の slowFinish）: 駒は滑ってくるので寄せるだけ
       if (i === ui.from) cell.classList.add('selected');
       if (isTarget) cell.classList.add('target');
       if (i === checkedKing) cell.classList.add('checked');

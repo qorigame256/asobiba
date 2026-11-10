@@ -280,6 +280,7 @@ function renderGob(root, s, o) {
     if (top) {
       const pc = gobPiece(top);
       if (i === s.last && o.fresh) pc.classList.add('pop');
+      if (i === s.last) pc.dataset.last = ''; // 決め手のスロー（main.js の slowFinish）が寄せて落とす物
       cell.append(pc);
       if (st.length > 1) {
         const hid = document.createElement('span');
@@ -452,6 +453,7 @@ function cellButton(v, i, s, o, playable) {
     cell.classList.add('p' + v);
     if (i === s.last) cell.classList.add('last');
     if (i === s.last && o.fresh) cell.classList.add('pop');
+    if (i === s.last) cell.firstElementChild?.setAttribute('data-last', ''); // 決め手のスロー（main.js の slowFinish）
   }
   if (playable) {
     cell.classList.add('playable');

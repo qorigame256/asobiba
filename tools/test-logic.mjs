@@ -440,7 +440,7 @@ for (const players of [2, 3]) {
     let st = R.init({ rules: all, seed: 90 });
     assert.equal(st.hide, true);
     const showSt = R.init({ rules, seed: 90 });
-    assert.match(R.info(showSt), /黒 2|黒 1/, 'なしなら数が出る ' + JSON.stringify(rules));
+    assert.match(R.info(showSt).replace(/<[^>]*>/g, ''), /黒 2|黒 1/, 'なしなら数が出る ' + JSON.stringify(rules)); // 数には数え上げの印（data-roll）の span が付く
     while (!R.result(st)) {
       assert.match(R.info(st), /石の数はひみつ/, '対局の間は隠す ' + JSON.stringify(rules));
       assert.doesNotMatch(R.info(st), /rv-mini/, '対局の間は数を出さない');
@@ -448,7 +448,7 @@ for (const players of [2, 3]) {
       assert.ok(st, '石の数を隠すで CPU が反則を出した');
     }
     assert.doesNotMatch(R.info(st), /ひみつ/, '終わったら隠さない');
-    assert.match(R.info(st), /rv-mini p0"><\/span>黒 \d+/, '終わったら数が出る');
+    assert.match(R.info(st), /rv-mini p0"><\/span>黒 <span data-roll="rv0" data-v="\d+">\d+/, '終わったら数が出る');
   }
 }
 

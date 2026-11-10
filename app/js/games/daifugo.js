@@ -44,7 +44,7 @@
 //     対局をまたぐ順位の引き継ぎ（carry）は合計点の順（同じ点なら最後の回の順位で決める）。1回のときは match を持たず、今までと全く同じ局面。
 
 import { mulberry32, shuffle } from './util.js';
-import { JOKER, SUITS, SUIT_MARK, suitOf, rankOf, rankLabel, makeDeck, cardEl, cardLabel } from './cards.js';
+import { JOKER, SUITS, SUIT_MARK, suitOf, rankOf, rankLabel, makeDeck, cardEl, cardLabel, fanHand } from './cards.js';
 
 const power = (c) => {
   if (c === JOKER) return 16;
@@ -831,6 +831,7 @@ export default {
         }
         hand.append(e);
       }
+      fanHand(hand, myTurn || giving || !!pd); // 手札を扇形に持つ（2026-11-10）
       root.append(hand);
 
       if (myTurn) {

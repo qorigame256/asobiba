@@ -22,7 +22,7 @@
 //   全員が同時に押すので、この間だけホストが手を足し直す（concurrent。main.js の rebase）。
 
 import { mulberry32, shuffle } from './util.js';
-import { SUITS, JOKER, suitOf, rankOf, makeDeck, cardEl, backEl, turnUp } from './cards.js';
+import { SUITS, JOKER, suitOf, rankOf, makeDeck, cardEl, backEl, turnUp, fanHand } from './cards.js';
 import { since } from './party.js';
 
 const START_CHIPS = 1000;
@@ -631,6 +631,7 @@ export default {
         }
         hand.append(e);
       });
+      fanHand(hand, myTurn && !h.folded[me]); // 手札を扇形に持つ（2026-11-10）
       root.append(hand);
 
       if (myTurn && h.phase !== 'end') {

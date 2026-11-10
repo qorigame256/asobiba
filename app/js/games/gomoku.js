@@ -400,6 +400,7 @@ export default {
       } else if (v !== null) {
         const stone = document.createElement('span');
         stone.className = 'gm-stone p' + v + (win.has(i) ? ' win' : '') + (i === s.last ? ' last' : '') + (i === s.last && o.fresh ? ' pop' : '');
+        if (i === s.last) stone.dataset.last = ''; // 決め手のスロー（main.js の slowFinish）
         cell.append(stone);
         cell.tabIndex = -1;
       } else if (ban && forbidden(s.grid, n, i)) {
