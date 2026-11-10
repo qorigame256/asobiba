@@ -2216,6 +2216,24 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .sm-item svg path { fill: none; stroke: #fffdf3; stroke-width: 2.8; stroke-linecap: round; }
 .sm-item.somen svg { filter: drop-shadow(0 1px 1.5px rgba(15, 45, 75, .75)); }
 .sm-item.took { transition: transform .25s ease-out, opacity .25s; transform: translate(-50%, -170%) scale(.6); opacity: 0; }
+/* 金のそうめん（2026-11-10 の38回目の案）。光ってきらめく */
+.sm-item.gold svg path { stroke: #ffd447; stroke-width: 3.2; }
+.sm-item.gold svg { filter: drop-shadow(0 0 3px #fff3b0) drop-shadow(0 0 7px rgba(255, 196, 40, .95)); animation: sm-shine .5s ease-in-out infinite alternate; }
+@keyframes sm-shine { to { filter: drop-shadow(0 0 5px #fffbe0) drop-shadow(0 0 12px rgba(255, 210, 60, 1)); } }
+.sm-gold-n { color: #b07d00; }
+/* 色水づくりのお手本の伝統色の名前（2026-11-10 の38回目の案） */
+.im-trad { display: block; margin-top: 2px; color: var(--ink, #333); font-size: 1rem; font-weight: 700; letter-spacing: .08em; }
+.im-trad-y { display: block; font-size: .7rem; }
+/* 季節の飾り（水に浮かんで流れる。押せない。品より下） */
+.sm-deco { position: absolute; inset: 20px 12px; overflow: hidden; border-radius: 44px; pointer-events: none; }
+.sm-deco span { position: absolute; top: calc(18% + var(--k) * 19%); left: -8%; font-size: 1.15rem; opacity: .75; animation: sm-deco 9s linear infinite; animation-delay: calc(var(--k) * -2.3s - var(--k) * var(--k) * .4s); }
+@keyframes sm-deco { from { transform: translateX(0) rotate(0deg); } to { transform: translateX(min(700px, 115vw)) rotate(220deg); } }
+.sm-spring .sm-water { background: repeating-linear-gradient(100deg, rgba(255, 255, 255, 0) 0 20px, rgba(255, 255, 255, .45) 20px 24px, rgba(255, 255, 255, 0) 24px 48px), linear-gradient(#c2e3f0, #6ea9c8); background-size: 48px 100%, auto; }
+.sm-autumn .sm-water { background: repeating-linear-gradient(100deg, rgba(255, 255, 255, 0) 0 20px, rgba(255, 255, 255, .4) 20px 24px, rgba(255, 255, 255, 0) 24px 48px), linear-gradient(#a6d0de, #4f8aa8); background-size: 48px 100%, auto; }
+.sm-autumn { background: linear-gradient(#b9c873, #7f9440 40%, #57672a); }
+.sm-winter .sm-water { background: repeating-linear-gradient(100deg, rgba(255, 255, 255, 0) 0 20px, rgba(255, 255, 255, .55) 20px 24px, rgba(255, 255, 255, 0) 24px 48px), linear-gradient(#d6edf6, #7fb3cc); background-size: 48px 100%, auto; }
+.sm-winter { background: linear-gradient(#e9f1ea, #8fae86 32%, #5b7d4f); }
+.sm-winter .sm-deco span { opacity: .9; text-shadow: 0 0 3px rgba(40, 90, 130, .5); }
 .sm-bowl { display: flex; flex-direction: column; align-items: center; }
 .sm-bowl-in { display: flex; gap: 14px; padding: 10px 22px 14px; border: 2px solid #9a6a3e; border-top-width: 6px; border-radius: 6px 6px 60px 60px; background: linear-gradient(#fbf6ea, #e6d7bb); color: #5a3a20; font-weight: 700; }
 .sm-bowl-cap { margin-top: 4px; color: var(--muted); font-size: .8rem; }
@@ -2258,7 +2276,7 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .im-all { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; }
 .im-all .im-glass { width: 64px; height: 80px; }
 .im-review li { display: flex; align-items: center; gap: 8px; }
-@media (prefers-reduced-motion: reduce) { .sm-water, .im-drop { animation: none; } .kg-open, .im-liquid { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .sm-water, .im-drop, .sm-deco span, .sm-item.gold svg { animation: none; } .sm-deco span { left: calc(8% + var(--k) * 24%); } .kg-open, .im-liquid { transition: none; } }
 /* すごろく */
 .sgr-board { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; touch-action: manipulation; }
 .sgr-cell { position: relative; aspect-ratio: 1; min-width: 0; border: 1.5px solid var(--line); border-radius: 8px; background: var(--field); display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 1px; overflow: hidden; }

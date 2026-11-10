@@ -7268,10 +7268,33 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.deepEqual(a.scores, [0, 3, 0], '流しそうめん: いちばん速い人がさくらんぼ（3点）を取る');
   assert.deepEqual(a.scores, b.scores, '流しそうめん: 届く順に関わらない');
   assert.equal(G.apply(a, { p: 1, t: 'grab', i, ms: 600 }), null, '流しそうめん: 1つの品に1人1回');
-  assert.equal(G.apply(s, { p: 2, t: 'grab', i, ms: S.FLOW_MS + 500 }), null, '流しそうめん: 流れ切ったあとは弾く');
+  assert.equal(G.apply(s, { p: 2, t: 'grab', i, ms: 2600 + 500 }), null, '流しそうめん: 流れ切ったあとは弾く');
   const c = s.items.findIndex((x) => x.k === 'chili');
   assert.deepEqual(G.apply(s, { p: 2, t: 'grab', i: c, ms: 500 }).scores, [0, 0, -2], '流しそうめん: 唐辛子は −2点');
-  for (const rules of [{}, { time: 45 }]) {
+  // 38回目の案（2026-11-10）: 流れの速さ・金のそうめん・季節
+  for (let seed = 0; seed < 20; seed++) {
+    const off = S.itemsOf(seed, 60000), on = S.itemsOf(seed, 60000, { gold: true });
+    assert.deepEqual(on.map((x) => [x.at, x.k === 'gold' ? 'somen' : x.k, x.y]), off.map((x) => [x.at, x.k, x.y]), '流しそうめん: 金のそうめんはそうめんの分から取り、ほかの品の並びは変えない');
+  }
+  const golds = Array.from({ length: 40 }, (_, seed) => S.itemsOf(seed, 60000, { gold: true })).flat();
+  const gr = golds.filter((x) => x.k === 'gold').length / golds.length;
+  assert.ok(gr > 0.02 && gr < 0.06, `流しそうめん: 金のそうめんは4%前後（${(gr * 100).toFixed(1)}%）`);
+  assert.ok(!G.init(3, 5, { rules: { gold: 'off' } }).items.some((x) => x.k === 'gold'), '流しそうめん: 金のそうめん なし');
+  for (const [speed, d] of [['slow', 3400], ['normal', 2600], ['fast', 1900]]) {
+    const st = G.apply(G.init(3, 5, { rules: { speed } }), { p: -1, t: 'start' });
+    assert.ok(st.items.every((x) => x.d === (x.k === 'gold' ? Math.round(d * 0.6) : d)), `流しそうめん: 流れの速さ ${speed}`);
+    const g = st.items.findIndex((x) => x.k === 'gold');
+    assert.ok(g >= 0, '流しそうめん: 金のそうめんが流れてくる');
+    assert.deepEqual(G.apply(st, { p: 1, t: 'grab', i: g, ms: 300 }).scores, [0, 5, 0], '流しそうめん: 金のそうめんは5点');
+    assert.equal(G.apply(st, { p: 1, t: 'grab', i: g, ms: st.items[g].d + 200 }), null, '流しそうめん: 金のそうめんは早く流れ切る');
+    const q = st.items.findIndex((x) => x.k === 'somen');
+    assert.ok(G.apply(st, { p: 1, t: 'grab', i: q, ms: d - 50 }), `流しそうめん: ${speed} では ${d - 50}ms でもまだ取れる`);
+  }
+  const sp = G.apply(G.init(3, 5, { rules: { season: 'spring' } }), { p: -1, t: 'start' }), wi = G.apply(G.init(3, 5, { rules: { season: 'winter' } }), { p: -1, t: 'start' });
+  assert.deepEqual(sp.items, wi.items, '流しそうめん: 季節は見た目だけで品は同じ');
+  assert.equal(S.seasonIn({ season: 'now' }, new Date(2026, 0, 3)), 'winter', '流しそうめん: 正月は冬');
+  assert.equal(S.seasonIn({ season: 'now' }, new Date(2026, 9, 3)), 'autumn', '流しそうめん: 今の季節は日付で決まる');
+  for (const rules of [{}, { time: 45 }, { speed: 'fast' }, { speed: 'slow', gold: 'off' }]) {
     const st = runCpus(G, 5, 11, rules, 100, 5000);
     assert.ok(G.result(st), `流しそうめん: CPU どうしで最後まで ${JSON.stringify(rules)}`);
     let sum = 0;
@@ -7286,6 +7309,28 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   const G = GAMES.kirigami;
   const K = await import('../app/js/games/kirigami.js');
   const mapAll = (f, polys) => polys.map((p) => p.map(f));
+  // 38回目の案（2026-11-10）: 星・ハート・月の切り口。形ごとに、ねじれていない（辺が交わらない）・広さと中心がそれらしい
+  {
+    const cross = (a, b, c, d) => {
+      const o = (p, q, r) => Math.sign((q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]));
+      return o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0;
+    };
+    const AREA = { circle: [3, 3.2], tri: [1.2, 1.4], diamond: [1.1, 1.3], square: [1.9, 2.1], star: [1.3, 1.6], heart: [2.2, 2.6], moon: [1.05, 1.3] };
+    assert.deepEqual(K.CUT_KINDS, Object.keys(AREA), '切り紙あて: 切り口は7つの形');
+    for (const kind of K.CUT_KINDS) {
+      const s = 0.1, poly = K.shapePoly(kind, 0.5, 0.5, s, 0.7);
+      const area = Math.abs(poly.reduce((a, p, i) => { const q = poly[(i + 1) % poly.length]; return a + p[0] * q[1] - q[0] * p[1]; }, 0)) / 2 / (s * s);
+      assert.ok(area > AREA[kind][0] && area < AREA[kind][1], `切り紙あて: ${kind} の広さ ${area.toFixed(2)}`);
+      const n = poly.length;
+      for (let i = 0; i < n; i++) for (let j = i + 2; j < n; j++) {
+        if (i === 0 && j === n - 1) continue;
+        assert.ok(!cross(poly[i], poly[(i + 1) % n], poly[j], poly[(j + 1) % n]), `切り紙あて: ${kind} の辺が交わらない`);
+      }
+      // 真ん中のまわりか（回さずに見る。ハートは上下の形が違うので、回すと囲む四角の真ん中がずれる。三角は 0.25s ずれているのが前からの形）
+      const p0 = K.shapePoly(kind, 0.5, 0.5, s, 0), xs = p0.map((p) => p[0]), ys = p0.map((p) => p[1]);
+      assert.ok(Math.hypot((Math.min(...xs) + Math.max(...xs)) / 2 - 0.5, (Math.min(...ys) + Math.max(...ys)) / 2 - 0.5) < s * 0.3, `切り紙あて: ${kind} は真ん中のまわり`);
+    }
+  }
   for (const folds of [1, 2, 3]) {
     for (let seed = 0; seed < 12; seed++) {
       for (const x of K.makeQuestions(10, seed, folds)) {
@@ -7326,6 +7371,14 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.deepEqual(I.mixColor([2, 1, 0, 1]), I.mixColor([4, 2, 0, 2]), '色水づくり: 数ではなく割合で決まる');
   assert.ok(I.mixColor([1, 0, 0, 2])[1] > I.mixColor([1, 0, 0, 0])[1], '色水づくり: 白を足すと明るくなる');
   for (let seed = 0; seed < 30; seed++) for (const t of I.makeTargets(8, seed)) assert.ok(t.reduce((x, v) => x + v, 0) <= 15 && t.slice(0, 3).filter((v) => v > 0).length >= 2, '色水づくり: お手本は2色以上で作れる');
+  // 38回目の案（2026-11-10）: 伝統色の名前。名前と読みが重ならない・見本の色そのものならその名前・どのお手本にも名前が付く
+  assert.equal(new Set(I.TRAD_COLORS.map(([n]) => n)).size, I.TRAD_COLORS.length, '色水づくり: 伝統色の名前が重ならない');
+  for (const [n, y, h] of I.TRAD_COLORS) {
+    assert.ok(/^[ぁ-ん]+$/.test(y) && /^#[0-9a-f]{6}$/.test(h), `色水づくり: ${n} の読みと色の書き方`);
+    assert.deepEqual(I.tradName([1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255)), [n, y], `色水づくり: ${n} の見本の色は ${n}`);
+  }
+  assert.equal(I.tradName(I.mixColor([0, 1, 1, 0]))[0].match(/緑|竹|萌|若草|常磐|鶯|緑青/) !== null, true, '色水づくり: 黄＋青には緑の仲間の名前');
+  assert.equal(I.tradName(I.mixColor([1, 1, 0, 0]))[0].match(/橙|朱|柿|山吹|杏/) !== null, true, '色水づくり: 赤＋黄にはだいだいの仲間の名前');
   let s = G.apply(G.init(3, 6, { rules: {} }), { p: -1, t: 'next' });
   const goal = s.targets[0];
   // 0 はお手本どおり、1 は少しずらす、2 は何も落とさない

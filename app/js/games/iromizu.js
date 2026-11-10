@@ -13,6 +13,11 @@
 //   - 詳細設定「回数」（鍵は rounds）: 3・5（最初）・8回。おまかせでは抽選しない（KEEP_KEYS の rounds）。
 //   - ほかの人の色は、その回の結果まで見せない（まねできないように）。決めたかどうか（✔）だけ見せる。
 //   - CPU はお手本の作り方を少しずらした作り方（色ごとに半分の見込みで ±1滴）を、1.5秒から0.5〜0.9秒おきに1滴ずつ落として決める。
+// 2026-11-10 の38回目の案「伝統色のお手本」（本人が選んだ。分かれ目は Claude の判断）:
+//   - お手本の色に、いちばん近い日本の伝統色の名前と読みを添える（TRAD_COLORS から、色の差 gapOf がいちばん小さいもの）。お手本の作り方は変えない。
+//     名前は見た目の添え物で、点には関わらない。詳細設定にせず、いつも出す。結果のふりかえりにも出す。
+//   - 色の値は、和色の色見本としてよく使われる値を Claude が書いたもの（色見本によって少し違う。目安）。作れる色（赤・黄・青・白の混ざり）の
+//     まわりにまんべんなく名前があるよう、赤み・黄み・緑・青・紫・茶・淡い色から選んだ。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'drop', r: 何回目, c: 絵の具（0 赤・1 黄・2 青・3 白）, k: その人のその回の何手目 } /
 //     { p, t: 'reset', r, k } / { p, t: 'ok', r, k }（k は同じ手が2回届いたときに2回目を弾くため）
@@ -65,6 +70,31 @@ export function gapOf(a, b) {
   return Math.round(Math.hypot(l1 - l2, a1 - a2, b1 - b2) * 100);
 }
 export const closeness = (gap) => Math.max(0, Math.round(100 - gap / 100));
+
+// 日本の伝統色 [名前, 読み, 色]
+export const TRAD_COLORS = [
+  ['桜色', 'さくらいろ', '#fef4f4'], ['撫子色', 'なでしこいろ', '#eebbcb'], ['桃色', 'ももいろ', '#f09199'], ['珊瑚色', 'さんごいろ', '#f5b1aa'],
+  ['紅梅色', 'こうばいいろ', '#f2a0a1'], ['薔薇色', 'ばらいろ', '#e9546b'], ['茜色', 'あかねいろ', '#b7282e'], ['臙脂色', 'えんじいろ', '#b94047'],
+  ['朱色', 'しゅいろ', '#eb6101'], ['柿色', 'かきいろ', '#ed6d3d'], ['橙色', 'だいだいいろ', '#ee7800'], ['杏色', 'あんずいろ', '#f7b977'],
+  ['山吹色', 'やまぶきいろ', '#f8b500'], ['卵色', 'たまごいろ', '#fcd575'], ['菜の花色', 'なのはないろ', '#ffec47'], ['刈安色', 'かりやすいろ', '#f5e56b'],
+  ['黄土色', 'おうどいろ', '#c39143'], ['芥子色', 'からしいろ', '#d0af4c'], ['鶯色', 'うぐいすいろ', '#928c36'], ['抹茶色', 'まっちゃいろ', '#c5c56a'],
+  ['若草色', 'わかくさいろ', '#c3d825'], ['萌黄色', 'もえぎいろ', '#aacf53'], ['若竹色', 'わかたけいろ', '#68be8d'], ['緑青色', 'ろくしょういろ', '#47885e'],
+  ['常磐色', 'ときわいろ', '#007b43'], ['千歳緑', 'ちとせみどり', '#316745'], ['青竹色', 'あおたけいろ', '#7ebea5'], ['浅葱色', 'あさぎいろ', '#00a3af'],
+  ['水色', 'みずいろ', '#bce2e8'], ['空色', 'そらいろ', '#a0d8ef'], ['露草色', 'つゆくさいろ', '#38a1db'], ['縹色', 'はなだいろ', '#2792c3'],
+  ['瑠璃色', 'るりいろ', '#1e50a2'], ['群青色', 'ぐんじょういろ', '#4c6cb3'], ['藍色', 'あいいろ', '#165e83'], ['紺色', 'こんいろ', '#223a70'],
+  ['藤色', 'ふじいろ', '#bbbcde'], ['菫色', 'すみれいろ', '#7058a3'], ['桔梗色', 'ききょういろ', '#5654a2'], ['江戸紫', 'えどむらさき', '#745399'],
+  ['牡丹色', 'ぼたんいろ', '#e7609e'], ['葡萄色', 'えびいろ', '#522f60'], ['小豆色', 'あずきいろ', '#96514d'], ['栗色', 'くりいろ', '#762f07'],
+  ['茶色', 'ちゃいろ', '#965042'], ['焦茶', 'こげちゃ', '#6f4b3e'], ['枯草色', 'かれくさいろ', '#e4dc8a'], ['鼠色', 'ねずみいろ', '#949495'],
+];
+const hexRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+const TRAD_RGB = TRAD_COLORS.map(([, , h]) => hexRgb(h));
+// 色（0〜1 の RGB）にいちばん近い伝統色 [名前, 読み]
+export function tradName(rgb) {
+  let best = 0, bg = Infinity;
+  TRAD_RGB.forEach((c, i) => { const g = gapOf(rgb, c); if (g < bg) { bg = g; best = i; } });
+  return TRAD_COLORS[best].slice(0, 2);
+}
+const tradLabel = (m) => { const [n, y] = tradName(mixColor(m)); return `<span class="im-trad">${n}</span><span class="im-trad-y">${y}</span>`; };
 const css = (c) => `rgb(${c.map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255)).join(',')})`;
 
 // お手本の作り方（何回目か q から）
@@ -242,7 +272,7 @@ export default {
     const key = `iromizu:${s.seed}:${s.q}`;
     const row = document.createElement('div');
     row.className = 'im-row';
-    row.append(beaker(goal, s.targets[s.q].reduce((a, v) => a + v, 0), { label: 'お手本', cls: 'goal' }));
+    row.append(beaker(goal, s.targets[s.q].reduce((a, v) => a + v, 0), { label: `お手本${tradLabel(s.targets[s.q])}`, cls: 'goal' }));
     if (s.phase === 'open') {
       since(key);
       wrap.append(timeBar(key, LIMIT));
@@ -329,7 +359,7 @@ export default {
       const top = x.gaps.map((g, p) => (g !== null && g === best ? p : -1)).filter((p) => p >= 0);
       const info = document.createElement('span');
       info.className = 'mk-rv-who';
-      info.textContent = `作り方 ${PAINTS.map(([n], c) => (t[c] ? `${n}${t[c]}` : '')).filter(Boolean).join('・')}`
+      info.textContent = `${tradName(mixColor(t))[0]}・作り方 ${PAINTS.map(([n], c) => (t[c] ? `${n}${t[c]}` : '')).filter(Boolean).join('・')}`
         + (me !== null && x.gaps[me] !== null ? `・あなた ${closeness(x.gaps[me])}%` : '')
         + (top.length ? `・🥇${top.map((p) => (p === me ? 'あなた' : o.names?.[p] ?? '')).join('・')}` : '');
       li.append(info);

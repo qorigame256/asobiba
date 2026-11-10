@@ -5,7 +5,7 @@
 // Claude の判断:
 //   - 紙は 1×1 の正方形（y は下向き）。1回は右半分へ（たての折り目）、2回は右下の4分の1へ、3回はさらに4分の1を対角線で折った三角へ折る。
 //     開いた模様は、切り口をそれぞれの折り目で写したもの（1回は2つ、2回は4つ、3回は8つ）。
-//   - 切り口は 丸・三角・ひし形・四角 のどれか。やさしいは2つ、ふつう・むずかしいは3つ。1つは必ず折り目の上に置く（開くと1つの大きな形になる、切り紙の見どころ）。
+//   - 切り口は 丸・三角・ひし形・四角・星・ハート・月（三日月） のどれか（7つから同じ見込みで選ぶ。星・ハート・月は 2026-11-10 の38回目の案で足した）。やさしいは2つ、ふつう・むずかしいは3つ。1つは必ず折り目の上に置く（開くと1つの大きな形になる、切り紙の見どころ）。
 //     折った紙からはみ出た分は切れない（折った紙の形で切り取る）。
 //   - まちがいの3つは、次の作り方の候補から、正解とも互いとも見た目がはっきり違う（48×48 の点で数えて12点以上違う）ものを種で選ぶ:
 //     写す代わりに回す・写す折り目を減らす・切り口を折った紙の中で裏返してから開く・切り口を1つずらす・切り口を1つ消す。
@@ -89,7 +89,40 @@ function clipPoly(poly, clip) {
   return out.length >= 3 ? out.map((p) => p.map(r3)) : null;
 }
 
-function shapePoly(kind, cx, cy, s, ang) {
+export const CUT_KINDS = ['circle', 'tri', 'diamond', 'square', 'star', 'heart', 'moon'];
+// 中心 (0,0)・大きさ s で作った点を、ang だけ回して (cx, cy) へ動かす
+const place = (pts, cx, cy, ang) => pts.map(([x, y]) => [cx + x * Math.cos(ang) - y * Math.sin(ang), cy + x * Math.sin(ang) + y * Math.cos(ang)]);
+
+export function shapePoly(kind, cx, cy, s, ang) {
+  if (kind === 'star') {
+    return place(Array.from({ length: 10 }, (_, i) => {
+      const a = -Math.PI / 2 + (i / 10) * Math.PI * 2;
+      const rr = i % 2 ? s * 0.45 : s * 1.1;
+      return [Math.cos(a) * rr, Math.sin(a) * rr];
+    }), cx, cy, ang);
+  }
+  if (kind === 'heart') {
+    // よく知られたハートの式（幅 32・高さ 29 ほど）を、幅 2.1s に縮める
+    const k = (s * 2.1) / 32;
+    return place(Array.from({ length: 28 }, (_, i) => {
+      const t = (i / 28) * Math.PI * 2;
+      return [16 * Math.sin(t) ** 3 * k, -(13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t) + 2.5) * k]; // + 2.5 は上下の真ん中を中心にそろえる分
+
+    }), cx, cy, ang);
+  }
+  if (kind === 'moon') {
+    // 半径 s の円から、右へ 0.6s ずらした同じ大きさの円を除いた三日月
+    const d = s * 0.6, al = Math.atan2(Math.sqrt(s * s - (d * d) / 4), d / 2);
+    const outer = Array.from({ length: 19 }, (_, i) => {
+      const a = al + (i / 18) * (Math.PI * 2 - 2 * al);
+      return [Math.cos(a) * s, Math.sin(a) * s];
+    });
+    const inner = Array.from({ length: 9 }, (_, i) => {
+      const a = Math.PI + al - ((i + 1) / 10) * 2 * al;
+      return [d + Math.cos(a) * s, Math.sin(a) * s];
+    });
+    return place([...outer, ...inner].map(([x, y]) => [x + s * 0.35, y]), cx, cy, ang); // + 0.35s で囲む四角の真ん中を中心に
+  }
   const k = kind === 'circle' ? 24 : kind === 'tri' ? 3 : 4;
   const a0 = kind === 'square' ? ang + Math.PI / 4 : ang;
   return Array.from({ length: k }, (_, i) => {
@@ -102,7 +135,7 @@ function shapePoly(kind, cx, cy, s, ang) {
 // 折った紙の上の切り口（全体の紙の座標）
 function makeCuts(folds, count, rnd) {
   const reg = REGION[folds];
-  const kinds = ['circle', 'tri', 'diamond', 'square'];
+  const kinds = CUT_KINDS;
   const cuts = [];
   const centers = [];
   for (let tries = 0; cuts.length < count && tries < 200; tries++) {
@@ -142,6 +175,9 @@ function inPoly([x, y], poly) {
 }
 // 模様を 48×48 の点で見た「穴かどうか」の並び（見た目が違うかを数えるのに使う）
 const GRID = 48;
+// 横だけ半分から少しずらした所を見る（折り目の線 x=0.5・y=0.5・x=y・x+y=1 の上にちょうど乗る点を作らないため。乗ると、星・ハート・月を折り目で切ったときに
+// 左右・ななめで写した模様の点の数え方が数点ずれた。2026-11-10）
+const SX = 0.513;
 export function raster(polys) {
   const out = new Uint8Array(GRID * GRID);
   for (const poly of polys) { // 多角形の囲む四角の中の点だけ調べる
@@ -149,7 +185,7 @@ export function raster(polys) {
     const i0 = Math.max(0, Math.floor(Math.min(...xs) * GRID - 0.5)), i1 = Math.min(GRID - 1, Math.ceil(Math.max(...xs) * GRID));
     const j0 = Math.max(0, Math.floor(Math.min(...ys) * GRID - 0.5)), j1 = Math.min(GRID - 1, Math.ceil(Math.max(...ys) * GRID));
     for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
-      if (!out[j * GRID + i] && inPoly([(i + 0.5) / GRID, (j + 0.5) / GRID], poly)) out[j * GRID + i] = 1;
+      if (!out[j * GRID + i] && inPoly([(i + SX) / GRID, (j + 0.5) / GRID], poly)) out[j * GRID + i] = 1;
     }
   }
   return out;
