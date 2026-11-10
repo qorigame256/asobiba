@@ -7271,6 +7271,18 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.equal(G.apply(s, { p: 2, t: 'grab', i, ms: 2600 + 500 }), null, '流しそうめん: 流れ切ったあとは弾く');
   const c = s.items.findIndex((x) => x.k === 'chili');
   assert.deepEqual(G.apply(s, { p: 2, t: 'grab', i: c, ms: 500 }).scores, [0, 0, -2], '流しそうめん: 唐辛子は −2点');
+  // 2026-11-10 の Codex の点検: 押した手が一覧とすれ違って消えたら、同じ ms で送り直す（lostGrabs）
+  {
+    const taps = [{ seed: s.seed, i, ms: 700 }, { seed: s.seed, i: c, ms: 800 }, { seed: s.seed + 1, i: 0, ms: 300 }];
+    assert.deepEqual(S.lostGrabs(s, 1, taps), [{ t: 'grab', i, ms: 700 }, { t: 'grab', i: c, ms: 800 }], '流しそうめん: 局面に入っていない自分の手を送り直す（別の対局の手は送らない）');
+    assert.deepEqual(S.lostGrabs(a, 1, taps), [{ t: 'grab', i: c, ms: 800 }], '流しそうめん: 局面に入った手は送り直さない');
+    assert.deepEqual(S.lostGrabs(a, 0, taps.slice(0, 1)), [], '流しそうめん: ほかの人に取られていても、自分の手が入っていれば送り直さない');
+    assert.deepEqual(S.lostGrabs(G.apply(s, { p: -1, t: 'end' }), 1, taps), [], '流しそうめん: 終わったら送り直さない');
+    assert.deepEqual(S.lostGrabs(s, null, taps), [], '流しそうめん: 観戦の人は送り直さない');
+    const again = S.lostGrabs(s, 1, taps).reduce((x, mv) => G.apply(x, { ...mv, p: 1 }), s);
+    assert.deepEqual(S.lostGrabs(again, 1, taps), [], '流しそうめん: 送り直した手が入れば止まる');
+    assert.equal(G.apply(again, { p: 1, t: 'grab', i, ms: 700 }), null, '流しそうめん: 元の手が遅れて届いても二重に数えない');
+  }
   // 38回目の案（2026-11-10）: 流れの速さ・金のそうめん・季節
   for (let seed = 0; seed < 20; seed++) {
     const off = S.itemsOf(seed, 60000), on = S.itemsOf(seed, 60000, { gold: true });
@@ -7394,6 +7406,20 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   s = G.apply(s, { p: -1, t: 'close' });
   assert.equal(s.last.gaps[0], 0, '色水づくり: お手本どおりなら差は0');
   assert.deepEqual(s.scores, [3, 2, 0], '色水づくり: 近い順に3・2点、落とさなかった人は0点');
+  // 2026-11-10 の Codex の点検: 自分の画面で30秒たったら操作を受け付けない（inTime）
+  {
+    const real = performance.now;
+    let fake = 1e9;
+    performance.now = () => fake;
+    try {
+      const key = 'test:iromizu:inTime';
+      assert.ok(I.inTime(key), '色水づくり: 始めは操作できる');
+      fake += I.LIMIT - 1;
+      assert.ok(I.inTime(key), '色水づくり: 30秒の直前までは操作できる');
+      fake += 1;
+      assert.ok(!I.inTime(key), '色水づくり: 30秒たったら操作できない');
+    } finally { performance.now = real; }
+  }
   for (const rules of [{}, { rounds: 3 }, { rounds: 8 }]) {
     const st = runCpus(G, 5, 12, rules, 100, 8000);
     assert.ok(G.result(st) && st.scores.some((v) => v > 0), `色水づくり: CPU どうしで最後まで ${JSON.stringify(rules)}`);

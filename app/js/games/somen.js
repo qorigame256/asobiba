@@ -10,6 +10,8 @@
 //   - 取ったかどうか: 押した人のうち ms の一番小さい人が取る（同じなら席の番号の小さい人）。手が届く順番には関わらないので、全員の端末で同じ。
 //     自分の画面では、自分が押した品と、ほかの人が「自分の画面でのその品の時間」より早く押した品を消す（的の早押しと同じ。ゲストが不利にならないように）。
 //   - 1つの品に1人1回だけ押せる（2回目は弾く。realtime の決まり）。
+//   - 押した手が局面に入っていなければ、0.5秒ごとに同じ ms で送り直す（lostGrabs。ゲストの手はホストの一覧とすれ違って消えることがあり、
+//     消えると自分の画面では取れたように消えるのに点が入らなかった。2026-11-10 の Codex の点検。金魚すくいと同じ）。
 //   - CPU は品ごとに、そうめん45%・さくらんぼ60%・唐辛子5%・金のそうめん70% で取りに行き、0.45〜1.4秒で押す（金のそうめんは流れ切る0.5秒前まで）。
 // 2026-11-10 の38回目の案（本人が選んだ。分かれ目は Claude の判断）:
 //   - 詳細設定「流れの速さ」（鍵は speed）: ゆっくり 3.4秒・ふつう 2.6秒（最初。前と同じ）・急流 1.9秒（といを流れ切るまでの時間）。品の間と数は変えない。
@@ -78,7 +80,15 @@ function scoresOf(s) {
 
 const clone = (s) => ({ ...s, claims: s.claims.slice() });
 const cpuPlan = new Map();
-const myTaps = new Set(); // この端末で押した品（返ってくる前に消すため）
+// この端末で押した品（`${seed}:${i}` → { seed, i, ms }）。返ってくる前に消すためと、手が消えたときに同じ ms で送り直すため
+const myTaps = new Map();
+const RESEND_MS = 500;
+// 自分が押したのに局面に入っていない品の手（ゲストの手はホストの一覧とすれ違って消えることがある。金魚すくい・2色爆弾と同じわけ）。
+// 同じ手が2回届いても apply が「1つの品に1人1回」で弾くので、二重には数えない
+export function lostGrabs(s, me, taps = [...myTaps.values()]) {
+  if (s.phase !== 'play' || me === null) return [];
+  return taps.filter((x) => x.seed === s.seed && x.i < s.claims.length && !s.claims[x.i].some(([p]) => p === me)).map(({ i, ms }) => ({ t: 'grab', i, ms }));
+}
 
 function itemEl(k, sea) {
   const d = document.createElement('div');
@@ -219,10 +229,16 @@ export default {
     const els = new Map();
     const can = me !== null && o.canMove;
     const gone = (i, age) => myTaps.has(`${s.seed}:${i}`) || s.claims[i].some(([p, ms]) => p === me || ms <= age);
+    let resendAt = performance.now() + RESEND_MS;
     const loop = () => {
       if (!lane.isConnected && lane.dataset.on) { els.clear(); return; }
       lane.dataset.on = '1';
       const t = since(startKey);
+      if (can && performance.now() >= resendAt) { // 消えた手の送り直し（0.5秒ごと）
+        resendAt = performance.now() + RESEND_MS;
+        for (const mv of lostGrabs(s, me)) o.onMove(mv);
+        if (!lane.isConnected) return; // 送り直しで描き直された（新しい描き替えが続きを受け持つ）
+      }
       s.items.forEach((it, i) => {
         const age = t - it.at;
         let el = els.get(i);
@@ -241,9 +257,10 @@ export default {
             e.preventDefault();
             const a = since(startKey) - it.at;
             if (!can || a < 0 || a > it.d || gone(i, a)) return;
-            myTaps.add(`${s.seed}:${i}`);
-            if (myTaps.size > 500) myTaps.delete(myTaps.values().next().value);
-            o.onMove({ t: 'grab', i, ms: Math.round(a) });
+            const ms = Math.round(a);
+            myTaps.set(`${s.seed}:${i}`, { seed: s.seed, i, ms });
+            if (myTaps.size > 500) myTaps.delete(myTaps.keys().next().value);
+            o.onMove({ t: 'grab', i, ms });
           };
           lane.append(el);
           els.set(i, el);

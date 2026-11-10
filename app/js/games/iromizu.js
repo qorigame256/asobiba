@@ -8,7 +8,7 @@
 //   - 近さは、人の目の感じ方に近い色の差（CIE Lab の ΔE76）で比べ、100 − 差 を「近さ ◯%」で見せる（0% より下は 0%）。
 //     比べるときは差を 0.01 に丸める（端末で末尾が違っても順位が変わらないように）。
 //   - 点は近い順に 3・2・1点（同じ近さは同じ点。1滴も落としていない人は0点）。
-//   - 1回の制限時間は30秒。「これで決定」を押すとそれ以上落とせない。全員が決めたら0.8秒で締め切る。結果を見せる間は4秒。
+//   - 1回の制限時間は30秒（自分の画面で30秒たったらボタンを押せなくする。inTime）。「これで決定」を押すとそれ以上落とせない。全員が決めたら0.8秒で締め切る。結果を見せる間は4秒。
 //   - お手本は種から「作れる色」を作る（1回目は2色、2回目からは2〜3色、ときどき白も入る。1色は1〜4滴）。1人30滴まで。
 //   - 詳細設定「回数」（鍵は rounds）: 3・5（最初）・8回。おまかせでは抽選しない（KEEP_KEYS の rounds）。
 //   - ほかの人の色は、その回の結果まで見せない（まねできないように）。決めたかどうか（✔）だけ見せる。
@@ -95,6 +95,8 @@ export function tradName(rgb) {
   return TRAD_COLORS[best].slice(0, 2);
 }
 const tradLabel = (m) => { const [n, y] = tradName(mixColor(m)); return `<span class="im-trad">${n}</span><span class="im-trad-y">${y}</span>`; };
+// この端末の画面でその回が始まってから30秒たっていないか（落とす・捨てる・決定を受け付けるか）
+export const inTime = (key) => since(key) < LIMIT;
 const css = (c) => `rgb(${c.map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255)).join(',')})`;
 
 // お手本の作り方（何回目か q から）
@@ -295,7 +297,8 @@ export default {
         const pad = document.createElement('div');
         pad.className = 'im-pad';
         const total = s.mix[me].reduce((a, v) => a + v, 0);
-        const send = (mv) => { if (pad.dataset.sent) return; pad.dataset.sent = '1'; pad.querySelectorAll('button').forEach((b) => { b.disabled = true; }); o.onMove({ ...mv, r: s.q, k: s.acts[me] }); };
+        // 30秒を過ぎたら押しても送らない（ホストの締め切りは通信の遅れを見込んで0.8秒あとなので、その間に色を変えられた。2026-11-10 の Codex の点検）
+        const send = (mv) => { if (pad.dataset.sent || !inTime(key)) return; pad.dataset.sent = '1'; pad.querySelectorAll('button').forEach((b) => { b.disabled = true; }); o.onMove({ ...mv, r: s.q, k: s.acts[me] }); };
         PAINTS.forEach(([name, color], c) => {
           const b = document.createElement('button');
           b.type = 'button';
@@ -317,6 +320,9 @@ export default {
         ok.onclick = () => send({ t: 'ok' });
         act.append(reset, ok);
         wrap.append(act);
+        const off = () => [...pad.querySelectorAll('button'), reset, ok].forEach((b) => { b.disabled = true; });
+        if (!inTime(key)) off();
+        else setTimeout(off, LIMIT - since(key));
       }
       const note = document.createElement('p');
       note.className = 'cc-log';
