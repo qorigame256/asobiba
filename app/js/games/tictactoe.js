@@ -242,9 +242,12 @@ function gobPiece(piece) {
 function renderGob(root, s, o) {
   const res = gobResult(s);
   const legal = o.canMove ? gobLegal(s) : [];
-  if (gobSel && (gobSel.n !== s.n || !o.canMove)) gobSel = null;
+  // 選んだ駒は、動かせる描き直しで局面が進んでいたときだけ忘れる。動かせない描き直し（2回押して置くの薄い駒・さっきの手 など）では忘れずに使わないだけにする
+  // （忘れると、2回押して置くの1回目のあとで同じマスを押しても置けなかった。2026-11-11 Codex の点検）
+  if (gobSel && o.canMove && gobSel.n !== s.n) gobSel = null;
+  const sel = o.canMove ? gobSel : null;
   const pick = (src) => { gobSel = gobSel?.src === src ? null : { n: s.n, src }; renderGob(root, s, { ...o, fresh: false }); };
-  const targets = new Set(gobSel ? legal.filter((m) => Math.floor(m / 9) === gobSel.src).map((m) => m % 9) : []);
+  const targets = new Set(sel ? legal.filter((m) => Math.floor(m / 9) === sel.src).map((m) => m % 9) : []);
   root.innerHTML = '';
   root.className = 'board gob';
   const bottom = o.me === 1 ? 1 : 0; // 自分の手元を下に出す（観戦と同じ画面の対局は ○ が下）
@@ -260,7 +263,7 @@ function renderGob(root, s, o) {
         const can = q === s.turn && legal.some((m) => Math.floor(m / 9) === z);
         if (can) {
           b.classList.add('playable');
-          if (gobSel?.src === z && k === 0) b.classList.add('sel');
+          if (sel?.src === z && k === 0) b.classList.add('sel');
           b.setAttribute('aria-label', `手元の${GOB_SIZE[z]}を選ぶ`);
           b.onclick = () => pick(z);
         } else b.tabIndex = -1;
@@ -295,10 +298,11 @@ function renderGob(root, s, o) {
     if (targets.has(i)) {
       cell.classList.add('playable', 'target');
       cell.setAttribute('aria-label', `${i + 1}番のマスへ`);
-      cell.onclick = () => { const src = gobSel.src; gobSel = null; o.onMove(i + 9 * src); };
+      const src = sel.src;
+      cell.onclick = () => o.onMove(i + 9 * src); // 置けたら局面が進むので、次の動かせる描き直しで選択を忘れる
     } else if (top && legal.some((m) => Math.floor(m / 9) === i + 3)) {
       cell.classList.add('playable');
-      if (gobSel?.src === i + 3) cell.classList.add('sel');
+      if (sel?.src === i + 3) cell.classList.add('sel');
       cell.setAttribute('aria-label', `${i + 1}番のマスの駒を動かす`);
       cell.onclick = () => pick(i + 3);
     } else cell.tabIndex = -1;

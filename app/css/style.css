@@ -3028,6 +3028,7 @@ h1, h2, .sheet-head h3, .cat-h, .tile-nm, .lobby-game-name { font-family: "asobi
 .status-sub.tap-hint { color: var(--accent); font-weight: 700; }
 @media (prefers-reduced-motion: reduce) { .board .peek-aim::after, .board .tap-ghost { animation: none; } }
 .board .tap-ghost, .board .peek-ghost { color: color-mix(in srgb, currentColor 45%, transparent); }
+.board .ghost-fill { opacity: .5; } /* 中身が無く印だけで描く物（点と線の線。data-fill）の薄い姿 */
 
 /* 色に形を添える（2026-11-11。main.js の setView・html の .shapes）: 3〜4人の盤（main.js が board に data-seats を付ける）で、人ごとの石に ● ▲ ■ ◆ を重ねる（点と線の陣地は「赤」などの字が入っているので重ねない。マルバツは印が人ごとに違う）。
    色そのものは変えない。順番の帯の印にも添える。石の ::after は「最後の手」の印に使っているので ::before に描く */

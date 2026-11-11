@@ -229,6 +229,7 @@ export default {
           const v = s.lines[i];
           if (v !== null) {
             e.classList.add('on', 'p' + v);
+            e.dataset.fill = ''; // 中身が無く印だけで引いたと描くので、main.js の 2回押して置く・相手の迷い・さっきの手 に知らせる（2026-11-11）
             if (i === s.last) e.classList.add('last');
             e.tabIndex = -1;
           } else if (o.canMove) {

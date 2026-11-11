@@ -239,7 +239,8 @@ export default {
     // 答えを決める間と当て始めてからで、入力中の数字を分ける
     const key = `${s.answer ?? s.auto.join('')}:${s.n}:${s.round}:${s.setting ? 'set' : 'guess'}`;
     if (entry.key !== key) entry = { key, text: '' };
-    const memoKey = `${s.answer ?? s.auto.join('')}:${s.n}:${s.round}`; // 推理のメモは対局（と回）が替わったら消す
+    // 推理のメモは対局が替わったら消す（回は入れない。入れると予想を出すたびに消えていた。2026-11-11 Codex の点検）
+    const memoKey = `${s.answer ?? s.auto.join('')}:${s.n}`;
     if (memo.key !== memoKey) memo = { key: memoKey, d: {} };
     const done = s.winners !== null;
     const nameOf = (p) => (p === me ? 'あなた' : o.names[p]);

@@ -521,6 +521,8 @@ const game = {
     const over = s.won !== null;
 
     if (s.phase === 'place') {
+      // 並べている間に推理のメモを忘れる（次の対局で自分の船を前と同じ形に並べると、前の対局のメモが残っていた。2026-11-11 Codex の点検）
+      ksMemo = { key: null, cells: new Set(), on: false };
       if (o.canMove && me !== null) { renderPlace(root, s, o); return; }
       if (np(s) === 3) {
         const p = document.createElement('p');

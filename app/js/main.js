@@ -2608,7 +2608,7 @@ function cellsOf(board) {
   return [...best.children];
 }
 function cellSig(e) {
-  const parts = [e.textContent];
+  const parts = [e.textContent, e.dataset.fill !== undefined ? 'fill' : '']; // 印だけで埋まる物（data-fill。点と線の線）も見る（2026-11-11 Codex の点検）
   for (const d of e.querySelectorAll('*')) parts.push(d.tagName + ':' + [...d.classList].filter((c) => !WAS_SKIP.has(c) && !c.startsWith('fly')).sort().join('.'));
   return parts.join('|');
 }
@@ -4052,8 +4052,11 @@ function ghostOne(game, st, board, move, cls, at) {
   const tmp = document.createElement('div');
   try { game.render(tmp, next, { canMove: false, onMove() {}, fresh: false, me: watchSeat(game), view: boardView(game) }); } catch { return; }
   const empty = (c) => !c.textContent.trim() && !c.children.length;
+  // 中身を持たず印（class）だけで埋まったと描く物（点と線の線）は、ゲームが data-fill を付けて知らせる（2026-11-11 Codex の点検。前は相手の迷いが何も出なかった）
+  const filled = (c) => c.dataset?.fill !== undefined;
   const pairs = [];
   const walk = (x, y) => {
+    if (filled(y) && !filled(x)) { pairs.push([x, y]); return; }
     if (empty(x)) { if (!empty(y)) pairs.push([x, y]); return; }
     if (x.children.length !== y.children.length) return;
     for (let i = 0; i < x.children.length; i++) walk(x.children[i], y.children[i]);
@@ -4068,6 +4071,11 @@ function ghostOne(game, st, board, move, cls, at) {
     }
     c.replaceChildren(...copy);
     c.classList.add(cls);
+    // 印だけで描く物は、埋まった印を写して薄く出す（.ghost-fill）
+    if (filled(y) && !y.childNodes.length) {
+      for (const k of y.classList) if (!['last', 'pop', 'flip', 'drop', 'win'].includes(k)) c.classList.add(k);
+      c.classList.add('ghost-fill');
+    }
   }
   if (!pairs.length && at >= 0) board.querySelectorAll('*')[at]?.classList.add(cls + '-ring');
 }
