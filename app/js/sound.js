@@ -60,6 +60,7 @@ try { muted = localStorage.getItem(MUTE_KEY) === '1'; } catch { /* 覚えられ�
 export const isMuted = () => muted;
 export function setMuted(v) {
   muted = !!v;
+  if (muted) stopVoice(); // 言いかけの声と、続けて鳴らす予定の部品も止める（2026-11-11）
   try { localStorage.setItem(MUTE_KEY, muted ? '1' : '0'); } catch { /* 無視 */ }
 }
 
@@ -102,7 +103,8 @@ function keep(u) {
 }
 
 // ブラウザの読み上げ。rate は速さ（旗揚げは 1.15）、cut なら言いかけの読み上げを止めてから言う
-function say(text, { rate, cut } = {}) {
+// key: cut のとき、同じ key で鳴っている VOICEVOX の声も止める（前のお題が声のファイル・次がブラウザの読み上げのとき、二重にならないように）
+function say(text, { rate, cut } = {}, key) {
   try {
     const u = new SpeechSynthesisUtterance(text);
     u.lang = 'ja-JP';
@@ -111,7 +113,7 @@ function say(text, { rate, cut } = {}) {
     u.volume = VOICE_VOL;
     if (rate) u.rate = rate;
     keep(u);
-    if (cut) speechSynthesis.cancel();
+    if (cut) { stopVoice(key); speechSynthesis.cancel(); }
     if (speechSynthesis.paused) speechSynthesis.resume(); // 他のアプリへ移って戻ったあと、止まったままになる端末がある
     speechSynthesis.speak(u);
   } catch { /* 読み上げが使えない端末 */ }
@@ -142,6 +144,16 @@ export function preloadVoice(texts) {
   for (const t of texts) if (hasVoice(t)) for (const v of VOICES) voiceFile(v, t).catch(() => {});
 }
 const voicing = {}; // key → いま鳴らしている声の音源（cut で止めるため）
+const liveSrc = new Set(); // 鳴っている・鳴らす予定の声の音源すべて（🔇 で止めるため。鳴り終わったら消す）
+// 声を止める。key を渡せばその key の VOICEVOX の声だけ、渡さなければ VOICEVOX の声もブラウザの読み上げも全部
+function stopVoice(key) {
+  const list = key === undefined ? [...liveSrc] : voicing[key] ?? [];
+  for (const src of list) { try { src.stop(); } catch { /* もう止まっている */ } liveSrc.delete(src); }
+  if (key === undefined) {
+    for (const k of Object.keys(voicing)) delete voicing[k];
+    try { speechSynthesis.cancel(); } catch { /* 読み上げが使えない端末・Node */ }
+  } else delete voicing[key];
+}
 // parts を声のファイルでつないで言う。全部の部品にファイルがあれば true（鳴らすのは読み込んでから）。読めなかったらブラウザの読み上げで言い直す
 function playVoice(parts, key, opts) {
   if (!parts.every(hasVoice)) return false;
@@ -151,7 +163,10 @@ function playVoice(parts, key, opts) {
     .then((bufs) => {
       if (muted) return;
       if (performance.now() - asked > 3000) return; // 遅れすぎた声は言わない（次の問題が出ていることがある）
-      if (opts.cut) for (const src of voicing[key] ?? []) try { src.stop(); } catch { /* もう止まっている */ }
+      if (opts.cut) { // 前のお題がブラウザの読み上げで言いかけでも止める
+        stopVoice(key);
+        try { speechSynthesis.cancel(); } catch { /* 読み上げが使えない端末 */ }
+      }
       const g = ctx.createGain();
       g.gain.value = MASTER;
       g.connect(ctx.destination);
@@ -161,11 +176,15 @@ function playVoice(parts, key, opts) {
         src.buffer = buf;
         src.connect(g);
         src.start(t);
+        liveSrc.add(src);
+        src.onended = () => liveSrc.delete(src);
         t += buf.duration + PART_GAP;
         return src;
       });
     })
-    .catch(() => say(parts.join('、'), opts));
+    .catch(() => { // 読めなかったらブラウザの読み上げで言い直す。待つ間に 🔇 にした・遅れすぎた（次の問題が出ている）なら言わない
+      if (!muted && performance.now() - asked <= 3000) say(parts.join('、'), opts, key);
+    });
   return true;
 }
 if (typeof window !== 'undefined') { // tools/ の自動確認（Node）から読まれたときは何もしない
@@ -200,7 +219,7 @@ export function speak(text, key = 'speak', opts = {}) {
   talk(parts, key, opts);
 }
 function talk(parts, key, opts) {
-  if (!playVoice(parts, key, opts)) say(parts.join('、'), opts);
+  if (!playVoice(parts, key, opts)) say(parts.join('、'), opts, key);
 }
 
 // 対局が終わったときの音。自分の勝ち → win、負け → lose、引き分け → draw_game。

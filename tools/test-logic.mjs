@@ -4863,7 +4863,7 @@ assert.equal(sk.pits[13], 0, '相手のゴールは飛ばす');
 assert.equal(sk.pits[0], 1, '飛ばした分は自分の側へ回る');
 const end = MC.apply({ ...mc, pits: [0, 0, 0, 0, 0, 1, 10, 2, 3, 0, 0, 0, 0, 5] }, 5);
 assert.ok(end.over && end.pits[13] === 10 && end.pits[6] === 11, '片側が空になったら残りは持ち主のゴールへ');
-assert.deepEqual(MC.result(end), { winner: 0, cells: [] });
+assert.equal(MC.result(end).winner, 0); // 結果には席ごとの点（scores）もある（2026-11-11）
 for (let g = 0; g < 20; g++) {
   let st = MC.init({ rules: { stones: 3 + (g % 4) } });
   const total = st.pits.reduce((a, b) => a + b, 0);
@@ -4913,7 +4913,7 @@ const one3 = MC.apply({ ...mc3, pits: p3({ 0: 1, 4: 1, 8: 3, 7: 1, 14: 1 }) }, 0
 assert.ok(one3 && one3.got === 4, '3人: 片方だけに石があってもとる');
 const end3 = MC.apply({ ...mc3, pits: p3({ 5: 1, 7: 2, 15: 3, 20: 4 }) }, 5);
 assert.ok(end3.over && end3.pits[6] === 1 && end3.pits[13] === 2 && end3.pits[20] === 7, '3人: 誰かの側が空になったら全員終わり');
-assert.deepEqual(MC.result(end3), { winner: 2, cells: [] });
+assert.equal(MC.result(end3).winner, 2);
 assert.equal(MC.result({ ...end3, pits: p3({ 6: 5, 13: 5, 20: 1 }) }).winner, null, '3人: 一番が2人なら引き分け');
 for (let g = 0; g < 12; g++) {
   let st = MC.init({ rules: { players: 3, stones: 3 + (g % 4) } });
@@ -6178,6 +6178,23 @@ console.log('kaisen OK');
   const mres = M.result({ ...M.init(4, 3, { rules: {} }), done: true, scores: [3, 1, 1, 0] });
   assert.deepEqual(seatPoints(mres, 4), [3, 1, 1, 0], '神経衰弱で2位が2人なら同じ点');
   assert.deepEqual(seatPoints({ winner: null, draw: false, ranking: [2, 0, 1], place: [2, 2, 1], winners: [2] }, 3), [0, 0, 2], 'スピードの3人で2位が2人');
+  // 点と線（3〜4人）・マンカラ（3人）は結果に席ごとの点（scores）を持つ（2026-11-11。無いと勝った人しか点をもらえず、表彰台も出なかった）
+  const DT = GAMES.dots;
+  const ds = DT.init({ rules: { players: 3 } });
+  ds.lines.fill(0);
+  ds.count = ds.lines.length;
+  ds.boxes = ds.boxes.map((_, b) => (b < 12 ? 0 : b < 20 ? 1 : 2)); // 25マス: 12・8・5
+  assert.deepEqual(seatPoints(DT.result(ds), 3), [2, 1, 0], '点と線の3人: 四角の多い順に 2・1・0点');
+  ds.boxes = ds.boxes.map((_, b) => (b < 10 ? 0 : b < 20 ? 1 : 2)); // 10・10・5 は1位が同点の引き分け（今までどおりだれも点なし）
+  assert.deepEqual(seatPoints(DT.result(ds), 3), [0, 0, 0], '点と線の3人: 1位が同点なら引き分け');
+  const MK = GAMES.mancala;
+  const ms = MK.init({ rules: { players: 3 } });
+  const goals = ms.pits.map((v, i) => (v === 0 ? i : -1)).filter((i) => i >= 0); // 始めはゴールだけ0個
+  assert.equal(goals.length, 3, 'マンカラの3人のゴールは3つ');
+  ms.pits = ms.pits.map(() => 0);
+  [9, 5, 4].forEach((v, p) => { ms.pits[goals[p]] = v; });
+  ms.over = true;
+  assert.deepEqual(seatPoints(MK.result(ms), 3), [2, 1, 0], 'マンカラの3人: ゴールの石の多い順に 2・1・0点');
 }
 
 // 遊び方: どのゲームにもあり、長くしない（1つ4行まで）

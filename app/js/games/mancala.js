@@ -126,7 +126,7 @@ const game = {
     const sc = stores(s);
     const top = Math.max(...sc);
     const winners = sc.map((v, p) => (v === top ? p : -1)).filter((p) => p >= 0);
-    return { winner: winners.length === 1 ? winners[0] : null, cells: [] };
+    return { winner: winners.length === 1 ? winners[0] : null, cells: [], scores: sc }; // scores: 成績表の順位で点・表彰台（3人）
   },
 
   // CPU: 何手か先まで読む（ゴールの石の差で点を付ける）。よわいは浅く、ときどき適当に打つ

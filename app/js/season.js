@@ -4,7 +4,7 @@
 // Claude が決めた細部:
 //   - 季節: 春 3〜5月・夏 6〜8月・秋 9〜11月・冬 12〜2月。1月1〜7日は正月（梅と金の粉）。端末の時計で決める。
 //   - 画面全体に重ねる canvas（押せないので、下の物はそのまま押せる）。数は見本の電話の大きさ（260×360）を基準に、画面の広さに合わせて増やす（2.5倍まで）。
-//   - 動きを減らす設定の端末では、止まった飾りを1回だけ描く。タブが裏にある間は止める。
+//   - 動きを減らす設定の端末では出さない（止まった絵も描かない。2026-11-11 本人の決定）。タブが裏にある間は止める。
 //   - 確かめ用に URL の ?season=spring などで季節を替えられる（spring・summer・autumn・winter・newyear・none）。
 // ブラウザにしか無いもの（window・document）は、呼ばれたときに初めて触る（Node の自動確認から読まれても動くように）。
 
@@ -77,8 +77,7 @@ function star(x, y, r) {
 function draw(now, k) {
   ctx.clearRect(0, 0, W, H);
   if (season === 'summer') {
-    if (!sparks.length && still()) burst(now); // 止まった絵でも花火が1つ見えるように
-    if (now > nextBurst && !still()) burst(now);
+    if (now > nextBurst) burst(now);
     for (const s of sparks) { s.x += s.vx * k; s.y += s.vy * k; s.vy += 0.025 * k; s.vx *= 0.985; s.life -= 0.014 * k; }
     sparks = sparks.filter((s) => s.life > 0);
     for (const s of sparks) { ctx.globalAlpha = Math.max(0, s.life); ctx.fillStyle = s.col; ctx.beginPath(); ctx.arc(s.x, s.y, 1.6, 0, 7); ctx.fill(); }
@@ -105,7 +104,8 @@ function draw(now, k) {
 }
 
 function frame(now) {
-  if (!on || document.hidden || still()) { running = false; return; }
+  if (!on || document.hidden) { running = false; return; }
+  if (still()) { running = false; ctx.clearRect(0, 0, W, H); return; } // 見ている途中で動きを減らす設定にしたら消す
   const k = last ? Math.min(3, (now - last) / 16.7) : 1;
   last = now;
   draw(now, k);
@@ -114,7 +114,7 @@ function frame(now) {
 
 function start() {
   if (!on) return;
-  if (still()) { draw(performance.now(), 0); return; } // 止まった飾りを1回だけ
+  if (still()) { ctx.clearRect(0, 0, W, H); return; } // 動きを減らす設定の端末では出さない
   if (running) return;
   running = true; last = 0;
   requestAnimationFrame(frame);
@@ -137,6 +137,7 @@ function setup() {
 
 // 出す（true）・止めて消す（false）。何度呼んでもよい
 export function showSeason(want) {
+  if (want && still()) want = false; // 動きを減らす設定の端末では出さない（canvas も作らない）
   if (want === on) return;
   if (want && !cv && !setup()) return;
   if (!cv) return;

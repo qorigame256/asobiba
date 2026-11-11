@@ -102,6 +102,7 @@ function noteGains(o, scores) {
   scores.forEach((v, p) => {
     const was = gains.vals[p];
     if (o.fresh && Number.isFinite(v) && Number.isFinite(was) && v > was) { gains.at[p] = now; gains.from[p] = was; }
+    else if (!(v >= was)) delete gains.at[p]; // 点が減った（同じ顔ぶれのもう一回で0に戻った など）ら、前の「+3」の続きを出さない（「+-5」になるため）
     gains.vals[p] = v;
   });
 }

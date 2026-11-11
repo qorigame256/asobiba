@@ -2815,7 +2815,7 @@ function endStamp(game, res, me, end, delay) {
   const [text, kind] = stampOf(game, res, me, end);
   const key = timerKey();
   setTimeout(() => {
-    if (!S || timerKey() !== key) return; // 待つ間に次の対局へ進んでいたら出さない
+    if (!S || timerKey() !== key || reviewing()) return; // 待つ間に次の対局へ進んでいた・ふりかえりを見ていたら出さない
     const s = document.createElement('div');
     s.className = 'end-stamp ' + kind;
     for (const x of [text].flat()) { // 名前は外から来た文字なので textContent
@@ -2825,7 +2825,7 @@ function endStamp(game, res, me, end, delay) {
     showFx(s, 1700);
     if (kind === 'win') setTimeout(() => el('board')?.animate(SHAKE_KF, { duration: 320 }), 200);
     const pod = podiumOf(game, res, me);
-    if (pod) setTimeout(() => { if (S && timerKey() === key) podiumFx(pod); }, 1500); // 判子が消えるころに表彰台
+    if (pod) setTimeout(() => { if (S && timerKey() === key && !reviewing()) podiumFx(pod); }, 1500); // 判子が消えるころに表彰台
   }, delay);
 }
 
@@ -2864,8 +2864,9 @@ function slowFinish(board) {
   board.style.transition = 'transform .45s cubic-bezier(.3, .7, .3, 1)';
   board.style.transform = 'scale(1.04)';
   const drop = target.dataset.last !== 'still';
+  let fall = null;
   if (drop) {
-    target.animate([
+    fall = target.animate([
       { transform: 'translateY(-22px) scale(1.6)', opacity: 0 },
       { opacity: 1, offset: 0.6 },
       { transform: 'none', opacity: 1 },
@@ -2882,6 +2883,7 @@ function slowFinish(board) {
     board.style.transform = '';
     setTimeout(() => { if (!board.style.transform) { board.style.transition = ''; board.style.transformOrigin = ''; } }, 340);
     if (slowNow === s) slowNow = null;
+    try { fall?.finish(); } catch { /* 盤が描き直されて、もう無い */ } // 押して飛ばしたとき、石が落ち続けないように
   };
   slowNow = s;
   document.addEventListener('pointerdown', slowSkip, true);
@@ -2969,6 +2971,7 @@ function rollStep() {
   for (const e of document.querySelectorAll('[data-roll]')) {
     const r = S && rolls.get(`${timerKey()}:${e.dataset.roll}`);
     if (!r || r.done) continue;
+    if (Number(e.dataset.v) !== r.to) continue; // ふりかえりで前の局面の数を出している数字は書き換えない
     if (now - r.t >= r.ms) r.done = true; else more = true; // 終わりの数を必ず1回書く（画面が隠れていて間が飛んでも）
     const n = e.firstChild;
     const txt = rollText(rollAt(r, now), e);
@@ -2982,7 +2985,7 @@ function rollStep() {
 // Claude の判断: 「点数で競う」は結果が席ごとの点（scores。ranking があるゲームは pts も）を持つゲーム。チーム戦（teams）と引き分け（draw）は出さない。
 // 順位は成績表の「順位で点」と同じ見方（games/index.js の seatPoints）で決め、同じ順位なら点の多い順に並べる。4位からは5人まで出して残りは「ほか○人」
 function podiumOf(game, res, me) {
-  if (!res || res.teams !== undefined || res.draw === true) return null;
+  if (!res || res.teams !== undefined || res.draw === true || !winnersOf(res).length) return null; // 勝った人のいない引き分け（点と線・マンカラの1位の同点など）も出さない
   const okArr = (a) => Array.isArray(a) && a.length >= 3 && a.every(Number.isFinite);
   const val = okArr(res.scores) ? res.scores : okArr(res.pts) && Array.isArray(res.ranking) ? res.pts : null;
   if (!val) return null;
@@ -2999,11 +3002,12 @@ function podiumFx(list) {
   const stage = document.createElement('div');
   stage.className = 'pd-stage';
   const counts = [];
-  [[list[1], 2, 300], [list[0], 1, 600], [list[2], 3, 0]].forEach(([x, pos, at]) => {
+  // 台の高さ・色と王冠は順位で決める（同点1位が2人なら、2人とも1位の台で王冠を付ける。2026-11-11 本人の決定）。並べる位置（まんなかが先頭）は今までどおり
+  [[list[1], 300], [list[0], 600], [list[2], 0]].forEach(([x, at]) => {
     const col = document.createElement('div');
-    col.className = `pd-col pd-${pos}`;
+    col.className = `pd-col pd-${Math.min(3, x.rank)}`;
     col.style.setProperty('--at', at + 'ms');
-    if (pos === 1) {
+    if (x.rank === 1) {
       const crown = document.createElement('div');
       crown.className = 'pd-crown';
       crown.textContent = '👑';
@@ -3182,6 +3186,18 @@ function introFx(game) {
   const t1 = ids.length === 2 ? 1000 : 1000 + ids.length * 40;
   showFx(box, t1 + 550);
   introUntil = Date.now() + t1 + 550; // 札を配るのは顔合わせが消えるころから（flyPlay）
+  // 顔合わせ・配っている間にどこかを押したら、配る動きもすぐ終える（待っている間の手札の札は山札の所に重なっていて、山札を押すつもりで札を押してしまうため）。
+  // 押した指の pointerdown の当たり先はもう決まっていて、指を離す所（本来の山札）と違うので、その1回の押しで札が出ることはない
+  const skipDeal = () => {
+    document.removeEventListener('pointerdown', skipDeal, true);
+    introUntil = 0;
+    flights.clear(); // 描き直された札が、配る動きの続きを始めないように
+    for (const e of el('board')?.querySelectorAll('[data-fly-deal]') ?? []) {
+      for (const a of e.getAnimations()) try { a.finish(); } catch { /* 終わりの無い動き */ }
+    }
+  };
+  document.addEventListener('pointerdown', skipDeal, true);
+  setTimeout(() => document.removeEventListener('pointerdown', skipDeal, true), t1 + 550 + 2500); // 配り終わるまで（顔合わせのあとも1〜2秒配っている）
   setTimeout(() => {
     if (!box.isConnected) return; // 押して飛ばした
     const go = document.createElement('div');
@@ -3409,8 +3425,11 @@ function moveSound(game, st, res, prevLen, mine, hold = 0) {
   if (mine && !replayNow && S.mode === 'online' && !game.realtime && !canMove(game, before, null)) {
     const waited = Date.now() - S.waitFrom;
     if (waited > TURN_PING_MS) {
-      setTimeout(() => { play('turn'); haptic('turn'); sayTurn(); }, 300);
-      setTimeout(turnFx, Math.max(300, cutUntil - Date.now())); // あなたのターンの帯（2026-11-06）。技の名前が出ていれば、そのあとに
+      // 待つ間に打った・部屋を出た・次の対局へ進んだら出さない（同じ部屋の同じ対局で、手の数が変わっていないときだけ）
+      const at = [S, timerKey(), S.moves.length];
+      const still = () => S === at[0] && timerKey() === at[1] && S.moves.length === at[2];
+      setTimeout(() => { if (still()) { play('turn'); haptic('turn'); sayTurn(); } }, 300);
+      setTimeout(() => { if (still()) turnFx(); }, Math.max(300, cutUntil - Date.now())); // あなたのターンの帯（2026-11-06）。技の名前が出ていれば、そのあとに
     }
   }
 }
