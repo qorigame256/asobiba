@@ -9542,7 +9542,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
 // ジグソー早解き（2026-11-06）
 {
   const JG = GAMES.jigsaw;
-  const { EMOJIS: JG_EMOJIS, pictureOf, scrambleOf, replaySwaps, solveSwaps, isDone: jgDone } = await import('../app/js/games/jigsaw.js');
+  const { EMOJIS: JG_EMOJIS, pictureOf, scrambleOf, replaySwaps, solveSwaps, swapsToSend, isDone: jgDone } = await import('../app/js/games/jigsaw.js');
   const { mulberry32: jgRnd } = await import('../app/js/games/util.js');
   for (const e of JG_EMOJIS) assert.ok(![...e].some((c) => c.codePointAt(0) >= 0x1fa70), `ジグソー: 新しすぎる絵文字を使わない（${e}）`);
   assert.deepEqual(pictureOf(42), pictureOf(42), 'ジグソー: 同じ種なら同じ絵');
@@ -9572,6 +9572,16 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   s = JG.apply(s, { p: 2, t: 'pass', q: 0 });
   s = JG.apply(s, { p: -1, t: 'close' });
   assert.deepEqual(s.scores, [3, 2, 0], 'ジグソー: 速い順に点、あきらめたら0点');
+  // 400回を超えて入れ替えてからそろえても受け付ける（Codex の点検の指摘。前は先頭の400回だけ送って弾かれていた）
+  {
+    let y = JG.apply(JG.init(2, 9), { p: -1, t: 'next' });
+    const start = y.qs[0].perm;
+    const many = [...Array(401)].map(() => [0, 1]).concat(solveSwaps(replaySwaps(start, [[0, 1]])));
+    assert.ok(jgDone(many.reduce((p, [a, b]) => { const q = p.slice(); [q[a], q[b]] = [q[b], q[a]]; return q; }, start)), 'ジグソー: 401回のあとでそろった並び（確かめの前提）');
+    const sent = swapsToSend(start, many);
+    assert.ok(JG.apply(y, { p: 0, t: 'done', q: 0, swaps: sent, ms: 5000 }), 'ジグソー: 400回を超えてからそろえても受け付ける');
+    assert.deepEqual(swapsToSend(start, sw), sw, 'ジグソー: 400回までは押したとおりに送る');
+  }
   console.log('jigsaw OK');
 }
 
@@ -9961,11 +9971,16 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   }
   // 鬼の交代: 前の対局と同じ顔ぶれなら、鬼になった回数がいちばん少ない人
   for (let seed = 0; seed < 40; seed++) {
-    const y = G.init(3, seed, { prev: [{ oni: 1 }, { oni: 0 }, { oni: 1 }] });
+    const y = G.init(3, seed, { prev: [1, 0, 1] });
     assert.equal(y.oni, 1, '鬼: 鬼になった回数がいちばん少ない人が鬼');
-    const z = G.init(3, seed, { prev: [{ oni: 1 }, { oni: 0 }, { oni: 0 }] });
+    const z = G.init(3, seed, { prev: [1, 0, 0] });
     assert.ok(z.oni === 1 || z.oni === 2, '鬼: 並んだら回数の少ない人の中から');
-    assert.deepEqual([0, 1, 2].map((p) => G.carry({ ...z, phase: 'end' }, p).oni), [1, z.oni === 1 ? 1 : 0, z.oni === 2 ? 1 : 0], '鬼: 鬼になった回数を持ち越す');
+    assert.deepEqual([0, 1, 2].map((p) => G.carry({ ...z, phase: 'end' }, p)), [1, z.oni === 1 ? 1 : 0, z.oni === 2 ? 1 : 0], '鬼: 鬼になった回数を持ち越す');
+    // main.js の newRound は、carry の値が全部整数のときだけ prev に渡す（Codex の点検の指摘。前はオブジェクトで返していて、いつもくじになっていた）
+    const prev = [0, 1, 2].map((p) => G.carry({ ...z, phase: 'end' }, p));
+    assert.ok(prev.every(Number.isInteger), '鬼: 持ち越す値は main.js が受け取れる整数');
+    const z2 = G.init(3, seed, { prev });
+    assert.equal(prev[z2.oni], Math.min(...prev), '鬼: 持ち越した値で、鬼になった回数の少ない人が次の鬼');
   }
   // CPU どうしで最後まで。CPU の鬼が数える「いそうなマス」には、いつも本当の位置が入っている（のぞかずに正しく数えている）
   const realRandom = Math.random;
@@ -10066,11 +10081,11 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
       const res = G.result(y);
       assert.ok(res && res.oniWin && res.got === 3 && res.winners.length === 2 && res.winners.includes(y.oni) && res.winners.includes(y.oni2), '鬼: 鬼2人は3人つかまえたら2人とも勝ち');
       assert.ok(G.resultText(res, rs[0], (p) => 'P' + p).includes('P' + y.oni) && G.resultText(res, rs[0], (p) => 'P' + p).includes('P' + y.oni2), '鬼: 結果の文に鬼2人の名前');
-      assert.deepEqual([0, 1, 2, 3, 4].map((p) => G.carry(y, p).oni), [0, 1, 2, 3, 4].map((p) => (p === y.oni || p === y.oni2 ? 1 : 0)), '鬼: 鬼になった回数を2人とも持ち越す');
+      assert.deepEqual([0, 1, 2, 3, 4].map((p) => G.carry(y, p)), [0, 1, 2, 3, 4].map((p) => (p === y.oni || p === y.oni2 ? 1 : 0)), '鬼: 鬼になった回数を2人とも持ち越す');
       for (let seed = 0; seed < 30; seed++) {
-        const z = G.init(5, seed, { rules: { onis: 2 }, prev: [{ oni: 1 }, { oni: 1 }, { oni: 0 }, { oni: 0 }, { oni: 1 }] });
+        const z = G.init(5, seed, { rules: { onis: 2 }, prev: [1, 1, 0, 0, 1] });
         assert.deepEqual([z.oni, z.oni2].sort(), [2, 3], '鬼: 鬼になった回数が少ない2人が鬼');
-        const w = G.init(5, seed, { rules: { onis: 2 }, prev: [{ oni: 1 }, { oni: 1 }, { oni: 0 }, { oni: 1 }, { oni: 1 }] });
+        const w = G.init(5, seed, { rules: { onis: 2 }, prev: [1, 1, 0, 1, 1] });
         assert.ok(w.oni === 2 || w.oni2 === 2, '鬼: いちばん少ない人は必ず鬼');
       }
     }
@@ -10125,6 +10140,16 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.ok(!G.canAct(s, 0), 'レース: 休みの手は選べない');
   s = G.apply(s, { p: -1, t: 'close' });
   assert.ok(G.canAct(s, 0), 'レース: 休みは1回だけ');
+  // はみ出して戻る手前のマスにほかの車が止まっていたら、道すじをさらに戻る（Codex の点検の指摘。前は2台が重なった）
+  {
+    let y = G.apply(G.init(2, 3, { rules: { course: 'u' } }), { p: -1, t: 'next' });
+    y = { ...y, cars: [{ ...y.cars[0], x: 4, y: 10, vx: 2, vy: 0, rest: 0 }, { ...y.cars[1], x: 5, y: 10, vx: 0, vy: 0, rest: 1 }] };
+    y = G.apply(y, { p: 0, t: 'go', k: y.k, a: [1, 0] });
+    assert.ok(y, 'レース: 空いているマスへの手は受け付ける（はみ出す手でも）');
+    y = G.apply(y, { p: -1, t: 'close' });
+    assert.deepEqual([y.cars[0].x, y.cars[0].y, y.cars[0].rest, y.cars[0].crash], [4, 10, 1, true], 'レース: 戻る手前のマスがふさがっていたら、さらに手前へ');
+    assert.deepEqual([y.cars[1].x, y.cars[1].y], [5, 10], 'レース: 止まっていた車はそのまま');
+  }
   // 時間切れはそのまま進む
   s = { ...s, cars: [{ ...s.cars[0], x: 3, y: 12, vx: 0, vy: -2 }, s.cars[1]] };
   s = G.apply(s, { p: -1, t: 'close' });

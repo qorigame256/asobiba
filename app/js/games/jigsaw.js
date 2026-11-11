@@ -79,7 +79,10 @@ export function replaySwaps(perm, swaps) {
   }
   return out;
 }
-// そろえる入れ替え（CPU と自動確認が使う）。1回で1つのかけらを正しい場所へ入れる
+// 送る入れ替え。ふつうは押したとおり。MAX_SWAPS を超えたら、最初の並びからそろえる最短の入れ替えを送る
+// （切って送ると apply がそろっていないと弾き、画面は「そろった！」のまま止まった。2026-11-11 Codex の点検。そろったときにしか送らないので、どちらでも結果は同じ）
+export const swapsToSend = (start, swaps) => (swaps.length <= MAX_SWAPS ? swaps.slice() : solveSwaps(start));
+// そろえる入れ替え（CPU と自動確認、送る入れ替えが多すぎるときに使う）。1回で1つのかけらを正しい場所へ入れる
 export function solveSwaps(perm) {
   const p = perm.slice();
   const out = [];
@@ -319,7 +322,7 @@ export default {
       loc.sent = true;
       grid.classList.remove('live');
       grid.classList.add('whole');
-      o.onMove({ t: 'done', q: s.q, swaps: loc.swaps.slice(0, MAX_SWAPS), ms });
+      o.onMove({ t: 'done', q: s.q, swaps: swapsToSend(x.perm, loc.swaps), ms });
     };
     const hit = (i) => {
       if (!playing || loc.sent) return;

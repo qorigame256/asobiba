@@ -7,6 +7,8 @@
 // Claude の判断:
 //   - 動き方: 次の位置 ＝ 今の位置 ＋ 今の速さ ＋ 足す分（横・縦それぞれ −1・0・+1 の9通り）。動いたあとの速さは「次の位置 − 今の位置」。
 //     動いた道すじ（線分）を細かく区切って調べ、途中で1マスでもコースの外へ出たらはみ出し。ゴールのマスに道すじが入ったらゴール。
+//   - はみ出して戻る「手前の位置」にほかの車が止まっていたら、道すじをさらに戻って空いているマスに置く（どこも空いていなければ動く前の位置）。
+//     はみ出さなかった車を先に置き、はみ出した車どうしは席の順に置く（Codex の点検の指摘。前は2台が同じマスに重なった）。
 //   - 同じ手のうちに2台以上がゴールしたら、道すじのより手前でゴールに入った車が上（まったく同じなら同着）。
 //     だれもゴールしていない人は、ゴールまでの残りのマス数が少ない順に並べる（成績表の順位で点のため）。
 //   - ほかの車がいるマスは、動く前に車がいるマス（そのマスの車がこの手で動いても選べない）。同じ手で2台が同じマスを選んだら、ぶつかって2台とも元の位置で速さ0（休みなし）。
@@ -72,6 +74,20 @@ export function trace(c, x0, y0, x1, y1) {
     lx = x; ly = y;
   }
   return { x: x1, y: y1, crash: false, fin: null };
+}
+
+// はみ出す手前までに通ったコースの上のマス（はみ出す手前 → 動く前の位置 の順。先頭は trace のはみ出しの位置と同じ）
+function pathBack(c, x0, y0, x1, y1) {
+  const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) * 4;
+  const cells = [[x0, y0]];
+  for (let i = 1; i <= n; i++) {
+    const t = i / n;
+    const x = Math.round(x0 + (x1 - x0) * t), y = Math.round(y0 + (y1 - y0) * t);
+    if (!c.on(x, y)) break;
+    const [lx, ly] = cells[cells.length - 1];
+    if (x !== lx || y !== ly) cells.push([x, y]);
+  }
+  return cells.reverse();
 }
 
 const ACCELS = [[-1, -1], [0, -1], [1, -1], [-1, 0], [0, 0], [1, 0], [-1, 1], [0, 1], [1, 1]];
@@ -216,6 +232,7 @@ export default {
     });
     // 同じマスを選んだ車はぶつかる
     const bumped = moves.map((d, p) => d !== null && moves.some((e, q) => q !== p && e && e[0] === d[0] && e[1] === d[1]));
+    const crashes = [];
     s.cars.forEach((car, p) => {
       if (!racing(car)) return;
       if (car.rest) { car.rest -= 1; return; }
@@ -223,14 +240,19 @@ export default {
       if (!d) return;
       if (bumped[p]) { car.vx = 0; car.vy = 0; car.bump = true; return; }
       const tr = trace(c, car.x, car.y, d[0], d[1]);
-      if (tr.crash) {
-        Object.assign(car, { x: tr.x, y: tr.y, vx: 0, vy: 0, rest: 1, crash: true });
-      } else {
-        Object.assign(car, { vx: d[0] - car.x, vy: d[1] - car.y, x: tr.fin !== null ? tr.x : d[0], y: tr.fin !== null ? tr.y : d[1] });
-        if (tr.fin !== null) car.fin = { k: s.k, t: tr.fin };
-      }
+      if (tr.crash) { crashes.push([p, d]); return; }
+      Object.assign(car, { vx: d[0] - car.x, vy: d[1] - car.y, x: tr.fin !== null ? tr.x : d[0], y: tr.fin !== null ? tr.y : d[1] });
+      if (tr.fin !== null) car.fin = { k: s.k, t: tr.fin };
       s.trails[p].push([car.x, car.y]);
     });
+    // はみ出した車は、ほかの車が止まっていない手前のマスへ戻す（ファイルの先頭のコメント）
+    for (const [p, d] of crashes) {
+      const car = s.cars[p];
+      const taken = ([x, y]) => s.cars.some((o, q) => q !== p && racing(o) && o.x === x && o.y === y);
+      const [x, y] = pathBack(c, car.x, car.y, d[0], d[1]).find((xy) => !taken(xy)) ?? [car.x, car.y];
+      Object.assign(car, { x, y, vx: 0, vy: 0, rest: 1, crash: true });
+      s.trails[p].push([x, y]);
+    }
     s.picks = Array(s.n).fill(null);
     if (s.cars.some((car) => car.fin) || s.k + 1 >= MAX_TURNS) { s.phase = 'end'; return s; }
     s.k += 1;

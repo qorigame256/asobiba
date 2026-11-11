@@ -170,7 +170,8 @@ export default {
     const rng = mulberry32(seed ^ 0x0c1);
     const two = Number(rules.onis) === 2 && n >= 5;
     let oni, oni2;
-    const counts = prev && prev.length === n && prev.every((x) => x && Number.isInteger(x.oni)) ? prev.map((x) => x.oni) : null;
+    // prev は前の対局で鬼になった回数（席ごとの整数）。main.js の newRound は整数の並びだけを prev に渡すので、carry も整数で返す
+    const counts = prev && prev.length === n && prev.every(Number.isInteger) ? prev.slice() : null;
     const pickMin = (skip) => {
       const ps = [...Array(n).keys()].filter((p) => p !== skip);
       if (!counts) return ps[Math.floor(rng() * ps.length)];
@@ -202,7 +203,7 @@ export default {
     const oniWin = s.caught.length >= need(s);
     return { winners: oniWin ? onisOf(s) : runners(s), oniWin, all: !s.alive.some(Boolean), got: s.caught.length, oni: s.oni, onis: onisOf(s), left: aliveRunners(s).length };
   },
-  carry(s, p) { return { oni: s.counts[p] + (isOni(s, p) ? 1 : 0) }; },
+  carry(s, p) { return s.counts[p] + (isOni(s, p) ? 1 : 0); },
   resultText(res, me, pn) {
     const what = res.all ? '全員' : `${res.got}人`;
     const onis = res.onis ?? [res.oni];
