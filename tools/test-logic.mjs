@@ -9787,6 +9787,183 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('声のファイル OK', seen.size, '語');
 }
 
+// 兵の振り分け: 戦場の点・一番多い人だけが取る（並んだらだれも）・ちょうど100人・決めなかった人は20人ずつ・5回・CPU どうしで最後まで
+{
+  const G = GAMES.heitai;
+  const { valuesOf, scoreRound, okAlloc, cpuAlloc, FIELDS, TROOPS } = await import('../app/js/games/heitai.js');
+  for (let seed = 0; seed < 200; seed++) for (let r = 0; r < 5; r++) {
+    const v = valuesOf(seed, r);
+    assert.ok(v.length === FIELDS && v.every((x) => Number.isInteger(x) && x >= 1 && x <= 5), '兵: 戦場の点は1〜5点');
+    assert.ok(new Set(v).size > 1, '兵: 5つとも同じ点の回は作らない');
+    assert.deepEqual(valuesOf(seed, r), v, '兵: 戦場の点は種から同じに作れる');
+  }
+  assert.deepEqual(scoreRound([[50, 50, 0, 0, 0], [40, 60, 0, 0, 0]], [1, 2, 3, 4, 5]), { owner: [0, 1, null, null, null], pts: [1, 2] }, '兵: 一番多い人がその戦場の点・だれも置かない戦場はだれも取らない');
+  assert.deepEqual(scoreRound([[50, 50, 0, 0, 0], [50, 0, 50, 0, 0], [0, 0, 0, 0, 100]], [1, 2, 3, 4, 5]).owner, [null, 0, 1, null, 2], '兵: 一番多い人が並んだ戦場はだれも取らない');
+  assert.deepEqual(scoreRound([[30, 0, 0, 0, 70], [30, 0, 0, 0, 70], [20, 0, 0, 0, 80]], [5, 1, 1, 1, 1]).owner, [null, null, null, null, 2], '兵: 一番多い人だけ（2位どうしの並びは関係ない）');
+  assert.ok(okAlloc([20, 20, 20, 20, 20]) && !okAlloc([20, 20, 20, 20, 19]) && !okAlloc([-1, 21, 20, 20, 40]) && !okAlloc([20.5, 19.5, 20, 20, 20]) && !okAlloc([100, 0, 0, 0]), '兵: ちょうど100人を5つに');
+  for (let i = 0; i < 300; i++) assert.ok(okAlloc(cpuAlloc([1 + (i % 5), 2, 3, 4, 5].map((x, f) => (f ? 1 + ((i * f) % 5) : x)))), '兵: CPU の配り方もちょうど100人');
+  let s = G.apply(G.init(3, 9), { p: -1, t: 'next' });
+  assert.equal(G.apply(s, { p: 0, t: 'pick', r: 1, a: [20, 20, 20, 20, 20] }), null, '兵: 違う回の手は弾く');
+  assert.equal(G.apply(s, { p: 0, t: 'pick', r: 0, a: [20, 20, 20, 20, 21] }), null, '兵: 100人でない配り方は弾く');
+  s = G.apply(s, { p: 0, t: 'pick', r: 0, a: [100, 0, 0, 0, 0] });
+  assert.equal(G.apply(s, { p: 0, t: 'pick', r: 0, a: [0, 100, 0, 0, 0] }), null, '兵: 決めたら変えられない（同じ手が2回届いても2回目は弾く）');
+  s = G.apply(s, { p: 1, t: 'pick', r: 0, a: [0, 0, 0, 0, 100] });
+  assert.equal(G.referee(s).key, 'open0', '兵: まだ決めていない人がいる');
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.picks[2], [TROOPS / FIELDS, 20, 20, 20, 20], '兵: 決めなかった人は20人ずつ');
+  assert.deepEqual(s.last.late, [false, false, true], '兵: 決めなかった人に印');
+  const v0 = valuesOf(9, 0);
+  assert.deepEqual(s.scores, [v0[0], v0[4], v0[1] + v0[2] + v0[3]], '兵: 回の点を足す');
+  for (const n of [2, 4, 6]) {
+    const st = runCpus(G, n, n + 3, {}, 300, 5000);
+    const res = G.result(st);
+    assert.ok(res && st.log.length === 5, `兵: CPU どうしで5回やって終わる（${n}人）`);
+    assert.deepEqual(res.winners, st.scores.map((v, p) => (v === Math.max(...st.scores) ? p : -1)).filter((p) => p >= 0), '兵: 合計点が一番多い人の勝ち');
+    assert.ok(st.log.every((x) => x.picks.every(okAlloc)), '兵: 全部の回の配り方がちょうど100人');
+  }
+  console.log('heitai OK');
+}
+
+// 見えない鬼ごっこ: 盤（木がつながる・始めの位置）・動ける所・3手ごとに見える・つかまえる・15手・鬼の交代・CPU の鬼はのぞかない
+{
+  const G = GAMES.oni;
+  const O = await import('../app/js/games/oni.js');
+  const { W, TURNS, EVERY } = O;
+  const md = (a, b) => Math.abs((a % W) - (b % W)) + Math.abs(Math.floor(a / W) - Math.floor(b / W));
+  for (let seed = 0; seed < 100; seed++) {
+    const n = 2 + (seed % 5);
+    const s = G.init(n, seed);
+    assert.equal(s.trees.filter(Boolean).length, 10, '鬼: 木は10本');
+    // 木のないマスがすべてつながっている
+    const seen = new Set([s.O]);
+    const q = [s.O];
+    for (let i = 0; i < q.length; i++) for (const d of O.nbrs(q[i], s.trees)) if (!seen.has(d)) { seen.add(d); q.push(d); }
+    assert.equal(seen.size, W * W - 10, '鬼: 木のないマスはすべてつながる');
+    assert.ok(s.oni >= 0 && s.oni < n && s.pos[s.oni] === null, '鬼: 鬼は1人');
+    for (let p = 0; p < n; p++) if (p !== s.oni) assert.ok(!s.trees[s.pos[p]] && md(s.pos[p], s.O) >= 5, '鬼: 逃げる人は木のない、鬼から5マス以上の所から');
+  }
+  // 動ける所
+  let s = G.init(3, 5);
+  const r0 = [0, 1, 2].find((p) => p !== s.oni);
+  for (const c of O.runMoves(s, r0)) assert.ok(c === s.pos[r0] || (md(c, s.pos[r0]) === 1 && !s.trees[c] && c !== s.O), '鬼: 逃げる人は1マスかとどまる');
+  for (const c of O.chaseMoves(s)) assert.ok(!s.trees[c] && md(c, s.O) >= 1 && md(c, s.O) <= 2, '鬼: 鬼は1〜2マス');
+  assert.equal(G.apply(s, { p: s.oni, t: 'chase', k: 1, to: O.chaseMoves(s)[0] }), null, '鬼: 逃げる人が動く前に鬼は動けない');
+  const runAll = (x) => { for (let p = 0; p < x.n; p++) if (G.canAct(x, p) && x.phase === 'run') x = G.apply(x, { p, t: 'run', k: x.k, to: x.pos[p] }); return x; };
+  s = runAll(s);
+  assert.equal(s.phase, 'chase');
+  assert.equal(s.seen.k, 0, '鬼: 1手目は見えない');
+  const t1 = G.apply(s, { p: s.oni, t: 'run', k: 1, to: s.O });
+  assert.equal(t1, null, '鬼: 鬼は逃げる人の手を打てない');
+  // 3手目に見える
+  let x = s;
+  for (let k = 1; k <= 3; k++) {
+    if (x.phase === 'run') x = runAll(x);
+    if (k === 3) { assert.equal(x.seen.k, 3, '鬼: 3手目に見える'); break; }
+    const to = O.chaseMoves(x).find((c) => !x.pos.includes(c));
+    x = G.apply(x, { p: x.oni, t: 'chase', k: x.k, to });
+    assert.equal(G.apply(x, { p: x.oni, t: 'chase', k: x.k - 1, to }), null, '鬼: 同じ手が2回届いても2回目は弾く');
+  }
+  // つかまえる: 逃げる人のとなりへ鬼を置いた局面を作る
+  {
+    let y = G.init(2, 11);
+    const rr = 1 - y.oni;
+    const near = O.nbrs(y.pos[rr], y.trees)[0];
+    y = { ...y, O: near, trail: [near] };
+    y = G.apply(y, { p: rr, t: 'run', k: 1, to: y.pos[rr] });
+    y = G.apply(y, { p: y.oni, t: 'chase', k: 1, to: y.pos[rr] });
+    assert.equal(y.phase, 'end', '鬼: 全員つかまえたら終わり');
+    const res = G.result(y);
+    assert.ok(res.oniWin && res.winners.length === 1 && res.winners[0] === y.oni, '鬼: 全員つかまえたら鬼の勝ち');
+  }
+  // 15手逃げ切る: 鬼が逃げる人のいないマスへ動き続ける
+  {
+    let y = G.init(3, 21);
+    for (let g = 0; g < 100 && y.phase !== 'end'; g++) {
+      if (y.phase === 'run') y = runAll(y);
+      else y = G.apply(y, { p: y.oni, t: 'chase', k: y.k, to: O.chaseMoves(y).find((c) => !y.pos.includes(c)) });
+    }
+    const res = G.result(y);
+    assert.ok(res && !res.oniWin && y.k === TURNS && res.winners.length === 2 && !res.winners.includes(y.oni), '鬼: 15手逃げ切れば逃げる側（全員）の勝ち');
+  }
+  // 鬼の交代: 前の対局と同じ顔ぶれなら、鬼になった回数がいちばん少ない人
+  for (let seed = 0; seed < 40; seed++) {
+    const y = G.init(3, seed, { prev: [{ oni: 1 }, { oni: 0 }, { oni: 1 }] });
+    assert.equal(y.oni, 1, '鬼: 鬼になった回数がいちばん少ない人が鬼');
+    const z = G.init(3, seed, { prev: [{ oni: 1 }, { oni: 0 }, { oni: 0 }] });
+    assert.ok(z.oni === 1 || z.oni === 2, '鬼: 並んだら回数の少ない人の中から');
+    assert.deepEqual([0, 1, 2].map((p) => G.carry({ ...z, phase: 'end' }, p).oni), [1, z.oni === 1 ? 1 : 0, z.oni === 2 ? 1 : 0], '鬼: 鬼になった回数を持ち越す');
+  }
+  // CPU どうしで最後まで。CPU の鬼が数える「いそうなマス」には、いつも本当の位置が入っている（のぞかずに正しく数えている）
+  const realRandom = Math.random;
+  try {
+    let rs = 7;
+    Math.random = () => { rs = (rs * 1103515245 + 12345) % 2147483648; return rs / 2147483648; };
+    for (const n of [2, 3, 6]) for (let g = 0; g < 6; g++) {
+      let y = G.init(n, 100 + g + n * 10);
+      for (let guard = 0; guard < 200 && !G.result(y); guard++) {
+        if (y.phase === 'chase') for (let p = 0; p < n; p++) if (p !== y.oni && y.alive[p]) assert.ok(O.belief(y, p).has(y.pos[p]), '鬼: いそうなマスに本当の位置が入っている');
+        for (let p = 0; p < n; p++) { if (!G.canAct(y, p)) continue; const m = G.cpu(y, p); const nx = G.apply(y, { ...m, p }); assert.ok(nx, '鬼: CPU の手は反則にならない'); y = nx; }
+      }
+      assert.ok(G.result(y), `鬼: CPU どうしで最後まで（${n}人）`);
+    }
+  } finally { Math.random = realRandom; }
+  assert.equal(EVERY, 3);
+  console.log('oni OK');
+}
+
+// 方眼紙レース: コース・はみ出し・ゴール・止まれないマス・ぶつかる・休み・時間切れ・順位・CPU どうしで最後まで
+{
+  const G = GAMES.race;
+  const R = await import('../app/js/games/race.js');
+  for (const id of R.COURSE_IDS) {
+    const c = R.courseOf(id);
+    assert.equal(new Set(c.start.map(String)).size, 4, `レース: ${id} の並ぶ位置は4つ`);
+    for (const [x, y] of c.start) assert.ok(c.on(x, y) && !c.goal(x, y) && c.left(x, y) < Infinity, `レース: ${id} の並ぶ位置はコースの上で、ゴールへ行ける`);
+  }
+  const U = R.courseOf('u');
+  assert.ok(R.trace(U, 3, 10, 9, 10).crash, 'レース: 内側の芝を横切ったらはみ出し');
+  assert.deepEqual(R.trace(U, 3, 10, 9, 10), { x: 5, y: 10, crash: true, fin: null }, 'レース: はみ出す手前のマスに戻る');
+  assert.ok(!R.trace(U, 3, 10, 3, 4).crash, 'レース: コースの上はそのまま');
+  assert.ok(R.trace(U, 20, 11, 20, 15).fin !== null && !R.trace(U, 20, 11, 20, 15).crash, 'レース: ゴールの列に入ったらゴール（その先がコースの外でも）');
+  // 止まれないマスと、ぶつかる
+  let s = G.apply(G.init(2, 3, { rules: { course: 'u' } }), { p: -1, t: 'next' });
+  s = { ...s, cars: [{ ...s.cars[0], x: 2, y: 10, vx: 0, vy: 0 }, { ...s.cars[1], x: 3, y: 9, vx: 0, vy: 0 }] };
+  assert.ok(!R.choices(s, 0).some(([ax, ay]) => ax === 1 && ay === -1), 'レース: ほかの車がいるマスは選べない');
+  assert.equal(G.apply(s, { p: 0, t: 'go', k: 0, a: [1, -1] }), null, 'レース: ほかの車がいるマスへの手は弾く');
+  s = { ...s, cars: [{ ...s.cars[0], x: 2, y: 10 }, { ...s.cars[1], x: 4, y: 10 }] };
+  s = G.apply(s, { p: 0, t: 'go', k: 0, a: [1, 0] });
+  assert.equal(G.apply(s, { p: 0, t: 'go', k: 0, a: [0, 0] }), null, 'レース: 選んだら変えられない（同じ手が2回届いても2回目は弾く）');
+  s = G.apply(s, { p: 1, t: 'go', k: 0, a: [-1, 0] });
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.cars.map((c) => [c.x, c.y, c.vx, c.vy, c.bump]), [[2, 10, 0, 0, true], [4, 10, 0, 0, true]], 'レース: 同じマスを選んだら2台とも元の位置で速さ0');
+  // はみ出したら手前に戻り、速さ0で1回休み
+  s = { ...s, cars: [{ ...s.cars[0], x: 3, y: 10, vx: 5, vy: 0 }, s.cars[1]] };
+  s = G.apply(s, { p: 0, t: 'go', k: 1, a: [0, 0] });
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual([s.cars[0].x, s.cars[0].y, s.cars[0].vx, s.cars[0].vy, s.cars[0].rest], [5, 10, 0, 0, 1], 'レース: はみ出したら手前に戻り速さ0・休み');
+  assert.ok(!G.canAct(s, 0), 'レース: 休みの手は選べない');
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.ok(G.canAct(s, 0), 'レース: 休みは1回だけ');
+  // 時間切れはそのまま進む
+  s = { ...s, cars: [{ ...s.cars[0], x: 3, y: 12, vx: 0, vy: -2 }, s.cars[1]] };
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual([s.cars[0].x, s.cars[0].y, s.cars[0].vy], [3, 10, -2], 'レース: 選ばなかった人は速さを変えずに進む');
+  // 順位: ゴールした人が上（同じ手なら道すじの手前で入った方）、ほかは残りが少ない順
+  {
+    const y = G.init(3, 1, { rules: { course: 'u' } });
+    y.cars[0].fin = { k: 5, t: 0.5 }; y.cars[1].fin = { k: 5, t: 0.25 };
+    y.cars[2] = { ...y.cars[2], x: 3, y: 3 };
+    assert.deepEqual(R.placeOf(y), [2, 1, 3], 'レース: 同じ手のゴールは手前で入った方が上');
+  }
+  for (const course of ['u', 's', 'z', 'random']) for (const n of [2, 4]) {
+    const st = runCpus(G, n, n * 13 + course.length, { course }, 800, 20000);
+    const res = G.result(st);
+    assert.ok(res && res.finished, `レース: CPU どうしでゴールまで（${course}・${n}人）`);
+    assert.ok(res.winners.every((p) => st.cars[p].fin), 'レース: ゴールした人の勝ち');
+  }
+  console.log('race OK');
+}
+
 // 見出しの字体（2026-11-09。tools/make-fonts.mjs）: 今のコードのゲームの名前・仲間の名前・技の名前の字が、切り出した字体に全部入っているか。
 // 落ちたら、元の字体のフォルダを渡して node tools/make-fonts.mjs で作り直す（入っていない字はほかの字体で出るだけで、崩れはしない）
 {

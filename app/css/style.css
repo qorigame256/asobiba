@@ -2907,3 +2907,87 @@ h1, h2, .sheet-head h3, .cat-h, .tile-nm, .lobby-game-name { font-family: "asobi
 .end-stamp { font-family: "asobi-fude", "Yu Mincho", "Hiragino Mincho ProN", serif; }
 .end-stamp .nm { font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", system-ui, sans-serif; font-weight: 800; font-size: .8em; }
 .turn-fx span, .cut-fx span { font-family: "asobi-goku", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", system-ui, sans-serif; }
+
+/* ---------- 兵の振り分け（heitai.js） ---------- */
+:is([data-game="heitai"], [data-game="oni"], [data-game="race"]) .board { width: min(100%, 560px); }
+.ht-left { text-align: center; font-size: .95rem; color: var(--muted); margin: 4px 0; }
+.ht-left b { font-size: 1.3rem; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ht-left.done b { color: #2f8a4a; }
+.ht-fields { display: grid; gap: 6px; width: min(100%, 460px); margin: 0 auto; }
+.ht-row { display: grid; grid-template-columns: 6.2em 1fr auto; gap: 6px; align-items: center; padding: 6px 8px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--field); }
+.ht-lab { display: grid; line-height: 1.15; }
+.ht-name { font-weight: 800; font-size: .85rem; }
+.ht-val { color: #c88a12; font-size: .8rem; letter-spacing: -1px; }
+.ht-val small { color: var(--muted); margin-left: 4px; letter-spacing: 0; }
+.ht-meter { position: relative; height: 26px; border-radius: 7px; background: var(--line); overflow: hidden; }
+.ht-bar { position: absolute; inset: 0 auto 0 0; background: var(--accent); opacity: .55; transition: width .12s; }
+.ht-num { position: relative; display: block; text-align: center; line-height: 26px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.ht-ctl { display: flex; gap: 3px; touch-action: manipulation; }
+.board button.ht-step { min-width: 2.3em; padding: 6px 2px; border-radius: 8px; border: 1.5px solid var(--line); background: var(--panel); color: var(--ink); font-weight: 700; font-size: .8rem; font-variant-numeric: tabular-nums; }
+.board button.ht-step:disabled { opacity: .35; }
+.ht-tools { display: flex; justify-content: center; gap: 8px; margin: 2px 0 6px; }
+.ht-prev { margin-top: 8px; }
+.ht-prev summary, .ht-rv { font-size: .85rem; color: var(--muted); margin: 6px 0 2px; }
+.ht-tbox { overflow-x: auto; }
+.ht-table { border-collapse: collapse; margin: 0 auto; font-size: .82rem; font-variant-numeric: tabular-nums; }
+.ht-table th, .ht-table td { padding: 3px 6px; border-bottom: 1px solid var(--line); text-align: center; }
+.ht-table tr > th:first-child { text-align: left; max-width: 6em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ht-table tr.me > * { font-weight: 800; }
+.ht-tn { display: block; font-size: .7rem; color: var(--muted); font-weight: 600; white-space: nowrap; }
+.ht-tv { display: block; color: #c88a12; }
+.ht-table td.win { background: #2f8a4a; color: #fff; border-radius: 6px; font-weight: 900; }
+.ht-table td.tie { text-decoration: line-through; color: #c0392b; }
+.ht-table td.ht-pt { font-weight: 800; }
+.ht-table.big { font-size: .95rem; }
+.ht-table.big th, .ht-table.big td { padding: 6px 8px; }
+
+/* ---------- 見えない鬼ごっこ（oni.js）。盤の地と木はどのスキンでも同じ色 ---------- */
+.on-wrap { display: grid; gap: 8px; }
+.on-info { text-align: center; font-size: .9rem; color: var(--muted); }
+.on-info b { color: var(--ink); font-size: 1.15rem; }
+.on-eye { color: #c0392b; font-weight: 800; }
+.on-dot { display: inline-block; width: .8em; height: .8em; border-radius: 50%; vertical-align: -1px; }
+.cc-opp.on-oni { border-color: #a83226; }
+.cc-opp.out { opacity: .5; }
+.on-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 2px; width: min(100%, 440px); margin: 0 auto; padding: 4px; border-radius: 12px; background: #6f9a4e; touch-action: manipulation; }
+.board button.on-cell { position: relative; aspect-ratio: 1; padding: 0; border: 0; border-radius: 5px; background: #b9d68f; font-size: clamp(14px, 4.4vw, 24px); line-height: 1; display: grid; place-items: center; color: #222; }
+.board button.on-cell.tree { background: #8db86a; opacity: 1; }
+.board button.on-cell:disabled { opacity: 1; cursor: default; }
+.board button.on-cell.can { background: #f1f7c8; box-shadow: inset 0 0 0 2px #e0b52a; cursor: pointer; }
+.board button.on-cell.sel { background: #ffe27a; box-shadow: inset 0 0 0 3px #c0392b; }
+.on-o { grid-area: 1 / 1; z-index: 2; }
+.on-r { grid-area: 1 / 1; width: 62%; height: 62%; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .35); }
+.on-r.me { border-color: #222; border-width: 3px; }
+.on-r + .on-r { transform: translate(18%, -18%); }
+.on-ghost { grid-area: 1 / 1; width: 70%; height: 70%; border-radius: 50%; border: 2.5px dashed; display: grid; place-items: center; font-size: .55em; font-weight: 900; color: #333; background: rgba(255, 255, 255, .55); }
+.on-x { grid-area: 1 / 1; color: #a83226; font-weight: 900; }
+.board button.on-go { display: block; margin: 0 auto; min-width: 12em; }
+
+/* ---------- 方眼紙レース（race.js）。コースの色はどのスキンでも同じ ---------- */
+.rc-wrap { display: grid; gap: 8px; }
+.rc-board { width: 100%; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 6px rgba(0, 0, 0, .2); }
+.rc-svg { display: block; width: 100%; height: auto; }
+.rc-grass { fill: #5f8f45; }
+.rc-road { fill: #f4f1e6; }
+.rc-goal.a { fill: #222; }
+.rc-goal.b { fill: #fff; }
+.rc-grid line { stroke: #9bb4d4; stroke-width: .035; }
+.rc-trail { fill: none; stroke-width: .12; opacity: .6; stroke-linejoin: round; }
+.rc-step { opacity: .6; }
+.rc-car { stroke: #fff; stroke-width: .1; }
+.rc-car.me { stroke: #111; stroke-width: .16; }
+.rc-boom { font-size: .9px; text-anchor: middle; }
+.rc-aim { stroke: #555; stroke-width: .06; stroke-dasharray: .2 .15; }
+.rc-opt { fill: #f0b429; stroke: #7a5a00; stroke-width: .06; cursor: pointer; }
+.rc-opt.crash { fill: #e74c3c; stroke: #7a1f15; }
+.rc-opt.fin { fill: #2f8a4a; stroke: #144d26; }
+.rc-opt.sel { stroke: #111; stroke-width: .12; }
+.rc-path { stroke: #111; stroke-width: .08; }
+.rc-path.crash { stroke: #c0392b; }
+.rc-ctl { display: flex; justify-content: center; align-items: center; gap: 14px; flex-wrap: wrap; }
+.rc-pad { display: grid; grid-template-columns: repeat(3, 48px); gap: 4px; touch-action: manipulation; }
+.board button.rc-key { height: 44px; padding: 0; border-radius: 9px; border: 1.5px solid var(--line); background: var(--panel); color: var(--ink); font-size: 1.2rem; font-weight: 800; }
+.board button.rc-key.crash { color: #c0392b; border-color: #e6a59d; }
+.board button.rc-key.sel { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.board button.rc-key:disabled { opacity: .3; }
+.board button.rc-go { min-width: 10em; }
