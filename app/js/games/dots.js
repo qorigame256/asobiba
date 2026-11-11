@@ -8,7 +8,7 @@
 // 線の番号: 横線が先で (段 0〜h) × (列 0〜w-1) → 段*w+列。そのあとに縦線 (段 0〜h-1) × (列 0〜w) → 横線の数 + 段*(w+1)+列。
 // 四角の番号: 段*w+列。手 = 線の番号。
 
-import { CPU_SETTING, mulberry32 } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, mulberry32 } from './util.js';
 
 const AUTO = { 2: 4, 3: 5, 4: 6 };
 const SIZE_CHOICES = [['auto', 'おまかせ（2人 4×4・3人 5×5・4人 6×6）'], [3, '3×3'], [4, '4×4'], [5, '5×5'], [6, '6×6']];
@@ -149,6 +149,7 @@ export default {
     { key: 'size', label: '盤', desc: '四角の数（よこ×たて）', def: 'auto', choices: SIZE_CHOICES },
     { key: 'swap', label: '四角を取っても交代', desc: '四角を取っても続けて引けず、次の人の番になる', def: false },
     { key: 'gold', label: '金の四角', desc: '取ると2点になる金の四角が、盤のどこかに数個ある（場所は毎回変わる）。点の多い人の勝ち', def: false, choices: [[false, 'なし'], [true, 'あり']] },
+    TAP_PEEK_SETTING,
     CPU_SETTING,
   ],
 

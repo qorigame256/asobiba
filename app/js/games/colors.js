@@ -420,6 +420,18 @@ export default {
     if (L.call) return { text: 'いろあわせ！', color: '#d9643a' };
     return null;
   },
+  // あなたの番までに起きたこと（2026-11-11。room.md「UI・UX の4回目」）: 順番の帯の札の下に出す短い言葉（名前は付けない）
+  said(a, b, m) {
+    const L = b.last;
+    if (m.t === 'next' || !L || L.p !== m.p) return null;
+    if (L.t === 'draw') return L.got ? `${L.got}枚引いた` : '引けなかった';
+    if (L.t === 'pass') return '出さずに次へ';
+    if (L.t === 'take') return `${L.got}枚引いて休み`;
+    if (L.t === 'challenge') return L.bluff ? 'チャレンジ成功' : 'チャレンジ失敗';
+    if (L.t !== 'play') return null;
+    const t = L.n > 1 ? `${kindOf(L.card)}を${L.n}枚` : cardName(L.card);
+    return t + (L.call ? '「いろあわせ！」' : '');
+  },
   sound(a, b, m) {
     if (m.t === 'next') return 'shuffle';
     if (b.last?.call) return 'call';

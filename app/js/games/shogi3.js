@@ -475,7 +475,7 @@ export function render(root, s, o) {
       any = true;
       const ok = can && side === s.turn && droppable.has(d);
       const e = document.createElement(ok ? 'button' : 'span');
-      e.className = 'sg-hand-piece' + (ok ? ' playable' : '') + (ui.drop === d && side === s.turn ? ' selected' : '');
+      e.className = 'sg-hand-piece' + (ok ? ' playable' : '') + (ui.drop === d && side === s.turn ? ' selected' : '') + (o.peekIn?.d === d && side === s.turn ? ' peek' : '');
       e.innerHTML = `<span class="sg-piece">${KANJI[d]}</span>${n > 1 ? `<small>${n}</small>` : ''}`;
       if (ok) {
         e.type = 'button';
@@ -515,6 +515,8 @@ export function render(root, s, o) {
     const cls = ['sg3-cell', `r${regionOf(i)}`];
     if (s.last && !s.last.resign && s.last.t === i) cls.push('last');
     if (i === ui.from) cls.push('selected');
+    if (o.peekIn?.f === i) cls.push('peek'); // 相手の迷いが見える（2026-11-11。main.js の o.peek・o.peekIn）: 相手の選び
+    if (o.peekIn?.a === i) cls.push('peek-aim');
     if (checked.has(i)) cls.push('checked');
     if (isTarget || mineToMove) cls.push('active');
     const poly = svgEl('polygon', { points: ptsText(g.pts), class: cls.join(' ') });
@@ -538,6 +540,10 @@ export function render(root, s, o) {
     if (isTarget || mineToMove) {
       // 押す所は駒や印の上にかぶせた透明な形（駒の絵が押すのを邪魔しないように）
       const hit = svgEl('polygon', { points: ptsText(g.pts), class: 'sg3-hit' });
+      if (isTarget && o.peek) { // 相手の迷いが見える（2026-11-11。main.js の o.peek・o.peekIn）: PC で行き先にのせたら、ねらいを知らせる
+        hit.addEventListener('pointerenter', (ev) => { if (ev.pointerType === 'mouse') o.peek({ f: ui.from, d: ui.drop, a: i }); });
+        hit.addEventListener('pointerleave', (ev) => { if (ev.pointerType === 'mouse') o.peek({ f: ui.from, d: ui.drop, a: null }); });
+      }
       hit.addEventListener('click', () => {
         if (isTarget) { pick(i); return; }
         ui = { ...ui, drop: null, promo: null, from: ui.from === i ? null : i };
@@ -553,6 +559,7 @@ export function render(root, s, o) {
   root.append(svg);
 
   root.append(handRow(bottom));
+  o.peek?.({ f: ui.from, d: ui.drop, a: null }); // 相手の迷いが見える（2026-11-11。main.js の o.peek・o.peekIn）: いまの選びを知らせる
 
   if (ui.promo) {
     const box = document.createElement('div');

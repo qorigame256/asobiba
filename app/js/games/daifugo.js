@@ -427,6 +427,19 @@ export default {
   },
   startSound: 'shuffle',
   // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
+  // あなたの番までに起きたこと（2026-11-11。room.md「UI・UX の4回目」）: 順番の帯の札の下に出す短い言葉（名前は付けない）
+  said(a, b, m) {
+    const L = b.last;
+    if (m.t === 'next' || !L || L.p !== m.p || JSON.stringify(L) === JSON.stringify(a.last)) return null;
+    let t;
+    if (L.t === 'give' || L.t === 'seven') t = `${L.n}枚渡した`;
+    else if (L.t === 'ten') t = `${L.n}枚捨てた`;
+    else if (L.t === 'pass') t = 'パス';
+    else if (L.t === 'bomb') t = `${rankLabel(L.r)}を指定`;
+    else if (Array.isArray(L.cards)) t = L.cards.map(cardLabel).join(' ');
+    else return null;
+    return L.done ? t + ' → 上がり' : t;
+  },
   sound(a, b, m) { return m.t === 'next' ? 'shuffle' : m.t === 'bomb' ? 'call' : m.t === 'pass' ? 'pop' : m.t === 'play' && b.last?.effects?.length ? 'call' : 'card'; },
   // 技の名前（2026-11-06 の UI・演出・アニメーションの案。card-games.md の「演出」）: 革命・8切り・しばりなど、出した組に起きたこと（last.effects）を大きな字で（main.js の cutInFx）。
   // 帯の色は革命が紫・8切りが赤・ほかは青。革命（革命返し・階段革命も）では盤を一瞬白黒反転する

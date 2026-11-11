@@ -26,6 +26,26 @@ export function shuffle(arr, rng) {
 /* ---------- 盤のゲームの CPU ---------- */
 
 // 盤のゲームの詳細設定「CPU の強さ」
+// 相手の迷いが見える（2026-11-11 本人の選択。room.md「UI・UX の4回目」）: オンラインで、番の人がつまんでいる駒・1回目に押した所を、ほかの人の画面に点線で出す。
+// 送りっぱなし（stream）で、勝ち負けに関わらない。送る・出すのは main.js（o.peek と o.peekIn）。PEEK_SETTING は駒を選んで動かすゲーム、TAP_PEEK_SETTING は「2回押して置く」のゲーム
+export const PEEK_SETTING = {
+  key: 'peek', label: '相手の迷いを見せる', desc: 'オンラインで、番の人がいまつまんでいる駒（PC ではねらっているマスも）が、ほかの人の画面に点線で見える', def: 'on',
+  choices: [['on', '見せる'], ['off', '見せない']],
+};
+export const TAP_PEEK_SETTING = {
+  ...PEEK_SETTING, desc: 'オンラインで、「2回押して置く」（ホームの 👓 見やすさ）を使っている人が1回目に押した所が、ほかの人の画面に点線で見える',
+};
+
+// 駒のマスに相手の選び（点線）を付け、PC で行き先にのせたら自分のねらいを知らせる。sel = () => いまの自分の選び { f, d }
+export function peekMark(e, i, o, isTarget, sel) {
+  if (o.peekIn?.f === i) e.classList.add('peek');
+  if (o.peekIn?.a === i) e.classList.add('peek-aim');
+  if (isTarget && o.peek) {
+    e.addEventListener('pointerenter', (ev) => { if (ev.pointerType === 'mouse') o.peek({ ...sel(), a: i }); });
+    e.addEventListener('pointerleave', (ev) => { if (ev.pointerType === 'mouse') o.peek({ ...sel(), a: null }); });
+  }
+}
+
 export const CPU_SETTING = {
   key: 'cpu', label: 'CPU の強さ', desc: 'CPU と対局するときの強さ', def: 'weak',
   choices: [['weak', 'よわい'], ['normal', 'ふつう'], ['strong', 'つよい']],

@@ -17,7 +17,7 @@
 const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
 export const NEUTRAL = -1; // じゃま石
 
-import { CPU_SETTING, boardCpu, mulberry32, winLine } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, boardCpu, mulberry32, winLine } from './util.js';
 
 // 盤（列 w・段 h）の4つ並びの窓の一覧。マスごとに、そのマスを含む窓の番号も持つ
 const WINDOWS = {};
@@ -273,6 +273,7 @@ export default {
       desc: '落とす代わりに、一番下の段にある自分のコマを抜いてもよい（2人のときだけ）。同じ盤面が3回出たら引き分け',
       choices: [['off', 'なし'], ['on', 'あり']],
     },
+    TAP_PEEK_SETTING,
     CPU_SETTING,
   ],
 

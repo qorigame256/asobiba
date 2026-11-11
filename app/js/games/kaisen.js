@@ -383,6 +383,9 @@ function render3(root, s, o) {
 /* ---------- 画面 ---------- */
 
 let plc = { key: null, ships: [], sel: 0, vert: false }; // 並べている途中（描き直しで消えないよう外に持つ）
+// 推理のメモ（2026-11-11 本人の選択。room.md「UI・UX の4回目」）: 2人のとき、相手の海のまだ撃っていないマスに「ここには無い」の × を付けられる（自分の画面だけ。送らない・保存しない）。
+// 「✎ メモ」を押している間は、マスを押すと撃たずに × を付け外しする（相手の番の間も付けられる）。key は自分の船の並び（対局が替わったら消す）
+let ksMemo = { key: null, cells: new Set(), on: false };
 let sonarMode = null; // ソナーで調べる所を選んでいる途中なら「手の数:自分の番号」（描き直しで消えないよう外に持つ）
 let salvoSel = { key: null, cells: [] }; // サルボで選んでいる途中のマス（この端末だけ。手の一覧に入れない。key は「手の数:自分の番号」）
 
@@ -568,8 +571,24 @@ const game = {
       else return; // もう決まった数を選んでいる（外してから選び直す）
       draw();
     };
-    const shoot = aiming ? (i) => { sonarMode = null; o.onMove({ t: 'sonar', c: i }); } : salvo ? toggle : o.canMove ? (i) => o.onMove(i) : null;
-    root.append(sea(s, 1 - me, { title, showShips: over, onShoot: shoot, aiming, picked }));
+    const mk = `${me}:${(s.grid[me] ?? []).join(',')}`;
+    if (ksMemo.key !== mk) ksMemo = { key: mk, cells: new Set(), on: false };
+    const memoOn = ksMemo.on && !over && !aiming;
+    const noteCell = (i) => { if (ksMemo.cells.has(i)) ksMemo.cells.delete(i); else ksMemo.cells.add(i); draw(); };
+    const shoot = memoOn ? noteCell : aiming ? (i) => { sonarMode = null; o.onMove({ t: 'sonar', c: i }); } : salvo ? toggle : o.canMove ? (i) => o.onMove(i) : null;
+    root.append(sea(s, 1 - me, { title: memoOn ? '相手の海 — 「ここには無い」と思うマスを押して × を付ける（もう一度で消す）' : title, showShips: over, onShoot: shoot, aiming, picked, memo: over ? null : ksMemo.cells }));
+    if (!over) {
+      const row = document.createElement('div');
+      row.className = 'cc-actions ks-acts';
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn small ' + (memoOn ? 'primary' : 'ghost');
+      b.textContent = memoOn ? '✎ メモをやめる（撃つに戻る）' : '✎ メモ（無いマスに × を付ける）';
+      b.setAttribute('aria-pressed', String(memoOn));
+      b.onclick = () => { ksMemo.on = !ksMemo.on; draw(); };
+      row.append(b);
+      root.append(row);
+    }
     if (salvo || canSonar) {
       const acts = document.createElement('div');
       acts.className = 'cc-actions ks-acts';
@@ -599,7 +618,7 @@ const game = {
 };
 
 // 海の盤。owner の海に、相手（1 - owner）が撃ったあとを出す
-function sea(s, owner, { title, showShips, onShoot = null, small = false, aiming = false, picked = [] }) {
+function sea(s, owner, { title, showShips, onShoot = null, small = false, aiming = false, picked = [], memo = null }) {
   const box = document.createElement('div');
   box.className = 'ks-sea' + (small ? ' small' : '');
   const head = document.createElement('div');
@@ -624,11 +643,12 @@ function sea(s, owner, { title, showShips, onShoot = null, small = false, aiming
     if (shot) cls += k >= 0 ? ' hit' : ' miss';
     if (s.last && !s.last.placed && (s.last.cell === i || s.last.sonar === i || s.last.salvo?.includes(i)) && s.last.p === shooter) cls += ' last';
     if (zone?.has(i)) cls += ' sonar';
+    if (memo?.has(i) && !shot) cls += ' memo'; // 推理のメモの ×（2026-11-11）
     if (can) {
       cell.type = 'button';
       cls += ' playable';
       cell.onclick = () => onShoot(i);
-      cell.setAttribute('aria-label', `${Math.floor(i / N) + 1}段目 ${(i % N) + 1}列目`);
+      cell.setAttribute('aria-label', `${Math.floor(i / N) + 1}段目 ${(i % N) + 1}列目${memo?.has(i) && !shot ? '（メモ: 無い）' : ''}`);
     }
     const pk = picked.indexOf(i);
     if (pk >= 0) {

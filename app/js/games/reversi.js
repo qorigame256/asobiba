@@ -19,7 +19,7 @@
 //   隠している間は「石の数はひみつ（終わったら出ます）」と出す。ふりかえりの途中の局面は終わっていないので隠れたまま。CPU は変えない。
 //   人数・盤の大きさ・四隅封印・穴あき盤・角でもう1手と一緒に使える。
 
-import { CPU_SETTING, boardCpu, mulberry32 } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, boardCpu, mulberry32 } from './util.js';
 
 const N8 = 8; // 3〜4人はいつも 8×8
 const DIRS = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
@@ -212,6 +212,7 @@ export default {
     { key: 'holes', label: '穴あき盤', desc: '石を置けないマス（穴）が数か所ある。置き場所は毎回変わる（先手と後手で同じ条件になるよう、点対称に置く）', def: false },
     { key: 'corner', label: '角でもう1手', desc: '角に置いたら、続けてもう1回置ける（四隅封印と一緒では、角に置けないので効かない）', def: false },
     { key: 'hide', label: '石の数を隠す', desc: '終わるまで、だれが何個持っているかの数が出ない。どっちが多いか、盤を見て考えよう', def: false },
+    TAP_PEEK_SETTING,
     CPU_SETTING,
   ],
 

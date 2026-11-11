@@ -71,6 +71,31 @@ const answerFor = (s, p) => (own(s) ? s.secrets[targetOf(s, p)] : s.answer);
 /* ---------- 画面 ---------- */
 
 let entry = { key: null, text: '' }; // 入力中の数字（通信で描き直されても消えないように外に持つ）
+// 推理のメモ（2026-11-11 本人の選択。room.md「UI・UX の4回目」）: 0〜9 の数字に自分の画面だけの印を付ける（送らない・保存しない）。押すたびに 無し → ×（無い）→ ○（ある）→ ？ → 無し。
+// テンキーの数字にも同じ印を小さく出す（× の数字は薄くするだけで、押せなくはしない）
+const MEMO_NEXT = { '': 'x', x: 'o', o: 'q', q: '' };
+const MEMO_TEXT = { x: '×', o: '○', q: '？' };
+let memo = { key: null, d: {} };
+function memoRow(s, draw) {
+  const row = document.createElement('div');
+  row.className = 'hb-memo';
+  const label = document.createElement('span');
+  label.className = 'hb-memo-label';
+  label.textContent = 'メモ';
+  label.title = '押すたびに × → ○ → ？ → 無し（自分の画面だけ）';
+  row.append(label);
+  for (const d of '0123456789') {
+    const b = document.createElement('button');
+    b.type = 'button';
+    const m = memo.d[d] ?? '';
+    b.className = 'hb-memo-d' + (m ? ' m-' + m : '');
+    b.innerHTML = `<span>${d}</span>${m ? `<i>${MEMO_TEXT[m]}</i>` : ''}`;
+    b.setAttribute('aria-label', `${d} のメモ: ${m ? MEMO_TEXT[m] : 'なし'}`);
+    b.onclick = () => { memo.d[d] = MEMO_NEXT[memo.d[d] ?? '']; draw(); };
+    row.append(b);
+  }
+  return row;
+}
 let keyHandler = null;
 let keyListening = false;
 
@@ -214,6 +239,8 @@ export default {
     // 答えを決める間と当て始めてからで、入力中の数字を分ける
     const key = `${s.answer ?? s.auto.join('')}:${s.n}:${s.round}:${s.setting ? 'set' : 'guess'}`;
     if (entry.key !== key) entry = { key, text: '' };
+    const memoKey = `${s.answer ?? s.auto.join('')}:${s.n}:${s.round}`; // 推理のメモは対局（と回）が替わったら消す
+    if (memo.key !== memoKey) memo = { key: memoKey, d: {} };
     const done = s.winners !== null;
     const nameOf = (p) => (p === me ? 'あなた' : o.names[p]);
 
@@ -285,6 +312,7 @@ export default {
       root.append(others);
     }
     if (me === null) return;
+    if (!s.setting && !done) root.append(memoRow(s, draw)); // 推理のメモ（2026-11-11）
 
     if (!can) {
       if (!done) {
@@ -323,7 +351,7 @@ export default {
     for (const d of ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']) { // 0〜4 を1段目、5〜9 を2段目。右端に縦長の「消す」
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'hb-key';
+      b.className = 'hb-key' + (!s.setting && memo.d[d] ? ' m-' + memo.d[d] : ''); // 推理のメモの印（2026-11-11）
       b.textContent = d;
       b.disabled = (!s.dup && entry.text.includes(d)) || entry.text.length >= s.digits;
       b.onclick = () => type(d);

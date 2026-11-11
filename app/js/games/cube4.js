@@ -17,7 +17,7 @@
 //   3人の CPU は読みをせず（2人用の読みは相手が1人の前提のため）、置けるマスごとの点数で選ぶ（threeCpu。四目並べの3人の CPU と同じ考え方）。
 // 手 = 柱の番号（上から見て 列 + 行×4。0〜15）。重力なしではマスの番号（0〜63）。マスの番号は 段×16 + 柱（段0 が一番下）。
 
-import { CPU_SETTING, boardCpu } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, boardCpu } from './util.js';
 
 const N = 4;
 const COLS = N * N;
@@ -146,6 +146,7 @@ export default {
   seatCount(rules) { return rules?.players === 3 ? 3 : 2; },
   settings: [
     { key: 'players', label: '人数', def: 2, desc: '3人では 赤・黄・緑 の順に置く。大きさは 4×4×4 のまま', choices: [[2, '2人'], [3, '3人']] },
+    TAP_PEEK_SETTING,
     CPU_SETTING,
     { key: 'free', label: '重力なし', desc: '下から積まずに、どの段のマスにも直接置ける', def: false },
   ],

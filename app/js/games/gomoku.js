@@ -21,7 +21,7 @@
 //   はさみ取りは、ほかの1人の石がちょうど2つ並んだ両側を自分の石ではさむと取れる（2つは同じ人の石。違う人の石が混ざっていたら取れない）。
 //   2人のときの局面は前と全く同じ形（3人のときだけ np: 3）。CPU は2人と同じ考え方で、守りは次の番の人を重く見る。
 
-import { CPU_SETTING, mulberry32, winLine } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, mulberry32, winLine } from './util.js';
 
 const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
 const DIRS8 = [...DIRS, ...DIRS.map(([r, c]) => [-r, -c])];
@@ -336,6 +336,7 @@ export default {
     { key: 'renju', label: '禁じ手', desc: '先手の黒だけ、三三・四四・6つ以上並ぶ点に置けない（連珠のルール。先手の有利を消す。2人のときだけ）', def: false },
     { key: 'capture', label: 'はさみ取り', desc: '相手の石がちょうど2つ並んだ両側をはさむと取れる（3人では同じ人の石2つ）。5組（10個）取っても勝ち', def: false },
     { key: 'blocks', label: 'じゃま石', desc: '始める前に、だれの物でもない灰色の石を数個置く（置けない・並びが切れる）。場所は毎回ちがう', def: false },
+    TAP_PEEK_SETTING,
     CPU_SETTING,
   ],
 

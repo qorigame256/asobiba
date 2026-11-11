@@ -183,6 +183,75 @@ function setBeg(id, on) {
   saveRoom();
 }
 
+/* ---------- 見やすさ（2026-11-11 本人の選択。room.md「UI・UX の4回目」）: 端末ごとの3つの切り替え ---------- */
+// big = 字の大きさ「大きい」（html の .big-text。状態の欄・ボタン・名前などを style.css の zoom でひと回り大きくする）、
+// twoTap = 2回押して置く（TWO_TAP_GAMES。下の「2回押して置く」）、shapes = 色に形を添える（html の .shapes。3〜4人の盤で人ごとの色に ● ▲ ■ ◆ を重ねる）。
+// どれも最初は切る（Claude の判断）。この端末だけ（localStorage。送らない）。ホームの「👓 見やすさ」と対局の画面の下の段の「👓 見やすさ」で開く
+// （上の段に置くと、スマホでゲームの名前が1行多く折れたため。2026-11-11 にブラウザで見て移した）。
+const VIEW_KEY = 'bg-view';
+let viewPref = { big: false, twoTap: false, shapes: false };
+try { viewPref = { ...viewPref, ...JSON.parse(localStorage.getItem(VIEW_KEY) || '{}') }; } catch { /* 覚えられなくても使える */ }
+function applyView() {
+  document.documentElement.classList.toggle('big-text', !!viewPref.big);
+  document.documentElement.classList.toggle('shapes', !!viewPref.shapes);
+}
+function setView(k, v) {
+  viewPref = { ...viewPref, [k]: v };
+  try { localStorage.setItem(VIEW_KEY, JSON.stringify(viewPref)); } catch { /* 無視 */ }
+  applyView();
+  tapGhost = null;
+  if (S && !el('screen-play').hidden) render();
+}
+applyView();
+function openView() {
+  closeInvite();
+  const pop = document.createElement('div');
+  pop.className = 'invite-pop';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-modal', 'true');
+  pop.setAttribute('aria-label', '見やすさ');
+  const box = document.createElement('div');
+  box.className = 'invite-box view-box';
+  pop.append(box);
+  const rows = [
+    ['big', '字の大きさ', '状態の欄・ボタン・名前などの字をひと回り大きくします', [[false, 'ふつう'], [true, '大きい']]],
+    ['twoTap', '2回押して置く', 'マルバツ・四目並べ・リバーシ・五目並べ・立体四目並べ・点と線で、1回目に薄い印が出て、同じ所をもう一度押すと置きます（押し間違いを防ぎます）', [[false, '切る'], [true, '使う']]],
+    ['shapes', '色に形を添える', '3〜4人の盤で、人ごとの色の上に ● ▲ ■ ◆ を重ねます（色が見分けにくいときに）', [[false, '切る'], [true, '使う']]],
+  ];
+  const draw = () => {
+    box.innerHTML = '<div class="invite-title">👓 見やすさ</div><p class="invite-note">この端末だけの設定です（ほかの人には変わりません）。</p>';
+    for (const [k, label, note, choices] of rows) {
+      const row = document.createElement('div');
+      row.className = 'view-row';
+      row.innerHTML = '<div class="rank-head"></div><p class="view-note"></p><div class="view-seg" role="radiogroup"></div>';
+      row.querySelector('.rank-head').textContent = label;
+      row.querySelector('.view-note').textContent = note;
+      const seg = row.querySelector('.view-seg');
+      seg.setAttribute('aria-label', label);
+      for (const [v, t] of choices) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'view-opt' + (!!viewPref[k] === v ? ' on' : '');
+        b.setAttribute('role', 'radio');
+        b.setAttribute('aria-checked', String(!!viewPref[k] === v));
+        b.textContent = t;
+        b.onclick = () => { setView(k, v); draw(); };
+        seg.append(b);
+      }
+      box.append(row);
+    }
+    const acts = document.createElement('div');
+    acts.className = 'invite-actions';
+    acts.append(makeButton('閉じる', closeInvite, 'primary'));
+    box.append(acts);
+  };
+  draw();
+  pop.addEventListener('click', (e) => { if (e.target === pop) closeInvite(); });
+  pop.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeInvite(); });
+  document.body.append(pop);
+  pop.querySelector('.view-opt.on')?.focus();
+}
+
 /* ---------- 部屋の成績表（2026-10-06 本人の決定）: この部屋で決着した対局の数と、だれが何回勝ったか（ゲームをまたいで） ---------- */
 // Claude の判断: 人だけを出す（CPU は出さない）。引き分けはだれも勝ちにしない。同点の1位・チームの勝ちは全員を数える。
 // 部屋にいる人は0勝でも出し、出た人は勝ちがあれば出す。勝った回数の多い順。待合室と、対局の結果の画面に出す。
@@ -1017,7 +1086,7 @@ function rulesOf(gameId, rules) {
 // マルバツ・将棋の size は盤の大きさでなく遊び方（スーパー・消える・5五将棋）なので抽選する。
 // ビンゴの終わり方（until。長さ）・ことわざかるたの場の札の数（field。難しさ）も抽選しない（2026-10-29 の Codex の点検。本人承認）。
 // 綱引き連打の綱の重さ（weight。長さ）・ボウリングのガードレール（bumper。ハンデ）と向きの線（guide。手助け）も抽選しない。立体四目並べの重力なし（free）は遊び方なので抽選する（31回目の案。Claude の判断）。ミニゴルフのホールの数（holes。長さ）も抽選しない（2026-11-02。Claude の判断）。
-const KEEP_KEYS = new Set(['players', 'wide', 'cpu', 'speed', 'season', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'safe', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check', 'mallet', 'stones', 'diffs', 'kind', 'tries', 'until', 'field', 'frames', 'weight', 'bumper', 'guide', 'ask', 'holes', 'gap', 'teams', 'judge', 'drops', 'lives', 'flash', 'boxes', 'every', 'onis']); // every = 見えない鬼ごっこの見える間隔（難しさ）・onis = 鬼の数（人数）（2026-11-11 の Claude の判断）・drops = 羽根つきの落とせる回数（長さ）・lives = 価値観ならべのライフの数（難しさ）（2026-11-05 の Claude の判断）・gap = ビンゴの数字の間・teams = 綱引きのチームの数（2026-11-03。時間の長さと人数なので抽選しない。Claude の判断）・judge = 大喜利の審査員が選ぶ（回数が人数で決まるので抽選しない。2026-11-03 の Claude の判断）・flash = 多いのはどっちの点の見える時間（難しさ）・boxes = 多いのはどっちの箱の数（答えの数。シルエットクイズの choice と同じ）（2026-11-09 の Claude の判断）・season = 流しそうめんの季節（見た目の好み。2026-11-10 の Claude の判断）
+const KEEP_KEYS = new Set(['players', 'peek', 'wide', 'cpu', 'speed', 'season', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'safe', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check', 'mallet', 'stones', 'diffs', 'kind', 'tries', 'until', 'field', 'frames', 'weight', 'bumper', 'guide', 'ask', 'holes', 'gap', 'teams', 'judge', 'drops', 'lives', 'flash', 'boxes', 'every', 'onis']); // peek = 相手の迷いを見せる（好み。2026-11-11 の Claude の判断）・every = 見えない鬼ごっこの見える間隔（難しさ）・onis = 鬼の数（人数）（2026-11-11 の Claude の判断）・drops = 羽根つきの落とせる回数（長さ）・lives = 価値観ならべのライフの数（難しさ）（2026-11-05 の Claude の判断）・gap = ビンゴの数字の間・teams = 綱引きのチームの数（2026-11-03。時間の長さと人数なので抽選しない。Claude の判断）・judge = 大喜利の審査員が選ぶ（回数が人数で決まるので抽選しない。2026-11-03 の Claude の判断）・flash = 多いのはどっちの点の見える時間（難しさ）・boxes = 多いのはどっちの箱の数（答えの数。シルエットクイズの choice と同じ）（2026-11-09 の Claude の判断）・season = 流しそうめんの季節（見た目の好み。2026-11-10 の Claude の判断）
 const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
 
 // 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、将棋・マンカラ・海戦ゲーム・五目並べ・立体四目並べ・はさみ将棋・エアホッケーは 2〜3。ほかは2）
@@ -1030,7 +1099,8 @@ const seatNote = (game, p, n = 2) => {
 };
 
 // R = { gameId, seed, order, moves, rules, prev }（S でも、届いた state でもよい）
-function replay(R) {
+// each(前の局面, 次の局面, 手, 何番目の手)（任意）: 手を1つ当てるたびに呼ぶ（あなたの番までに起きたこと・さっきの手をもう一度）
+function replay(R, each) {
   const game = GAMES[R.gameId];
   if (!game?.ready) return null;
   if (game.live) return Array.isArray(R.order) && R.order.length === boardSeats(R.gameId, R.rules) ? {} : null; // 手の一覧を使わないゲーム（局面はゲームが持つ）
@@ -1043,9 +1113,11 @@ function replay(R) {
     if (Array.isArray(R.order) && R.order.length !== boardSeats(R.gameId, R.rules)) return null;
     st = game.init({ rules: rulesOf(R.gameId, R.rules), seed: R.seed ?? 0 }); // seed は始めの盤を種で決めるゲーム（コネクトフォーのじゃま石）が使う
   }
-  for (const m of R.moves) {
-    st = game.apply(st, m);
+  for (let i = 0; i < R.moves.length; i++) {
+    const before = st;
+    st = game.apply(st, R.moves[i]);
     if (!st) return null;
+    each?.(before, st, R.moves[i], i);
   }
   return st;
 }
@@ -1590,10 +1662,51 @@ const STUCK_MS = 12000; // 合図がこれより長く戻らないと「遅れ�
 const netStuck = () => S.pingAt != null && Date.now() - S.pingAt > STUCK_MS;
 
 function onSelf(msg) {
+  if (msg.type === 'move' || msg.type === 'state') { sendBack(msg); return; }
   if (msg.type !== 'ping' || !Number.isFinite(msg.t)) return;
   S.rtt = Math.max(0, Date.now() - msg.t);
   S.pingAt = null;
   renderRoomBar();
+}
+
+/* ---------- 手が届いたかの印（2026-11-11 本人の選択。room.md「UI・UX の4回目」） ---------- */
+// オンラインで自分が打った手（onBoardMove）を送ってから、中継サーバーから自分に戻ってくる（onSelf）までを「送っています…」とし、
+// 戻ったら「✓ 届きました」を一瞬出す。待っている間は盤の最後の手の印（.last・[data-last]）を点線にする（board の .sending）。
+// Claude の判断: 戻ってきた手の一覧が、送ったときの長さ以上で同じ対局なら届いたとみる（ホストが CPU の手を足して送り直したものでもよい）。
+// つながっていない間は「まだ届いていません。つなぎ直しています…」。つなぎ直したときはゲストが手の一覧を送り直す（onConn）ので、それが戻れば届いたになる。
+const SENT_SHOW_MS = 1200; // 「✓ 届きました」を出しておく長さ
+let sentTimer = 0;
+function markSending() {
+  if (S.mode !== 'online') return;
+  S.sendWait = { key: timerKey(), len: S.moves.length + 1 };
+  S.sentAt = 0;
+}
+function sendBack(msg) {
+  const w = S.sendWait;
+  if (!w || msg.gameId !== S.gameId || msg.round !== S.round || w.key !== timerKey() || !Array.isArray(msg.moves) || msg.moves.length < w.len) return;
+  S.sendWait = null;
+  S.sentAt = Date.now();
+  showSendMark();
+}
+function showSendMark() {
+  const status = el('status');
+  const board = el('board');
+  let chip = status.querySelector('.send-chip');
+  const waiting = S?.sendWait && S.sendWait.key === timerKey();
+  const ok = !waiting && S?.sentAt && Date.now() - S.sentAt < SENT_SHOW_MS;
+  board.classList.toggle('sending', !!waiting);
+  if (!waiting && !ok) { chip?.remove(); return; }
+  if (!chip) {
+    chip = document.createElement('div');
+    chip.className = 'send-chip';
+    chip.setAttribute('aria-hidden', 'true'); // 目で見る印（読み上げると打つたびにうるさい）
+    status.append(chip);
+  }
+  chip.classList.toggle('ok', !!ok);
+  chip.classList.toggle('lost', !!waiting && S.conn !== 'ready');
+  chip.textContent = ok ? '✓ 届きました' : S.conn !== 'ready' ? 'まだ届いていません。つなぎ直しています…' : '送っています…';
+  clearTimeout(sentTimer);
+  if (ok) sentTimer = setTimeout(showSendMark, SENT_SHOW_MS - (Date.now() - S.sentAt) + 20);
 }
 
 function renderNetBanner() {
@@ -1959,6 +2072,7 @@ function renderPage() {
   S.shownKey = key;
   S.shownLen = S.moves.length;
   const opts = { canMove: canMove(game, st, res), onMove: onBoardMove, fresh, me: watchSeat(game), view: boardView(game) };
+  if (!game.multi) Object.assign(opts, { peek: opts.canMove ? sendPeek : null, peekIn: peekInNow() }); // 相手の迷いが見える（2026-11-11）
   const slow = fresh && res && slowWanted(game, prevLen); // 決め手のスロー（2026-11-10）: 線を引くのを盤を描く前に遅らせておく
   if (slow) lineHold.until = Date.now() + SLOW_LINE - 160; // winLine はこの時刻からいつもの 160ms 待って引く
   if (game.multi) {
@@ -1974,6 +2088,9 @@ function renderPage() {
     });
   }
   game.render(board, st, opts);
+  if (game.multi) delete board.dataset.seats; else board.dataset.seats = boardSeats(S.gameId, S.rules); // 色に形を添える（2026-11-11。3〜4人の盤だけ）
+  drawGhosts(game, st, board); // 2回押して置く・相手の迷い（2026-11-11）
+  if (tapGhost && tapGhost.k === ghostKey() && twoTapOn(game) && opts.canMove) status.insertAdjacentHTML('beforeend', '<div class="status-sub tap-hint">👆 同じ所をもう一度押すと置きます</div>');
   lineHold.until = 0;
   const hold = slow ? slowFinish(board) : 0;
   rollNums(status); // 点の数字が回る（2026-11-10）
@@ -2002,13 +2119,16 @@ function renderPage() {
   if (!res && S.gameId === 'oekaki' && st.phase === 'show') appendShare(); // お絵描き当ての答えの場面（描き終わった絵が出ている）
   appendSit(game, res);
   appendFlip(game);
+  appendReplayLast(game, res);
   appendPredict(game, res);
   appendReactions();
   appendWatchSelect(game);
+  controls.append(makeButton('👓 見やすさ', openView, 'ghost small')); // 見やすさ（2026-11-11）
   if (S.mode === 'online' && !S.isHost) controls.append(makeButton('🏠 待合室へ', () => goAwayLobby(game, st, res), 'ghost small'));
   if (S.mode === 'online' && S.isHost && !res) controls.append(lobbyAllButton());
   if (S.mode === 'online' && S.isHost) controls.append(gameSelect());
   appendMemberPanel();
+  showSendMark(); // 手が届いたかの印（2026-11-11）
   scheduleCpu(game, st, res);
   scheduleReferee(game, st, res);
   if (res) checkAgain();
@@ -2028,8 +2148,9 @@ function turnBand(game, st, res) {
   const crowned = res ? new Set(winnersOf(res).filter((p) => p < n)) : null;
   if (crowned && !crowned.size) return null; // 引き分けは今までどおり出さない
   const me = myPlayer();
+  const said = res ? null : saidBySeat(game, n);
   const band = document.createElement('div');
-  band.className = 'turn-band';
+  band.className = 'turn-band' + (said ? ' has-said' : '') + (!game.multi && n >= 3 ? ' seats34' : ''); // seats34: 色に形を添える（2026-11-11）
   const back = st?.dir === -1;
   const seats = [...Array(n).keys()];
   if (back) seats.reverse();
@@ -2048,6 +2169,7 @@ function turnBand(game, st, res) {
     // 印は色の丸か短い記号（○・× など）。「先手」のような言葉は席の番号にし、同じ画面の対局では名前の所に言葉を出す
     const sym = label ? COLOR_DOT[label] ?? ([...label].length <= 1 ? label : null) : null;
     mark.textContent = sym ?? String(i + 1);
+    if (sym && COLOR_DOT[label]) mark.dataset.p = i; // 色に形を添える（2026-11-11）: 色の丸に ● ▲ ■ ◆ を添える（style.css の .shapes）
     const who = document.createElement('span');
     who.className = 'turn-name';
     who.textContent = S.mode === 'online' ? (i === me ? 'あなた' : nameOf(S.order[i])) : label && label !== sym ? label : `${i + 1}番`;
@@ -2061,12 +2183,38 @@ function turnBand(game, st, res) {
       dots.innerHTML = '<i></i><i></i><i></i>';
       card.append(dots);
     }
+    if (said?.[i]) {
+      const b = document.createElement('span');
+      b.className = 'turn-said';
+      b.textContent = said[i];
+      card.append(b);
+    }
     if (S.mode === 'online') addFlame(card, S.order[i]);
     if (crowned?.has(i)) addCrown(card);
     band.append(card);
   });
   if (S.mode === 'online') flameSeen = { key: S.streak?.key ?? null, n: { ...(S.streak?.wins ?? {}) } };
   return band;
+}
+
+// あなたの番までに起きたこと（2026-11-11 本人の選択。room.md「UI・UX の4回目」）: 自分が最後に打った手より後に、ほかの人がした手を、
+// その人の順番の帯の札の下に短い吹き出しで残す（1人1つ。同じ人が何回か打ったら最後の手）。言葉はゲームの said(前の局面, 次の局面, 手)。
+// Claude の判断: オンラインのカードゲームで、自分の席があるとき（観戦の人は、見ている人の席から数える）。まだ1回も打っていなければ対局の始めから。
+// 進行役の手（p = -1）と自分の手には出さない。長い言葉は CSS で切る。
+function saidBySeat(game, n) {
+  if (!game.said || S.mode !== 'online' || !game.multi) return null;
+  const me = watchSeat(game);
+  if (!Number.isInteger(me) || me < 0) return null;
+  let from = -1;
+  for (let i = S.moves.length - 1; i >= 0; i--) if (S.moves[i]?.p === me) { from = i; break; }
+  const out = {};
+  let any = false;
+  replay(S, (a, b, m, i) => {
+    if (i <= from || !Number.isInteger(m?.p) || m.p < 0 || m.p >= n || m.p === me) return;
+    const t = game.said(a, b, m);
+    if (t) { out[m.p] = t; any = true; }
+  });
+  return any ? out : null;
 }
 
 // 連勝の炎（2026-11-09 本人の選択。room.md「演出・アニメーションの2回目」）: 2連勝以上の人の順番の帯の札に 🔥 と連勝の数を出し、増えるほど炎を大きくする。
@@ -2437,6 +2585,53 @@ function appendFlip(game) {
   }, 'ghost small');
   b.setAttribute('aria-label', `盤の向きを変える。いま下にいるのは ${who(cur)}`);
   ctl().append(b); // 名前は textContent で入る（makeButton）ので、外から来た文字でもそのまま使える
+}
+
+/* ---------- さっきの手をもう一度（2026-11-11 本人の選択。room.md「UI・UX の4回目」） ---------- */
+// 盤のゲームの対局中に「↺ さっきの手」を押すと、1手前の局面を描いてから、最後の手が新しく届いたときと同じように描き直す
+// （石や駒の動き・リバーシの返る石・音がもう一度出る）。そのあと、1手前と変わったマスを金色に縁取る（.was。数秒で消える）。
+// Claude の判断: 決着のあとは出さない（ふりかえりがある。判子や紙吹雪をもう一度出さないため）。もう一度の間は「番が来た」の知らせを出さない（replayNow）。
+// 変わったマスは、盤の中でいちばん子の多い入れ物の子どうしを、中の字と中の物の種類（動きの印・押せる印などは除く）で比べて見つける。
+const REPLAY_WAIT_MS = 550; // 1手前の局面を見せておく長さ
+const WAS_SKIP = new Set(['last', 'pop', 'flip', 'playable', 'usable', 'sel', 'picked', 'hint', 'was', 'drop', 'land', 'slide', 'new', 'fresh']);
+let replayNow = false;
+let replayToken = 0;
+function appendReplayLast(game, res) {
+  if (game.multi || game.live || res || !S.moves.length || (S.mode === 'online' && !S.order)) return;
+  const b = makeButton('↺ さっきの手', () => replayLast(game), 'ghost small');
+  b.setAttribute('aria-label', '最後の手をもう一度見る');
+  ctl().append(b);
+}
+function cellsOf(board) {
+  let best = board;
+  for (const e of board.querySelectorAll('*')) if (e.children.length > best.children.length) best = e;
+  return [...best.children];
+}
+function cellSig(e) {
+  const parts = [e.textContent];
+  for (const d of e.querySelectorAll('*')) parts.push(d.tagName + ':' + [...d.classList].filter((c) => !WAS_SKIP.has(c) && !c.startsWith('fly')).sort().join('.'));
+  return parts.join('|');
+}
+function replayLast(game) {
+  const n = S.moves.length;
+  const key = timerKey();
+  const prev = replay({ ...S, moves: S.moves.slice(0, -1) });
+  if (!prev || !n) return;
+  const board = el('board');
+  const token = ++replayToken;
+  game.render(board, prev, { canMove: false, onMove: () => {}, fresh: false, me: watchSeat(game), view: boardView(game) });
+  const before = cellsOf(board).map(cellSig);
+  setTimeout(() => {
+    if (token !== replayToken || !S || timerKey() !== key) return;
+    if (S.moves.length !== n) { render(); return; } // 待つ間に新しい手が来た
+    S.shownKey = S.gameId + ':' + S.round;
+    S.shownLen = n - 1; // 新しく届いた手として描く（render の fresh）
+    replayNow = true;
+    try { render(); } finally { replayNow = false; }
+    const now = cellsOf(el('board'));
+    if (now.length !== before.length) return;
+    now.forEach((c, i) => { if (cellSig(c) !== before[i]) c.classList.add('was'); });
+  }, REPLAY_WAIT_MS);
 }
 
 /* ---------- 対局のふりかえり（2026-10-06 本人の決定）: 盤のゲームが終わったあと、最初から1手ずつ見返せる ---------- */
@@ -3211,7 +3406,7 @@ function moveSound(game, st, res, prevLen, mine, hold = 0) {
     try { c = game.cutin(a, b, mm, me); } catch { c = null; }
     if (c) { cutInFx(c); break; }
   }
-  if (mine && S.mode === 'online' && !game.realtime && !canMove(game, before, null)) {
+  if (mine && !replayNow && S.mode === 'online' && !game.realtime && !canMove(game, before, null)) {
     const waited = Date.now() - S.waitFrom;
     if (waited > TURN_PING_MS) {
       setTimeout(() => { play('turn'); haptic('turn'); sayTurn(); }, 300);
@@ -3803,6 +3998,80 @@ function rouletteButton() {
   return b;
 }
 
+/* ---------- 2回押して置く・相手の迷いが見える（2026-11-11 本人の選択。room.md「UI・UX の4回目」） ---------- */
+// 2回押して置く（見やすさの twoTap。TWO_TAP_GAMES だけ）: onBoardMove に来た手を1回目は置かずに覚え（tapGhost）、同じ手がもう一度来たら置く。
+//   覚えた手は、その手を当てた局面を画面に出ない入れ物に描いて、いまの盤で空いていたのに埋まる所の中身を写して薄く出す（.tap-ghost）。
+//   埋まる所は、2つの盤を根元から同じ並びで降りて探す（子の数が違えばそこで止める。四目並べの列のような入れ物の中まで見るため）。
+//   埋まるマスが見つからないときは、押した物に輪を付ける（.tap-ghost-ring）。新しい手が来たら（ghostKey が変わったら）忘れる。
+// 相手の迷いが見える（詳細設定 peek。util.js の PEEK_SETTING）: 番の人の端末が、つまんでいる駒（ゲームが o.peek({ f, d, a }) で知らせる）か
+//   2回押しの1回目の手（{ m }）を送りっぱなしで送り、受け取った端末は描き直して、ゲームに o.peekIn で渡す（{ m } は main.js が .peek-ghost で出す）。
+//   Claude の判断: 同じ中身は続けて送らない。局面が進んだら（ghostKey が変わったら）出さない。自分が送ったものは出さない。
+const TWO_TAP_GAMES = new Set(['tictactoe', 'connect4', 'reversi', 'gomoku', 'cube4', 'dots']);
+let tapGhost = null; // { k: どの局面か, sig: 手の JSON, move, at: 押した物の場所 }
+let lastTap = null; // 盤の中で最後に押した物（押した手の印を付けるため。onclick より先に捕まえる）
+el('board').addEventListener('click', (e) => { lastTap = e.target; }, true);
+const ghostKey = () => `${timerKey()}:${S.moves.length}:${S.undo ?? 0}`;
+const twoTapOn = (game) => !!viewPref.twoTap && TWO_TAP_GAMES.has(S.gameId) && !game.multi && !game.live;
+const peekOn = () => S?.mode === 'online' && !!GAMES[S.gameId]?.settings?.some((x) => x.key === 'peek') && rulesOf(S.gameId, S.rules).peek !== 'off';
+function tapFirst(game, move) {
+  if (!twoTapOn(game)) return false;
+  const sig = JSON.stringify(move);
+  if (tapGhost?.k === ghostKey() && tapGhost.sig === sig) { tapGhost = null; return false; }
+  const all = [...el('board').querySelectorAll('*')];
+  tapGhost = { k: ghostKey(), sig, move, at: lastTap ? all.indexOf(lastTap) : -1 };
+  sendPeek({ m: move });
+  render();
+  return true;
+}
+let peekSent = '';
+function sendPeek(d) {
+  if (!peekOn()) return;
+  const me = myPlayer();
+  if (!Number.isInteger(me) || me < 0) return;
+  const sig = ghostKey() + JSON.stringify(d);
+  if (sig === peekSent) return;
+  peekSent = sig;
+  send({ type: 'stream', gameId: S.gameId, round: S.round, d: { peek: d, k: S.moves.length, u: S.undo ?? 0 } }, 0);
+}
+function onPeek(msg) {
+  if (msg.gameId !== S.gameId || msg.round !== S.round || !msg.d || typeof msg.d.peek !== 'object' || !msg.d.peek) return;
+  S.peekIn = { k: `${timerKey()}:${msg.d.k}:${msg.d.u}`, d: msg.d.peek, from: msg.from };
+  if (S.peekIn.k === ghostKey() && peekOn()) render();
+}
+const peekInNow = () => (S.peekIn && S.peekIn.k === ghostKey() && S.peekIn.from !== S.myId && peekOn() ? S.peekIn.d : null);
+function drawGhosts(game, st, board) {
+  if (game.multi || game.live) return;
+  if (tapGhost && tapGhost.k === ghostKey() && twoTapOn(game)) ghostOne(game, st, board, tapGhost.move, 'tap-ghost', tapGhost.at);
+  const pk = peekInNow();
+  if (pk && pk.m !== undefined && TWO_TAP_GAMES.has(S.gameId)) ghostOne(game, st, board, pk.m, 'peek-ghost', -1);
+}
+function ghostOne(game, st, board, move, cls, at) {
+  let next = null;
+  try { next = game.apply(st, move); } catch { next = null; }
+  if (!next) return;
+  const tmp = document.createElement('div');
+  try { game.render(tmp, next, { canMove: false, onMove() {}, fresh: false, me: watchSeat(game), view: boardView(game) }); } catch { return; }
+  const empty = (c) => !c.textContent.trim() && !c.children.length;
+  const pairs = [];
+  const walk = (x, y) => {
+    if (empty(x)) { if (!empty(y)) pairs.push([x, y]); return; }
+    if (x.children.length !== y.children.length) return;
+    for (let i = 0; i < x.children.length; i++) walk(x.children[i], y.children[i]);
+  };
+  walk(board, tmp);
+  for (const [c, y] of pairs) {
+    const copy = [...y.childNodes].map((x) => x.cloneNode(true));
+    // 写した物から、動きの鍵と「最後の手」「動き」の印を外す（薄い石に最後の手の点が付かないように）
+    for (const x of copy) if (x.nodeType === 1) for (const e of [x, ...x.querySelectorAll('*')]) {
+      for (const k of ['data-fly', 'data-fly-from', 'data-last', 'id']) e.removeAttribute(k);
+      e.classList.remove('last', 'pop', 'flip', 'drop', 'win');
+    }
+    c.replaceChildren(...copy);
+    c.classList.add(cls);
+  }
+  if (!pairs.length && at >= 0) board.querySelectorAll('*')[at]?.classList.add(cls + '-ring');
+}
+
 /* ---------- 操作 ---------- */
 
 function pushMove(move) {
@@ -3824,7 +4093,9 @@ function onBoardMove(move) {
   if (!st || !canMove(game, st, game.result(st))) return;
   if (game.multi) move = { ...move, p: myPlayer() };
   if (!game.apply(st, move)) return;
+  if (tapFirst(game, move)) { haptic('tap'); return; } // 2回押して置くの1回目（2026-11-11）
   haptic('tap');
+  markSending(); // 手が届いたかの印（2026-11-11）
   pushMove(move);
 }
 
@@ -4640,8 +4911,9 @@ function onMessage(msg) {
   if (msg.to && msg.to !== S.myId) return;
   const wasAlive = alive(msg.from);
   S.seen[msg.from] = Date.now();
-  if (msg.type === 'stream') { // 見た目だけの中身。手の一覧には入れず、描き直しもしない
-    if (msg.gameId === S.gameId && msg.round === S.round) GAMES[S.gameId]?.onStream?.(msg.d, S.order?.indexOf(msg.from) ?? -1);
+  if (msg.type === 'stream') { // 見た目だけの中身。手の一覧には入れず、描き直しもしない（相手の迷い（peek）だけは描き直す）
+    if (msg.d?.peek !== undefined && !GAMES[S.gameId]?.multi) onPeek(msg);
+    else if (msg.gameId === S.gameId && msg.round === S.round) GAMES[S.gameId]?.onStream?.(msg.d, S.order?.indexOf(msg.from) ?? -1);
     if (!wasAlive) render();
     return;
   }
@@ -5027,6 +5299,7 @@ el('btn-about').onclick = () => openAbout();
 el('btn-rank').onclick = openRanking;
 el('btn-zukan').onclick = openZukan;
 el('btn-skin').onclick = openSkins;
+el('btn-view').onclick = openView;
 noAdsBtn.onclick = openNoAds;
 // ホームの下の段の「📳 振動」と「🏅 実績」（App Store 版だけ。2026-10-22 本人の決定。振動の付け外しは本人の希望で足した）
 function showAppExtras() {

@@ -33,7 +33,7 @@
 //   詰み（決着）の手では出さない。本将棋・5五将棋・3人将棋（指した人の駒がほかの人の玉に利いた）・3×4（ライオンに利いた）のどれでも効く。
 //   なしのときだけ局面に quiet: true を持つ（ありのときは今までと全く同じ形）。CPU の読みと apply の結果は変えない。
 
-import { CPU_SETTING, mulberry32 } from './util.js';
+import { CPU_SETTING, PEEK_SETTING, peekMark, mulberry32 } from './util.js';
 import * as three from './shogi3.js';
 import * as zoo from './shogi34.js';
 
@@ -407,6 +407,7 @@ export default {
     { key: 'mix', label: '駒の並び', desc: '「ばらばら」にすると、一番下の段の駒（玉は真ん中のまま）と角・飛の左右を毎回おまかせで並べる（先手と後手は同じ並び）。決まった序盤が使えない。本将棋の2人・平手だけ', def: 'off', choices: [['off', 'ふつう'], ['on', 'ばらばら']] },
     { key: 'check', label: '王手の知らせ', desc: '王手をかけたとき、盤に大きく「王手！」と出して読み上げる（🔊 がオンのとき）。3人・3×4 でも出る', def: 'on', choices: [['on', 'あり'], ['off', 'なし']] },
     { key: 'handicap', label: '駒落ち', desc: '先手（上手）が駒を落として先に指す。腕の差があるときに', def: 'none', choices: Object.entries(HANDICAPS) },
+    PEEK_SETTING,
     CPU_SETTING,
   ],
 
@@ -547,7 +548,7 @@ export default {
         any = true;
         const ok = can && side === s.turn && droppable.has(d);
         const e = document.createElement(ok ? 'button' : 'span');
-        e.className = 'sg-hand-piece' + (ok ? ' playable' : '') + (ui.drop === d && side === s.turn ? ' selected' : '');
+        e.className = 'sg-hand-piece' + (ok ? ' playable' : '') + (ui.drop === d && side === s.turn ? ' selected' : '') + (o.peekIn?.d === d && side === s.turn ? ' peek' : '');
         e.innerHTML = `<span class="sg-piece${side === bottom ? '' : ' flip'}">${KANJI[d]}</span>${n > 1 ? `<small>${n}</small>` : ''}`;
         // 駒がすっと動く（2026-11-06。main.js の flyPlay）: 取った駒は、取ったマス（at:マス。駒の鍵は直前に動いた駒だと mv: なのでマスで指す）から
         // 向きを変えながら持ち駒へ飛んでくる（前に同じ駒を持っていたときは、前と同じ鍵の物があるので飛ばない）
@@ -598,6 +599,7 @@ export default {
       if (s.last && !s.last.resign && s.last.t === i) cell.dataset.last = 'still'; // 決め手のスロー（main.js の slowFinish）: 駒は滑ってくるので寄せるだけ
       if (i === ui.from) cell.classList.add('selected');
       if (isTarget) cell.classList.add('target');
+      peekMark(cell, i, o, isTarget, () => ({ f: ui.from, d: ui.drop })); // 相手の迷いが見える（2026-11-11。main.js の o.peek・o.peekIn）: 相手の選び・PC のねらい
       if (i === checkedKing) cell.classList.add('checked');
       if (s.trial && (i === trySq(0, N) || i === trySq(1, N))) cell.classList.add('try'); // トライのマスに薄い印
       if (v) {
@@ -634,6 +636,7 @@ export default {
     root.append(wrap);
 
     if (!noHand) root.append(handRow(bottom));
+    o.peek?.({ f: ui.from, d: ui.drop, a: null }); // 相手の迷いが見える（2026-11-11。main.js の o.peek・o.peekIn）: いまの選びを知らせる（同じ中身は main.js が送らない）
 
     if (ui.promo) {
       const box = document.createElement('div');

@@ -332,7 +332,14 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .dot.wait { background: #e0a82e; }
 .dot.off { background: #c9c2b8; }
 
-.status { text-align: center; margin: 16px 0 12px; min-height: 3.2em; }
+.status { position: relative; text-align: center; margin: 16px 0 12px; min-height: 3.2em; }
+/* 手が届いたかの印（2026-11-11。main.js の showSendMark）: 状態の欄と盤の間に重ねる小さな札（出し入れで盤がずれないように）。待つ間は最後の手の印を点線に */
+.send-chip { position: absolute; left: 50%; bottom: -13px; transform: translateX(-50%); z-index: 3; max-width: calc(100% - 16px); padding: 1px 10px; border: 1.5px dashed var(--line); border-radius: 999px; background: var(--panel); color: var(--muted); font-size: .75rem; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.send-chip.ok { border-style: solid; border-color: var(--win); color: var(--win); font-weight: 700; animation: send-ok 1.2s ease-out forwards; }
+.send-chip.lost { border-color: #c0541a; color: #c0541a; }
+@keyframes send-ok { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+.board.sending .last, .board.sending [data-last] { outline: 2px dashed var(--accent); outline-offset: 1px; opacity: .7; }
+@media (prefers-reduced-motion: reduce) { .send-chip.ok { animation: none; } }
 .status-main { font-size: 1.25rem; font-weight: 700; }
 .status-main.small { font-size: 1rem; font-weight: 400; }
 .status-sub { color: var(--muted); font-size: .92rem; }
@@ -2182,6 +2189,10 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .turn-dots i:nth-child(3) { animation-delay: .3s; }
 @keyframes turn-dot { 0%, 60%, 100% { transform: translateY(0); opacity: .35; } 30% { transform: translateY(-3px); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .turn-card { transition: none; } .turn-card.now { transform: none; } }
+/* あなたの番までに起きたこと（2026-11-11。main.js の saidBySeat）: 札の中の下に短い吹き出し。長い言葉は「…」で切る */
+.turn-band.has-said .turn-card { max-width: 128px; }
+.turn-band.has-said .turn-card.now:has(.turn-dots) { padding-bottom: 12px; }
+.turn-said { margin-top: 3px; max-width: 100%; padding: 2px 7px; border-radius: 8px; background: var(--field); border: 1px solid var(--line); color: var(--ink); font-size: .72rem; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- もう一回は全員の OK で（2026-10-26） ---------- */
 .again-box { width: 100%; text-align: center; margin: 4px 0; }
@@ -2994,3 +3005,78 @@ h1, h2, .sheet-head h3, .cat-h, .tile-nm, .lobby-game-name { font-family: "asobi
 .board button.rc-key.sel { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .board button.rc-key:disabled { opacity: .3; }
 .board button.rc-go { min-width: 10em; }
+
+/* さっきの手をもう一度（2026-11-11。main.js の replayLast）: 1手前と変わったマスを金色に縁取り、数秒で消す */
+.board .was { outline: 3px solid #e0b030; outline-offset: -3px; animation: was-fade 2.6s ease-in forwards; z-index: 1; }
+@keyframes was-fade { 0%, 70% { outline-color: #e0b030; } 100% { outline-color: transparent; } }
+@media (prefers-reduced-motion: reduce) { .board .was { animation: none; } }
+
+/* 相手の迷いが見える（2026-11-11。main.js の peekInNow・util.js の peekMark）: 相手がつまんでいる駒は点線の枠、PC でねらっているマスは点線の輪がふくらむ */
+.board .peek { outline: 2.5px dashed #7a5cc2; outline-offset: -3px; }
+.board .peek-aim { position: relative; }
+.board .peek-aim::after { content: ""; position: absolute; inset: 14%; border: 2.5px dashed #7a5cc2; border-radius: 50%; pointer-events: none; animation: peek-aim 1s ease-in-out infinite; }
+@keyframes peek-aim { 0%, 100% { transform: scale(.85); opacity: .6; } 50% { transform: scale(1); opacity: 1; } }
+.sg3-cell.peek { stroke: #7a5cc2; stroke-width: 2.5; stroke-dasharray: 5 4; }
+.sg3-cell.peek-aim { fill: color-mix(in srgb, #7a5cc2 25%, transparent); }
+/* 2回押して置く（2026-11-11。main.js の tapFirst・ghostOne）: 1回目に押した所は、置いたときの石や印を薄く出す。相手の1回目（相手の迷い）は点線の枠も付ける */
+.board .tap-ghost > *, .board .peek-ghost > * { opacity: .45; }
+.board .tap-ghost { outline: 2.5px solid var(--accent); outline-offset: -3px; animation: tap-ghost 1.1s ease-in-out infinite; }
+.board .peek-ghost { outline: 2.5px dashed #7a5cc2; outline-offset: -3px; }
+.board .tap-ghost-ring { outline: 2.5px solid var(--accent); outline-offset: -2px; }
+.board .peek-ghost-ring { outline: 2.5px dashed #7a5cc2; outline-offset: -2px; }
+@keyframes tap-ghost { 0%, 100% { outline-color: var(--accent); } 50% { outline-color: transparent; } }
+.status-sub.tap-hint { color: var(--accent); font-weight: 700; }
+@media (prefers-reduced-motion: reduce) { .board .peek-aim::after, .board .tap-ghost { animation: none; } }
+.board .tap-ghost, .board .peek-ghost { color: color-mix(in srgb, currentColor 45%, transparent); }
+
+/* 色に形を添える（2026-11-11。main.js の setView・html の .shapes）: 3〜4人の盤（main.js が board に data-seats を付ける）で、人ごとの石に ● ▲ ■ ◆ を重ねる（点と線の陣地は「赤」などの字が入っているので重ねない。マルバツは印が人ごとに違う）。
+   色そのものは変えない。順番の帯の印にも添える。石の ::after は「最後の手」の印に使っているので ::before に描く */
+.shapes .board:is([data-seats="3"], [data-seats="4"]) :is(.c4-disc, .rv-disc, .gm-stone, .cb-disc):is(.p0, .p1, .p2, .p3)::before {
+  position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none;
+  font-size: clamp(9px, 3vw, 17px); line-height: 1; color: #fff; text-shadow: 0 0 2px #000, 0 0 1px #000; opacity: .85;
+}
+.shapes .board:is([data-seats="3"], [data-seats="4"]) .rv-disc { position: relative; }
+.shapes .board:is([data-seats="3"], [data-seats="4"]) :is(.c4-disc, .rv-disc, .gm-stone, .cb-disc).p0::before { content: "●"; }
+.shapes .board:is([data-seats="3"], [data-seats="4"]) :is(.c4-disc, .rv-disc, .gm-stone, .cb-disc).p1::before { content: "▲"; }
+.shapes .board:is([data-seats="3"], [data-seats="4"]) :is(.c4-disc, .rv-disc, .gm-stone, .cb-disc).p2::before { content: "■"; }
+.shapes .board:is([data-seats="3"], [data-seats="4"]) :is(.c4-disc, .rv-disc, .gm-stone, .cb-disc).p3::before { content: "◆"; }
+.shapes .turn-band.seats34 .turn-mark[data-p]::after { font-size: .8rem; margin-left: 2px; vertical-align: middle; }
+.shapes .turn-band.seats34 .turn-mark[data-p="0"]::after { content: "●"; }
+.shapes .turn-band.seats34 .turn-mark[data-p="1"]::after { content: "▲"; }
+.shapes .turn-band.seats34 .turn-mark[data-p="2"]::after { content: "■"; }
+.shapes .turn-band.seats34 .turn-mark[data-p="3"]::after { content: "◆"; }
+
+/* 字の大きさ「大きい」（2026-11-11。main.js の setView・html の .big-text）: 状態の欄・ボタンの段・部屋の帯・遊び方・小窓・知らせ・ホームの一覧を zoom でひと回り大きくする。
+   盤そのもの（マスの大きさが決まっている）と上の段（ゲームの名前がスマホで縦に折れる）は大きくしない。zoom は幅を詰めて折り返すので、横にはみ出さない */
+.big-text :is(#status, #controls, #room-bar, #howto, .invite-box, #toast, .home-header, .join-form, .home-tools, .home-find, .game-list, .home-foot) { zoom: 1.15; }
+
+/* 見やすさの小窓（2026-11-11。main.js の openView） */
+.view-box { max-width: 380px; text-align: left; }
+.view-box .invite-title, .view-box > .invite-note { text-align: center; }
+.view-note { color: var(--muted); font-size: .82rem; margin: 0 0 6px; }
+.view-seg { display: flex; gap: 6px; }
+.view-opt { flex: 1; font: inherit; font-weight: 700; padding: 8px 6px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+.view-opt.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
+/* 推理のメモ（2026-11-11。hitblow.js・jinro.js・kaisen.js）: 自分の画面だけの印 */
+.hb-memo { display: flex; align-items: center; justify-content: center; gap: 3px; flex-wrap: wrap; margin: 8px auto; max-width: 420px; }
+.hb-memo-label { font-size: .8rem; color: var(--muted); font-weight: 700; margin-right: 4px; }
+.hb-memo-d { position: relative; width: 32px; height: 36px; font: inherit; font-weight: 700; border-radius: 8px; border: 1.5px dashed var(--line); background: var(--field); color: var(--ink); cursor: pointer; padding: 0; }
+.hb-memo-d i { position: absolute; right: 1px; bottom: -1px; font-style: normal; font-size: .72rem; line-height: 1; }
+.hb-memo-d.m-x { color: var(--muted); border-style: solid; }
+.hb-memo-d.m-x span { text-decoration: line-through; text-decoration-thickness: 2px; }
+.hb-memo-d.m-x i { color: #c0392b; }
+.hb-memo-d.m-o { border-style: solid; border-color: #2e9a52; }
+.hb-memo-d.m-o i { color: #2e9a52; }
+.hb-memo-d.m-q { border-style: solid; border-color: #d08a00; }
+.hb-memo-d.m-q i { color: #d08a00; }
+.hb-key.m-x { opacity: .45; text-decoration: line-through; }
+.hb-key.m-o { box-shadow: inset 0 0 0 2px #2e9a52; }
+.hb-key.m-q { box-shadow: inset 0 0 0 2px #d08a00; }
+.jr-memo { margin-top: 4px; font: inherit; font-size: .72rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; border: 1.5px dashed var(--line); background: var(--field); color: var(--muted); cursor: pointer; }
+.jr-memo.m-w { border-style: solid; border-color: #9aa3ab; background: #f4f6f8; color: #4a5560; }
+.jr-memo.m-s { border-style: solid; border-color: #d08a00; background: #fff2d6; color: #8a5a00; }
+.jr-memo.m-b { border-style: solid; border-color: #333; background: #333; color: #fff; }
+.ks-cell.memo::after { content: "×"; position: absolute; inset: 0; display: grid; place-items: center; color: #c0392b; font-weight: 800; font-size: clamp(10px, 3vw, 16px); pointer-events: none; opacity: .8; }
+/* ホームの道具のボタンが4つになったので（2026-11-11 の 👓 見やすさ）、狭い画面では2つずつ2段に並べる（1つのボタンの字が2行に折れないように） */
+@media (max-width: 560px) { .home-tools { flex-wrap: wrap; } .home-tools .btn { flex: 1 1 calc(50% - 4px); } }

@@ -20,7 +20,7 @@
 //   3〜4人と同じ広い盤（大きさは詳細設定「広い盤の大きさ」）で、4つ並べたら勝ち。おまかせは 6×6
 //   （CPU どうしで 5×5 は半分が引き分け、6×6 より広いと引き分けはほぼ無い）。CPU も3〜4人と同じ wideCpu。
 
-import { CPU_SETTING, boardCpu, winLine } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, boardCpu, winLine } from './util.js';
 
 const LINES = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
 const MARKS = [
@@ -515,6 +515,7 @@ export default {
       desc: '3人・4人で遊ぶときと、2人で「盤」を「広い盤」にしたときの盤の大きさ。3人・4人は3つ並べ、2人は4つ並べたら勝ち',
       choices: WIDE_CHOICES,
     },
+    TAP_PEEK_SETTING,
     CPU_SETTING,
   ],
 

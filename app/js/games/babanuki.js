@@ -85,6 +85,13 @@ export default {
   canAct(s, p) { return !this.done(s) && s.turn === p; },
   victim(s) { return nextActive(s, s.turn); },
   startSound: 'shuffle',
+  // あなたの番までに起きたこと（2026-11-11。room.md「UI・UX の4回目」）: 順番の帯の札の下に出す短い言葉（引いた札は伏せたまま。そろって捨てた札は場に出るので書く）
+  said(a, b, m) {
+    const L = b.last;
+    if (!L || L.p !== m.p) return null;
+    const t = L.pair ? `${L.pair.map(cardLabel).join('と')}を捨てた` : '1枚引いた';
+    return b.out.includes(m.p) && !a.out.includes(m.p) ? t + ' → 上がり' : t;
+  },
   sound(a, b) { return b.last?.pair ? 'card' : 'draw'; },
 
   result(s) {

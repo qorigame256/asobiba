@@ -109,6 +109,10 @@ function dawn(s) {
 
 // 入力欄は対局の間ずっと同じものを使う（作り直すとスマホのキーボードが閉じる）
 let ui = null;
+// 推理のメモ（2026-11-11 本人の選択。room.md「UI・UX の4回目」）: ほかの人の名前の札に、自分の画面だけの印を付ける（送らない・保存しない）。押すたびに 無し → 白 → 怪しい → 黒 → 無し。対局が替わったら消す
+const MEMO_NEXT = { '': 'w', w: 's', s: 'b', b: '' };
+const MEMO_TEXT = { '': '✎ メモ', w: '白', s: '怪しい', b: '黒' };
+let memo = { seed: null, m: {} };
 
 function button(text, cls, onClick) {
   const b = document.createElement('button');
@@ -354,6 +358,20 @@ export default {
       sub.className = 'pt-extra';
       sub.textContent = over ? `${ICON[s.roles[p]]} ${ROLE[s.roles[p]]}${s.alive[p] ? '' : '（やられた）'}` : s.alive[p] ? (s.phase === 'vote' ? (p in s.votes ? '投票ずみ' : '考え中') : '生きている') : 'やられた';
       chip.append(sub);
+      if (me !== null && p !== me && !over) { // 推理のメモ（2026-11-11）
+        if (memo.seed !== s.seed) memo = { seed: s.seed, m: {} };
+        const t = document.createElement('button');
+        t.type = 'button';
+        const show = () => {
+          const v = memo.m[p] ?? '';
+          t.className = 'jr-memo' + (v ? ' m-' + v : '');
+          t.textContent = MEMO_TEXT[v];
+          t.setAttribute('aria-label', `${nameP(p)}のメモ: ${v ? MEMO_TEXT[v] : 'なし'}（押すと変わる。自分の画面だけ）`);
+        };
+        t.onclick = () => { memo.m[p] = MEMO_NEXT[memo.m[p] ?? '']; show(); };
+        show();
+        chip.append(t);
+      }
       if (o.away[p] || o.sub?.[p]) {
         const t = document.createElement('span');
         t.className = 'cc-tag away';

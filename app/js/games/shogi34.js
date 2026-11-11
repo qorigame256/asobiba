@@ -10,6 +10,8 @@
 // マスの番号 = 段 * 3 + 列（段0 が一番上、列0 が左）。持ち駒 hands[p][駒の番号] = 枚数（1〜3 だけ使う）。
 // 手: { f: 動かす駒のマス, t: 行き先 } / { d: 打つ駒（1〜3）, t: 打つマス } / { resign: true }（投了。手番の人）
 
+import { peekMark } from './util.js';
+
 const W = 3;
 const H = 4;
 const CHICK = 1;
@@ -267,7 +269,7 @@ export function render(root, s, o, players) {
       any = true;
       const ok = can && side === s.turn;
       const e = document.createElement(ok ? 'button' : 'span');
-      e.className = 'sg-hand-piece' + (ok ? ' playable' : '') + (ui.drop === d && side === s.turn ? ' selected' : '');
+      e.className = 'sg-hand-piece' + (ok ? ' playable' : '') + (ui.drop === d && side === s.turn ? ' selected' : '') + (o.peekIn?.d === d && side === s.turn ? ' peek' : '');
       e.innerHTML = `<span class="sg-piece p${side}${side === bottom ? '' : ' flip'}">${ICON[d]}</span>${n > 1 ? `<small>${n}</small>` : ''}`;
       e.setAttribute('aria-label', `${NAME[d]}${n}枚`);
       // 駒がすっと動く（2026-11-06。main.js の flyPlay）: 取った駒は、取ったマスから向きを変えながら持ち駒へ飛んでくる（shogi.js と同じ）
@@ -289,6 +291,7 @@ export function render(root, s, o, players) {
   };
 
   root.append(handRow(1 - bottom));
+  o.peek?.({ f: ui.from, d: ui.drop, a: null }); // 相手の迷いが見える（2026-11-11。main.js の o.peek・o.peekIn）: いまの選びを知らせる
 
   const wrap = document.createElement('div');
   wrap.className = 'sg-wrap';
@@ -313,6 +316,7 @@ export function render(root, s, o, players) {
     if (s.last && !s.last.resign && s.last.t === i) cell.classList.add('last', ...(o.fresh ? ['pop'] : []));
     if (i === ui.from) cell.classList.add('selected');
     if (isTarget) cell.classList.add('target');
+    peekMark(cell, i, o, isTarget, () => ({ f: ui.from, d: ui.drop })); // 相手の迷いが見える（2026-11-11。main.js の o.peek・o.peekIn）: 相手の選び・PC のねらい
     if (i === danger) cell.classList.add('checked');
     if (v) {
       const t = Math.abs(v);

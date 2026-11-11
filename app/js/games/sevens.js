@@ -94,6 +94,18 @@ export default {
   turn(s) { return this.ended(s) ? null : s.turn; },
   canAct(s, p) { return !this.ended(s) && s.turn === p; },
   startSound: 'shuffle',
+  // あなたの番までに起きたこと（2026-11-11。room.md「UI・UX の4回目」）: 順番の帯の札の下に出す短い言葉（名前は付けない）
+  said(a, b, m) {
+    const L = b.last;
+    if (!L || L.p !== m.p) return null;
+    const up = L.up ? ' → 上がり' : '';
+    if (L.t === 'play') return cardLabel(L.c) + up;
+    if (L.t === 'joker') return `ジョーカーを${cardLabel(L.c)}に` + up;
+    if (L.t === 'swap') return 'ジョーカーと交換';
+    if (L.t === 'pass') return 'パス';
+    if (L.t === 'out') return 'パスしすぎて脱落';
+    return null;
+  },
   sound(a, b) { return b.last?.t === 'out' ? 'wrong' : b.last?.t === 'pass' ? 'pop' : 'card'; },
 
   result(s) {

@@ -18,7 +18,7 @@
 //   3人の CPU は読みをせず、取れる数・動いたあとにほかの人に取られる自分の駒の数で選ぶ（hasami3Cpu）。結果には順位（place）を付ける。
 //   2人のときの局面と手は前と全く同じ形（3人のときだけ np: 3）。
 
-import { CPU_SETTING, boardCpu, mulberry32 } from './util.js';
+import { CPU_SETTING, PEEK_SETTING, peekMark, boardCpu, mulberry32 } from './util.js';
 
 const DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 const MAX_PLY = 300;
@@ -263,6 +263,7 @@ export default {
     { key: 'size', label: '盤の大きさ', desc: '7×7 は駒が7個ずつで、早く終わる', def: 9, choices: [[9, '9×9'], [7, '7×7（駒7個ずつ・短い）']] },
     // 値（5・'all'）は前のまま（前の部屋の設定がそのまま使えるように）。盤で個数が変わるので表示に両方書く
     { key: 'goal', label: '勝ち', desc: '何個取ったら勝ちか。「全部」は長くなる', def: 5, choices: [[5, '5個取ったら勝ち（7×7 は4個）'], ['all', '全部（9個）取ったら勝ち（7×7 は7個。3人は最後まで残った人の勝ち）']] },
+    PEEK_SETTING,
     CPU_SETTING,
   ],
 
@@ -381,6 +382,7 @@ export default {
       if (caught.has(i)) cell.classList.add('caught');
       if (i === ui.from) cell.classList.add('selected');
       if (isTarget) cell.classList.add('target');
+      peekMark(cell, i, o, isTarget, () => ({ f: ui.from, d: null })); // 相手の迷いが見える（2026-11-11。main.js の o.peek・o.peekIn）: 相手の選び・PC のねらい
       if (v !== null) {
         const piece = document.createElement('span');
         if (three) {
@@ -409,5 +411,6 @@ export default {
       grid.append(cell);
     }
     root.append(grid);
+    o.peek?.({ f: ui.from, d: null, a: null }); // 相手の迷いが見える（2026-11-11。main.js の o.peek・o.peekIn）: いまの選びを知らせる
   },
 };

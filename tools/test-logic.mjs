@@ -9760,6 +9760,45 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('技の名前 OK', [...df].join(' '), '/', [...cl].join(' '), '/', [...mj].join(' '));
 }
 
+// あなたの番までに起きたこと（2026-11-11。main.js の saidBySeat）: 5つのカードゲームの said は null か短い言葉を返し、CPU どうしの対局で
+// そのゲームらしい言葉（パス・引いた・ダウト など）が出る。進行役の手（p = -1）には出さない
+{
+  const defs = (G) => Object.fromEntries((G.settings ?? []).map((x) => [x.key, x.def]));
+  const saids = (G, n, seeds) => {
+    const got = new Set();
+    for (const seed of seeds) {
+      let st = G.init(n, seed, { rules: defs(G) });
+      for (let guard = 0; guard < 20000 && !G.result(st); guard++) {
+        const p = [...Array(n).keys()].find((q) => G.canAct(st, q));
+        const m = p === undefined ? G.referee?.(st)?.move : G.cpu(st, p);
+        if (!m) break;
+        const mm = { ...m, p: p ?? -1 };
+        const nx = G.apply(st, mm);
+        assert.ok(nx, `${G.name}: CPU の手が通らない`);
+        const t = G.said(st, nx, mm);
+        assert.ok(t === null || (typeof t === 'string' && t.length >= 1 && t.length <= 24), `${G.name}: said の形 ${JSON.stringify(t)}`);
+        if (mm.p === -1) assert.equal(t, null, `${G.name}: 進行役の手には出さない`);
+        if (t) got.add(t);
+        st = nx;
+      }
+      assert.ok(G.result(st), `${G.name}: CPU どうしで最後まで`);
+    }
+    return [...got];
+  };
+  const has = (list, re, what) => assert.ok(list.some((t) => re.test(t)), `${what} が出る: ${list.slice(0, 12).join(' / ')}`);
+  const df = saids(GAMES.daifugo, 4, [1, 2, 3]);
+  has(df, /^パス$/, '大富豪: パス'); has(df, /[♠♥♦♣]/, '大富豪: 出した札');
+  const cl = saids(GAMES.colors, 3, [1, 2, 3]);
+  has(cl, /枚引いた/, 'いろあわせ: 引いた'); has(cl, /^(赤|青|緑|黄)の/, 'いろあわせ: 出した札');
+  const db = saids(GAMES.doubt, 4, [1, 2, 3]);
+  has(db, /^「.+」を[1-4]枚$/, 'ダウト: 言った数字と枚数'); has(db, /^パス$/, 'ダウト: パス');
+  const sv = saids(GAMES.sevens, 4, [1, 2, 3]);
+  has(sv, /^[♠♥♦♣]/, '七並べ: 出した札'); has(sv, /パス/, '七並べ: パス');
+  const bb = saids(GAMES.babanuki, 4, [1, 2, 3]);
+  has(bb, /^1枚引いた/, 'ババ抜き: 引いた'); has(bb, /を捨てた/, 'ババ抜き: そろって捨てた');
+  console.log('あなたの番までに起きたこと OK', [df, cl, db, sv, bb].map((l) => l.length).join('・'), '種類');
+}
+
 // 声のファイル（2026-11-08）: 決まった言葉はどれも、2人の声（app/voice/hau・bee）のファイルがそろって voice-list.js に入っている。
 // 落ちたら VOICEVOX を起動して node tools/make-voice.mjs（言葉を足した・変えたとき）
 {
