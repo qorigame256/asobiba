@@ -9907,6 +9907,23 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
       assert.ok(G.result(y), `鬼: CPU どうしで最後まで（${n}人）`);
     }
   } finally { Math.random = realRandom; }
+  // 逃げる人が3人以上なら、半分以上（切り上げ）つかまえたら鬼の勝ち（2026-11-11 本人の決定）
+  assert.deepEqual([2, 3, 4, 5, 6].map(O.needOf), [1, 2, 2, 2, 3], '鬼: 鬼が勝つのに捕まえる人数（逃げる人が1〜2人なら全員・3人以上なら半分以上）');
+  {
+    let y = G.init(4, 31);
+    const rs = [0, 1, 2, 3].filter((p) => p !== y.oni);
+    const catchOne = (z, r) => {
+      const near = O.nbrs(z.pos[r], z.trees).find((c) => !z.pos.includes(c));
+      z = { ...z, O: near, trail: [...z.trail.slice(0, -1), near] };
+      for (let p = 0; p < z.n; p++) if (G.canAct(z, p)) z = G.apply(z, { p, t: 'run', k: z.k, to: z.pos[p] });
+      return G.apply(z, { p: z.oni, t: 'chase', k: z.k, to: z.pos[r] });
+    };
+    y = catchOne(y, rs[0]);
+    assert.ok(y.phase === 'run' && !G.result(y), '鬼: 3人のうち1人ではまだ続く');
+    y = catchOne(y, rs[1]);
+    const res = G.result(y);
+    assert.ok(y.phase === 'end' && res.oniWin && !res.all && res.got === 2 && res.winners.length === 1 && res.winners[0] === y.oni, '鬼: 3人のうち2人つかまえたら、15手を待たずに鬼の勝ち');
+  }
   assert.equal(EVERY, 3);
   console.log('oni OK');
 }

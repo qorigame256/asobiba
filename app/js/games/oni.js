@@ -4,6 +4,8 @@
 //   - 9×9 のマスに通れない木がいくつかある。逃げる人は1手に1マス、鬼は2マス動ける。
 //   - 逃げる人の位置は3手に1回だけ鬼に見え、それ以外は動いた向きも分からない。
 //   - 15手のあいだに1人でも逃げ切れば逃げる側の勝ち、全員捕まえたら鬼の勝ち。捕まえる＝同じマスに入る。
+//   - 逃げる人が3人以上のときは、半分以上（切り上げ）捕まえたら鬼の勝ち（同日、CPU どうしの実測で鬼の勝ちが 4人 5%・6人 0% だったため。推奨を本人が承認）。
+//     鬼の勝ちが決まったら、15手を待たずにすぐ終わる。
 // Claude の判断:
 //   - 1手は「逃げる人が全員同時に動く → 鬼が動く」。逃げる人は上下左右に1マスか、その場にとどまる（鬼のいるマスには入れない。逃げる人どうしは重なってよい）。
 //     鬼は上下左右に1〜2マス先のマス（木はよけて回り道の数で数える）を選ぶ。捕まえるのは鬼が止まったマスにいる人だけ（通り道は数えない。どの道を通ったかで変わらないように）。
@@ -81,6 +83,8 @@ export function chaseMoves(s) {
 }
 
 const runners = (s) => [...Array(s.n).keys()].filter((p) => p !== s.oni);
+// 鬼が勝つのに捕まえる人数: 逃げる人が1〜2人なら全員、3人以上なら半分以上（切り上げ）
+export const needOf = (n) => (n - 1 >= 3 ? Math.ceil((n - 1) / 2) : n - 1);
 const aliveRunners = (s) => runners(s).filter((p) => s.alive[p]);
 
 // 鬼から見て、逃げる人 p がいまいそうなマス（鬼が知っていることだけで数える）
@@ -135,12 +139,13 @@ export default {
   },
   result(s) {
     if (s.phase !== 'end') return null;
-    const caughtAll = !s.alive.some(Boolean);
-    return { winners: caughtAll ? [s.oni] : runners(s), oniWin: caughtAll, oni: s.oni, left: aliveRunners(s).length };
+    const oniWin = s.caught.length >= needOf(s.n);
+    return { winners: oniWin ? [s.oni] : runners(s), oniWin, all: !s.alive.some(Boolean), got: s.caught.length, oni: s.oni, left: aliveRunners(s).length };
   },
   carry(s, p) { return { oni: s.counts[p] + (p === s.oni ? 1 : 0) }; },
   resultText(res, me, pn) {
-    if (res.oniWin) return res.oni === me ? '全員つかまえた！あなた（鬼）の勝ち！🎉' : `全員つかまった…鬼（${pn(res.oni)}）の勝ち！`;
+    const what = res.all ? '全員' : `${res.got}人`;
+    if (res.oniWin) return res.oni === me ? `${what}つかまえた！あなた（鬼）の勝ち！🎉` : `${what}つかまった…鬼（${pn(res.oni)}）の勝ち！`;
     return me === res.oni ? `${res.left}人に逃げ切られた…逃げる側の勝ち` : `${res.left}人が逃げ切った！逃げる側の勝ち！${me >= 0 ? '🎉' : ''}`;
   },
   phaseText(s, me, pn) {
@@ -174,7 +179,7 @@ export default {
       s.O = m.to;
       s.trail.push(m.to);
       for (const p of aliveRunners(s)) if (s.pos[p] === m.to) { s.alive[p] = false; s.caught.push({ p, k: s.k, at: m.to }); }
-      if (!s.alive.some(Boolean) || s.k >= TURNS) { s.phase = 'end'; return s; }
+      if (s.caught.length >= needOf(s.n) || s.k >= TURNS) { s.phase = 'end'; return s; }
       s.k += 1;
       s.phase = 'run';
       s.moved = Array(s.n).fill(false);
@@ -253,7 +258,7 @@ export default {
     const nextSeen = Math.ceil(s.k / EVERY) * EVERY;
     const shownNow = s.phase === 'chase' && s.k % EVERY === 0;
     info.innerHTML = s.phase === 'end' ? `${Math.min(s.k, TURNS)}手で終わり`
-      : `<b>${s.k}</b>手目 / ${TURNS}　${shownNow ? '<span class="on-eye">👀 いま鬼に見えている！</span>' : `鬼に見えるのは ${nextSeen}手目`}`;
+      : `<b>${s.k}</b>手目 / ${TURNS}　鬼の勝ちまで ${needOf(s.n) - s.caught.length}人　${shownNow ? '<span class="on-eye">👀 いま鬼に見えている！</span>' : `鬼に見えるのは ${nextSeen}手目`}`;
     wrap.append(info);
     // 盤
     const mine = this.canAct(s, me) && o.canMove && !o.watching;
