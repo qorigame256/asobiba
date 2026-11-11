@@ -2913,6 +2913,7 @@ h1, h2, .sheet-head h3, .cat-h, .tile-nm, .lobby-game-name { font-family: "asobi
 .ht-left { text-align: center; font-size: .95rem; color: var(--muted); margin: 4px 0; }
 .ht-left b { font-size: 1.3rem; color: var(--ink); font-variant-numeric: tabular-nums; }
 .ht-left.done b { color: #2f8a4a; }
+.ht-pool { font-size: .8em; color: var(--muted); margin-right: .3em; font-variant-numeric: tabular-nums; }
 .ht-fields { display: grid; gap: 6px; width: min(100%, 460px); margin: 0 auto; }
 .ht-row { display: grid; grid-template-columns: 6.2em 1fr auto; gap: 6px; align-items: center; padding: 6px 8px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--field); }
 .ht-lab { display: grid; line-height: 1.15; }
@@ -2952,6 +2953,8 @@ h1, h2, .sheet-head h3, .cat-h, .tile-nm, .lobby-game-name { font-family: "asobi
 .on-grid { display: grid; grid-template-columns: repeat(9, 1fr); gap: 2px; width: min(100%, 440px); margin: 0 auto; padding: 4px; border-radius: 12px; background: #6f9a4e; touch-action: manipulation; }
 .board button.on-cell { position: relative; aspect-ratio: 1; padding: 0; border: 0; border-radius: 5px; background: #b9d68f; font-size: clamp(14px, 4.4vw, 24px); line-height: 1; display: grid; place-items: center; color: #222; }
 .board button.on-cell.tree { background: #8db86a; opacity: 1; }
+.board button.on-cell.grass { background: repeating-linear-gradient(135deg, #6fa846 0 4px, #86bb5c 4px 8px); }
+.on-g { grid-area: 1 / 1; font-size: .85em; opacity: .6; pointer-events: none; }
 .board button.on-cell:disabled { opacity: 1; cursor: default; }
 .board button.on-cell.can { background: #f1f7c8; box-shadow: inset 0 0 0 2px #e0b52a; cursor: pointer; }
 .board button.on-cell.sel { background: #ffe27a; box-shadow: inset 0 0 0 3px #c0392b; }

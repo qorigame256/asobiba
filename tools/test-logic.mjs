@@ -9821,6 +9821,41 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.deepEqual(res.winners, st.scores.map((v, p) => (v === Math.max(...st.scores) ? p : -1)).filter((p) => p >= 0), '兵: 合計点が一番多い人の勝ち');
     assert.ok(st.log.every((x) => x.picks.every(okAlloc)), '兵: 全部の回の配り方がちょうど100人');
   }
+  // 39回目の案（2026-11-11）: 回数・兵を回をまたいで使う
+  {
+    const { okSpend, evenSpend, cpuBudget, POOL_PER } = await import('../app/js/games/heitai.js');
+    const d = G.init(3, 9);
+    assert.ok(d.total === 5 && !('pool' in d) && !('left' in d), '兵: 詳細設定なしは今までと同じ局面（5回・pool も left も持たない）');
+    assert.deepEqual(G.init(3, 9, { rules: { rounds: 5, pool: false } }), d, '兵: 最初の値どおりなら今までと全く同じ局面');
+    assert.deepEqual([3, 7].map((r) => G.init(2, 1, { rules: { rounds: r } }).total), [3, 7], '兵: 回数');
+    assert.ok(okSpend([0, 0, 0, 0, 0], 10) && okSpend([100, 100, 0, 0, 0], 400) && !okSpend([100, 100, 100, 100, 1], 400) && !okSpend([1, 0, 0, 0, 0], 0) && !okSpend([0.5, 0, 0, 0, 0], 10), '兵: またいで使うときは 0人〜のこりまで');
+    assert.deepEqual(evenSpend(400, 5), [16, 16, 16, 16, 16], '兵: 決めなかった人は のこり÷残りの回 を均等に');
+    assert.deepEqual(evenSpend(203, 3), [14, 14, 13, 13, 13], '兵: 均等に（切り捨て・余りは前から）');
+    let p = G.apply(G.init(3, 9, { rules: { pool: true } }), { p: -1, t: 'next' });
+    assert.deepEqual(p.left, [POOL_PER * 5, 400, 400], '兵: 全部で 回数×80人');
+    assert.equal(G.apply(p, { p: 0, t: 'pick', r: 0, a: [100, 100, 100, 100, 1] }), null, '兵: のこりより多くは配れない');
+    p = G.apply(p, { p: 0, t: 'pick', r: 0, a: [200, 0, 0, 0, 0] });
+    p = G.apply(p, { p: 1, t: 'pick', r: 0, a: [0, 0, 0, 0, 0] });
+    assert.ok(p, '兵: 0人（休む）でも決められる');
+    p = G.apply(p, { p: -1, t: 'close' });
+    assert.deepEqual(p.left, [200, 400, 320], '兵: 使った分だけのこりが減る（決めなかった人は 400÷5 = 80人）');
+    assert.deepEqual(p.log[0].left, [200, 400, 320], '兵: ふりかえりにのこりを残す');
+    p = G.apply(p, { p: -1, t: 'next' });
+    p = G.apply(p, { p: -1, t: 'close' });
+    assert.deepEqual(p.picks[0], [10, 10, 10, 10, 10], '兵: 2回目に決めなかった人は 200÷4 = 50人');
+    assert.equal(cpuBudget([1, 1, 1, 1, 1], 77, 1), 77, '兵: CPU は最後の回に全部使う');
+    for (let i = 0; i < 300; i++) { const b = cpuBudget([1, 2, 3, 4, 5], 300, 1 + (i % 5)); assert.ok(Number.isInteger(b) && b >= 0 && b <= 300, '兵: CPU の使う人数はのこりまで'); }
+    for (const [n, rounds] of [[2, 3], [4, 5], [6, 7]]) {
+      const st = runCpus(G, n, n + 11, { pool: true, rounds }, 300, 8000);
+      assert.ok(G.result(st) && st.log.length === rounds, `兵: またいで使っても CPU どうしで最後まで（${n}人・${rounds}回）`);
+      let left = Array(n).fill(POOL_PER * rounds);
+      for (const x of st.log) {
+        assert.ok(x.picks.every((a, q) => okSpend(a, left[q])), '兵: どの回もその時ののこりまで');
+        left = left.map((v, q) => v - x.picks[q].reduce((a, b) => a + b, 0));
+        assert.deepEqual(x.left, left, '兵: のこりの数え方');
+      }
+    }
+  }
   console.log('heitai OK');
 }
 
@@ -9925,6 +9960,96 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.ok(y.phase === 'end' && res.oniWin && !res.all && res.got === 2 && res.winners.length === 1 && res.winners[0] === y.oni, '鬼: 3人のうち2人つかまえたら、15手を待たずに鬼の勝ち');
   }
   assert.equal(EVERY, 3);
+  // 39回目の案（2026-11-11）: 見える間隔・草むら・鬼の数
+  {
+    for (let seed = 0; seed < 20; seed++) {
+      const d = G.init(5, seed);
+      assert.ok(!('every' in d) && !('grass' in d) && !('oni2' in d) && !('ks' in d.seen), '鬼: 詳細設定なしは今までと同じ局面');
+      assert.deepEqual(G.init(5, seed, { rules: { every: 3, grass: false, onis: 1 } }), d, '鬼: 最初の値どおりなら今までと全く同じ局面');
+      const g = G.init(5, seed, { rules: { grass: true } });
+      assert.deepEqual([g.trees, g.pos, g.oni], [d.trees, d.pos, d.oni], '鬼: 草むらがあっても木と始めの位置は同じ');
+      assert.equal(g.grass.filter(Boolean).length, 7, '鬼: 草むらは7つ');
+      assert.ok(g.grass.every((x, c) => !x || (!g.trees[c] && !g.pos.includes(c) && c !== g.O)), '鬼: 草むらは木・始めの位置・真ん中でない所');
+      assert.equal(G.init(4, seed, { rules: { onis: 2 } }).oni2, undefined, '鬼: 4人以下では鬼は1人のまま');
+      const t = G.init(5 + (seed % 2), seed, { rules: { onis: 2 } });
+      assert.ok(t.oni2 !== undefined && t.oni2 !== t.oni && t.pos[t.oni] === null && t.pos[t.oni2] === null && t.O2 === t.O, '鬼: 5人以上なら鬼2人（どちらも真ん中から）');
+    }
+    // 見える間隔: 2手ごと
+    let e = G.init(3, 5, { rules: { every: 2 } });
+    e = runAll(e);
+    assert.equal(e.seen.k, 0, '鬼: 2手ごとなら1手目は見えない');
+    e = G.apply(e, { p: e.oni, t: 'chase', k: 1, to: O.chaseMoves(e).find((c) => !e.pos.includes(c)) });
+    e = runAll(e);
+    assert.equal(e.seen.k, 2, '鬼: 2手ごとなら2手目に見える');
+    // 草むら: 見える手に草むらにいる人は見えず、前に見えた位置のまま。鬼の「いそうなマス」は草むらに絞られる
+    {
+      let g = G.init(3, 8, { rules: { grass: true } });
+      const [a, b] = [0, 1, 2].filter((p) => p !== g.oni);
+      const gc = g.grass.findIndex((x, c) => x && c !== g.pos[b]);
+      const start = g.pos.slice();
+      g = { ...g, pos: Object.assign(g.pos.slice(), { [a]: gc }), seen: { k: 0, pos: Object.assign(g.pos.slice(), { [a]: gc }), ks: g.seen.ks }, k: 3 };
+      for (const p of [a, b]) g = G.apply(g, { p, t: 'run', k: 3, to: g.pos[p] });
+      assert.ok(g.phase === 'chase' && g.seen.k === 3, '鬼: 3手目に見える手が来た');
+      assert.ok(g.seen.ks[a] === 0 && g.seen.ks[b] === 3, '鬼: 草むらの人は見えず、ほかの人は見える');
+      assert.ok(g.seen.pos[b] === g.pos[b], '鬼: 見えた人の位置は新しくなる');
+      assert.ok([...O.belief(g, a)].every((c) => g.grass[c]) && O.belief(g, a).has(gc), '鬼: 見えなかった人は草むらのどれかにいると数える');
+      assert.ok(start.length === 3);
+    }
+    // 鬼2人: 2人とも選んだら一斉に動く・どちらの止まったマスでも捕まえる・3人つかまえたら勝ち・交代
+    {
+      let y = G.init(5, 41, { rules: { onis: 2 } });
+      const rs = [0, 1, 2, 3, 4].filter((p) => p !== y.oni && p !== y.oni2);
+      assert.equal(rs.length, 3);
+      const near = O.nbrs(y.pos[rs[0]], y.trees).find((c) => !y.pos.includes(c));
+      y = { ...y, O2: near, trail2: [near] };
+      y = runAll(y);
+      assert.equal(G.turn(y), null, '鬼: 2人のときは決まった1人の番ではない');
+      const to1 = O.chaseMoves(y, y.oni).find((c) => !y.pos.includes(c));
+      y = G.apply(y, { p: y.oni, t: 'chase', k: 1, to: to1 });
+      assert.ok(y.phase === 'chase' && !G.canAct(y, y.oni) && G.canAct(y, y.oni2) && y.O !== to1, '鬼: 1人目が選んでも、2人目がそろうまで動かない');
+      assert.equal(G.apply(y, { p: y.oni, t: 'chase', k: 1, to: to1 }), null, '鬼: 同じ鬼の手が2回届いても2回目は弾く');
+      assert.ok(O.chaseMoves(y, y.oni2).includes(y.pos[rs[0]]), '鬼: 2人目は自分の位置から1〜2マス');
+      y = G.apply(y, { p: y.oni2, t: 'chase', k: 1, to: y.pos[rs[0]] });
+      assert.ok(y.O === to1 && y.O2 === y.pos[rs[0]] && !y.alive[rs[0]] && y.phase === 'run' && y.k === 2, '鬼: 2人目の止まったマスでも捕まえる');
+      assert.deepEqual([y.trail.length, y.trail2.length], [2, 2]);
+      for (const r of rs.slice(1)) assert.ok(!O.runMoves(y, r).includes(y.O) && !O.runMoves(y, r).includes(y.O2), '鬼: 逃げる人はどちらの鬼のマスにも入れない');
+      // 2人目まで捕まえても続き、3人目で鬼の勝ち
+      const catchBy = (z, r) => {
+        const nb = O.nbrs(z.pos[r], z.trees).find((c) => !z.pos.includes(c));
+        z = { ...z, O: nb, trail: [...z.trail.slice(0, -1), nb] };
+        z = runAll(z);
+        z = G.apply(z, { p: z.oni2, t: 'chase', k: z.k, to: O.chaseMoves(z, z.oni2)[0] });
+        return G.apply(z, { p: z.oni, t: 'chase', k: z.k, to: z.pos[r] });
+      };
+      y = catchBy(y, rs[1]);
+      assert.ok(y.phase === 'run' && !G.result(y), '鬼: 鬼2人なら2人つかまえてもまだ続く');
+      y = catchBy(y, rs[2]);
+      const res = G.result(y);
+      assert.ok(res && res.oniWin && res.got === 3 && res.winners.length === 2 && res.winners.includes(y.oni) && res.winners.includes(y.oni2), '鬼: 鬼2人は3人つかまえたら2人とも勝ち');
+      assert.ok(G.resultText(res, rs[0], (p) => 'P' + p).includes('P' + y.oni) && G.resultText(res, rs[0], (p) => 'P' + p).includes('P' + y.oni2), '鬼: 結果の文に鬼2人の名前');
+      assert.deepEqual([0, 1, 2, 3, 4].map((p) => G.carry(y, p).oni), [0, 1, 2, 3, 4].map((p) => (p === y.oni || p === y.oni2 ? 1 : 0)), '鬼: 鬼になった回数を2人とも持ち越す');
+      for (let seed = 0; seed < 30; seed++) {
+        const z = G.init(5, seed, { rules: { onis: 2 }, prev: [{ oni: 1 }, { oni: 1 }, { oni: 0 }, { oni: 0 }, { oni: 1 }] });
+        assert.deepEqual([z.oni, z.oni2].sort(), [2, 3], '鬼: 鬼になった回数が少ない2人が鬼');
+        const w = G.init(5, seed, { rules: { onis: 2 }, prev: [{ oni: 1 }, { oni: 1 }, { oni: 0 }, { oni: 1 }, { oni: 1 }] });
+        assert.ok(w.oni === 2 || w.oni2 === 2, '鬼: いちばん少ない人は必ず鬼');
+      }
+    }
+    // CPU どうしで最後まで（草むら・鬼2人・間隔）。いそうなマスに本当の位置が入っている
+    const realRandom2 = Math.random;
+    try {
+      let rs = 9;
+      Math.random = () => { rs = (rs * 1103515245 + 12345) % 2147483648; return rs / 2147483648; };
+      for (const [n, rules] of [[3, { grass: true }], [5, { onis: 2 }], [6, { onis: 2, grass: true, every: 2 }], [4, { every: 4, grass: true }]]) for (let g = 0; g < 6; g++) {
+        let y = G.init(n, 300 + g + n * 10, { rules });
+        for (let guard = 0; guard < 300 && !G.result(y); guard++) {
+          if (y.phase === 'chase') for (let p = 0; p < n; p++) if (p !== y.oni && p !== y.oni2 && y.alive[p]) assert.ok(O.belief(y, p).has(y.pos[p]), '鬼: いそうなマスに本当の位置が入っている（' + JSON.stringify(rules) + '）');
+          for (let p = 0; p < n; p++) { if (!G.canAct(y, p)) continue; const m = G.cpu(y, p); const nx = G.apply(y, { ...m, p }); assert.ok(nx, '鬼: CPU の手は反則にならない'); y = nx; }
+        }
+        assert.ok(G.result(y), `鬼: CPU どうしで最後まで（${n}人・${JSON.stringify(rules)}）`);
+      }
+    } finally { Math.random = realRandom2; }
+  }
   console.log('oni OK');
 }
 
@@ -9977,6 +10102,12 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     const res = G.result(st);
     assert.ok(res && res.finished, `レース: CPU どうしでゴールまで（${course}・${n}人）`);
     assert.ok(res.winners.every((p) => st.cars[p].fin), 'レース: ゴールした人の勝ち');
+  }
+  // 1手の時間（39回目の案。2026-11-11）
+  assert.ok(!('limit' in G.init(2, 1)) && !('limit' in G.init(2, 1, { rules: { time: '20' } })), 'レース: 20秒は今までと同じ局面');
+  for (const [t, ms] of [['10', 10000], ['20', 20000], ['30', 30000]]) {
+    const y = G.apply(G.init(2, 1, { rules: { time: t } }), { p: -1, t: 'next' });
+    assert.equal(G.referee(y).ms, ms + 1000, `レース: 1手の時間 ${t}秒`);
   }
   console.log('race OK');
 }

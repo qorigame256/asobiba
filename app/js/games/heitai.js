@@ -11,6 +11,12 @@
 //   - 戦場の点は対局の種から作る（全員の端末で同じ）。5つとも同じ点になる回は作り直す（どこに置いても同じになり、読み合いが無くなるため）。
 //   - 同じ合計点の人は同じ順位。
 //   - CPU は、点の高い戦場を多めに選んで3〜4か所に寄せ、残りは捨てる。3割は適当に配って弱める。読み合い（ほかの人のくせを読む）はしない。3〜12秒で決める。
+// 2026-11-11 の39回目の案（本人が選んだ。分かれ目は Claude の判断。extra-games.md の「兵の振り分け」）:
+//   - 詳細設定「回数」（rounds）3・5（最初）・7回。
+//   - 詳細設定「兵を回をまたいで使う」（pool）: 全部の回で合わせて 回数×80人（5回なら400人）を持ち、回ごとに 0人〜のこり全部 を配る。
+//     使わなかった兵は次の回へ残り、最後の回で残った兵は使われない。時間内に決めなかった人は「のこり ÷ 残りの回の数」（切り捨て）を均等に配ったことにする。
+//     のこりの人数は全員に見える（前の回の配り方から誰でも数えられるので）。CPU は、その回の点の合計が平均（15点）より高いほど多めに使う。
+//     ありのときだけ局面に pool・left を持つ（なしでは今までと全く同じ局面）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next … → end
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'pick', r: 何回目（0 から）, a: [5つの戦場の人数] }
 //   r が今の回と同じで、その人がまだ決めていないときだけ受け付けるので、同じ手が2回届いても2回目は反則になる。
@@ -21,6 +27,7 @@ import { mulberry32 } from './util.js';
 export const FIELDS = 5;
 export const TROOPS = 100;
 const ROUNDS = 5;
+export const POOL_PER = 80; // 兵を回をまたいで使うとき、1回あたりの兵（全部で 回数×80人）
 const LIMIT = 60000;
 const READY_MS = 3000;
 const SHOWN_MS = 7000;
@@ -40,6 +47,18 @@ export function valuesOf(seed, r) {
 export const okAlloc = (a) => Array.isArray(a) && a.length === FIELDS && a.every((x) => Number.isInteger(x) && x >= 0 && x <= TROOPS)
   && a.reduce((x, y) => x + y, 0) === TROOPS;
 
+// 兵を回をまたいで使うとき: 0人〜のこり（left）までを5つに
+export const okSpend = (a, left) => Array.isArray(a) && a.length === FIELDS && a.every((x) => Number.isInteger(x) && x >= 0 && x <= left)
+  && a.reduce((x, y) => x + y, 0) <= left;
+// のこり left 人を k 回で使うときの、1回分を均等に（決めなかった人の配り方）
+export function evenSpend(left, k) {
+  const amt = Math.floor(left / Math.max(1, k));
+  const a = Array(FIELDS).fill(Math.floor(amt / FIELDS));
+  for (let f = 0; f < amt % FIELDS; f++) a[f] += 1;
+  return a;
+}
+const sum = (a) => a.reduce((x, y) => x + y, 0);
+
 // 1回ぶんの結果: 戦場ごとに取った人（並んだら・だれも置かなければ null）と、席ごとの点
 export function scoreRound(allocs, values) {
   const owner = values.map((_, f) => {
@@ -53,22 +72,31 @@ export function scoreRound(allocs, values) {
 }
 
 const rKey = (s, r = s.r) => `heitai:${s.seed}:${r}`;
-const clone = (s) => ({ ...s, scores: s.scores.slice(), picks: s.picks.slice() });
+const clone = (s) => ({ ...s, scores: s.scores.slice(), picks: s.picks.slice(), ...(s.pool ? { left: s.left.slice() } : {}) });
+const okPick = (s, p, a) => (s.pool ? okSpend(a, s.left[p]) : okAlloc(a));
+const lateAlloc = (s, p) => (s.pool ? evenSpend(s.left[p], s.total - s.r) : EVEN.slice());
 const cpuPlan = new Map();
 const drafts = new Map(); // この端末で作っている（まだ決めていない）配り方。描き直しても消えないように回ごとに覚える
 
 // CPU の配り方。点の高い戦場を選びやすく、3〜4か所に寄せる。3割は適当
-export function cpuAlloc(values, rnd = Math.random) {
+export function cpuAlloc(values, rnd = Math.random, troops = TROOPS) {
   const w = rnd() < 0.3 ? values.map(() => rnd()) : values.map((v) => v ** 1.3 * (0.5 + rnd()));
   const keep = rnd() < 0.5 ? 3 : 4;
   const order = w.map((x, f) => [x, f]).sort((a, b) => b[0] - a[0]).map(([, f]) => f);
   const use = new Set(order.slice(0, keep));
   const ws = w.map((x, f) => (use.has(f) ? x + 0.2 : 0));
   const sum = ws.reduce((a, b) => a + b, 0);
-  const a = ws.map((x) => Math.floor((x / sum) * TROOPS));
-  let left = TROOPS - a.reduce((x, y) => x + y, 0);
+  const a = ws.map((x) => Math.floor((x / sum) * troops));
+  let left = troops - a.reduce((x, y) => x + y, 0);
   for (let i = 0; left > 0; i++, left--) a[order[i % keep]] += 1;
   return a;
+}
+// 兵を回をまたいで使うときに、この回に使う人数。点の合計が平均（15点）より高い回ほど多め。最後の回は全部。3割は適当
+export function cpuBudget(values, left, roundsLeft, rnd = Math.random) {
+  if (roundsLeft <= 1) return left;
+  if (rnd() < 0.3) return Math.min(left, Math.floor((left * 2 * rnd()) / roundsLeft));
+  const v = sum(values);
+  return Math.min(left, Math.round(((left * v) / (v + 15 * (roundsLeft - 1))) * (0.7 + 0.6 * rnd())));
 }
 
 export default {
@@ -81,12 +109,19 @@ export default {
   realtime: true,
   minPlayers: 2,
   maxPlayers: 6,
+  settings: [
+    { key: 'rounds', label: '回数', desc: 'この回数をくり返して、合計点で勝負', def: 5, choices: [[3, '3回'], [5, '5回'], [7, '7回']] },
+    { key: 'pool', label: '兵を回をまたいで使う', desc: `毎回100人ではなく、全部の回で合わせて「回数×${POOL_PER}人」（5回なら400人）を持ち、どの回に何人使うかも決める。使わなかった兵は次の回へ残る`, def: false },
+  ],
 
-  init(n, seed) {
-    return {
-      n, seed, total: ROUNDS, r: -1, phase: 'ready', values: valuesOf(seed, 0),
+  init(n, seed, { rules = {} } = {}) {
+    const total = [3, 5, 7].includes(Number(rules.rounds)) ? Number(rules.rounds) : ROUNDS;
+    const s = {
+      n, seed, total, r: -1, phase: 'ready', values: valuesOf(seed, 0),
       picks: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0,
     };
+    if (rules.pool === true) { s.pool = true; s.left = Array(n).fill(POOL_PER * total); }
+    return s;
   },
 
   turn() { return null; },
@@ -133,18 +168,20 @@ export default {
         s.step += 1;
         s.phase = 'shown';
         const late = s.picks.map((a) => a === null);
-        const allocs = s.picks.map((a) => a ?? EVEN.slice());
+        const allocs = s.picks.map((a, p) => a ?? lateAlloc(s, p));
         const { owner, pts } = scoreRound(allocs, s.values);
         pts.forEach((v, p) => { s.scores[p] += v; });
         s.picks = allocs;
         s.last = { owner, pts, late };
-        s.log = [...s0.log, { values: s.values.slice(), picks: allocs, owner, pts, late }];
+        const x = { values: s.values.slice(), picks: allocs, owner, pts, late };
+        if (s.pool) { allocs.forEach((a, p) => { s.left[p] -= sum(a); }); x.left = s.left.slice(); }
+        s.log = [...s0.log, x];
         return s;
       }
       return null;
     }
     if (m.t !== 'pick' || s0.phase !== 'open' || m.r !== s0.r || !Number.isInteger(m.p) || m.p < 0 || m.p >= s0.n || s0.picks[m.p] !== null) return null;
-    if (!okAlloc(m.a)) return null;
+    if (!okPick(s0, m.p, m.a)) return null;
     const s = clone(s0);
     s.step += 1;
     s.picks[m.p] = m.a.slice();
@@ -157,7 +194,7 @@ export default {
     const key = rKey(s) + ':' + p;
     let plan = cpuPlan.get(key);
     if (!plan) {
-      plan = { at: 3000 + Math.random() * 9000, a: cpuAlloc(s.values) };
+      plan = { at: 3000 + Math.random() * 9000, a: s.pool ? cpuAlloc(s.values, Math.random, cpuBudget(s.values, s.left[p], s.total - s.r)) : cpuAlloc(s.values) };
       cpuPlan.set(key, plan);
       if (cpuPlan.size > 300) cpuPlan.delete(cpuPlan.keys().next().value);
     }
@@ -167,7 +204,9 @@ export default {
   render(root, s, o) {
     const me = o.me >= 0 && !o.watching ? o.me : null;
     const won = s.phase === 'end' ? leaders(s.scores) : [];
-    const extra = (p) => {
+    const pool = (p) => (s.pool && s.phase !== 'end' ? `<span class="ht-pool" title="のこりの兵">🪖${s.left[p]}</span>` : '');
+    const extra = (p) => pool(p) + extra0(p);
+    const extra0 = (p) => {
       if (s.phase === 'open') return s.picks[p] !== null ? '<span class="pt-ok">✔ 決めた</span>' : '';
       if (s.phase !== 'shown' || !s.last) return '';
       return s.last.pts[p] ? `<span class="pt-ok">+${s.last.pts[p]}</span>` : '<span class="pt-ng">0</span>';
@@ -182,7 +221,7 @@ export default {
     if (s.phase === 'ready') {
       const card = document.createElement('div');
       card.className = 'kj-card';
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">100人の兵を5つの戦場に配ろう。一番多く置いた人がその戦場の点を取る・全${s.total}回</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">${s.pool ? `全部で${POOL_PER * s.total}人の兵を、${s.total}回に分けて5つの戦場に配ろう` : '100人の兵を5つの戦場に配ろう'}。一番多く置いた人がその戦場の点を取る・全${s.total}回</div>`;
       wrap.append(card);
       return;
     }
@@ -198,6 +237,8 @@ export default {
     const dk = key + ':' + me;
     if (!drafts.has(dk)) { drafts.set(dk, Array(FIELDS).fill(0)); if (drafts.size > 50) drafts.delete(drafts.keys().next().value); }
     const draft = mine ?? drafts.get(dk);
+    const cap = s.pool ? (me !== null ? s.left[me] : 0) : TROOPS; // この回に配れる上限
+    const lastRound = s.r + 1 >= s.total;
     const box = document.createElement('div');
     box.className = 'ht-fields';
     const left = document.createElement('div');
@@ -207,16 +248,27 @@ export default {
     go.className = 'btn primary kb-go';
     const rows = [];
     const paint = () => {
-      const rest = TROOPS - draft.reduce((a, b) => a + b, 0);
-      left.innerHTML = mine !== null ? '配り終えました' : `のこり <b>${rest}</b> 人`;
-      left.classList.toggle('done', rest === 0);
+      const used = sum(draft);
+      const rest = cap - used;
+      if (s.pool) {
+        left.innerHTML = mine !== null ? `この回は ${used}人で決めました`
+          : `この回に <b>${used}</b> 人・のこり <b>${rest}</b> 人${lastRound ? '（最後の回。残った兵は使われない）' : '（使わなかった兵は次の回へ）'}`;
+      } else {
+        left.innerHTML = mine !== null ? '配り終えました' : `のこり <b>${rest}</b> 人`;
+        left.classList.toggle('done', rest === 0);
+      }
       rows.forEach(({ num, bar, btns }, f) => {
         num.textContent = String(draft[f]);
-        bar.style.width = draft[f] + '%';
+        bar.style.width = (cap > 0 ? Math.min(100, (draft[f] / cap) * 100) : 0) + '%';
         btns.forEach(([b, d]) => { b.disabled = !can || draft[f] + d < 0 || (d > 0 && rest <= 0); });
       });
-      go.disabled = !can || rest !== 0;
-      go.textContent = mine !== null ? 'これで決めた' : rest === 0 ? 'これで決める' : `あと ${rest}人 配ろう`;
+      if (s.pool) {
+        go.disabled = !can;
+        go.textContent = mine !== null ? 'これで決めた' : used === 0 ? '0人で決める（この回は休む）' : `${used}人で決める`;
+      } else {
+        go.disabled = !can || rest !== 0;
+        go.textContent = mine !== null ? 'これで決めた' : rest === 0 ? 'これで決める' : `あと ${rest}人 配ろう`;
+      }
     };
     s.values.forEach((v, f) => {
       const row = document.createElement('div');
@@ -241,7 +293,7 @@ export default {
         b.textContent = d > 0 ? `+${d}` : String(d).replace('-', '−');
         b.onclick = () => {
           if (!can) return;
-          const rest = TROOPS - draft.reduce((a, c) => a + c, 0);
+          const rest = cap - sum(draft);
           draft[f] = Math.max(0, draft[f] + (d > 0 ? Math.min(d, rest) : d));
           paint();
         };
@@ -264,11 +316,11 @@ export default {
       return b;
     };
     tools.append(
-      mk('20人ずつ', () => draft.fill(TROOPS / FIELDS)),
+      s.pool ? mk('1回分を均等に', () => evenSpend(cap, s.total - s.r).forEach((v, f) => { draft[f] = v; })) : mk('20人ずつ', () => draft.fill(TROOPS / FIELDS)),
       mk('はじめから', () => draft.fill(0)),
     );
     go.onclick = () => {
-      if (!can || go.dataset.sent || since(key) >= LIMIT || !okAlloc(draft)) return;
+      if (!can || go.dataset.sent || since(key) >= LIMIT || !okPick(s, me, draft)) return;
       go.dataset.sent = '1';
       go.disabled = true;
       o.onMove({ t: 'pick', r: s.r, a: draft.slice() });
@@ -281,7 +333,7 @@ export default {
     note.className = 'cc-log';
     if (me === null) note.textContent = '観戦中';
     else if (mine !== null) note.textContent = 'ほかの人が決めるのを待っています…';
-    else note.textContent = '時間内に決めないと、20人ずつ配ったことになります';
+    else note.textContent = s.pool ? '時間内に決めないと、のこりを残りの回の数で割った人数を均等に配ったことになります' : '時間内に決めないと、20人ずつ配ったことになります';
     wrap.append(note);
     if (s.log.length) {
       const prev = document.createElement('details');
@@ -299,7 +351,7 @@ export default {
     const t = document.createElement('table');
     t.className = 'ht-table' + (big ? ' big' : '');
     const head = document.createElement('tr');
-    head.innerHTML = '<th></th>' + x.values.map((v, f) => `<th><span class="ht-tn">${FIELD_NAMES[f]}</span><span class="ht-tv">${v}点</span></th>`).join('') + '<th>点</th>';
+    head.innerHTML = '<th></th>' + x.values.map((v, f) => `<th><span class="ht-tn">${FIELD_NAMES[f]}</span><span class="ht-tv">${v}点</span></th>`).join('') + '<th>点</th>' + (x.left ? '<th>のこり</th>' : '');
     t.append(head);
     x.picks.forEach((a, p) => {
       const tr = document.createElement('tr');
@@ -318,6 +370,7 @@ export default {
       pt.className = 'ht-pt';
       pt.textContent = '+' + x.pts[p];
       tr.append(pt);
+      if (x.left) { const lf = document.createElement('td'); lf.className = 'ht-pt'; lf.textContent = String(x.left[p]); tr.append(lf); }
       t.append(tr);
     });
     const box = document.createElement('div');
@@ -326,7 +379,7 @@ export default {
     if (x.late.some(Boolean)) {
       const n = document.createElement('div');
       n.className = 'kj-sub';
-      n.textContent = '⏰ = 時間内に決めず、20人ずつ配った';
+      n.textContent = x.left ? '⏰ = 時間内に決めず、のこりを均等に配った' : '⏰ = 時間内に決めず、20人ずつ配った';
       box.append(n);
     }
     return box;

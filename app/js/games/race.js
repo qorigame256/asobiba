@@ -10,7 +10,7 @@
 //   - 同じ手のうちに2台以上がゴールしたら、道すじのより手前でゴールに入った車が上（まったく同じなら同着）。
 //     だれもゴールしていない人は、ゴールまでの残りのマス数が少ない順に並べる（成績表の順位で点のため）。
 //   - ほかの車がいるマスは、動く前に車がいるマス（そのマスの車がこの手で動いても選べない）。同じ手で2台が同じマスを選んだら、ぶつかって2台とも元の位置で速さ0（休みなし）。
-//   - 1手20秒。時間内に選ばなかった人は「そのまま」（足す分なし）。そのままで止まれないマスなら、選べる中から遠くへ行かない手。
+//   - 1手20秒（2026-11-11 の39回目の案で、詳細設定「1手の時間」（time）10・20（最初）・30秒。20秒以外のときだけ局面に limit を持つ）。時間内に選ばなかった人は「そのまま」（足す分なし）。そのままで止まれないマスなら、選べる中から遠くへ行かない手。
 //   - 80手でだれもゴールしなければ、ゴールに近い人の勝ち。
 //   - コースは手で作った3つ（U字・S字・ジグザグ）。おまかせは種で3つから選ぶ。おまかせで抽選してよい（遊び方なので）。
 //   - CPU は3手先まで読み、はみ出さずにゴールへ近づく手を選ぶ。5回に1回は、はみ出さない手から適当に選んで弱める。ほかの車はよけない（止まれないマスだけ避ける）。
@@ -23,6 +23,7 @@ import { since, timeBar, SEAT_COLORS } from './party.js';
 import { mulberry32, shuffle } from './util.js';
 
 const LIMIT = 20000;
+const limitOf = (s) => s.limit ?? LIMIT;
 const READY_MS = 3000;
 const GRACE_MS = 500;
 export const MAX_TURNS = 80;
@@ -125,6 +126,7 @@ export default {
   minPlayers: 2,
   maxPlayers: 4,
   settings: [
+    { key: 'time', label: '1手の時間', desc: '次の位置を選ぶ時間。時間内に選ばなかった人は、速さを変えずにそのまま進む', def: '20', choices: [['10', '10秒'], ['20', '20秒'], ['30', '30秒']] },
     { key: 'course', label: 'コース', desc: 'U字・S字・ジグザグ（細い道が続く）から選ぶ。おまかせは毎回くじで選ぶ', def: 'u', choices: [['u', 'U字'], ['s', 'S字'], ['z', 'ジグザグ'], ['random', 'おまかせ']] },
   ],
 
@@ -133,7 +135,9 @@ export default {
     const c = courseOf(course);
     const st = shuffle(c.start.slice(), mulberry32(seed));
     const cars = [...Array(n)].map((_, p) => ({ x: st[p][0], y: st[p][1], vx: 0, vy: 0, rest: 0, fin: null, crash: false, bump: false }));
-    return { n, seed, course, k: -1, phase: 'ready', cars, picks: Array(n).fill(null), trails: cars.map((car) => [[car.x, car.y]]), step: 0 };
+    const s = { n, seed, course, k: -1, phase: 'ready', cars, picks: Array(n).fill(null), trails: cars.map((car) => [[car.x, car.y]]), step: 0 };
+    if (['10', '30'].includes(String(rules.time))) s.limit = Number(rules.time) * 1000;
+    return s;
   },
 
   turn() { return null; },
@@ -166,7 +170,7 @@ export default {
     if (s.phase === 'ready') return { key: 'ready', ms: READY_MS, move: { t: 'next' } };
     if (s.phase === 'open') {
       if (s.cars.every((_, p) => !this.canAct(s, p))) return { key: 'all' + s.k, ms: GRACE_MS, move: { t: 'close' } };
-      return { key: 'open' + s.k, ms: LIMIT + 1000, move: { t: 'close' } };
+      return { key: 'open' + s.k, ms: limitOf(s) + 1000, move: { t: 'close' } };
     }
     return null;
   },
@@ -285,7 +289,7 @@ export default {
     });
     wrap.append(chips);
     const key = `race:${s.seed}:${s.k}`;
-    if (s.phase === 'open') { since(key); wrap.append(timeBar(key, LIMIT)); }
+    if (s.phase === 'open') { since(key); wrap.append(timeBar(key, limitOf(s))); }
     // 盤（SVG）
     const NS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(NS, 'svg');
