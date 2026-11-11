@@ -3002,7 +3002,8 @@ function podiumFx(list) {
   const stage = document.createElement('div');
   stage.className = 'pd-stage';
   const counts = [];
-  // 台の高さ・色と王冠は順位で決める（同点1位が2人なら、2人とも1位の台で王冠を付ける。2026-11-11 本人の決定）。並べる位置（まんなかが先頭）は今までどおり
+  // 台の高さ・色と王冠は順位で決める（同点1位が2人なら、2人とも1位の台で王冠を付ける。2026-11-11 本人の決定）。並べる位置（まんなかが先頭）は今までどおり。
+  // 台は3つまでなので、4人目からの1位は下の1行で名前の前に 👑 を付ける（台は増やさない。スマホ幅で細くなりすぎるため。Claude の判断を本人が承認）
   [[list[1], 300], [list[0], 600], [list[2], 0]].forEach(([x, at]) => {
     const col = document.createElement('div');
     col.className = `pd-col pd-${Math.min(3, x.rank)}`;
@@ -3034,7 +3035,7 @@ function podiumFx(list) {
   if (rest.length) {
     const p = document.createElement('p');
     p.className = 'pd-rest';
-    p.textContent = rest.slice(0, 5).map((x) => `${x.rank}位 ${x.name} ${x.v.toLocaleString()}点`).join('・') + (rest.length > 5 ? `・ほか${rest.length - 5}人` : '');
+    p.textContent = rest.slice(0, 5).map((x) => `${x.rank === 1 ? '👑' : ''}${x.rank}位 ${x.name} ${x.v.toLocaleString()}点`).join('・') + (rest.length > 5 ? `・ほか${rest.length - 5}人` : '');
     box.append(p);
   }
   showFx(box, 3600);
@@ -3192,6 +3193,7 @@ function introFx(game) {
     document.removeEventListener('pointerdown', skipDeal, true);
     introUntil = 0;
     flights.clear(); // 描き直された札が、配る動きの続きを始めないように
+    for (const g of document.querySelectorAll('.fly-ghost')) g.remove(); // ほかの人の席へ飛ぶ札の写し（dealToOthers）も消す
     for (const e of el('board')?.querySelectorAll('[data-fly-deal]') ?? []) {
       for (const a of e.getAnimations()) try { a.finish(); } catch { /* 終わりの無い動き */ }
     }
@@ -3425,9 +3427,10 @@ function moveSound(game, st, res, prevLen, mine, hold = 0) {
   if (mine && !replayNow && S.mode === 'online' && !game.realtime && !canMove(game, before, null)) {
     const waited = Date.now() - S.waitFrom;
     if (waited > TURN_PING_MS) {
-      // 待つ間に打った・部屋を出た・次の対局へ進んだら出さない（同じ部屋の同じ対局で、手の数が変わっていないときだけ）
-      const at = [S, timerKey(), S.moves.length];
-      const still = () => S === at[0] && timerKey() === at[1] && S.moves.length === at[2];
+      // 待つ間に自分が打った・部屋を出た・次の対局へ進んだ・待ったで戻ったら出さない。ほかの人の手は数えない（ポーカーの「見た」のように何人も同時に押す場面で、
+      // ほかの人が先に押しても自分の番の知らせは出す）。盤のゲームの手には p が無いが、自分の番の間にほかの人は打てないので、増えた手は自分の手と見る
+      const at = [S, timerKey(), S.moves.length, myPlayer()];
+      const still = () => S === at[0] && timerKey() === at[1] && S.moves.length >= at[2] && !S.moves.slice(at[2]).some((m) => !game.multi || m.p === at[3]);
       setTimeout(() => { if (still()) { play('turn'); haptic('turn'); sayTurn(); } }, 300);
       setTimeout(() => { if (still()) turnFx(); }, Math.max(300, cutUntil - Date.now())); // あなたのターンの帯（2026-11-06）。技の名前が出ていれば、そのあとに
     }

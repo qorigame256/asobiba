@@ -60,7 +60,7 @@ try { muted = localStorage.getItem(MUTE_KEY) === '1'; } catch { /* 覚えられ�
 export const isMuted = () => muted;
 export function setMuted(v) {
   muted = !!v;
-  if (muted) stopVoice(); // 言いかけの声と、続けて鳴らす予定の部品も止める（2026-11-11）
+  if (muted) { stopVoice(); muteGen++; } // 言いかけの声と、続けて鳴らす予定の部品も止める。読み込み中の声も、あとで鳴らさない（muteGen。2026-11-11）
   try { localStorage.setItem(MUTE_KEY, muted ? '1' : '0'); } catch { /* 無視 */ }
 }
 
@@ -144,6 +144,7 @@ export function preloadVoice(texts) {
   for (const t of texts) if (hasVoice(t)) for (const v of VOICES) voiceFile(v, t).catch(() => {});
 }
 const voicing = {}; // key → いま鳴らしている声の音源（cut で止めるため）
+let muteGen = 0; // 🔇 にした回数（読み込みを待つ間に 🔇→🔊 と切り替えても、🔇 の前に頼んだ声を鳴らさないため）
 const liveSrc = new Set(); // 鳴っている・鳴らす予定の声の音源すべて（🔇 で止めるため。鳴り終わったら消す）
 // 声を止める。key を渡せばその key の VOICEVOX の声だけ、渡さなければ VOICEVOX の声もブラウザの読み上げも全部
 function stopVoice(key) {
@@ -159,9 +160,10 @@ function playVoice(parts, key, opts) {
   if (!parts.every(hasVoice)) return false;
   const voice = VOICES[Math.floor(Math.random() * VOICES.length)];
   const asked = performance.now();
+  const gen = muteGen;
   Promise.all(parts.map((t) => voiceFile(voice, t).then((b) => ctx.decodeAudioData(b.slice(0)))))
     .then((bufs) => {
-      if (muted) return;
+      if (muted || gen !== muteGen) return;
       if (performance.now() - asked > 3000) return; // 遅れすぎた声は言わない（次の問題が出ていることがある）
       if (opts.cut) { // 前のお題がブラウザの読み上げで言いかけでも止める
         stopVoice(key);
@@ -183,7 +185,7 @@ function playVoice(parts, key, opts) {
       });
     })
     .catch(() => { // 読めなかったらブラウザの読み上げで言い直す。待つ間に 🔇 にした・遅れすぎた（次の問題が出ている）なら言わない
-      if (!muted && performance.now() - asked <= 3000) say(parts.join('、'), opts, key);
+      if (!muted && gen === muteGen && performance.now() - asked <= 3000) say(parts.join('、'), opts, key);
     });
   return true;
 }
