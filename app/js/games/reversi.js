@@ -308,20 +308,21 @@ export default {
 
   info(s) {
     // 石の数を隠す（詳細設定）: 終わるまで数を出さない
-    const hidden = s.hide && !s.over;
+    const over = s.over || s.gave !== undefined; // gave: 参りましたで終わった（util.js の withGiveUp）
+    const hidden = s.hide && !over;
     const secret = '<span class="rv-score">石の数はひみつ（終わったら出ます）</span>';
     if (s.n > 2) {
       const c = count(s.board, s.n);
       let html = hidden ? secret : '<span class="rv-score">' + c.map((v, p) => `<span class="rv-mini p${p}"></span>${this.players[p]} <span data-roll="rv${p}" data-v="${v}">${v}</span>`).join('　') + '</span>';
-      if (s.again && !s.over) html += `<br>${this.players[s.turn]}は角を取ったので、もう1回！`;
-      if (!s.over && !legalMoves(s.board, s.turn, s.closed).length) html += `<br>${this.players[s.turn]}ははさめる所がないので、石のとなりならどこにでも置けます`;
+      if (s.again && !over) html += `<br>${this.players[s.turn]}は角を取ったので、もう1回！`;
+      if (!over && !legalMoves(s.board, s.turn, s.closed).length) html += `<br>${this.players[s.turn]}ははさめる所がないので、石のとなりならどこにでも置けます`;
       return html;
     }
     const [b, w] = count(s.board);
     let html = hidden ? secret : `<span class="rv-score"><span class="rv-mini p0"></span>黒 <span data-roll="rv0" data-v="${b}">${b}</span>　−　<span data-roll="rv1" data-v="${w}">${w}</span> 白<span class="rv-mini p1"></span></span>`;
-    if (s.again && !s.over) html += `<br>${this.players[s.turn]}は角を取ったので、もう1回！`;
-    if (s.missed != null && !s.over) html += `<br>${this.players[s.missed]}は角を取りましたが、続けて置ける場所がないので${this.players[s.turn]}の番です`;
-    if (s.passed !== null && !s.over) html += `<br>${this.players[s.passed]}は置ける場所がないのでパスです`;
+    if (s.again && !over) html += `<br>${this.players[s.turn]}は角を取ったので、もう1回！`;
+    if (s.missed != null && !over) html += `<br>${this.players[s.missed]}は角を取りましたが、続けて置ける場所がないので${this.players[s.turn]}の番です`;
+    if (s.passed !== null && !over) html += `<br>${this.players[s.passed]}は置ける場所がないのでパスです`;
     return html;
   },
 

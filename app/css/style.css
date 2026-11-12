@@ -340,7 +340,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .gave-note { font-size: .88rem; font-weight: 700; color: var(--muted); margin-top: 2px; } /* 参りました（2026-11-12） */
 /* 結果に名場面（2026-11-12。main.js の appendScenes）: 判子のあとに1行ずつ出す。描き直しでは動かさない（.still） */
 .scenes { display: grid; gap: 4px; width: min(100%, 380px); margin: 8px auto 0; text-align: left; }
-.scene { display: flex; gap: 8px; align-items: baseline; background: var(--hi, #fff6dc); border-radius: 10px; padding: 5px 10px; font-size: .86rem; animation: scene-in .45s cubic-bezier(.2, 1.2, .4, 1) both; animation-delay: calc(.9s + var(--i, 0) * .25s); }
+.scene { display: flex; gap: 8px; align-items: baseline; background: var(--hi, #fff6dc); border-radius: 10px; padding: 5px 10px; font-size: .86rem; animation: scene-in .45s cubic-bezier(.2, 1.2, .4, 1) both; animation-delay: calc(.9s + var(--hold, 0ms) + var(--i, 0) * .25s); }
 .scene .sc-who { font-weight: 700; white-space: nowrap; }
 .scene .sc-txt { min-width: 0; }
 .scenes.still .scene { animation: none; }
@@ -562,6 +562,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 /* ポップアウトの「抜く」ボタン（盤の下の段） */
 .c4 .c4-pop { margin: 2px 1px 0; padding: 4px 0; border: 0; border-radius: 8px; font-size: .78rem; font-weight: 700; background: rgba(255, 255, 255, .9); color: #2f5fa8; }
 .c4 .c4-pop:disabled { visibility: hidden; }
+.c4 .c4-pop.pop-danger { visibility: visible; background: #fff; color: #d23a2e; box-shadow: inset 0 0 0 2px #d23a2e; } /* あぶない所の知らせ: ほかの人が抜けば勝てる列（押せない） */
 .c4 .c4-pop.playable:hover { background: #fff; color: #2f5fa8; }
 
 /* ---------- リバーシ ---------- */

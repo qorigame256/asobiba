@@ -343,8 +343,11 @@ export default {
     root.className = 'board c4' + (s.w > 7 ? ' c4w' : '');
     root.style.setProperty('--cols', s.w);
     // あぶない所の知らせ（2026-11-12）: ほかの人が次に落とせば4つ並ぶ列の、石が止まるマス
+    // ポップアウトでは、ほかの人が抜けば勝てる列の「抜く」も赤く出す（押せないまま見せる。2026-11-12 の Codex の点検）
     const danger = new Set();
-    if (dangerOn(o) && !res) for (const c of dangerMoves(this, s, s.n, (t) => [...Array(t.w).keys()].filter((x) => t.grid[x] === null))) danger.add(landing(s, c));
+    const popDanger = new Set();
+    const cands = (t) => [...[...Array(t.w).keys()].filter((x) => t.grid[x] === null), ...(t.pop ? [...Array(t.w).keys()].filter((x) => t.grid[(t.h - 1) * t.w + x] === t.turn).map((x) => ({ pop: x })) : [])];
+    if (dangerOn(o) && !res) for (const c of dangerMoves(this, s, s.n, cands)) { if (typeof c === 'object') popDanger.add(c.pop); else danger.add(landing(s, c)); }
     for (let c = 0; c < s.w; c++) {
       const col = document.createElement('button');
       col.type = 'button';
@@ -398,6 +401,11 @@ export default {
         btn.onclick = () => o.onMove({ pop: c });
       } else {
         btn.disabled = true;
+      }
+      if (popDanger.has(c)) {
+        btn.classList.add('pop-danger');
+        btn.textContent = '！抜く';
+        btn.setAttribute('aria-label', `${c + 1}列目: ほかの人がここを抜くと4つ並ぶ`);
       }
       root.append(btn);
     }

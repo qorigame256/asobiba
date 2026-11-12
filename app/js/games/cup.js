@@ -58,6 +58,9 @@ export const LIMIT = 6000; // まざり終わってから選べる時間
 const READY_MS = 3000;
 const SHOWN_MS = 2500;
 const GRACE_MS = 700;
+// 締め切りの余裕: ゲストの画面は回の始まりが通信の分だけ遅れ、答えも通信の分だけ遅れて届く。往復でこれより遅いと、自分の画面では間に合った答えが時間切れになる
+// （0.8秒だった。2026-11-12 の Codex の点検。○×クイズは1秒・風船ふくらましは1.5秒）
+const LATE_MS = 1500;
 
 export const animMs = (x) => START + x.swaps.length * x.dur; // まざり終わる時刻
 
@@ -177,7 +180,7 @@ export default {
     if (s.phase === 'ready') return { key: 'ready', ms: READY_MS, move: { t: 'next' } };
     if (s.phase === 'open') {
       if ([...Array(s.n).keys()].every((p) => doneOf(s, p))) return { key: 'all' + s.q, ms: GRACE_MS, move: { t: 'close' } };
-      return { key: 'open' + s.q, ms: animMs(s.rs[s.q]) + LIMIT + 800, move: { t: 'close' } };
+      return { key: 'open' + s.q, ms: animMs(s.rs[s.q]) + LIMIT + LATE_MS, move: { t: 'close' } };
     }
     if (s.phase === 'shown') return { key: 'shown' + s.q, ms: SHOWN_MS, move: { t: 'next' } };
     return null;

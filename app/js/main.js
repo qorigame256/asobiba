@@ -2099,6 +2099,7 @@ function renderPage() {
   if (tapGhost && tapGhost.k === ghostKey() && twoTapOn(game) && opts.canMove) status.insertAdjacentHTML('beforeend', '<div class="status-sub tap-hint">👆 同じ所をもう一度押すと置きます</div>');
   lineHold.until = 0;
   const hold = slow ? slowFinish(board) : 0;
+  if (hold) status.querySelector('.scenes:not(.still)')?.style.setProperty('--hold', hold + 'ms'); // 名場面は判子のあと（決め手のスローでは判子が遅れるので、その分待つ。2026-11-12 の Codex の点検）
   rollNums(status); // 点の数字が回る（2026-11-10）
   rollNums(board);
   if (beginner && opts.canMove && BEG_GAMES.has(S.gameId) && [...board.querySelectorAll('.playable, .usable, button')].some((e) => getComputedStyle(e).getPropertyValue('--beg').trim() === '1')) {
@@ -2678,7 +2679,7 @@ function appendReview() {
   if (!reviewing()) {
     ctl().append(makeButton('ふりかえり（最初から見る）', () => go(0), 'secondary'));
     const turn = judgeTurn(GAMES[S.gameId]); // ふりかえりの分かれ目（2026-11-12）
-    if (turn !== null && turn < n) ctl().append(makeButton('★ 分かれ目へ', () => go(turn), 'secondary'));
+    if (turn !== null) ctl().append(makeButton('★ 分かれ目へ', () => go(turn), 'secondary')); // 最後の手が分かれ目のときも出す（2026-11-12 の Codex の点検）
     return;
   }
   const k = S.review.k;
@@ -2723,7 +2724,7 @@ function judgeTurn(game) {
   let best = null;
   let size = 19;
   for (let k = 1; k < s.length; k++) {
-    if (s[k] === null || s[k - 1] === null) continue;
+    if (s[k] === null || s[k - 1] === null || S.moves[k - 1]?.give === true) continue; // 参りましたの手は分かれ目にしない（形勢が一気に動くだけなので）
     const d = Math.abs(s[k] - s[k - 1]);
     if (d > size) { size = d; best = k; }
   }
@@ -4304,7 +4305,8 @@ function onBoardMove(move) {
   if (!st || !canMove(game, st, game.result(st))) return;
   if (game.multi) move = { ...move, p: myPlayer() };
   if (!game.apply(st, move)) return;
-  if (tapFirst(game, move)) { haptic('tap'); return; } // 2回押して置くの1回目（2026-11-11）
+  // 2回押して置くの1回目（2026-11-11）。参りましたは確かめの窓を出しているので2回押しにしない（2026-11-12 の Codex の点検）
+  if (move.give !== true && tapFirst(game, move)) { haptic('tap'); return; }
   haptic('tap');
   markSending(); // 手が届いたかの印（2026-11-11）
   pushMove(move);

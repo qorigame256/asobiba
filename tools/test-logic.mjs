@@ -10489,6 +10489,32 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     const dl = D.scenes(ds, 4);
     assert.equal(dl.length, 4, '名場面: 大富豪は席の数だけ');
     assert.ok(dl.some((t) => typeof t === 'string' && t.length), '名場面: 大富豪で一言が出る');
+    // いろあわせの「引いた札」は、引かされた札（ドロー2・ドロー4・宣言忘れ・チャレンジ）も数える（2026-11-12 の Codex の点検）:
+    // 終わったときの手札の枚数 = 配られた枚数 + 引いた札 − 出した札
+    const U = GAMES.colors;
+    const seen = { victim: 0, forgot: 0, challenge: 0 };
+    for (let k = 0; k < 40; k++) {
+      let u = U.init(2 + (k % 4), k * 97 + 5, { rules: { call: true, challenge: true, stack: k % 2 === 1 } });
+      const h0 = u.hands.map((h) => h.length);
+      const us = [];
+      for (let j = 0; j < 5000 && !U.result(u); j++) {
+        const p = U.turn(u);
+        const m = { ...U.cpu(u, p), p };
+        const b = u;
+        u = U.apply(u, m);
+        assert.ok(u, '名場面: いろあわせで CPU が反則の手を出した');
+        if (u.last?.victim !== undefined && u.last?.got) seen.victim++;
+        if (u.last?.forgot) seen.forgot++;
+        if (u.last?.t === 'challenge') seen.challenge++;
+        us.push({ before: b, after: u, move: m });
+      }
+      const ul = U.scenes(us, u.n);
+      ul.forEach((t, p) => {
+        const [, o, g] = t.match(/出した札 (\d+)枚・引いた札 (\d+)枚/).map(Number);
+        assert.equal(u.hands[p].length, h0[p] + g - o, `名場面: いろあわせの引いた札（${k}局目・席${p}: ${t}）`);
+      });
+    }
+    assert.ok(seen.victim > 5 && seen.forgot > 0 && seen.challenge > 0, `名場面: いろあわせの確かめで引かされる場面が出た（${JSON.stringify(seen)}）`);
   }
   console.log('UI・UX の5回目 OK');
 }

@@ -429,8 +429,14 @@ export default {
       if (move.t === 'next') { out.fill(0); got.fill(0); continue; }
       const L = after.last;
       if (!L || L.p !== move.p || L === before.last || !(L.p >= 0 && L.p < n)) continue;
-      if (L.t === 'play') out[L.p] += L.n ?? 1;
-      else if ((L.t === 'draw' || L.t === 'take') && L.got) got[L.p] += L.got;
+      // 引いた札は、自分で引いた札に加え、ドロー2・ドロー4で引かされた札・宣言忘れ・チャレンジで引いた札も数える（2026-11-12 の Codex の点検）
+      const add = (q, k) => { if (Number.isInteger(q) && q >= 0 && q < n && k > 0) got[q] += k; };
+      if (L.t === 'play') {
+        out[L.p] += L.n ?? 1;
+        if (L.victim !== undefined) add(L.victim, L.got);
+        add(L.p, L.forgot);
+      } else if (L.t === 'draw' || L.t === 'take') add(L.p, L.got);
+      else if (L.t === 'challenge') add(L.bluff ? L.by : L.p, L.got);
     }
     return out.map((o, p) => `出した札 ${o}枚・引いた札 ${got[p]}枚`);
   },

@@ -601,6 +601,7 @@ export default {
   },
 
   info(s) {
+    if (s.gave !== undefined) return ''; // 参りましたで終わった（util.js の withGiveUp）
     if (s.gob) {
       if (s.won) return '';
       if (s.stuck) return '打てる手が無くなったので引き分け';

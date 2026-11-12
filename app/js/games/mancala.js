@@ -185,7 +185,7 @@ const game = {
 
   info(s) {
     const l = s.last;
-    if (!l || s.over) return '';
+    if (!l || s.over || s.gave !== undefined) return ''; // gave: 参りましたで終わった（util.js の withGiveUp）
     const name = game.players[l.p];
     if (l.extra) return `<b class="pl p${l.p}">${name}</b>はゴールで止まったので、もう1回！`;
     if (l.capture) return `<b class="pl p${l.p}">${name}</b>が向かいの石をとった` + (s.hide ? '' : `（${l.capture.got}個）`);

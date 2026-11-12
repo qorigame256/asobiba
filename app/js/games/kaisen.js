@@ -318,7 +318,7 @@ function cpu3(s, p, rules) {
 
 function info3(s) {
   const l = s.last;
-  if (!l || l.placed || s.won !== null) return '';
+  if (!l || l.placed || s.won !== null || s.gave !== undefined) return '';
   const name = (q) => `<b class="pl p${q}">${game.players[q]}</b>`;
   const who = name(l.p);
   if (!l.hits.length) return `${who}の弾は どちらの海も はずれ`;
@@ -365,7 +365,7 @@ function sea3(s, owner, { title, showShips, onShoot = null, small = false, mine 
 
 function render3(root, s, o) {
   const me = Number.isInteger(o.me) && o.me >= 0 ? o.me : null;
-  const over = s.won !== null;
+  const over = s.won !== null || s.gave !== undefined; // gave: 参りましたで終わった（util.js の withGiveUp）
   const status = document.createElement('p');
   status.className = 'cc-log';
   const left = (q) => fleetOf(sizeOf(s)).length - sunk3(s, q).length;
@@ -501,7 +501,7 @@ const game = {
   info(s) {
     if (np(s) === 3) return info3(s);
     const l = s.last;
-    if (!l || l.placed || s.won !== null) return '';
+    if (!l || l.placed || s.won !== null || s.gave !== undefined) return '';
     const who = `<b class="pl p${l.p}">${game.players[l.p]}</b>`;
     if (l.sonar !== undefined) return `${who}がソナーを使った: まだ撃っていないマスのうち、船のマスが<b>${l.n}つ</b>`;
     if (l.salvo) {
@@ -518,7 +518,7 @@ const game = {
     const me = Number.isInteger(o.me) && o.me >= 0 ? o.me : null; // 観戦（-1）と同じ画面（null）はどちらの船も見せない
     root.innerHTML = '';
     root.className = 'board ks';
-    const over = s.won !== null;
+    const over = s.won !== null || s.gave !== undefined; // gave: 参りましたで終わった（util.js の withGiveUp）
 
     if (s.phase === 'place') {
       // 並べている間に推理のメモを忘れる（次の対局で自分の船を前と同じ形に並べると、前の対局のメモが残っていた。2026-11-11 Codex の点検）
@@ -534,7 +534,7 @@ const game = {
       }
       const p = document.createElement('p');
       p.className = 'cc-log';
-      p.textContent = me === s.turn ? '' : `${game.players[s.turn]}が船を並べています…`;
+      p.textContent = me === s.turn || over ? '' : `${game.players[s.turn]}が船を並べています…`;
       root.append(p);
       if (me !== null && s.grid[me]) root.append(sea(s, me, { title: 'あなたの海', showShips: true }));
       return;

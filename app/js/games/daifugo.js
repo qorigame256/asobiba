@@ -872,14 +872,14 @@ export default {
       head.append(ord);
       if (suitOrder) {
         const k = document.createElement('small');
-        k.textContent = stairCards(s.hands[me]).size ? '青緑の点線の札は、階段（同じマークの3枚以上の連番）にできます' : '';
+        k.textContent = s.rules.stairs && stairCards(s.hands[me]).size ? '青緑の点線の札は、階段（同じマークの3枚以上の連番）にできます' : '';
         if (k.textContent) head.append(k);
       }
       root.append(head);
 
       const hand = document.createElement('div');
       hand.className = 'df-hand';
-      const kai = suitOrder ? stairCards(s.hands[me]) : null;
+      const kai = suitOrder && s.rules.stairs ? stairCards(s.hands[me]) : null; // 階段なしの設定では印を付けない（2026-11-12 の Codex の点検）
       const seen = {};
       // 札がすっと動く（2026-11-06）: 新しく来た札は、渡してきた人の席から（交換など）か場のあたりから裏返りながら（対局の始めは配る）
       const comeFrom = s.last?.to === me && s.last.p !== me ? `opp:${s.last.p}` : 'field';
