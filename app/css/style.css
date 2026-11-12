@@ -3173,3 +3173,73 @@ h1, h2, .sheet-head h3, .cat-h, .tile-nm, .lobby-game-name { font-family: "asobi
 .ks-cell.memo::after { content: "×"; position: absolute; inset: 0; display: grid; place-items: center; color: #c0392b; font-weight: 800; font-size: clamp(10px, 3vw, 16px); pointer-events: none; opacity: .8; }
 /* ホームの道具のボタンが4つになったので（2026-11-11 の 👓 見やすさ）、狭い画面では2つずつ2段に並べる（1つのボタンの字が2行に折れないように） */
 @media (max-width: 560px) { .home-tools { flex-wrap: wrap; } .home-tools .btn { flex: 1 1 calc(50% - 4px); } }
+
+/* かたち描き（katachi.js）。描く場は白い紙（どのスキンでも同じ色）。指でなぞってもページが動かないよう touch-action: none */
+.board.kt { width: min(100%, 560px); }
+.kt-row { display: flex; gap: 10px; align-items: flex-start; justify-content: center; margin: 6px 0; }
+.kt-sample { flex: 0 0 auto; width: 74px; text-align: center; font-size: .78rem; color: var(--muted); font-weight: 700; }
+.kt-sample svg { display: block; width: 74px; height: 74px; margin-top: 2px; border-radius: 10px; background: #fff; border: 1.5px solid var(--line); }
+.kt-sample path { fill: none; stroke: #c0392b; stroke-width: 9; stroke-linejoin: round; }
+.kt-pad { flex: 1 1 auto; width: min(100%, 340px); max-width: 340px; aspect-ratio: 1; border-radius: 14px; background: #fff; border: 2px solid var(--line); background-image: linear-gradient(#eef1f6 1px, transparent 1px), linear-gradient(90deg, #eef1f6 1px, transparent 1px); background-size: 10% 10%; touch-action: none; user-select: none; -webkit-user-select: none; }
+.kt-pad.live { border-color: #2f6fb3; cursor: crosshair; }
+.kt-ink { fill: none; stroke: #1d2230; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+.kt-fit { fill: none; stroke: #c0392b; stroke-width: 3; stroke-dasharray: 7 6; opacity: .75; }
+.kt-all { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; margin: 6px 0; }
+.kt-mini { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px; border: 2px solid; border-radius: 10px; background: var(--field); font-size: .76rem; }
+.kt-mini svg { width: 100%; aspect-ratio: 1; background: #fff; border-radius: 6px; }
+.kt-mini .kt-ink { stroke-width: 6; }
+.kt-mini b { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kt-mini span { font-weight: 800; }
+
+/* リズムまね（rhythm.js）。まん中の丸はお手本で黄色、自分がたたくと青く光る */
+.board.rz { width: min(100%, 560px); }
+.rz-lamp { width: 110px; height: 110px; margin: 10px auto 6px; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #f2f2f2, #b9bec8); box-shadow: inset 0 -6px 0 rgba(0, 0, 0, .12); }
+.rz-lamp.on { animation: rz-on .28s ease-out; }
+.rz-lamp.mine { animation: rz-mine .22s ease-out; }
+@keyframes rz-on { from { background: radial-gradient(circle at 40% 35%, #fffbe0, #ffd23a); box-shadow: 0 0 26px #ffd23a; transform: scale(1.08); } }
+@keyframes rz-mine { from { background: radial-gradient(circle at 40% 35%, #e3f0ff, #3f8ce0); box-shadow: 0 0 22px #3f8ce0; transform: scale(1.06); } }
+.rz-dots { display: flex; justify-content: center; gap: 8px; margin: 4px 0; }
+.rz-dots i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); background: var(--field); }
+.rz-dots i.lit { background: #ffd23a; border-color: #d4a20c; }
+.rz-dots i.mine { background: #3f8ce0; border-color: #2f6fb3; }
+.board .btn.rz-tap { display: block; width: min(100%, 320px); margin: 8px auto; padding: 22px 0; font-size: 1.3rem; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.board .btn.rz-tap:disabled, .board .btn.ms-stop:disabled { opacity: .4; cursor: default; }
+.rz-line { position: relative; height: 52px; margin: 8px 0; border-radius: 10px; background: var(--field); border: 1.5px solid var(--line); }
+.rz-track { position: absolute; left: 0; right: 0; height: 50%; }
+.rz-track.rz-me { top: 50%; border-top: 1px dashed var(--line); }
+.rz-track i { position: absolute; top: 20%; width: 6px; height: 60%; margin-left: -3px; border-radius: 3px; }
+.rz-ref i { background: #d4a20c; }
+.rz-me i { background: #2f6fb3; }
+
+/* 都道府県タッチ（todofuken.js）。海と陸の色はどのスキンでも同じ。地図をなぞってもページは動かせる（押したことにならない） */
+.board.tf { width: min(100%, 620px); }
+.tf-head { margin: 6px 0 2px; text-align: center; font-weight: 700; color: var(--muted); }
+.tf-head b { font-size: 1.5rem; color: var(--ink); }
+.tf-head small { margin: 0 2px; font-size: .8rem; }
+.tf-map { display: block; width: 100%; height: auto; border-radius: 14px; background: #cfe3f3; border: 2px solid var(--line); touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.tf-map.live { border-color: #2f6fb3; cursor: crosshair; }
+.tf-pref { fill: #f3efe2; stroke: #8a8574; stroke-width: 1; stroke-linejoin: round; }
+.tf-pref.ans { fill: #ffcf4a; stroke: #b07800; stroke-width: 2.5; }
+.tf-oki { fill: none; stroke: #8a8574; stroke-width: 2; stroke-dasharray: 8 6; }
+.tf-dot { stroke: #fff; stroke-width: 3; }
+.tf-dot.mine { fill: #111; stroke: #fff; stroke-width: 4; }
+.tf-who { display: flex; flex-wrap: wrap; gap: 4px 6px; justify-content: center; margin: 4px 0; }
+.tf-who span { padding: 1px 8px; border: 2px solid; border-radius: 10px; font-size: .8rem; background: var(--field); }
+
+/* 目押しそろえ（ms はこのゲームの部品の名前のはじめ。meoshi.js）。台と帯はどのスキンでも同じ色。帯の位置は meoshi.js が毎フレーム書く */
+.board.ms { width: min(100%, 520px); }
+.ms-table { display: flex; flex-wrap: wrap; gap: 4px 12px; justify-content: center; margin: 6px 0; font-size: .85rem; color: var(--muted); }
+.ms-table b { color: var(--ink); letter-spacing: -1px; }
+.ms-7 { color: #d0201a; font-weight: 900; font-family: Georgia, 'Times New Roman', serif; }
+.ms-box { display: flex; gap: 8px; justify-content: center; margin: 8px auto 4px; padding: 12px; width: fit-content; border-radius: 16px; background: linear-gradient(#3a3f4a, #23262d); box-shadow: inset 0 0 0 3px #c9a23c; }
+.ms-box.win { animation: ms-win .5s ease-in-out 3; }
+.ms-box.pair { box-shadow: inset 0 0 0 3px #7fc4ff; }
+@keyframes ms-win { 50% { box-shadow: inset 0 0 0 3px #ffe066, 0 0 24px #ffe066; } }
+.ms-reel { position: relative; width: 78px; height: 3.3em; font-size: 34px; overflow: hidden; border-radius: 8px; background: #fff; box-shadow: inset 0 10px 10px -6px rgba(0, 0, 0, .35), inset 0 -10px 10px -6px rgba(0, 0, 0, .35); touch-action: manipulation; user-select: none; -webkit-user-select: none; cursor: pointer; }
+.ms-reel::after { content: ''; position: absolute; left: 0; right: 0; top: 50%; height: 1.1em; transform: translateY(-50%); border-top: 2px solid rgba(208, 32, 26, .55); border-bottom: 2px solid rgba(208, 32, 26, .55); pointer-events: none; }
+.ms-reel.done { cursor: default; }
+.ms-reel.done::after { background: rgba(255, 224, 102, .2); }
+.ms-strip { position: absolute; left: 0; right: 0; top: 0; display: flex; flex-direction: column; will-change: transform; }
+.ms-strip span { display: grid; place-items: center; height: 1.1em; line-height: 1; }
+.ms-btns { display: flex; gap: 8px; justify-content: center; }
+.board .btn.ms-stop { width: 86px; padding: 10px 0; touch-action: manipulation; }

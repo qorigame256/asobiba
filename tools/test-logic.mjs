@@ -10519,6 +10519,199 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('UI・UX の5回目 OK');
 }
 
+// かたち描き（2026-11-13 本人の決定）: 丸・三角・四角・星・ハートを一筆で描き、お手本に近いほど上。毎回 3・2・1点
+{
+  const G = GAMES.katachi;
+  const { SHAPES, OUTLINES, likeness, pointsOf, cpuDraw, PAD } = await import('../app/js/games/katachi.js');
+  assert.deepEqual(SHAPES.map((x) => x.name), ['丸', '三角', '四角', '星', 'ハート'], 'かたち描き: 形は5つ');
+  const flatOf = (id, size = 150, cx = 100, cy = 100) => [...OUTLINES[id], OUTLINES[id][0]].flatMap(([x, y]) => [Math.round(cx + (x / 2000) * size), Math.round(cy + (y / 2000) * size)]);
+  for (const a of SHAPES) {
+    // お手本どおりなら 90% 以上。大きさと場所を変えても同じくらい
+    assert.ok(likeness(flatOf(a.id), a.id) >= 90, `かたち描き: お手本どおりの${a.name}は90%以上`);
+    assert.ok(Math.abs(likeness(flatOf(a.id, 60, 50, 140), a.id) - likeness(flatOf(a.id), a.id)) <= 3, `かたち描き: ${a.name}は大きさと場所で変わらない`);
+    // ほかの形は 50% 未満
+    for (const b of SHAPES) if (b !== a) assert.ok(likeness(flatOf(b.id), a.id) < 50, `かたち描き: ${a.name}のお題に${b.name}を描くと50%未満`);
+    // 描き始めと向きを変えても同じ（点の並びを逆にする・回す）
+    const f = flatOf(a.id);
+    const pts = [];
+    for (let i = 0; i < f.length - 2; i += 2) pts.push([f[i], f[i + 1]]);
+    const k = Math.floor(pts.length / 3);
+    const turned = [...pts.slice(k), ...pts.slice(0, k + 1)].reverse().flat();
+    assert.ok(Math.abs(likeness(turned, a.id) - likeness(f, a.id)) <= 3, `かたち描き: ${a.name}は描き始めと向きを問わない`);
+    // 半分で止めると下がる
+    assert.ok(likeness(f.slice(0, Math.floor(f.length / 4) * 2), a.id) < likeness(f, a.id) - 15, `かたち描き: ${a.name}を途中でやめると下がる`);
+  }
+  assert.equal(likeness([10, 10, 12, 12, 14, 10, 11, 13], 'circle'), 0, 'かたち描き: 小さすぎる線は0%');
+  // 四角を横長に描くと下がる（縦横の比はそろえない）
+  const wide = flatOf('square').map((v, i) => (i % 2 ? Math.round(100 + (v - 100) * 0.5) : v));
+  assert.ok(likeness(wide, 'square') < 60, 'かたち描き: 横長の四角は下がる');
+  assert.deepEqual(pointsOf([90, 80, 80, null, 10]), [3, 2, 2, 0, 0], 'かたち描き: 高い順に 3・2・1点（同じ%は同じ点・描かなかった人は0点）');
+  for (const a of SHAPES) for (let i = 0; i < 50; i++) {
+    const d = cpuDraw(a.id);
+    assert.ok(d.every((v) => Number.isInteger(v) && v >= 0 && v <= PAD) && d.length % 2 === 0, 'かたち描き: CPU の絵は手の形どおり');
+  }
+  // 進行と点
+  let s = G.init(3, 5);
+  assert.deepEqual([...s.order].sort(), SHAPES.map((x) => x.id).sort(), 'かたち描き: 5つの形を1回ずつ');
+  assert.deepEqual(G.init(3, 5).order, s.order, 'かたち描き: 同じ種から同じ順');
+  s = G.apply(s, { p: -1, t: 'next' });
+  const sh = s.order[0];
+  const other = SHAPES.find((x) => x.id !== sh).id;
+  assert.equal(G.apply(s, { p: 0, t: 'draw', q: 0, pts: [1, 2, 3] }), null, 'かたち描き: 点の数が奇数の手は受け付けない');
+  assert.equal(G.apply(s, { p: 0, t: 'draw', q: 0, pts: [0, 0, 10, 10, 20, 20, 999, 5] }), null, 'かたち描き: 場の外の点は受け付けない');
+  assert.equal(G.apply(s, { p: 0, t: 'draw', q: 1, pts: flatOf(sh) }), null, 'かたち描き: ほかの回の手は受け付けない');
+  s = G.apply(s, { p: 0, t: 'draw', q: 0, pts: flatOf(sh) });
+  assert.equal(G.apply(s, { p: 0, t: 'draw', q: 0, pts: flatOf(sh) }), null, 'かたち描き: 1回に1人1度だけ');
+  s = G.apply(s, { p: 1, t: 'draw', q: 0, pts: flatOf(other) });
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [3, 2, 0], 'かたち描き: 似ている順に 3・2点、描かなかった人は0点');
+  for (let q = 1; q < 5; q++) {
+    s = G.apply(s, { p: -1, t: 'next' });
+    s = G.apply(s, { p: 2, t: 'draw', q, pts: flatOf(s.order[q]) });
+    s = G.apply(s, { p: -1, t: 'close' });
+  }
+  s = G.apply(s, { p: -1, t: 'next' });
+  assert.deepEqual(G.result(s), { winners: [2], scores: [3, 2, 12] }, 'かたち描き: 5回で終わり、点の多い人の勝ち');
+  console.log('katachi OK');
+}
+
+// リズムまね（2026-11-13 本人の決定）: お手本のリズムを聞いて同じ間隔でたたく。ずれの小さい順に 3・2・1点
+{
+  const G = GAMES.rhythm;
+  const { makePatterns, errorOf, pointsOf } = await import('../app/js/games/rhythm.js');
+  for (let seed = 1; seed <= 300; seed++) {
+    const ps = makePatterns(seed);
+    assert.deepEqual(ps, makePatterns(seed), 'リズムまね: 同じ種から同じお手本');
+    assert.deepEqual(ps.map((a) => a.length), [4, 5, 5, 6, 7], 'リズムまね: たたく数は 4・5・5・6・7');
+    ps.forEach((at, q) => {
+      const gaps = at.slice(1).map((v, i) => v - at[i]);
+      assert.ok(at[0] === 0 && gaps.every((g) => g > 0 && g % 300 === 0 && g <= (q < 2 ? 600 : 900)), 'リズムまね: 間隔は 0.3秒の倍数（1・2回目は 0.6秒まで）');
+      assert.ok(gaps.some((g) => g !== gaps[0]), 'リズムまね: 同じ間隔ばかりにしない');
+    });
+  }
+  assert.equal(errorOf([0, 300, 900], [300, 900]), 0, 'リズムまね: ぴったりならずれ0');
+  assert.equal(errorOf([0, 300, 900], [350, 850]), 50, 'リズムまね: ずれは各音のずれの平均');
+  assert.equal(errorOf([0, 300, 900], [300]), null, 'リズムまね: 数が合わなければずれなし');
+  assert.deepEqual(pointsOf([0, 50, 50, null, 200]), [3, 2, 2, 0, 0], 'リズムまね: 小さい順に 3・2・1点（同じずれは同じ点・たたけなかった人は0点）');
+  let s = G.init(3, 9);
+  s = G.apply(s, { p: -1, t: 'next' });
+  const at = s.pats[0];
+  const exact = at.slice(1);
+  assert.equal(G.apply(s, { p: 0, t: 'tap', q: 0, d: exact.slice(1) }), null, 'リズムまね: 数の足りない手は受け付けない');
+  assert.equal(G.apply(s, { p: 0, t: 'tap', q: 0, d: [...exact].reverse() }), null, 'リズムまね: 時刻が戻る手は受け付けない');
+  s = G.apply(s, { p: 0, t: 'tap', q: 0, d: exact });
+  assert.equal(G.apply(s, { p: 0, t: 'tap', q: 0, d: exact }), null, 'リズムまね: 1回に1人1度だけ');
+  s = G.apply(s, { p: 1, t: 'tap', q: 0, d: exact.map((v) => v + 40) });
+  assert.equal(s.errs[1], 40, 'リズムまね: 全部 40ms 遅いとずれ 0.04秒');
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [3, 2, 0], 'リズムまね: ずれの小さい順に 3・2点、たたかなかった人は0点');
+  for (let q = 1; q < 5; q++) {
+    s = G.apply(s, { p: -1, t: 'next' });
+    s = G.apply(s, { p: 1, t: 'tap', q, d: s.pats[q].slice(1) });
+    s = G.apply(s, { p: -1, t: 'close' });
+  }
+  s = G.apply(s, { p: -1, t: 'next' });
+  assert.deepEqual(G.result(s), { winners: [1], scores: [3, 14, 0] }, 'リズムまね: 5回で終わり、点の多い人の勝ち');
+  console.log('rhythm OK');
+}
+
+// 都道府県タッチ（2026-11-13 本人の決定）: 言われた都道府県を地図で押す。近い順に 3・2・1点（県の中なら近さ0）
+{
+  const G = GAMES.todofuken;
+  const { distTo, innerPoint, pointsOf } = await import('../app/js/games/todofuken.js');
+  const { PREFS } = await import('../app/js/games/todofuken-data.js');
+  assert.equal(PREFS.length, 47, '都道府県タッチ: 47都道府県');
+  assert.equal(new Set(PREFS.map((p) => p.n)).size, 47);
+  PREFS.forEach((p, i) => {
+    assert.ok(p.r.length >= 1 && p.r.every((r) => r.length >= 6 && r.length % 2 === 0 && r.every(Number.isInteger)), `都道府県タッチ: ${p.n} の形は整数の輪`);
+    const [x, y] = innerPoint(i);
+    assert.equal(distTo(i, x, y), 0, `都道府県タッチ: ${p.n} の中の点は近さ0`);
+    // ほかの県の中の点は、その県の近さ0にならない（県どうしが重なっていない）
+    PREFS.forEach((_, j) => { if (j !== i) assert.ok(distTo(j, x, y) > 0, `都道府県タッチ: ${p.n} の中の点は ${PREFS[j].n} の中ではない`); });
+  });
+  // 隣の県は近く、遠い県は遠い
+  const idx = (n) => PREFS.findIndex((p) => p.n === n);
+  const [tx, ty] = innerPoint(idx('東京都'));
+  assert.ok(distTo(idx('神奈川県'), tx, ty) < 40, '都道府県タッチ: 東京の中から神奈川は近い');
+  assert.ok(distTo(idx('北海道'), tx, ty) > 250, '都道府県タッチ: 東京の中から北海道は遠い');
+  assert.deepEqual(pointsOf([0, 0, 30, null, 90]), [3, 3, 1, 0, 0], '都道府県タッチ: 近い順に 3・2・1点（同じ近さは同じ点・押さなかった人は0点）');
+  let s = G.init(3, 4);
+  assert.equal(new Set(s.qs).size, 10, '都道府県タッチ: 10問とも別の県');
+  assert.deepEqual(G.init(3, 4).qs, s.qs, '都道府県タッチ: 同じ種から同じ問題');
+  s = G.apply(s, { p: -1, t: 'next' });
+  const [ax, ay] = innerPoint(s.qs[0]);
+  assert.equal(G.apply(s, { p: 0, t: 'tap', q: 0, x: 99999, y: ay }), null, '都道府県タッチ: 地図の外は受け付けない');
+  assert.equal(G.apply(s, { p: 0, t: 'tap', q: 0, x: ax + 0.5, y: ay }), null, '都道府県タッチ: 整数でない座標は受け付けない');
+  s = G.apply(s, { p: 0, t: 'tap', q: 0, x: ax, y: ay });
+  assert.equal(G.apply(s, { p: 0, t: 'tap', q: 0, x: ax, y: ay }), null, '都道府県タッチ: 1問に1回だけ');
+  const far = innerPoint(s.qs[1]);
+  s = G.apply(s, { p: 1, t: 'tap', q: 0, x: far[0], y: far[1] });
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [3, 2, 0], '都道府県タッチ: 中を押した人に3点、外は近さの順、押さなかった人は0点');
+  for (let q = 1; q < 10; q++) {
+    s = G.apply(s, { p: -1, t: 'next' });
+    const [x, y] = innerPoint(s.qs[q]);
+    s = G.apply(s, { p: 2, t: 'tap', q, x, y });
+    s = G.apply(s, { p: -1, t: 'close' });
+  }
+  s = G.apply(s, { p: -1, t: 'next' });
+  assert.deepEqual(G.result(s), { winners: [2], scores: [3, 2, 27] }, '都道府県タッチ: 10問で終わり、点の多い人の勝ち');
+  console.log('todofuken OK');
+}
+
+// 目押しそろえ（2026-11-13 本人の決定）: 3つの帯を止めてそろえる。そろった絵で点が違う（7 が一番高い）
+{
+  const G = GAMES.meoshi;
+  const { REELS, PTS, makeRounds, cellAt, pointsOf, timeFor, LIMIT } = await import('../app/js/games/meoshi.js');
+  for (const reel of REELS) {
+    const count = (k) => reel.filter((v) => v === k).length;
+    assert.deepEqual([count('7'), count('🔔'), count('🍉'), count('🍒')], [1, 2, 2, 3], '目押しそろえ: 帯は 7 が1・🔔 が2・🍉 が2・🍒 が3');
+  }
+  assert.ok(PTS['7'] > PTS['🔔'] && PTS['🔔'] > PTS['🍉'] && PTS['🍉'] > PTS['🍒'], '目押しそろえ: 帯に少ない絵ほど高い点');
+  assert.equal(pointsOf(['7', '7', '7']), 10, '目押しそろえ: 7 が3つで10点');
+  assert.equal(pointsOf(['🍒', '🍒', '🍒']), 2, '目押しそろえ: 🍒 が3つで2点');
+  assert.equal(pointsOf(['7', '🍒', '7']), 1, '目押しそろえ: 2つだけなら1点（離れていても）');
+  assert.equal(pointsOf(['7', '🍒', '🔔']), 0, '目押しそろえ: そろわなければ0点');
+  for (let seed = 1; seed <= 100; seed++) {
+    const rs = makeRounds(seed);
+    assert.deepEqual(rs, makeRounds(seed), '目押しそろえ: 同じ種から同じ帯');
+    for (const x of rs) {
+      for (let r = 0; r < 3; r++) {
+        assert.ok(Number.isInteger(x.off[r]) && x.off[r] >= 0 && x.off[r] < 8 * x.step);
+        // 1こまの長さごとに、まん中の絵は1つずつ進む
+        assert.equal(cellAt(x, r, 0), Math.floor(x.off[r] / x.step) % 8);
+        assert.equal(cellAt(x, r, x.step), (cellAt(x, r, 0) + 1) % 8, '目押しそろえ: 1こまの長さで次の絵');
+        for (let c = 0; c < 8; c++) {
+          const t = timeFor(x, r, c, 1000 + c * 37);
+          assert.ok(t >= 0 && t <= LIMIT && cellAt(x, r, t) === c, '目押しそろえ: CPU の狙う時刻にその絵が来る');
+        }
+      }
+    }
+  }
+  let s = G.init(3, 2);
+  s = G.apply(s, { p: -1, t: 'next' });
+  const x = s.rs[0];
+  const seven = [0, 1, 2].map((r) => timeFor(x, r, REELS[r].indexOf('7'), 500));
+  assert.equal(G.apply(s, { p: 0, t: 'stop', q: 0, ms: seven.slice(0, 2) }), null, '目押しそろえ: 3つそろっていない手は受け付けない');
+  assert.equal(G.apply(s, { p: 0, t: 'stop', q: 0, ms: [0, 0, LIMIT + 1] }), null, '目押しそろえ: 締め切りより後の時刻は受け付けない');
+  s = G.apply(s, { p: 0, t: 'stop', q: 0, ms: seven });
+  assert.deepEqual(s.syms[0], ['7', '7', '7'], '目押しそろえ: 止めた時刻から絵が決まる');
+  assert.equal(G.apply(s, { p: 0, t: 'stop', q: 0, ms: seven }), null, '目押しそろえ: 1回に1人1度だけ');
+  const cherry = [0, 1, 2].map((r) => timeFor(x, r, REELS[r].indexOf('🍒'), 500));
+  s = G.apply(s, { p: 1, t: 'stop', q: 0, ms: [cherry[0], cherry[1], seven[2]] });
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [10, 1, 0], '目押しそろえ: 7 が3つで10点・2つで1点・止めなかった人は0点');
+  for (let q = 1; q < 5; q++) {
+    s = G.apply(s, { p: -1, t: 'next' });
+    const y = s.rs[q];
+    s = G.apply(s, { p: 2, t: 'stop', q, ms: [0, 1, 2].map((r) => timeFor(y, r, REELS[r].indexOf('🔔'), 300)) });
+    s = G.apply(s, { p: -1, t: 'close' });
+  }
+  s = G.apply(s, { p: -1, t: 'next' });
+  assert.deepEqual(G.result(s), { winners: [2], scores: [10, 1, 20] }, '目押しそろえ: 5回で終わり、点の多い人の勝ち');
+  console.log('meoshi OK');
+}
+
 // 見出しの字体（2026-11-09。tools/make-fonts.mjs）: 今のコードのゲームの名前・仲間の名前・技の名前の字が、切り出した字体に全部入っているか。
 // 落ちたら、元の字体のフォルダを渡して node tools/make-fonts.mjs で作り直す（入っていない字はほかの字体で出るだけで、崩れはしない）
 {
