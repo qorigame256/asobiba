@@ -536,6 +536,11 @@ const game = {
       p.className = 'cc-log';
       p.textContent = me === s.turn || over ? '' : `${game.players[s.turn]}が船を並べています…`;
       root.append(p);
+      if (over) {
+        // 並べている途中の参りました: ふつうに終わったときと同じく、並べ終わった人の海を船つきで見せる（観戦・参った人にも。2026-11-12 の Codex の点検）
+        for (const q of [0, 1]) if (s.grid[q]) root.append(sea(s, q, { title: q === me ? 'あなたの海' : `${game.players[q]}の海`, showShips: true, small: q !== me }));
+        return;
+      }
       if (me !== null && s.grid[me]) root.append(sea(s, me, { title: 'あなたの海', showShips: true }));
       return;
     }

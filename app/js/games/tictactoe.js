@@ -242,7 +242,8 @@ function gobPiece(piece) {
 }
 
 function renderGob(root, s, o) {
-  const res = gobResult(s);
+  // 参りました（util.js の withGiveUp。s.gave）で終わったときも終わりと見る（手元の番の印を残さない。2026-11-12 の Codex の点検）
+  const res = gobResult(s) || (s.gave !== undefined ? { cells: [] } : null);
   const legal = o.canMove ? gobLegal(s) : [];
   // 選んだ駒は、動かせる描き直しで局面が進んでいたときだけ忘れる。動かせない描き直し（2回押して置くの薄い駒・さっきの手 など）では忘れずに使わないだけにする
   // （忘れると、2回押して置くの1回目のあとで同じマスを押しても置けなかった。2026-11-11 Codex の点検）
@@ -473,7 +474,8 @@ function cellButton(v, i, s, o, playable) {
 }
 
 function renderBig(root, s, o) {
-  const res = bigResult(s);
+  // 参りました（util.js の withGiveUp。s.gave）で終わったときも終わりと見る（次に置ける盤の枠を残さない。2026-11-12 の Codex の点検）
+  const res = bigResult(s) || (s.gave !== undefined ? { cells: [] } : null);
   root.innerHTML = '';
   root.className = 'board ttt9';
   for (let b = 0; b < 9; b++) {
