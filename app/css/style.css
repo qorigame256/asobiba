@@ -2336,6 +2336,8 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .board.ss { width: min(100%, 560px); }
 .ss-head { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 6px 0 0; font-weight: 700; }
 .ss-next { display: grid; place-items: center; width: calc(18px + var(--w) * 7px); aspect-ratio: 1; border-radius: 6px; background: #5a6470; color: #fff; font-size: 1.1rem; }
+.ss-after { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: .85rem; }
+.ss-next.small { width: calc(12px + var(--w) * 4px); font-size: .8rem; opacity: .75; }
 .ss-svg { display: block; width: 100%; max-width: 560px; margin: 0 auto; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
 .ss-pivot { fill: #6b5a48; }
 .ss-ground { fill: #b9ab98; }

@@ -10290,6 +10290,123 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('seesaw OK');
 }
 
+// コップのどれ？の回数・難しさ・はずれたら脱落（2026-11-12 の40回目の案）
+{
+  const G = GAMES.cup;
+  const { makeRounds, planOf } = await import('../app/js/games/cup.js');
+  for (let seed = 1; seed <= 50; seed++) assert.deepEqual(G.init(3, seed, { rules: {} }).rs, makeRounds(seed), 'コップのどれ？: 最初の値のときの問題は前と同じ');
+  assert.deepEqual(planOf({ rounds: 3 }).map((r) => r.cups), [3, 4, 5], 'コップのどれ？: 3回は3個から5個');
+  const long = planOf({ rounds: 8 });
+  assert.equal(long.length, 8);
+  assert.ok(long.every((r, i) => i === 0 || (r.cups >= long[i - 1].cups && r.swaps >= long[i - 1].swaps && r.dur <= long[i - 1].dur)), 'コップのどれ？: 8回も回が進むほど難しく');
+  assert.ok(planOf({ level: 'easy', rounds: 8 }).every((r) => r.cups <= 4), 'コップのどれ？: やさしいはコップ4個まで');
+  assert.ok(planOf({ level: 'hard' }).every((r) => r.cups === 5), 'コップのどれ？: むずかしいは最初から5個');
+  assert.equal(G.init(2, 4, { rules: { rounds: 8 } }).rs.length, 8, 'コップのどれ？: 回数の設定が効く');
+  // 脱落: 外した人・選ばなかった人は脱落、残りが1人で終わり
+  const close = (s, picks) => {
+    s = G.apply(s, { p: -1, t: 'next' });
+    picks.forEach((c, p) => { if (c !== null) s = G.apply(s, { p, t: 'ans', q: s.q, c: c === 'ok' ? s.rs[s.q].ans : (s.rs[s.q].ans + 1) % s.rs[s.q].cups }); });
+    return G.apply(s, { p: -1, t: 'close' });
+  };
+  let s = G.init(4, 9, { rules: { drop: true } });
+  s = close(s, ['ng', 'ng', 'ng', 'ng']);
+  assert.deepEqual(s.out, [null, null, null, null], 'コップのどれ？: 全員外した回はだれも脱落しない');
+  s = close(s, ['ok', 'ok', 'ng', null]);
+  assert.deepEqual(s.out, [null, null, 1, 1], 'コップのどれ？: 外した人と選ばなかった人が脱落');
+  assert.equal(G.canAct(G.apply(s, { p: -1, t: 'next' }), 2), false, 'コップのどれ？: 脱落した人は選べない');
+  assert.equal(G.apply(G.apply(s, { p: -1, t: 'next' }), { p: 3, t: 'ans', q: 2, c: 0 }), null, 'コップのどれ？: 脱落した人の答えは受け付けない');
+  s = close(s, ['ok', 'ng', null, null]);
+  s = G.apply(s, { p: -1, t: 'next' });
+  assert.equal(s.phase, 'end', 'コップのどれ？: 残りが1人になったら終わり');
+  assert.deepEqual(G.result(s), { winners: [0], scores: [2, 1, 0, 0], place: [1, 2, 3, 3] }, 'コップのどれ？: 残った人の勝ち・あとまで残った人が上');
+  console.log('cup settings OK');
+}
+
+// シーソーにのせるの次の重り・パス・何回戦・置き場所の数・重い重り（2026-11-12 の40回目の案）
+{
+  const G = GAMES.seesaw;
+  const { weightOf, limitOf, spotsOf } = await import('../app/js/games/seesaw.js');
+  const { mulberry32 } = await import('../app/js/games/util.js');
+  let heavy5 = 0;
+  for (let seed = 1; seed <= 300; seed++) for (let k = 0; k < 10; k++) {
+    const old = 1 + Math.floor(mulberry32((seed ^ Math.imul(k + 11, 0x9e3779b1)) >>> 0)() * 3);
+    assert.equal(weightOf(seed, k), old, 'シーソー: なしのときの重りは前と同じ');
+    const h = weightOf(seed, k, true);
+    assert.ok(h === old || h === 5, 'シーソー: 重い重りは、くじの重りか5');
+    if (h === 5) heavy5 += 1;
+  }
+  assert.ok(heavy5 > 3000 * 0.08 && heavy5 < 3000 * 0.16, `シーソー: 重さ5はおよそ1割2分（${heavy5}/3000）`);
+  // 置き場所の数
+  assert.deepEqual(spotsOf(3), [-3, -2, -1, 1, 2, 3]);
+  assert.equal(spotsOf(7).length, 14);
+  let s = G.init(2, 5, { rules: { size: 3 } });
+  assert.equal(G.apply(s, { p: 0, t: 'put', x: 4 }), null, 'シーソー: 3か所では4に置けない');
+  s = G.apply(s, { p: 0, t: 'put', x: 3 });
+  assert.ok(s && s.phase === 'play', 'シーソー: 3か所の最初の1つは落ちない（3 × 3 ≦ 10）');
+  assert.equal(limitOf(0, 6), 10);
+  assert.equal(G.apply(G.init(2, 5, { rules: { size: 7 } }), { p: 0, t: 'put', x: -7 }).phase, 'play', 'シーソー: 7か所では7に置ける');
+  // パス: 1回戦で1人1回、重りは次の人へ
+  s = G.init(3, 8, { rules: { pass: true } });
+  assert.equal(G.apply(G.init(3, 8), { p: 0, t: 'pass' }), null, 'シーソー: パスなしではパスできない');
+  assert.equal(G.apply(s, { p: 1, t: 'pass' }), null, 'シーソー: 番でない人はパスできない');
+  s = G.apply(s, { p: 0, t: 'pass' });
+  assert.equal(s.turn, 1, 'シーソー: パスしたら次の人の番');
+  assert.equal(s.placed.length, 0);
+  s = G.apply(s, { p: 1, t: 'put', x: 1 });
+  assert.equal(s.placed[0].w, weightOf(8, 0), 'シーソー: パスで回された人は同じ重りをのせる');
+  s = G.apply(s, { p: 2, t: 'put', x: -1 });
+  assert.equal(G.apply(s, { p: 0, t: 'pass' }), null, 'シーソー: パスは1回だけ');
+  // 何回戦: 落ちたら次の回戦へ、落とした回数の少ない人の勝ち
+  const play = (t) => {
+    while (t.phase === 'play') {
+      const open = spotsOf(5).filter((x) => !t.placed.some((v) => v.x === x));
+      t = G.apply(t, { p: t.turn, t: 'put', x: open[open.length - 1] }); // いちばん右へ（すぐ落ちる）
+    }
+    return t;
+  };
+  s = play(G.init(3, 21, { rules: { games: 3 } }));
+  assert.equal(s.phase, 'gap', 'シーソー: 何回戦では落ちても終わらない');
+  assert.equal(G.result(s), null);
+  const loser = s.last.p;
+  assert.equal(G.apply(s, { p: 0, t: 'put', x: -1 }), null, 'シーソー: 回戦のあいだは置けない');
+  s = G.apply(s, { p: -1, t: 'next' });
+  assert.equal(s.game, 1);
+  assert.equal(s.turn, loser, 'シーソー: 次の回戦は落とした人から');
+  assert.deepEqual(s.placed, []);
+  assert.equal(s.T, 0);
+  // 回戦ごとに重りのくじが変わる（2回戦目の最初の重りが、1回戦目の最初の重りと違う種がある）
+  let differ = 0;
+  for (let seed = 1; seed <= 30; seed++) {
+    const t = G.apply(play(G.init(2, seed, { rules: { games: 3 } })), { p: -1, t: 'next' });
+    if (G.apply(t, { p: t.turn, t: 'put', x: -1 }).placed[0].w !== weightOf(seed, 0)) differ += 1;
+  }
+  assert.ok(differ >= 5, `シーソー: 回戦ごとに重りのくじが変わる（${differ}/30）`);
+  s = play(s);
+  s = G.apply(s, { p: -1, t: 'next' });
+  s = play(s);
+  assert.equal(s.phase, 'end', 'シーソー: 3回戦で終わり');
+  const res = G.result(s);
+  assert.equal(s.falls.reduce((a, b) => a + b, 0), 3, 'シーソー: 3回落ちた');
+  const min = Math.min(...s.falls);
+  assert.deepEqual(res.winners, [0, 1, 2].filter((p) => s.falls[p] === min), 'シーソー: 落とした回数がいちばん少ない人の勝ち');
+  assert.deepEqual(res.place, s.falls.map((f) => 1 + s.falls.filter((x) => x < f).length), 'シーソー: 順位は落とした回数の少ない順');
+  // CPU はパスがあれば、落ちない場所が無いときだけパスする
+  for (let seed = 1; seed <= 200; seed++) {
+    let t = G.init(2, seed, { rules: { pass: true, heavy: true } });
+    while (t.phase === 'play') {
+      const m = G.cpu(t, t.turn);
+      if (m.t === 'pass') {
+        const w = weightOf(seed, t.placed.length, true);
+        const open = spotsOf(5).filter((x) => !t.placed.some((v) => v.x === x));
+        assert.ok(open.every((x) => Math.abs(t.T + w * x) > limitOf(t.placed.length)), 'シーソー: CPU は落ちない場所があればパスしない');
+      }
+      t = G.apply(t, { ...m, p: t.turn });
+      assert.ok(t, 'シーソー: CPU の手はいつも通る');
+    }
+  }
+  console.log('seesaw settings OK');
+}
+
 // 見出しの字体（2026-11-09。tools/make-fonts.mjs）: 今のコードのゲームの名前・仲間の名前・技の名前の字が、切り出した字体に全部入っているか。
 // 落ちたら、元の字体のフォルダを渡して node tools/make-fonts.mjs で作り直す（入っていない字はほかの字体で出るだけで、崩れはしない）
 {

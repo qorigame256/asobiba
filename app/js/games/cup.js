@@ -2,12 +2,18 @@
 // 2026-11-12 本人の決定（Claude が出した12の新しいゲームの案から本人が選んだ。分かれ目はすべて Claude の推奨を本人が承認）:
 //   - 当てた人全員に1点（速さは点に関係しない）。まざり終わったら全員が同時に1つ選ぶ。
 //   - 全部で5回。回が進むほど難しく（コップは3個から始めて最後は5個、まぜる速さも上げる）。
+// 詳細設定（2026-11-12 の40回目の案。本人が選んだ。分かれ目は Claude の判断）:
+//   - 「回数」3回・5回（最初）・8回（鍵は rounds）: 3回は ROUNDS の1・3・5回目、8回は LONG（同じく3個から5個へ、まぜる回数と速さを上げていく）。
+//   - 「難しさ」やさしい・ふつう（最初）・むずかしい（鍵は level）: やさしいはコップを最大4個に、むずかしいは最初から5個にする（まぜる回数と速さは回数の表のまま）。
+//   - 「はずれたら脱落」なし（最初）・あり（鍵は drop）: 外したか選ばなかった人はそこで脱落し、最後まで残った人の勝ち（点は今までどおり数える）。
+//     残っている全員が外した回は、だれも脱落しない。残りが1人になったら（2人以上で始めたとき）その人の勝ちで終わる。○×クイズの脱落と同じ形。
+//   - 3つとも最初の値のときの問題は前と全く同じ（makeRounds の乱数の使い方を変えていない）。
 // Claude の判断:
-//   - 回ごとのコップの数・入れ替えの回数・1回の入れ替えの長さは ROUNDS。詳細設定は置かない（回数も難しさも本人の決定で決まっているため）。
+//   - 回ごとのコップの数・入れ替えの回数・1回の入れ替えの長さは ROUNDS（5回のとき）。
 //   - 最初にコップを持ち上げて玉を1秒見せ、下ろしてからまぜる。入れ替えは2つのコップが弧を描いて場所を交換する（1つが奥、1つが手前を通る）。
 //   - 選べるのは自分の画面でまざり終わってから6秒。全員が選んだら0.7秒で締め切る。結果は全部のコップを持ち上げて2.5秒見せ、だれがどれを選んだかを並べる。
 //   - ほかの人が選んだコップは結果まで見せない（まねできないように。札に ✔ だけ出す）。
-//   - CPU はまざり終わって0.5〜1.7秒で選び、当たる割合は 1回目9割から最後は5割まで下げる（まちがえるときはほかのコップから1つ）。
+//   - CPU はまざり終わって0.5〜1.7秒で選び、当たる割合は 1回目9割から最後は5割まで下げる（回数が違っても最初と最後は同じ。まちがえるときはほかのコップから1つ）。
 //   - 玉の場所と入れ替えは種から作る（全員の端末で同じ動き）。動きは各自の画面で回が始まった時刻から計る。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next … → end
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q, c: 選んだ場所（左から 0〜） }
@@ -23,7 +29,27 @@ export const ROUNDS = [
   { cups: 4, swaps: 10, dur: 330 },
   { cups: 5, swaps: 12, dur: 280 },
 ];
-const CPU_OK = [0.9, 0.8, 0.7, 0.6, 0.5];
+// 8回のとき
+const LONG = [
+  { cups: 3, swaps: 4, dur: 600 },
+  { cups: 3, swaps: 5, dur: 560 },
+  { cups: 3, swaps: 7, dur: 460 },
+  { cups: 4, swaps: 8, dur: 400 },
+  { cups: 4, swaps: 10, dur: 330 },
+  { cups: 5, swaps: 11, dur: 300 },
+  { cups: 5, swaps: 12, dur: 280 },
+  { cups: 5, swaps: 14, dur: 250 },
+];
+const ROUND_CHOICES = [[3, '3回'], [5, '5回'], [8, '8回']];
+const LEVELS = [['mid', 'ふつう'], ['easy', 'やさしい（コップは4個まで）'], ['hard', 'むずかしい（最初から5個）']];
+// 詳細設定から回ごとの難しさの表を作る
+export function planOf(rules = {}) {
+  let plan = rules.rounds === 3 ? [ROUNDS[0], ROUNDS[2], ROUNDS[4]] : rules.rounds === 8 ? LONG : ROUNDS;
+  if (rules.level === 'easy') plan = plan.map((r) => ({ ...r, cups: Math.min(r.cups, 4) }));
+  if (rules.level === 'hard') plan = plan.map((r) => ({ ...r, cups: 5 }));
+  return plan;
+}
+const cpuOk = (q, total) => (total <= 1 ? 0.9 : 0.9 - (0.4 * q) / (total - 1));
 const LIFT = 350; // 持ち上げる・下ろす長さ
 const HOLD = 1000; // 玉を見せる長さ
 const GAP = 250; // 下ろしてからまぜ始めるまで
@@ -36,9 +62,9 @@ const GRACE_MS = 700;
 export const animMs = (x) => START + x.swaps.length * x.dur; // まざり終わる時刻
 
 // 5回分の問題。ball = 玉の入ったコップ（最初の場所の番号）、swaps = 入れ替える2つの場所、ans = まざり終わったときの玉の場所
-export function makeRounds(seed) {
+export function makeRounds(seed, plan = ROUNDS) {
   const rnd = mulberry32(seed);
-  return ROUNDS.map((r) => {
+  return plan.map((r) => {
     const ball = Math.floor(rnd() * r.cups);
     const swaps = [];
     for (let i = 0; i < r.swaps; i++) {
@@ -91,9 +117,23 @@ export function poseAt(x, t) {
 }
 
 const qKey = (s, q = s.q) => `cup:${s.seed}:${q}`;
-const clone = (s) => ({ ...s, scores: s.scores.slice(), picks: s.picks.slice() });
-const doneOf = (s, p) => s.picks[p] !== null;
+const clone = (s) => ({ ...s, scores: s.scores.slice(), picks: s.picks.slice(), out: s.out.slice() });
+const alive = (s, p) => s.out[p] === null;
+const doneOf = (s, p) => !alive(s, p) || s.picks[p] !== null;
 const cpuPlan = new Map();
+
+// 結果（脱落ありの順位を含む。○×クイズと同じ形）
+function finish(s) {
+  if (!s.rules.drop) return { winners: leaders(s.scores), scores: s.scores };
+  const all = [...Array(s.n).keys()];
+  const live = all.filter((p) => alive(s, p));
+  const top = live.length ? Math.max(...live.map((p) => s.scores[p])) : 0;
+  const winners = live.filter((p) => s.scores[p] === top);
+  // 強さ: 残った人は点で、脱落した人は脱落した回が後ろほど上
+  const power = (p) => (alive(s, p) ? 1e6 + s.scores[p] : s.out[p]);
+  const place = all.map((p) => 1 + all.filter((x) => power(x) > power(p)).length);
+  return { winners, scores: s.scores, place };
+}
 
 export default {
   id: 'cup',
@@ -105,18 +145,24 @@ export default {
   realtime: true,
   minPlayers: 2,
   maxPlayers: 10,
+  settings: [
+    { key: 'rounds', label: '回数', desc: '1回の対局で当てる回数（回が進むほどコップが増えて速くなる）', def: 5, choices: ROUND_CHOICES },
+    { key: 'level', label: '難しさ', desc: 'コップの数。やさしいは4個まで、むずかしいは最初から5個', def: 'mid', choices: LEVELS },
+    { key: 'drop', label: 'はずれたら脱落', desc: '外したか選ばなかった人は脱落。最後まで残った人の勝ち（全員外した回はだれも脱落しない）', def: false },
+  ],
 
-  init(n, seed) {
-    return { n, seed, rules: {}, rs: makeRounds(seed), q: -1, phase: 'ready', picks: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
+  init(n, seed, { rules = {} } = {}) {
+    const r = { rounds: 5, level: 'mid', drop: false, ...rules };
+    return { n, seed, rules: r, rs: makeRounds(seed, planOf(r)), q: -1, phase: 'ready', picks: Array(n).fill(null), out: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
   },
 
   turn() { return null; },
-  canAct(s) { return s.phase === 'open'; },
-  result(s) { return s.phase === 'end' ? { winners: leaders(s.scores), scores: s.scores } : null; },
+  canAct(s, p) { return s.phase === 'open' && (p === undefined || alive(s, p)); },
+  result(s) { return s.phase === 'end' ? finish(s) : null; },
   sound(a, b, m, me) {
     if (m.p === -1) {
       if (m.t === 'next') return 'question';
-      if (m.t === 'close' && me !== null && me >= 0 && me < b.n) return b.last?.ok[me] ? 'correct' : 'wrong';
+      if (m.t === 'close' && me !== null && me >= 0 && me < b.n && alive(a, me)) return b.last?.ok[me] ? 'correct' : 'wrong';
       return null;
     }
     return m.p === me ? 'chip' : null; // ほかの人が選んだ音は鳴らさない（選んだことが分かるとせかされるため）
@@ -143,7 +189,8 @@ export default {
       if (m.t === 'next' && (s0.phase === 'ready' || s0.phase === 'shown')) {
         const s = clone(s0);
         s.step += 1;
-        if (s.q + 1 >= s.rs.length) { s.phase = 'end'; return s; }
+        const live = [...Array(s.n).keys()].filter((p) => alive(s, p)).length;
+        if (s.q + 1 >= s.rs.length || (s.rules.drop && s.n >= 2 && live <= 1)) { s.phase = 'end'; return s; }
         s.q += 1;
         s.phase = 'open';
         s.picks = Array(s.n).fill(null);
@@ -156,8 +203,15 @@ export default {
         const ans = s.rs[s.q].ans;
         const ok = s.picks.map((c) => c === ans);
         ok.forEach((v, p) => { if (v) s.scores[p] += 1; });
-        s.last = { ok };
-        s.log = [...s0.log, { picks: s.picks.slice(), ok }];
+        const live = [...Array(s.n).keys()].filter((p) => alive(s, p));
+        let dropped = [];
+        if (s.rules.drop) {
+          dropped = live.filter((p) => !ok[p]);
+          if (dropped.length === live.length) dropped = []; // 全員外したら、だれも脱落しない
+          for (const p of dropped) s.out[p] = s.q;
+        }
+        s.last = { ok, dropped };
+        s.log = [...s0.log, { picks: s.picks.slice(), ok, live: live.length }];
         return s;
       }
       return null;
@@ -178,7 +232,7 @@ export default {
     let plan = cpuPlan.get(key);
     if (!plan) {
       const others = [...Array(x.cups).keys()].filter((c) => c !== x.ans);
-      const ok = Math.random() < CPU_OK[s.q];
+      const ok = Math.random() < cpuOk(s.q, s.rs.length);
       plan = { at: animMs(x) + 500 + Math.random() * 1200, c: ok ? x.ans : others[Math.floor(Math.random() * others.length)] };
       cpuPlan.set(key, plan);
       if (cpuPlan.size > 300) cpuPlan.delete(cpuPlan.keys().next().value);
@@ -188,12 +242,14 @@ export default {
 
   render(root, s, o) {
     const me = o.me >= 0 && !o.watching ? o.me : null;
-    const won = s.phase === 'end' ? leaders(s.scores) : [];
+    const won = s.phase === 'end' ? finish(s).winners : [];
+    const justOut = (p) => s.phase === 'shown' && s.last?.dropped?.includes(p);
     const extra = (p) => {
+      if (!alive(s, p) && !justOut(p)) return '<span class="pt-ng">脱落</span>';
       if (s.phase === 'open') return doneOf(s, p) ? '<span class="pt-ok">✔</span>' : '';
       if (s.phase !== 'shown' || !s.last) return '';
       if (s.last.ok[p]) return '<span class="pt-ok">○ +1</span>';
-      return s.picks[p] === null ? '<span class="pt-ng">―</span>' : '<span class="pt-ng">×</span>';
+      return `<span class="pt-ng">${s.picks[p] === null ? '―' : '×'}${justOut(p) ? ' 脱落' : ''}</span>`;
     };
     root.innerHTML = '';
     root.className = 'board cp';
@@ -203,7 +259,7 @@ export default {
     head.className = 'cp-head';
     root.append(head);
     if (s.phase === 'ready') {
-      head.textContent = `よーい… 玉の入ったコップをよく見て当てよう（全${s.rs.length}回・当てたら1点）`;
+      head.textContent = `よーい… 玉の入ったコップをよく見て当てよう（全${s.rs.length}回・当てたら1点${s.rules.drop ? '・はずれたら脱落' : ''}）`;
       return;
     }
     const x = s.rs[s.q];
@@ -241,7 +297,7 @@ export default {
       ball.style.left = `${((pos[ballCup].x + 0.5) / x.cups) * 100}%`;
       ball.style.opacity = lift > 0 ? 1 : 0;
     };
-    const can = () => s.phase === 'open' && me !== null && o.canMove && !doneOf(s, me) && since(key) >= total && since(key) < total + LIMIT;
+    const can = () => s.phase === 'open' && me !== null && o.canMove && !doneOf(s, me) && alive(s, me) && since(key) >= total && since(key) < total + LIMIT;
     const enable = () => {
       if (!stage.isConnected) return;
       place(total);
@@ -293,7 +349,8 @@ export default {
     note.className = 'cc-log';
     const noteText = () => {
       if (me === null) return '観戦中';
-      if (s.phase === 'shown') return s.last?.ok[me] ? '⭕ 当たり！ +1点' : s.picks[me] === null ? '時間切れ…' : '❌ はずれ…';
+      if (!alive(s, me) && !justOut(me)) return '脱落しました。最後まで見守ろう';
+      if (s.phase === 'shown') return s.last?.ok[me] ? '⭕ 当たり！ +1点' : (s.picks[me] === null ? '時間切れ…' : '❌ はずれ…') + (justOut(me) ? ' 脱落' : '');
       if (doneOf(s, me)) return '選びました。みんなを待とう';
       const t = since(key);
       if (t < total) return '👀 よく見て…';
@@ -332,8 +389,8 @@ export default {
       const r = s.rs[q];
       const li = document.createElement('li');
       const hits = x.ok.filter(Boolean).length;
-      const mine = me === null ? '' : x.ok[me] ? '⭕' : '❌';
-      li.innerHTML = `<span class="mk-rv-n">${q + 1}</span><span>コップ${r.cups}個・${r.swaps.length}回まぜる</span><span>${mine}</span><span class="mk-rv-who">当てた人 ${hits}/${s.n}</span>`;
+      const mine = me === null ? '' : s.out[me] !== null && q > s.out[me] ? '―' : x.ok[me] ? '⭕' : '❌';
+      li.innerHTML = `<span class="mk-rv-n">${q + 1}</span><span>コップ${r.cups}個・${r.swaps.length}回まぜる</span><span>${mine}</span><span class="mk-rv-who">当てた人 ${hits}/${x.live ?? s.n}</span>`;
       list.append(li);
     });
     box.append(sum, list);
