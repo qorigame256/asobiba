@@ -33,7 +33,7 @@
 //   詰み（決着）の手では出さない。本将棋・5五将棋・3人将棋（指した人の駒がほかの人の玉に利いた）・3×4（ライオンに利いた）のどれでも効く。
 //   なしのときだけ局面に quiet: true を持つ（ありのときは今までと全く同じ形）。CPU の読みと apply の結果は変えない。
 
-import { CPU_SETTING, PEEK_SETTING, peekMark, mulberry32 } from './util.js';
+import { CPU_SETTING, PEEK_SETTING, peekMark, mulberry32, judgeOf } from './util.js';
 import * as three from './shogi3.js';
 import * as zoo from './shogi34.js';
 
@@ -481,6 +481,14 @@ export default {
   sound(a, b) { return !b.quiet && gaveCheck(b) ? 'oute' : 'place'; },
 
   cpu(s, p, rules) { return s.n === 3 ? three.cpuMove(s, rules) : s.zoo ? zoo.cpuMove(s, rules) : cpuMove(s, rules); },
+
+  // 形勢（2026-11-12。util.js の judgeOf）: 2人の将棋（本将棋・5五・駒落ち）だけ。先読みはせず、CPU と同じ駒の点数（evaluate）だけで数える（重くしないため。Claude の判断）。
+  // 900 点（飛車1枚くらい）の差で「有利」と出る大きさ
+  judge(s) {
+    if (s.n === 3 || s.zoo) return null;
+    if (s.result) return s.result.winner === null ? 0 : s.result.winner === 0 ? 100 : -100;
+    return judgeOf(evaluate(s.board, s.hands, 0), 900);
+  },
 
   info(s) {
     if (s.n === 3) return three.info(s);

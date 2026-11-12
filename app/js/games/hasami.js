@@ -18,7 +18,7 @@
 //   3人の CPU は読みをせず、取れる数・動いたあとにほかの人に取られる自分の駒の数で選ぶ（hasami3Cpu）。結果には順位（place）を付ける。
 //   2人のときの局面と手は前と全く同じ形（3人のときだけ np: 3）。
 
-import { CPU_SETTING, PEEK_SETTING, peekMark, boardCpu, mulberry32 } from './util.js';
+import { CPU_SETTING, PEEK_SETTING, peekMark, boardCpu, boardJudge, mulberry32 } from './util.js';
 
 const DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 const MAX_PLY = 300;
@@ -268,6 +268,23 @@ export default {
   ],
 
   // CPU: 何手先まで読むかで強さを変える（よわい1・ふつう2・つよい3）。弱いほど適当に打つことがある
+  // 結果に名場面（2026-11-12。main.js の appendScenes）: 1人1行で、取った駒の数と1手でいちばん多く取った数
+  scenes(steps, n) {
+    const best = Array(n).fill(0);
+    steps.forEach(({ before, after }) => {
+      const p = before.turn;
+      if (p >= 0 && p < n) best[p] = Math.max(best[p], (after.taken[p] ?? 0) - (before.taken[p] ?? 0));
+    });
+    const end = steps.at(-1)?.after;
+    return best.map((b, p) => (end ? `取った駒 ${end.taken[p] ?? 0}個${b > 1 ? `（1手で最多 ${b}個）` : ''}` : null));
+  },
+
+  // 形勢（2026-11-12。util.js の boardJudge）: 2人だけ。取った駒の差を2手先まで読む
+  judge(s) {
+    if (s.np === 3) return null;
+    return boardJudge(this, s, (x) => movesOf(x.board, x.turn), score, 2, 2);
+  },
+
   cpu(s, p, rules) {
     if (s.np === 3) return hasami3Cpu(s, rules);
     return boardCpu(this, s, rules, (x) => movesOf(x.board, x.turn), score, {

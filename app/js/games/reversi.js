@@ -19,7 +19,7 @@
 //   隠している間は「石の数はひみつ（終わったら出ます）」と出す。ふりかえりの途中の局面は終わっていないので隠れたまま。CPU は変えない。
 //   人数・盤の大きさ・四隅封印・穴あき盤・角でもう1手と一緒に使える。
 
-import { CPU_SETTING, TAP_PEEK_SETTING, boardCpu, mulberry32 } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, boardCpu, boardJudge, mulberry32 } from './util.js';
 
 const N8 = 8; // 3〜4人はいつも 8×8
 const DIRS = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
@@ -217,6 +217,24 @@ export default {
   ],
 
   // CPU: 何手先まで読むかで強さを変える（よわい1・ふつう2・つよい4）。弱いほど適当に打つことがある
+  // 結果に名場面（2026-11-12。main.js の appendScenes）: 1人1行で、いちばん多く返した手
+  scenes(steps, n) {
+    const best = Array.from({ length: n }, () => ({ v: 0, k: 0 }));
+    steps.forEach(({ before, after }, i) => {
+      const p = before.turn;
+      if (!best[p]) return;
+      const v = before.board.filter((x, j) => x !== null && x !== p && after.board[j] === p).length;
+      if (v > best[p].v) best[p] = { v, k: i + 1 };
+    });
+    return best.map((b) => (b.v ? `いちばん多く返した手 ${b.v}枚（${b.k}手目）` : null));
+  },
+
+  // 形勢（2026-11-12。util.js の boardJudge）: 2人だけ。CPU の「ふつう」と同じ2手先まで読む
+  judge(s) {
+    if (s.n > 2) return null;
+    return boardJudge(this, s, (x) => legalMoves(x.board, x.turn, x.closed), score, 2, 120);
+  },
+
   cpu(s, p, rules) {
     if (s.n > 2) return wideCpu(s, rules);
     return boardCpu(this, s, rules, (x) => legalMoves(x.board, x.turn, x.closed), score, {

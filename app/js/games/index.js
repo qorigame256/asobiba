@@ -51,6 +51,12 @@
 //   自分が前に打ってからほかの人がした手について、main.js の saidBySeat が呼ぶ（カードゲームだけ）
 // 相手の迷いが見える（任意。2026-11-11。盤のゲーム）: render の o.peek({ f: 選んだマス, d: 選んだ持ち駒, a: PC でねらっているマス }) で自分の選びを知らせ
 //   （自分の番のときだけ o.peek がある）、o.peekIn（{ f, d, a } | null）で番の人の選びを受け取ってマスに .peek・.peek-aim を付ける。util.js の peekMark と PEEK_SETTING
+// 形勢（任意。2026-11-12。2人の盤のゲーム。いまはマルバツ・四目並べ・立体四目並べ・リバーシ・マンカラ・はさみ将棋・将棋）:
+//   judge(局面) → 席 0 から見た優勢の度合い −100〜100 | null（数えない局面）。Math.random を使わないこと（各端末で数えて同じ数を出すため）。util.js の boardJudge。
+//   main.js が観戦の人の形勢の帯と、ふりかえりの形勢の線・分かれ目に使う。judgeOpen(局面) → true なら対局している人にも帯を出す（形勢を見ても手が変わらない対戦。いまは無い）
+// 結果に名場面（任意。2026-11-12）: scenes(steps, 席の数) → 席ごとの一言（文字。名前は付けない）| null。steps = [{ before, after, move }]。
+//   無い盤のゲームは main.js がいちばん長く考えた手を出す（appendScenes）
+// 参りました（2026-11-12）: 下の GIVE_UP に入れた盤のゲームは、手 { give: true } で手番の人が負けを認めて終わる（util.js の withGiveUp が apply と result を包む）
 // 技の名前（任意。2026-11-06。いまは大富豪・いろあわせ・麻雀）:
 //   cutin(前の局面, 今の局面, 手, 自分の番号) → { text: 大きく出す字, color: 帯の色, flash?: 'invert'（盤の色を一瞬反転） } | null。
 //     新しい手が届いたときに、届いた手の新しい順に呼び、最初に返ってきた1つを出す（main.js の cutInFx。出ている間は「あなたのターン」の帯を待たせる）
@@ -163,6 +169,7 @@ import cup from './cup.js';
 import seesaw from './seesaw.js';
 import { HOWTO } from './howto.js';
 import { FIGS } from './howto-fig.js';
+import { withGiveUp } from './util.js';
 
 // 準備中のゲームを一覧に出すとき: soon('id', '名前', '絵文字')
 export const soon = (id, name, icon) => ({ id, name, icon, desc: 'じゅんび中', ready: false });
@@ -173,6 +180,11 @@ export const GAMES = {
   gomoku, dots, babanuki, doubt, yacht, wordwolf, jinro, sevens, mancala, oekaki, seri, blackjack, kaisen, pittari, typing, danmaku, tamaire, machigai, bombs, hasami, hitai, kioku, tamebeam, make10, ishin, karuta, acchi, daruma, slide, nanpure, mikiri, bingo, meiro, iroji, sugoroku, taru,
   isutori, cube4, kaidan, atodashi, bowling, tsuna, eitango, kaburi, anzan, golf, billiards, numtouch, mannaka, oxquiz, kotoba, oogiri, fukuwarai, nawa, darts, amida, narabe, kingyo, tower, fusen, kage, hane, kachikan, tsunagi, sumo, nearpin, kanjiplus, jigsaw, hitofude, ooi, yuki, hanabi, somen, kirigami, iromizu, heitai, oni, race, cup, seesaw,
 };
+// 参りました（2026-11-12 本人の選択。room.md「UI・UX の5回目」）を付ける2人で打つ盤のゲーム（util.js の withGiveUp で apply と result を包む）。
+// 将棋はもとから投了があるので入れない。見えない鬼ごっこ・方眼紙レースは全員が遊ぶ形（multi）なので入れない（Claude の判断）。
+// 3〜4人にできるゲームも入れてあるが、ボタンを出すのは2人のときだけ（main.js の canGiveUp）
+export const GIVE_UP = ['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'hasami'];
+for (const id of GIVE_UP) withGiveUp(GAMES[id]);
 // 遊び方（howto.js）。対局画面の「？遊び方」で出す（main.js の renderHowto）
 for (const [id, lines] of Object.entries(HOWTO)) if (GAMES[id]) GAMES[id].howto = lines;
 // 遊び方の図（howto-fig.js）。「？遊び方」の上に出し、howto の文は「くわしく」に畳む

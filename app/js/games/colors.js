@@ -420,6 +420,20 @@ export default {
     if (L.call) return { text: 'いろあわせ！', color: '#d9643a' };
     return null;
   },
+  // 結果に名場面（2026-11-12。main.js の appendScenes）: 1人1行で、出した札と山から引いた札の枚数。
+  // 点数で勝負は最後の回だけ数える（回が替わると局面を作り直すため。Claude の判断）
+  scenes(steps, n) {
+    const out = Array(n).fill(0);
+    const got = Array(n).fill(0);
+    for (const { before, after, move } of steps) {
+      if (move.t === 'next') { out.fill(0); got.fill(0); continue; }
+      const L = after.last;
+      if (!L || L.p !== move.p || L === before.last || !(L.p >= 0 && L.p < n)) continue;
+      if (L.t === 'play') out[L.p] += L.n ?? 1;
+      else if ((L.t === 'draw' || L.t === 'take') && L.got) got[L.p] += L.got;
+    }
+    return out.map((o, p) => `出した札 ${o}枚・引いた札 ${got[p]}枚`);
+  },
   // あなたの番までに起きたこと（2026-11-11。room.md「UI・UX の4回目」）: 順番の帯の札の下に出す短い言葉（名前は付けない）
   said(a, b, m) {
     const L = b.last;

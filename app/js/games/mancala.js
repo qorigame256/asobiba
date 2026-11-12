@@ -17,7 +17,7 @@
 //   （いつもは穴に12個まで・ゴールは数だけなので、ありのときはゴールにも石を描き、13個以上の穴とゴールは列を増やして小さく詰める。列の数は --cols）。
 //   終わったら（over）いつもどおり数を出す。ふりかえりの途中の局面は終わっていないので隠れたまま。CPU は変えない。
 
-import { CPU_SETTING, boardCpu } from './util.js';
+import { CPU_SETTING, boardCpu, boardJudge } from './util.js';
 
 const nOf = (s) => s.n ?? 2;
 const holesOf = (s) => s.holes ?? 6;
@@ -127,6 +127,24 @@ const game = {
     const top = Math.max(...sc);
     const winners = sc.map((v, p) => (v === top ? p : -1)).filter((p) => p >= 0);
     return { winner: winners.length === 1 ? winners[0] : null, cells: [], scores: sc }; // scores: 成績表の順位で点・表彰台（3人）
+  },
+
+  // 結果に名場面（2026-11-12。main.js の appendScenes）: 1人1行で、1手でいちばん多くゴールに入れた石
+  scenes(steps, n) {
+    const best = Array.from({ length: n }, () => ({ v: 0, k: 0 }));
+    steps.forEach(({ before, after }, i) => {
+      const p = before.turn;
+      if (!best[p]) return;
+      const v = after.pits[storeOf(after, p)] - before.pits[storeOf(before, p)];
+      if (v > best[p].v) best[p] = { v, k: i + 1 };
+    });
+    return best.map((b) => (b.v ? `1手でいちばん多くゴールに入れた ${b.v}個（${b.k}手目）` : null));
+  },
+
+  // 形勢（2026-11-12。util.js の boardJudge）: 2人だけ。ゴールの石の差を4手先まで読む（奇数だと先に打つ側に片寄って毎手ゆれるので偶数）
+  judge(s) {
+    if (nOf(s) !== 2) return null;
+    return boardJudge(game, s, legal, (t, who) => t.pits[storeOf(t, who)] - t.pits[storeOf(t, 1 - who)], 4, 6);
   },
 
   // CPU: 何手か先まで読む（ゴールの石の差で点を付ける）。よわいは浅く、ときどき適当に打つ

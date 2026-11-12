@@ -52,6 +52,25 @@ const power = (c) => {
   return r <= 2 ? r + 13 : r; // A = 14, 2 = 15
 };
 const powerLabel = (p) => rankLabel(p > 13 ? p - 13 : p);
+
+// 手札の並べ方（2026-11-12 本人の選択。card-games.md）: 強さ順（今まで）⇄ マーク順。画面の並びだけを変える（局面の手札は強さ順のまま）。
+// Claude の判断: 端末ごとに覚える（localStorage の bg-df-order）。マーク順では、同じマークで強さが3つ以上続く札（階段にできる札。ジョーカーは数えない。K-A-2 はつながる）を青緑の点線で囲む（.df-kai。出せる札の金の縁と見分けるため。本人には見本で金の縁と伝えた）
+const ORDER_KEY = 'bg-df-order';
+let suitOrder = (() => { try { return typeof localStorage !== 'undefined' && localStorage.getItem(ORDER_KEY) === 'suit'; } catch { return false; } })();
+const bySuit = (a, b) => (a === JOKER) - (b === JOKER) || SUITS.indexOf(suitOf(a)) - SUITS.indexOf(suitOf(b)) || power(a) - power(b);
+function stairCards(hand) {
+  const out = new Set();
+  for (const su of SUITS) {
+    const cs = hand.filter((c) => c !== JOKER && suitOf(c) === su).sort((a, b) => power(a) - power(b));
+    let run = [];
+    for (let i = 0; i <= cs.length; i++) {
+      if (i < cs.length && run.length && power(cs[i]) === power(run.at(-1)) + 1) { run.push(cs[i]); continue; }
+      if (run.length >= 3) run.forEach((c) => out.add(c));
+      run = i < cs.length ? [cs[i]] : [];
+    }
+  }
+  return out;
+}
 const sortHand = (h) => h.sort((a, b) => power(a) - power(b) || SUITS.indexOf(suitOf(a)) - SUITS.indexOf(suitOf(b)));
 
 export function titles(n) {
@@ -427,6 +446,26 @@ export default {
   },
   startSound: 'shuffle',
   // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
+  // 結果に名場面（2026-11-12。main.js の appendScenes）: 1人1行。出した組で起きた技（革命・8切り など）の回数の多い順に2つまで、技が無ければ出した組の数といちばん多く出した枚数。
+  // 何回か勝負は最後の回だけ数える（回が替わると局面を作り直すため。Claude の判断）
+  scenes(steps, n) {
+    const fx = Array.from({ length: n }, () => ({}));
+    const plays = Array(n).fill(0);
+    const most = Array(n).fill(0);
+    for (const { before, after, move } of steps) {
+      if (move.t === 'next') { fx.forEach((f) => { for (const k of Object.keys(f)) delete f[k]; }); plays.fill(0); most.fill(0); continue; }
+      const L = after.last;
+      if (move.t !== 'play' || !L || L.p !== move.p || L === before.last || !Array.isArray(L.cards)) continue;
+      plays[L.p]++;
+      most[L.p] = Math.max(most[L.p], L.cards.length);
+      for (const e of L.effects ?? []) { const k = e.startsWith('しばり') ? 'しばり' : e; fx[L.p][k] = (fx[L.p][k] ?? 0) + 1; }
+    }
+    return fx.map((f, p) => {
+      const top = Object.entries(f).sort((x, y) => y[1] - x[1]).slice(0, 2);
+      if (top.length) return '技: ' + top.map(([k, v]) => (v > 1 ? `${k}×${v}` : k)).join('・');
+      return plays[p] ? `出した組 ${plays[p]}回（いちばん多くて ${most[p]}枚）` : null;
+    });
+  },
   // あなたの番までに起きたこと（2026-11-11。room.md「UI・UX の4回目」）: 順番の帯の札の下に出す短い言葉（名前は付けない）
   said(a, b, m) {
     const L = b.last;
@@ -821,20 +860,37 @@ export default {
           : legal.length ? '出す札を選んで「出す」。光っている札が使えます' : '出せる札がありません。自動でパスします';
         head.append(hint);
       }
+      const ord = document.createElement('button');
+      ord.type = 'button';
+      ord.className = 'btn ghost small df-order';
+      ord.textContent = suitOrder ? '並べ方: マーク順 → 強さ順にする' : '並べ方: 強さ順 → マーク順にする';
+      ord.onclick = () => {
+        suitOrder = !suitOrder;
+        try { localStorage.setItem(ORDER_KEY, suitOrder ? 'suit' : 'power'); } catch { /* 覚えられなくても切り替えはできる */ }
+        draw();
+      };
+      head.append(ord);
+      if (suitOrder) {
+        const k = document.createElement('small');
+        k.textContent = stairCards(s.hands[me]).size ? '青緑の点線の札は、階段（同じマークの3枚以上の連番）にできます' : '';
+        if (k.textContent) head.append(k);
+      }
       root.append(head);
 
       const hand = document.createElement('div');
       hand.className = 'df-hand';
+      const kai = suitOrder ? stairCards(s.hands[me]) : null;
       const seen = {};
       // 札がすっと動く（2026-11-06）: 新しく来た札は、渡してきた人の席から（交換など）か場のあたりから裏返りながら（対局の始めは配る）
       const comeFrom = s.last?.to === me && s.last.p !== me ? `opp:${s.last.p}` : 'field';
-      for (const c of s.hands[me]) {
+      for (const c of suitOrder ? [...s.hands[me]].sort(bySuit) : s.hands[me]) {
         const can = giving || !!pd || usable.has(c);
         const pickable = myTurn && !bombing;
         const e = cardEl(c, pickable ? 'button' : 'div');
         seen[c] = (seen[c] ?? -1) + 1;
         Object.assign(e.dataset, { fly: `c:${c}#${seen[c]}`, flyFrom: comeFrom, flyTurn: '', flyDeal: '' });
         if (can) e.classList.add('usable');
+        if (kai?.has(c)) e.classList.add('df-kai');
         if (sel.cards.includes(c)) e.classList.add('selected');
         if (pickable) {
           e.onclick = () => {

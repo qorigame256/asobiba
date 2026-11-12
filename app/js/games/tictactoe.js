@@ -20,7 +20,9 @@
 //   3〜4人と同じ広い盤（大きさは詳細設定「広い盤の大きさ」）で、4つ並べたら勝ち。おまかせは 6×6
 //   （CPU どうしで 5×5 は半分が引き分け、6×6 より広いと引き分けはほぼ無い）。CPU も3〜4人と同じ wideCpu。
 
-import { CPU_SETTING, TAP_PEEK_SETTING, boardCpu, winLine } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, DANGER_SETTING, boardCpu, boardJudge, dangerMoves, dangerOn, winLine } from './util.js';
+
+const emptyCells = (x) => x.board.map((v, i) => (v === null ? i : -1)).filter((i) => i >= 0); // あぶない所の知らせで調べる手
 
 const LINES = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
 const MARKS = [
@@ -433,13 +435,15 @@ function wideCpu(s, rules) {
   return top[0];
 }
 
-function renderWide(root, s, o) {
+function renderWide(root, s, o, game) {
   const res = wideResult(s);
   root.innerHTML = '';
   root.className = 'board tttw';
   root.style.setProperty('--w', s.w);
+  const danger = dangerOn(o) && !res ? dangerMoves(game, s, s.n, emptyCells) : null; // あぶない所の知らせ（2026-11-12）
   s.board.forEach((v, i) => {
     const cell = cellButton(v, i, s, o, v === null && o.canMove);
+    if (danger?.has(i)) cell.classList.add('danger');
     if (res?.cells.includes(i)) cell.classList.add('win');
     root.append(cell);
   });
@@ -520,11 +524,21 @@ export default {
       choices: WIDE_CHOICES,
     },
     TAP_PEEK_SETTING,
+    DANGER_SETTING,
     CPU_SETTING,
   ],
 
   // CPU: よわい＝1手先だけ・ときどき適当、ふつう＝相手の次の手まで読む、つよい＝最後まで読む（負けない）
   // スーパー: よわい＝1手先・4割は適当、ふつう＝2手先・1割は適当、つよい＝4手先（どこにでも置ける局面は3手先。重くなるため）
+  // 形勢（2026-11-12。util.js の boardJudge）: 2人の 3×3・スーパー・消える・かぶせだけ（広い盤と3〜4人は数えない）。ふつうの 3×3 は最後まで読むので勝ち・引き分け・負けのどれかになる
+  judge(s) {
+    if (s.wide) return null;
+    if (s.gob) return boardJudge(this, s, gobLegal, gobScore, 2, 15);
+    if (s.vanish) return boardJudge(this, s, (x) => x.board.map((v, i) => (v === null ? i : -1)).filter((i) => i >= 0), vanishScore, 4, 15);
+    if (s.big) return boardJudge(this, s, bigLegal, bigScore, 2, 150);
+    return boardJudge(this, s, (x) => x.board.map((v, i) => (v === null ? i : -1)).filter((i) => i >= 0), () => 0, 9, 1);
+  },
+
   cpu(s, p, rules) {
     if (s.wide) return wideCpu(s, rules);
     if (s.gob) {
@@ -605,14 +619,16 @@ export default {
 
   render(root, s, o) {
     if (s.big) { renderBig(root, s, o); return; }
-    if (s.wide) { renderWide(root, s, o); return; }
+    if (s.wide) { renderWide(root, s, o, this); return; }
     if (s.gob) { renderGob(root, s, o); return; }
     const res = this.result(s);
     const fade = s.vanish && !res ? fading(s) : [];
     root.innerHTML = '';
     root.className = 'board ttt';
+    const danger = dangerOn(o) && !res ? dangerMoves(this, s, 2, emptyCells) : null; // あぶない所の知らせ（2026-11-12）
     s.board.forEach((v, i) => {
       const cell = cellButton(v, i, s, o, v === null && o.canMove);
+      if (danger?.has(i)) cell.classList.add('danger');
       cell.classList.remove('last');
       if (fade.includes(i)) cell.classList.add('fade');
       if (res?.cells.includes(i)) cell.classList.add('win');

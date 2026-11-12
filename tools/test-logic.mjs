@@ -10407,6 +10407,92 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('seesaw settings OK');
 }
 
+// UI・UX の5回目（2026-11-12。room.md「UI・UX の5回目」・board-games.md・card-games.md）: 参りました・形勢・あぶない所の知らせ・名場面・大富豪の階段の札
+{
+  const { GIVE_UP } = await import('../app/js/games/index.js');
+  const { dangerMoves } = await import('../app/js/games/util.js');
+  // 参りました: 手番の人の負け。そのあとは手を受け付けない。決着した局面・3人目の番では受け付けない
+  for (const id of GIVE_UP) {
+    const G = GAMES[id];
+    assert.ok(G.giveUp, `参りました: ${id} に付いている`);
+    let s = G.init({ rules: {}, seed: 3 });
+    const t = G.turn(s);
+    const g = G.apply(s, { give: true });
+    assert.ok(g, `参りました: ${id} で手番の人が打てる`);
+    assert.equal(G.result(g)?.winner, 1 - t, `参りました: ${id} で相手の勝ち`);
+    assert.equal(G.result(g)?.gave, t, `参りました: ${id} の結果に参った人`);
+    assert.equal(G.apply(g, { give: true }), null, `参りました: ${id} で決着のあとは受け付けない`);
+    assert.equal(G.result(s), null, `参りました: ${id} の前の局面は変わらない`);
+  }
+  {
+    let s = T.init({ rules: {} });
+    for (const m of [0, 3, 1, 4, 2]) s = T.apply(s, m);
+    assert.equal(T.apply(s, { give: true }), null, '参りました: 決着した局面では受け付けない');
+    const w = C.init({ rules: { players: 3 } });
+    assert.equal(C.apply({ ...w, turn: 2 }, { give: true }), null, '参りました: 3人目の番では受け付けない');
+  }
+  assert.ok(!GAMES.shogi.giveUp && !GAMES.colors.giveUp, '参りました: 将棋（もとから投了）とカードゲームには付けない');
+  // 形勢: −100〜100 の整数・同じ局面は同じ数・決着は ±100・席 0 が勝てる局面は正
+  for (const id of ['tictactoe', 'connect4', 'cube4', 'reversi', 'mancala', 'hasami', 'shogi']) {
+    const G = GAMES[id];
+    let s = G.init({ rules: {}, seed: 1 });
+    for (let k = 0; k < 12 && !G.result(s); k++) {
+      const v = G.judge(s);
+      assert.ok(Number.isInteger(v) && v >= -100 && v <= 100, `形勢: ${id} は −100〜100 の整数（${v}）`);
+      assert.equal(G.judge(s), v, `形勢: ${id} は同じ局面で同じ数`);
+      s = G.apply(s, G.cpu(s, G.turn(s), { cpu: 'weak' }));
+    }
+  }
+  {
+    let s = T.init({ rules: {} });
+    for (const m of [0, 3, 1, 4]) s = T.apply(s, m); // ○が 0・1、×が 3・4。○の番で、2 に置けば勝ち
+    assert.equal(T.judge(s), 100, '形勢: 席 0 が次に勝てる局面は 100');
+    s = T.apply(s, 2);
+    assert.equal(T.judge(s), 100, '形勢: 席 0 の勝ちは 100');
+    assert.equal(T.judge(T.apply(T.init({ rules: {} }), { give: true })), -100, '形勢: 席 0 が参ったら −100');
+    assert.equal(T.judge(T.init({ rules: { players: 3 } })), null, '形勢: 3人の盤は数えない');
+    assert.equal(GAMES.shogi.judge(GAMES.shogi.init({ rules: { players: 3 } })), null, '形勢: 3人将棋は数えない');
+  }
+  // あぶない所の知らせ: ほかの人が次の一手で勝てる所だけ
+  {
+    let s = T.init({ rules: {} });
+    for (const m of [4, 0, 8, 1]) s = T.apply(s, m); // ○が 4・8、×が 0・1。○の番で、×は 2 で勝つ
+    const emp = (x) => x.board.map((v, i) => (v === null ? i : -1)).filter((i) => i >= 0);
+    assert.deepEqual([...dangerMoves(T, s, 2, emp)], [2], 'あぶない所: マルバツで × が勝てる 2 だけ');
+    let c = C.init({ rules: {} });
+    for (const m of [0, 6, 0, 6, 1, 6]) c = C.apply(c, m); // 青が 6 列目に3つ。赤の番
+    assert.deepEqual([...dangerMoves(C, c, 2, (x) => [...Array(x.w).keys()].filter((k) => x.grid[k] === null))], [6], 'あぶない所: 四目並べで青が4つ目を落とせる列だけ');
+  }
+  // 名場面: 1人1行（席の数の長さ）
+  {
+    let s = R.init({ rules: {} });
+    const steps = [];
+    for (let k = 0; k < 20 && !R.result(s); k++) { const b = s; s = R.apply(s, R.cpu(s, R.turn(s), { cpu: 'weak' })); steps.push({ before: b, after: s, move: null }); }
+    const lines = R.scenes(steps, 2);
+    assert.equal(lines.length, 2, '名場面: リバーシは席の数だけ');
+    assert.ok(lines.every((t) => /^いちばん多く返した手 \d+枚（\d+手目）$/.test(t)), `名場面: リバーシの一言（${lines}）`);
+    // 返した枚数は「打った人の石の増えた数 − 置いた1つ」と同じ
+    const cnt = (b, p) => b.filter((x) => x === p).length;
+    const want = [0, 1].map((p) => Math.max(...steps.filter((x) => x.before.turn === p).map((x) => cnt(x.after.board, p) - cnt(x.before.board, p) - 1)));
+    assert.deepEqual(lines.map((t) => Number(t.match(/(\d+)枚/)[1])), want, '名場面: リバーシの返した枚数');
+    const D = GAMES.daifugo;
+    let d = D.init(4, 7, { rules: { revolution: true, eight: true } });
+    const ds = [];
+    for (let k = 0; k < 400 && !D.result(d); k++) {
+      const p = D.turn(d) ?? [0, 1, 2, 3].find((q) => D.canAct(d, q));
+      const m = D.cpu(d, p);
+      if (!m) break;
+      const b = d;
+      d = D.apply(d, { ...m, p });
+      ds.push({ before: b, after: d, move: { ...m, p } });
+    }
+    const dl = D.scenes(ds, 4);
+    assert.equal(dl.length, 4, '名場面: 大富豪は席の数だけ');
+    assert.ok(dl.some((t) => typeof t === 'string' && t.length), '名場面: 大富豪で一言が出る');
+  }
+  console.log('UI・UX の5回目 OK');
+}
+
 // 見出しの字体（2026-11-09。tools/make-fonts.mjs）: 今のコードのゲームの名前・仲間の名前・技の名前の字が、切り出した字体に全部入っているか。
 // 落ちたら、元の字体のフォルダを渡して node tools/make-fonts.mjs で作り直す（入っていない字はほかの字体で出るだけで、崩れはしない）
 {

@@ -21,7 +21,7 @@
 //   はさみ取りは、ほかの1人の石がちょうど2つ並んだ両側を自分の石ではさむと取れる（2つは同じ人の石。違う人の石が混ざっていたら取れない）。
 //   2人のときの局面は前と全く同じ形（3人のときだけ np: 3）。CPU は2人と同じ考え方で、守りは次の番の人を重く見る。
 
-import { CPU_SETTING, TAP_PEEK_SETTING, mulberry32, winLine } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, DANGER_SETTING, dangerMoves, dangerOn, mulberry32, winLine } from './util.js';
 
 const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
 const DIRS8 = [...DIRS, ...DIRS.map(([r, c]) => [-r, -c])];
@@ -337,6 +337,7 @@ export default {
     { key: 'capture', label: 'はさみ取り', desc: '相手の石がちょうど2つ並んだ両側をはさむと取れる（3人では同じ人の石2つ）。5組（10個）取っても勝ち', def: false },
     { key: 'blocks', label: 'じゃま石', desc: '始める前に、だれの物でもない灰色の石を数個置く（置けない・並びが切れる）。場所は毎回ちがう', def: false },
     TAP_PEEK_SETTING,
+    DANGER_SETTING,
     CPU_SETTING,
   ],
 
@@ -380,6 +381,8 @@ export default {
     root.style.setProperty('--n', n);
     const ban = s.renju && s.turn === BLACK && !res;
     const stars = n === 15 ? [3, 7, 11] : [3, 6, 9]; // 目印の点（星）
+    // あぶない所の知らせ（2026-11-12）: ほかの人が次に置けば勝つ点
+    const danger = dangerOn(o) && !res ? dangerMoves(this, s, np(s), (t) => t.grid.map((v, j) => (v === null ? j : -1)).filter((j) => j >= 0)) : null;
     for (let i = 0; i < n * n; i++) {
       const r = Math.floor(i / n);
       const c = i % n;
@@ -411,7 +414,8 @@ export default {
       } else if (o.canMove) {
         if (o.fresh && s.taken?.includes(i)) cell.append(Object.assign(document.createElement('span'), { className: 'gm-ghost' }));
         cell.classList.add('playable', 'p' + s.turn);
-        cell.setAttribute('aria-label', `${r + 1}段目 ${c + 1}列目`);
+        if (danger?.has(i)) cell.classList.add('danger');
+        cell.setAttribute('aria-label', `${r + 1}段目 ${c + 1}列目${danger?.has(i) ? '（あぶない所）' : ''}`);
         cell.onclick = () => o.onMove(i);
       } else {
         if (o.fresh && s.taken?.includes(i)) cell.append(Object.assign(document.createElement('span'), { className: 'gm-ghost' }));

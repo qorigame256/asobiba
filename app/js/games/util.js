@@ -46,6 +46,31 @@ export function peekMark(e, i, o, isTarget, sel) {
   }
 }
 
+// あぶない所の知らせ（2026-11-12 本人の選択。board-games.md）: 自分のターンのあいだ、ほかの人が次の一手で勝てる所に赤い「！」を出す。
+// マルバツ（3×3・広い盤・消える）・四目並べ・五目並べ・立体四目並べ。ゲームは render の o.rules（main.js が渡す詳細設定の値）で見る。
+// 好みの設定なので、おまかせでは抽選しない（main.js の KEEP_KEYS に danger）
+export const DANGER_SETTING = {
+  key: 'danger', label: 'あぶない所の知らせ', desc: 'ありなら自分のターンのあいだ、ほかの人が次の一手で勝てる所に赤い「！」を出す', def: 'off',
+  choices: [['off', 'なし'], ['on', 'あり']],
+};
+// s の番の人から見て、ほかの人（席 0〜seats−1）が次の一手で勝てる手の一覧（Set）。s.turn をその人に入れ替え、cands(局面) の手を当てて勝つかを見る
+// （どのゲームも apply が s.turn の人の手として当てるので使える）
+export function dangerMoves(game, s, seats, cands) {
+  const out = new Set();
+  for (let q = 0; q < seats; q++) {
+    if (q === s.turn) continue;
+    const t = { ...s, turn: q };
+    for (const m of cands(t)) {
+      let nx = null;
+      try { nx = game.apply(t, m); } catch { nx = null; }
+      const r = nx && game.result(nx);
+      if (r && r.winner === q) out.add(m);
+    }
+  }
+  return out;
+}
+export const dangerOn = (o) => o.canMove && o.rules?.danger === 'on';
+
 export const CPU_SETTING = {
   key: 'cpu', label: 'CPU の強さ', desc: 'CPU と対局するときの強さ', def: 'weak',
   choices: [['weak', 'よわい'], ['normal', 'ふつう'], ['strong', 'つよい']],
@@ -55,27 +80,30 @@ export const CPU_SETTING = {
 // legal(局面) → 打てる手の一覧、score(局面, p) → 決着前の局面の p から見た点数（勝ち負けより十分小さく）。
 // opts = { depth: { weak, normal, strong }, mistake: { weak, normal, strong } }。mistake は適当に打つ割合。
 // CPU はホストの端末だけで動くので Math.random を使ってよい。
+const WIN = 1e6;
+// s を who の番から depth 手先まで読んだ who から見た点数（boardCpu と boardJudge が使う）
+function negamax(game, legal, score, s, depth, alpha, beta, who) {
+  const res = game.result(s);
+  if (res) return res.winner === null ? 0 : res.winner === who ? WIN + depth : -WIN - depth;
+  if (depth === 0) return score(s, who);
+  let best = -Infinity;
+  for (const m of legal(s)) {
+    const child = game.apply(s, m);
+    const next = game.result(child) ? who : game.turn(child);
+    const v = next === who ? negamax(game, legal, score, child, depth - 1, alpha, beta, who) : -negamax(game, legal, score, child, depth - 1, -beta, -alpha, next);
+    if (v > best) best = v;
+    if (best > alpha) alpha = best;
+    if (alpha >= beta) break;
+  }
+  return best;
+}
+
 export function boardCpu(game, st, rules, legal, score, opts) {
   const level = opts.depth[rules?.cpu] !== undefined ? rules.cpu : 'weak';
   const moves = legal(st);
   if (moves.length === 1) return moves[0];
   if (Math.random() < opts.mistake[level]) return moves[Math.floor(Math.random() * moves.length)];
-  const WIN = 1e6;
-  const nega = (s, depth, alpha, beta, who) => {
-    const res = game.result(s);
-    if (res) return res.winner === null ? 0 : res.winner === who ? WIN + depth : -WIN - depth;
-    if (depth === 0) return score(s, who);
-    let best = -Infinity;
-    for (const m of legal(s)) {
-      const child = game.apply(s, m);
-      const next = game.result(child) ? who : game.turn(child);
-      const v = next === who ? nega(child, depth - 1, alpha, beta, who) : -nega(child, depth - 1, -beta, -alpha, next);
-      if (v > best) best = v;
-      if (best > alpha) alpha = best;
-      if (alpha >= beta) break;
-    }
-    return best;
-  };
+  const nega = (s, depth, alpha, beta, who) => negamax(game, legal, score, s, depth, alpha, beta, who);
   const me = game.turn(st);
   let best = -Infinity;
   let top = [];
@@ -87,6 +115,51 @@ export function boardCpu(game, st, rules, legal, score, opts) {
     if (v > best) { best = v; top = [m]; } else if (v === best) top.push(m);
   }
   return top[Math.floor(Math.random() * top.length)]; // 同じ点数なら毎回違う手に
+}
+
+// 形勢（2026-11-12 本人の選択。room.md「UI・UX の5回目」の「形勢の帯」「ふりかえりの分かれ目」）: 2人の盤のゲームの judge(局面) が使う。
+// 1番目の席（席 0）から見た優勢の度合いを −100〜100 の整数で返す（100 = 席 0 の勝ち・決まった勝ち、0 = 互角）。数えられない局面は null。
+// CPU と同じ読み（negamax）を depth 手先まで読み、点数を scale で割って tanh で −1〜1 に縮める（scale はそのゲームの点数の「はっきり差がある」くらいの大きさ。Claude の判断）。
+// Math.random を使わないので、どの端末でも同じ局面なら同じ数になる
+export function boardJudge(game, st, legal, score, depth, scale) {
+  const res = game.result(st);
+  if (res) return res.winner === null ? 0 : res.winner === 0 ? 100 : -100;
+  const me = game.turn(st);
+  if ((me !== 0 && me !== 1) || !legal(st).length) return null;
+  // 読みの切れ目で「次に打つ側」が得に見えて1手ごとに上下にゆれる（四目並べで3手に2回ほど）ので、depth と depth − 1 の読みを平均する
+  const read = (d) => { const v = negamax(game, legal, score, st, d, -Infinity, Infinity, me); return me === 0 ? v : -v; };
+  const a = read(depth);
+  if (depth < 2 || !Number.isFinite(a) || Math.abs(a) >= WIN) return judgeOf(a, scale);
+  const b = read(depth - 1);
+  return judgeOf(!Number.isFinite(b) || Math.abs(b) >= WIN ? b : (a + b) / 2, scale);
+}
+// 席 0 から見た点数 → −100〜100（決まった勝ち負けは ±100）
+export function judgeOf(v0, scale) {
+  if (!Number.isFinite(v0) || Math.abs(v0) >= WIN) return v0 > 0 ? 100 : -100;
+  return Math.round(100 * Math.tanh(v0 / scale));
+}
+
+// 参りました（2026-11-12 本人の選択。room.md「UI・UX の5回目」）: 2人で打つ盤のゲームで、手 { give: true } を打った手番の人の負けにする。
+// ゲームのファイルは変えず、ここで apply と result を包む（index.js の GIVE_UP）。局面に gave（参った人の席の番号）を足すだけで、盤はそのまま。
+// 打てるのは手番の人だけ（盤のゲームの手には打った人が入らないため。将棋の投了と同じ。Claude の判断）。
+// 3人以上の盤では main.js がボタンを出さない（ここでは手番が 0・1 かだけ見る）
+export function withGiveUp(def) {
+  const { apply, result } = def;
+  def.giveUp = true;
+  def.apply = function (s, m) {
+    if (s && s.gave !== undefined) return null;
+    if (m && typeof m === 'object' && m.give === true) {
+      if (!s || result.call(this, s)) return null;
+      const t = this.turn(s);
+      return t === 0 || t === 1 ? { ...s, gave: t } : null;
+    }
+    return apply.call(this, s, m);
+  };
+  def.result = function (s) {
+    if (s && s.gave !== undefined) return { winner: 1 - s.gave, cells: [], gave: s.gave };
+    return result.call(this, s);
+  };
+  return def;
 }
 
 // 人の名前など、外から来た文字を HTML に埋め込むときに使う

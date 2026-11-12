@@ -17,7 +17,7 @@
 const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
 export const NEUTRAL = -1; // じゃま石
 
-import { CPU_SETTING, TAP_PEEK_SETTING, boardCpu, mulberry32, winLine } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, DANGER_SETTING, boardCpu, boardJudge, dangerMoves, dangerOn, mulberry32, winLine } from './util.js';
 
 // 盤（列 w・段 h）の4つ並びの窓の一覧。マスごとに、そのマスを含む窓の番号も持つ
 const WINDOWS = {};
@@ -274,10 +274,18 @@ export default {
       choices: [['off', 'なし'], ['on', 'あり']],
     },
     TAP_PEEK_SETTING,
+    DANGER_SETTING,
     CPU_SETTING,
   ],
 
   // CPU（2人）: 何手先まで読むかで強さを変える（7列は よわい2・ふつう4・つよい6。広い盤は浅く。twoDepth）。弱いほど適当に打つことがある
+  // 形勢（2026-11-12。util.js の boardJudge）: 2人だけ。CPU の「ふつう」と同じ4手先（広い盤は2手先）まで読む（奇数だと先に打つ側に片寄って毎手ゆれるので偶数）
+  judge(s) {
+    if (s.n > 2) return null;
+    const legal = s.pop ? popLegal : (x) => centerOrder(x.w).filter((c) => x.grid[c] === null);
+    return boardJudge(this, s, legal, score, s.w <= 9 ? 4 : 2, 25);
+  },
+
   cpu(s, p, rules) {
     if (s.n > 2) return wideCpu(s, rules);
     if (s.pop) {
@@ -334,6 +342,9 @@ export default {
     root.innerHTML = '';
     root.className = 'board c4' + (s.w > 7 ? ' c4w' : '');
     root.style.setProperty('--cols', s.w);
+    // あぶない所の知らせ（2026-11-12）: ほかの人が次に落とせば4つ並ぶ列の、石が止まるマス
+    const danger = new Set();
+    if (dangerOn(o) && !res) for (const c of dangerMoves(this, s, s.n, (t) => [...Array(t.w).keys()].filter((x) => t.grid[x] === null))) danger.add(landing(s, c));
     for (let c = 0; c < s.w; c++) {
       const col = document.createElement('button');
       col.type = 'button';
@@ -348,7 +359,7 @@ export default {
       for (let r = 0; r < s.h; r++) {
         const i = r * s.w + c;
         const cell = document.createElement('span');
-        cell.className = 'c4-cell';
+        cell.className = 'c4-cell' + (danger.has(i) ? ' danger' : '');
         const v = s.grid[i];
         if (v !== null) {
           const disc = document.createElement('span');

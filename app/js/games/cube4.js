@@ -17,7 +17,7 @@
 //   3人の CPU は読みをせず（2人用の読みは相手が1人の前提のため）、置けるマスごとの点数で選ぶ（threeCpu。四目並べの3人の CPU と同じ考え方）。
 // 手 = 柱の番号（上から見て 列 + 行×4。0〜15）。重力なしではマスの番号（0〜63）。マスの番号は 段×16 + 柱（段0 が一番下）。
 
-import { CPU_SETTING, TAP_PEEK_SETTING, boardCpu } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, DANGER_SETTING, boardCpu, boardJudge, dangerMoves, dangerOn } from './util.js';
 
 const N = 4;
 const COLS = N * N;
@@ -147,9 +147,16 @@ export default {
   settings: [
     { key: 'players', label: '人数', def: 2, desc: '3人では 赤・黄・緑 の順に置く。大きさは 4×4×4 のまま', choices: [[2, '2人'], [3, '3人']] },
     TAP_PEEK_SETTING,
+    DANGER_SETTING,
     CPU_SETTING,
     { key: 'free', label: '重力なし', desc: '下から積まずに、どの段のマスにも直接置ける', def: false },
   ],
+
+  // 形勢（2026-11-12。util.js の boardJudge）: 2人だけ。2手先まで読む（奇数だと先に打つ側に片寄って毎手ゆれるので偶数）
+  judge(s) {
+    if (np(s) === 3) return null;
+    return boardJudge(this, s, legal, score, 2, 20);
+  },
 
   cpu(s, p, rules) {
     if (np(s) === 3) return threeCpu(s, rules);
@@ -191,6 +198,12 @@ export default {
     const win = new Set(res?.cells ?? []);
     root.innerHTML = '';
     root.className = 'board cb' + (s.free ? ' cb-free' : '');
+    // あぶない所の知らせ（2026-11-12）: ほかの人が次に置けば4つ並ぶマス（積むときはその柱の次のマス）
+    const danger = new Set();
+    if (dangerOn(o) && !res) {
+      const cands = s.free ? (t) => t.grid.map((v, j) => (v === null ? j : -1)).filter((j) => j >= 0) : (t) => [...Array(COLS).keys()].filter((c) => landing(t, c) >= 0);
+      for (const m of dangerMoves(this, s, np(s), cands)) danger.add(s.free ? m : landing(s, m));
+    }
 
     // 上から見た盤（押すとその柱に積む。重力なしでは出さない）
     const top = document.createElement('div');
@@ -212,6 +225,7 @@ export default {
         const v = s.grid[i];
         slot.className = 'cb-slot' + (v === null ? '' : ' p' + v) + (win.has(i) ? ' win' : '') + (i === s.last ? ' last' : '');
         if (v === null && z === h && o.canMove) slot.classList.add('next');
+        if (danger.has(i)) { slot.classList.add('danger'); b.classList.add('has-danger'); }
         b.append(slot);
       }
       top.append(b);
@@ -232,7 +246,7 @@ export default {
         const i = z * COLS + c;
         const v = s.grid[i];
         const cell = document.createElement(s.free ? 'button' : 'span');
-        cell.className = 'cb-cell';
+        cell.className = 'cb-cell' + (danger.has(i) ? ' danger' : '');
         if (s.free) {
           cell.type = 'button';
           cell.setAttribute('aria-label', `${z + 1}段目 ${Math.floor(c / N) + 1}行${(c % N) + 1}列`);

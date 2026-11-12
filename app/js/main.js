@@ -1086,7 +1086,7 @@ function rulesOf(gameId, rules) {
 // マルバツ・将棋の size は盤の大きさでなく遊び方（スーパー・消える・5五将棋）なので抽選する。
 // ビンゴの終わり方（until。長さ）・ことわざかるたの場の札の数（field。難しさ）も抽選しない（2026-10-29 の Codex の点検。本人承認）。
 // 綱引き連打の綱の重さ（weight。長さ）・ボウリングのガードレール（bumper。ハンデ）と向きの線（guide。手助け）も抽選しない。立体四目並べの重力なし（free）は遊び方なので抽選する（31回目の案。Claude の判断）。ミニゴルフのホールの数（holes。長さ）も抽選しない（2026-11-02。Claude の判断）。
-const KEEP_KEYS = new Set(['players', 'peek', 'wide', 'cpu', 'speed', 'season', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'safe', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check', 'mallet', 'stones', 'diffs', 'kind', 'tries', 'until', 'field', 'frames', 'weight', 'bumper', 'guide', 'ask', 'holes', 'gap', 'teams', 'judge', 'drops', 'lives', 'flash', 'boxes', 'every', 'onis', 'games']); // games = シーソーにのせるの何回戦（長さ。2026-11-12 の Claude の判断）・peek = 相手の迷いを見せる（好み。2026-11-11 の Claude の判断）・every = 見えない鬼ごっこの見える間隔（難しさ）・onis = 鬼の数（人数）（2026-11-11 の Claude の判断）・drops = 羽根つきの落とせる回数（長さ）・lives = 価値観ならべのライフの数（難しさ）（2026-11-05 の Claude の判断）・gap = ビンゴの数字の間・teams = 綱引きのチームの数（2026-11-03。時間の長さと人数なので抽選しない。Claude の判断）・judge = 大喜利の審査員が選ぶ（回数が人数で決まるので抽選しない。2026-11-03 の Claude の判断）・flash = 多いのはどっちの点の見える時間（難しさ）・boxes = 多いのはどっちの箱の数（答えの数。シルエットクイズの choice と同じ）（2026-11-09 の Claude の判断）・season = 流しそうめんの季節（見た目の好み。2026-11-10 の Claude の判断）
+const KEEP_KEYS = new Set(['players', 'peek', 'danger', 'wide', 'cpu', 'speed', 'season', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'safe', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check', 'mallet', 'stones', 'diffs', 'kind', 'tries', 'until', 'field', 'frames', 'weight', 'bumper', 'guide', 'ask', 'holes', 'gap', 'teams', 'judge', 'drops', 'lives', 'flash', 'boxes', 'every', 'onis', 'games']); // danger = あぶない所の知らせ（好み。2026-11-12 の Claude の判断）・games = シーソーにのせるの何回戦（長さ。2026-11-12 の Claude の判断）・peek = 相手の迷いを見せる（好み。2026-11-11 の Claude の判断）・every = 見えない鬼ごっこの見える間隔（難しさ）・onis = 鬼の数（人数）（2026-11-11 の Claude の判断）・drops = 羽根つきの落とせる回数（長さ）・lives = 価値観ならべのライフの数（難しさ）（2026-11-05 の Claude の判断）・gap = ビンゴの数字の間・teams = 綱引きのチームの数（2026-11-03。時間の長さと人数なので抽選しない。Claude の判断）・judge = 大喜利の審査員が選ぶ（回数が人数で決まるので抽選しない。2026-11-03 の Claude の判断）・flash = 多いのはどっちの点の見える時間（難しさ）・boxes = 多いのはどっちの箱の数（答えの数。シルエットクイズの choice と同じ）（2026-11-09 の Claude の判断）・season = 流しそうめんの季節（見た目の好み。2026-11-10 の Claude の判断）
 const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
 
 // 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、将棋・マンカラ・海戦ゲーム・五目並べ・立体四目並べ・はさみ将棋・エアホッケーは 2〜3。ほかは2）
@@ -1779,6 +1779,7 @@ function statusHtml(game, st, res) {
       const t = game.turn(st);
       main = t === me ? 'あなたのターン' : n > 2 ? `${name(t)}（${who(t)}）のターン…` : '相手のターン…';
     }
+    if (res && Number.isInteger(res.gave)) main += `<div class="gave-note">🏳 ${res.gave === me ? 'あなた' : `${name(res.gave)}（${who(res.gave)}）`}が参りました</div>`; // 参りました（2026-11-12）
     if (S.mode === 'online') {
       if (me === SPECTATOR) {
         sub = '観戦中: ' + roundOrder().map((_, p) => `${name(p)} ${who(p)}`).join(' ／ ');
@@ -2063,6 +2064,9 @@ function renderPage() {
   const band = turnBand(game, st, res);
   if (band) status.prepend(band);
   if (res && !game.multi && renderReview(game, st)) return; // ふりかえりで途中の局面を見ている
+  if (!game.multi && !(res && S.review?.key === reviewKey())) { const jb = judgeBar(game, st); if (jb) status.append(jb); } // 形勢の帯（2026-11-12）
+  if (res && !game.multi && S.review?.key === reviewKey()) { const ch = judgeChart(game, S.moves.length); if (ch) status.append(ch); } // ふりかえりを最後まで見たとき
+  if (res) appendScenes(game, st, res, status); // 結果に名場面（2026-11-12）
 
   // 新しく打たれた手だけ動きを付ける（接続表示の更新などで描き直したときは動かさない）
   const key = S.gameId + ':' + S.round;
@@ -2074,6 +2078,7 @@ function renderPage() {
   S.shownLen = S.moves.length;
   const opts = { canMove: canMove(game, st, res), onMove: onBoardMove, fresh, me: watchSeat(game), view: boardView(game) };
   if (!game.multi) Object.assign(opts, { peek: opts.canMove ? sendPeek : null, peekIn: peekInNow() }); // 相手の迷いが見える（2026-11-11）
+  if (!game.multi) opts.rules = rulesOf(S.gameId, S.rules); // あぶない所の知らせ（2026-11-12）など、描くときに詳細設定を見るゲームのため
   const slow = fresh && res && slowWanted(game, prevLen); // 決め手のスロー（2026-11-10）: 線を引くのを盤を描く前に遅らせておく
   if (slow) lineHold.until = Date.now() + SLOW_LINE - 160; // winLine はこの時刻からいつもの 160ms 待って引く
   if (game.multi) {
@@ -2116,6 +2121,7 @@ function renderPage() {
     );
   } else if (S.mode === 'online' && !game.multi) {
     appendUndo(game);
+    appendGiveUp(game, opts.canMove); // 参りました（2026-11-12）
   }
   if (!res && S.gameId === 'oekaki' && st.phase === 'show') appendShare(); // お絵描き当ての答えの場面（描き終わった絵が出ている）
   appendSit(game, res);
@@ -2650,7 +2656,9 @@ function renderReview(game) {
   if (!view) { S.review = null; return false; }
   const extra = game.info?.(view);
   el('status').innerHTML = `<div class="status-main">ふりかえり</div><div class="status-sub">${k}手目 / ${S.moves.length}手${k ? '' : '（始めの局面）'}</div>`
-    + (extra ? `<div class="status-sub">${extra}</div>` : '');
+    + (extra ? `<div class="status-sub">${extra}</div>` : '') + judgeTurnNote(game, k);
+  const chart = judgeChart(game, k); // ふりかえりの分かれ目（2026-11-12）
+  if (chart) el('status').append(chart);
   game.render(el('board'), view, { canMove: false, onMove: () => {}, fresh: false, me: myPlayer(), view: boardView(game) });
   appendReview(game);
   appendFlip(game);
@@ -2669,6 +2677,8 @@ function appendReview() {
   const go = (k) => { S.review = { key: reviewKey(), k: Math.max(0, Math.min(n, k)) }; render(); };
   if (!reviewing()) {
     ctl().append(makeButton('ふりかえり（最初から見る）', () => go(0), 'secondary'));
+    const turn = judgeTurn(GAMES[S.gameId]); // ふりかえりの分かれ目（2026-11-12）
+    if (turn !== null && turn < n) ctl().append(makeButton('★ 分かれ目へ', () => go(turn), 'secondary'));
     return;
   }
   const k = S.review.k;
@@ -2682,6 +2692,176 @@ function appendReview() {
     b('⏭ 終わり', '終わりの局面へ', n, false),
   );
   ctl().append(bar);
+  const turn = judgeTurn(GAMES[S.gameId]);
+  if (turn !== null && k !== turn) ctl().append(makeButton('★ 分かれ目へ', () => go(turn), 'ghost small'));
+}
+
+/* ---------- 形勢（2026-11-12 本人の選択。room.md「UI・UX の5回目」の「形勢の帯」「ふりかえりの分かれ目」） ---------- */
+// ゲームの judge(局面) → 席 0 から見た優勢の度合い −100〜100（util.js の boardJudge）。2人の盤のゲームで、judge を持つものだけ。
+// Claude の判断: 数は各端末で数える（送らない。読みに Math.random を使わないので、同じ局面ならどの端末でも同じ数）。
+// 同じ対局の k 手目の数は覚えておき、描き直しのたびに読み直さない（待った・1手戻すで手が減ったら覚えた数を捨てる）。
+const judgeMemo = { key: null, len: 0, at: new Map() };
+function judgeSeries(game) {
+  if (!game?.judge || game.multi || game.live || boardSeats(S.gameId, S.rules) !== 2) return null;
+  const key = `${reviewKey()}:${S.undo ?? 0}`;
+  if (judgeMemo.key !== key || S.moves.length < judgeMemo.len) { judgeMemo.key = key; judgeMemo.at = new Map(); }
+  judgeMemo.len = S.moves.length;
+  const n = S.moves.length;
+  if (judgeMemo.at.size < n + 1) {
+    const val = (st) => { let v = null; try { v = game.judge(st); } catch { v = null; } return Number.isFinite(v) ? Math.max(-100, Math.min(100, Math.round(v))) : null; };
+    const first = replay({ ...S, moves: [] });
+    if (!first) return null;
+    if (!judgeMemo.at.has(0)) judgeMemo.at.set(0, val(first));
+    replay(S, (before, after, m, i) => { if (!judgeMemo.at.has(i + 1)) judgeMemo.at.set(i + 1, val(after)); });
+  }
+  return Array.from({ length: n + 1 }, (_, k) => judgeMemo.at.get(k) ?? null);
+}
+// 分かれ目 = 1つ前からの形勢の動きがいちばん大きい手（何手目か）。動きが小さい（20 未満）ときは無し
+function judgeTurn(game) {
+  const s = judgeSeries(game);
+  if (!s) return null;
+  let best = null;
+  let size = 19;
+  for (let k = 1; k < s.length; k++) {
+    if (s[k] === null || s[k - 1] === null) continue;
+    const d = Math.abs(s[k] - s[k - 1]);
+    if (d > size) { size = d; best = k; }
+  }
+  return best;
+}
+const judgeWord = (game, v) => {
+  const a = Math.abs(v);
+  if (a < 10) return '互角';
+  const who = `<b class="pl p${v > 0 ? 0 : 1}">${game.players[v > 0 ? 0 : 1]}</b>`;
+  return `${who} ${a < 40 ? 'やや有利' : a < 90 ? '有利' : '勝ちそう'}`;
+};
+// 形勢の帯を出すか: 観戦の人だけ（対局している人にはヒントになるため）。
+// ただし形勢を見ても手が変わらない対戦（本人の言葉は「形勢がヒントにならない対戦」）では対局している人にも出す。ゲームの judgeOpen(局面) が true のとき（いまのゲームには無い）
+function judgeBarShown(game, st) {
+  if (S.mode !== 'online' || !S.order || !game.judge || game.multi) return false;
+  return myPlayer() === SPECTATOR || game.judgeOpen?.(st) === true;
+}
+let judgeShown = { key: null, v: 0 }; // 帯の前の長さ（新しい長さへ動かして見せる）
+function judgeBar(game, st) {
+  if (!judgeBarShown(game, st)) return null;
+  const s = judgeSeries(game);
+  const v = s?.[S.moves.length];
+  if (v === null || v === undefined) return null;
+  const key = reviewKey();
+  const from = judgeShown.key === key ? judgeShown.v : 0;
+  judgeShown = { key, v };
+  const d = document.createElement('div');
+  d.className = 'judge-bar';
+  d.setAttribute('role', 'img');
+  d.setAttribute('aria-label', `形勢: ${judgeWord(game, v).replace(/<[^>]+>/g, '')}`);
+  const name = (p) => `<span class="pl p${p}">${game.players[p]} ${esc(nameOf(roundOrder()[p]))}</span>`;
+  d.innerHTML = `<div class="jb-lab">${name(0)}<span class="jb-mid">形勢: ${judgeWord(game, v)}</span>${name(1)}</div><div class="jb-track"><div class="jb-fill" style="width:${50 + from / 2}%"></div></div>`;
+  if (from !== v) requestAnimationFrame(() => requestAnimationFrame(() => { const f = d.querySelector('.jb-fill'); if (f) f.style.width = `${50 + v / 2}%`; }));
+  else d.querySelector('.jb-fill').style.width = `${50 + v / 2}%`;
+  return d;
+}
+// ふりかえりの上の形勢の線。k = いま見ている手。押すとその手へ飛ぶ
+function judgeChart(game, k) {
+  const s = judgeSeries(game);
+  if (!s || s.filter((v) => v !== null).length < 2) return null;
+  const turn = judgeTurn(game);
+  const W = 320;
+  const H = 84;
+  const pad = 8;
+  const n = Math.max(1, s.length - 1);
+  const x = (i) => pad + ((W - pad * 2) * i) / n;
+  const y = (v) => H / 2 - (v / 100) * (H / 2 - 8);
+  const pts = s.map((v, i) => (v === null ? null : [x(i), y(v)]));
+  const line = pts.filter(Boolean).map(([a, b]) => `${a.toFixed(1)},${b.toFixed(1)}`).join(' ');
+  const area = (sign) => {
+    const p = pts.map((q, i) => (q ? [q[0], y(sign > 0 ? Math.max(s[i], 0) : Math.min(s[i], 0))] : null)).filter(Boolean);
+    return `M${p[0][0].toFixed(1)},${y(0)} ` + p.map(([a, b]) => `L${a.toFixed(1)},${b.toFixed(1)}`).join(' ') + ` L${p.at(-1)[0].toFixed(1)},${y(0)} Z`;
+  };
+  const box = document.createElement('div');
+  box.className = 'judge-chart';
+  const star = turn !== null && s[turn] !== null
+    ? `<circle class="jc-turn" cx="${x(turn).toFixed(1)}" cy="${y(s[turn]).toFixed(1)}" r="5"></circle><text class="jc-star" x="${x(turn).toFixed(1)}" y="${(y(s[turn]) + (s[turn] > 0 ? 16 : -9)).toFixed(1)}" text-anchor="middle">★</text>` : '';
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="形勢の移り変わり${turn !== null ? `。${turn}手目が分かれ目` : ''}">
+    <path class="jc-p0" d="${area(1)}"></path><path class="jc-p1" d="${area(-1)}"></path>
+    <line class="jc-zero" x1="${pad}" x2="${W - pad}" y1="${y(0)}" y2="${y(0)}"></line>
+    <polyline class="jc-line" points="${line}"></polyline>
+    <line class="jc-now" x1="${x(k).toFixed(1)}" x2="${x(k).toFixed(1)}" y1="2" y2="${H - 2}"></line>${star}
+  </svg><div class="jc-lab"><span><b class="pl p0">${game.players[0]}</b> 優勢 ↑</span><span>↓ <b class="pl p1">${game.players[1]}</b> 優勢</span></div>`;
+  box.querySelector('svg').addEventListener('click', (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const i = Math.round(((e.clientX - r.left) / r.width * W - pad) / ((W - pad * 2) / n));
+    S.review = { key: reviewKey(), k: Math.max(0, Math.min(s.length - 1, i)) };
+    render();
+  });
+  return box;
+}
+// 分かれ目の手を見ているときの一言（その手を打った人）
+function judgeTurnNote(game, k) {
+  if (k === 0 || judgeTurn(game) !== k) return '';
+  const before = replay({ ...S, moves: S.moves.slice(0, k - 1) });
+  const p = before ? game.turn(before) : null;
+  return `<div class="status-sub jc-note">★ 分かれ目: ${Number.isInteger(p) && game.players[p] ? `<b class="pl p${p}">${game.players[p]}</b>の` : ''}この手で形勢が大きく動きました</div>`;
+}
+
+/* ---------- 結果に名場面（2026-11-12 本人の選択。room.md「UI・UX の5回目」）: 決着のあと、対局した人1人につき1行ずつ、その人の名場面を出す ---------- */
+// ゲームの scenes(steps, 席の数) → 席ごとの一言（文字。名前は付けない）| null。steps = [{ before, after, move }]（手の一覧を最初から当て直したもの）。
+// Claude の判断: scenes の無い盤のゲームは、考えた時間（tickClock の S.clock）から「いちばん長く考えた手」（3秒以上のときだけ。CPU の席は出さない）。
+// 出せる人が1人もいなければ出さない。同じ対局の結果では作り直さない。判子のあとに1行ずつ出す（style.css の .scenes。2回目からの描き直しでは動かさない。動きを減らす設定ではすぐ）
+let sceneMemo = { key: null, lines: null, shown: false };
+function thinkScenes(n) {
+  const c = S.clock;
+  if (!c || c.key !== S.gameId + ':' + S.round) return null;
+  const best = Array.from({ length: n }, () => ({ ms: 0, k: 0 }));
+  c.log.forEach(([who, ms], i) => { if (best[who] && ms > best[who].ms) best[who] = { ms, k: i + 1 }; });
+  return best.map((b, p) => (b.ms >= 3000 && !isCpu(roundOrder()[p]) ? `いちばん長く考えた手 ${Math.round(b.ms / 1000)}秒（${b.k}手目）` : null));
+}
+function appendScenes(game, st, res, status) {
+  if (game.live) return;
+  const key = `${resultKey()}:${S.moves.length}`;
+  if (sceneMemo.key !== key) {
+    const n = game.multi ? S.order?.length ?? 0 : boardSeats(S.gameId, S.rules);
+    let lines = null;
+    if (game.scenes) {
+      const steps = [];
+      replay(S, (before, after, move) => steps.push({ before, after, move }));
+      try { lines = game.scenes(steps, n); } catch { lines = null; }
+    }
+    if (!Array.isArray(lines) && !game.multi) lines = thinkScenes(n);
+    sceneMemo = { key, lines: Array.isArray(lines) ? lines.slice(0, n) : null, shown: false };
+  }
+  const lines = sceneMemo.lines;
+  if (!lines?.some((t) => typeof t === 'string' && t)) return;
+  const me = myPlayer();
+  const who = (p) => {
+    if (game.multi) return esc(p === me ? 'あなた' : nameOf(S.order[p]));
+    const mark = game.players?.[p] ? `<b class="pl p${p}">${game.players[p]}</b> ` : '';
+    if (S.mode !== 'online') return mark.trim();
+    return mark + esc(p === me ? 'あなた' : nameOf(roundOrder()[p]));
+  };
+  const box = document.createElement('div');
+  box.className = 'scenes' + (sceneMemo.shown || lessMotion() ? ' still' : '');
+  let i = 0;
+  lines.forEach((t, p) => {
+    if (typeof t !== 'string' || !t) return;
+    const row = document.createElement('div');
+    row.className = 'scene';
+    row.style.setProperty('--i', i++);
+    row.innerHTML = `<span class="sc-who">${who(p)}</span><span class="sc-txt"></span>`;
+    row.querySelector('.sc-txt').textContent = t;
+    box.append(row);
+  });
+  sceneMemo.shown = true;
+  status.append(box);
+}
+
+/* ---------- 参りました（2026-11-12 本人の選択。room.md「UI・UX の5回目」）: 2人で打つ盤のゲームのオンラインで、自分の番に負けを認めて終われる ---------- */
+// 手は { give: true }（util.js の withGiveUp。index.js の GIVE_UP のゲーム）。押せるのは自分の番だけ（将棋の投了と同じ。Claude の判断）。確かめの窓を1回出す
+function appendGiveUp(game, canMoveNow) {
+  if (!game.giveUp || S.mode !== 'online' || !canMoveNow || boardSeats(S.gameId, S.rules) !== 2) return;
+  ctl().append(makeButton('🏳 参りました', () => {
+    if (!confirm('参りましたにしますか？（相手の勝ちになります）')) return;
+    onBoardMove({ give: true });
+  }, 'ghost small'));
 }
 
 /* ---------- 勝敗予想（2026-10-06 本人の決定）: 対局の始めに、観戦の人も含めて「だれが勝つか」を1回選べる ---------- */
@@ -2842,7 +3022,7 @@ const SLOW_LINE = 900; // 線を引き始めるまで（winLine のいつもの 
 const SLOW_HOLD = 1250; // 勝ち負けの音・判子まで
 let slowNow = null; // 決め手のスローの途中 { key, jobs, clean }
 function slowWanted(game, prevLen) {
-  if (game.multi || game.live || !SLOW_GAMES.has(game.id) || lessMotion()) return false;
+  if (game.multi || game.live || !SLOW_GAMES.has(game.id) || lessMotion() || S.moves.at(-1)?.give === true) return false; // 参りましたは盤が動かない
   const before = replay({ ...S, moves: S.moves.slice(0, prevLen) });
   return !!before && !game.result(before);
 }
