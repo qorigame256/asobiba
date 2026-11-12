@@ -10193,6 +10193,103 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('race OK');
 }
 
+// コップのどれ？（2026-11-12 本人の決定）: 当てた人全員に1点・5回・回が進むほどコップが増える
+{
+  const G = GAMES.cup;
+  const { makeRounds, slotsAfter, poseAt, animMs, ROUNDS } = await import('../app/js/games/cup.js');
+  assert.deepEqual(ROUNDS.map((r) => r.cups), [3, 3, 4, 4, 5], 'コップのどれ？: コップは3個から最後は5個');
+  assert.ok(ROUNDS.every((r, i) => i === 0 || (r.swaps >= ROUNDS[i - 1].swaps && r.dur <= ROUNDS[i - 1].dur)), 'コップのどれ？: 回が進むほどまぜる回数が増え、速くなる');
+  for (let seed = 1; seed <= 200; seed++) {
+    const rs = makeRounds(seed);
+    assert.deepEqual(rs, makeRounds(seed), 'コップのどれ？: 同じ種から同じ問題');
+    for (const x of rs) {
+      // 答えは、玉の入ったコップを入れ替えのとおりに追った場所
+      let at = x.ball;
+      for (const [a, b] of x.swaps) at = at === a ? b : at === b ? a : at;
+      assert.equal(x.ans, at, 'コップのどれ？: 答えは玉を追った場所');
+      assert.equal(slotsAfter(x.cups, x.swaps, x.swaps.length)[x.ball], x.ans);
+      // 動きの最後の形は答えと同じ場所（画面で見たとおりが正解）
+      const end = poseAt(x, animMs(x));
+      assert.equal(end.pos[x.ball].x, x.ans, 'コップのどれ？: まざり終わった画面の玉の場所が答え');
+      assert.ok(x.swaps.every(([a, b]) => a !== b && a >= 0 && b < x.cups));
+    }
+  }
+  // 進行と点: 当てた人全員に1点、はずれ・選ばなかった人は0点
+  let s = G.init(3, 7);
+  s = G.apply(s, { p: -1, t: 'next' });
+  assert.equal(s.phase, 'open');
+  const a = s.rs[0].ans;
+  const wrong = (a + 1) % s.rs[0].cups;
+  s = G.apply(s, { p: 0, t: 'ans', q: 0, c: a });
+  assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, c: a }), null, 'コップのどれ？: 同じ人は1回だけ選べる');
+  assert.equal(G.apply(s, { p: 1, t: 'ans', q: 1, c: a }), null, 'コップのどれ？: ほかの回の答えは受け付けない');
+  assert.equal(G.apply(s, { p: 1, t: 'ans', q: 0, c: 9 }), null, 'コップのどれ？: 無い場所は選べない');
+  s = G.apply(s, { p: 1, t: 'ans', q: 0, c: wrong });
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [1, 0, 0], 'コップのどれ？: 当てた人だけ1点');
+  for (let q = 1; q < 5; q++) {
+    s = G.apply(s, { p: -1, t: 'next' });
+    s = G.apply(s, { p: 2, t: 'ans', q, c: s.rs[q].ans });
+    s = G.apply(s, { p: 0, t: 'ans', q, c: s.rs[q].ans });
+    s = G.apply(s, { p: -1, t: 'close' });
+  }
+  assert.equal(G.result(s), null);
+  s = G.apply(s, { p: -1, t: 'next' });
+  assert.deepEqual(G.result(s), { winners: [0], scores: [5, 0, 4] }, 'コップのどれ？: 5回で終わり、点の多い人の勝ち');
+  console.log('cup OK');
+}
+
+// シーソーにのせる（2026-11-12 本人の決定）: くじの重りを置く場所だけ選ぶ・落とした人だけ負け
+{
+  const G = GAMES.seesaw;
+  const { SPOTS, weightOf, limitOf } = await import('../app/js/games/seesaw.js');
+  assert.equal(limitOf(0), 18, 'シーソー: 最初の1つの限界は18');
+  assert.equal(limitOf(SPOTS.length - 1), 0, 'シーソー: 最後の1つの限界は0（ぴったり釣り合わないと落ちる）');
+  for (let k = 0; k < 10; k++) assert.ok([1, 2, 3].includes(weightOf(5, k)), 'シーソー: 重りは1・2・3');
+  // 最初の1つはどこに置いても落ちない（3 × 5 = 15 ≦ 18）
+  for (const x of SPOTS) assert.equal(G.apply(G.init(2, 3), { p: 0, t: 'put', x }).phase, 'play', 'シーソー: 最初の1つは落ちない');
+  let s = G.init(3, 11);
+  assert.equal(G.apply(s, { p: 1, t: 'put', x: 1 }), null, 'シーソー: 番でない人は置けない');
+  assert.equal(G.apply(s, { p: 0, t: 'put', x: 0 }), null, 'シーソー: 支点には置けない');
+  s = G.apply(s, { p: 0, t: 'put', x: 5 });
+  assert.equal(G.apply(s, { p: 1, t: 'put', x: 5 }), null, 'シーソー: 1か所に1つだけ');
+  assert.equal(s.T, weightOf(11, 0) * 5, 'シーソー: 傾きは重り × 距離');
+  // 限界を超えた人が負け、ほかは勝ち。ちょうど限界なら落ちない
+  for (let seed = 1; seed <= 300; seed++) {
+    let t = G.init(3, seed);
+    while (t.phase === 'play') {
+      const k = t.placed.length;
+      const w = weightOf(seed, k);
+      const open = SPOTS.filter((x) => !t.placed.some((v) => v.x === x));
+      const x = open[(seed * 7 + k * 3) % open.length];
+      const T = t.T + w * x;
+      const p = t.turn;
+      t = G.apply(t, { p, t: 'put', x });
+      if (Math.abs(T) > limitOf(k)) {
+        assert.equal(t.phase, 'end');
+        assert.deepEqual(G.result(t), { winners: [0, 1, 2].filter((q) => q !== p), loser: p }, 'シーソー: 落とした人だけ負け');
+      } else if (t.placed.length === SPOTS.length) {
+        assert.equal(T, 0);
+        assert.deepEqual(G.result(t), { winners: [0, 1, 2], draw: true }, 'シーソー: 全部のって釣り合ったら全員の勝ち');
+      } else assert.equal(t.phase, 'play', 'シーソー: 限界までは続く');
+    }
+  }
+  // CPU は落ちない場所があればそこに置く
+  for (let seed = 1; seed <= 200; seed++) {
+    let t = G.init(2, seed);
+    while (t.phase === 'play') {
+      const k = t.placed.length;
+      const w = weightOf(seed, k);
+      const open = SPOTS.filter((x) => !t.placed.some((v) => v.x === x));
+      const safe = open.filter((x) => Math.abs(t.T + w * x) <= limitOf(k));
+      const m = G.cpu(t, t.turn);
+      if (safe.length) assert.ok(safe.includes(m.x), 'シーソー: CPU は落ちない場所を選ぶ');
+      t = G.apply(t, { ...m, p: t.turn });
+    }
+  }
+  console.log('seesaw OK');
+}
+
 // 見出しの字体（2026-11-09。tools/make-fonts.mjs）: 今のコードのゲームの名前・仲間の名前・技の名前の字が、切り出した字体に全部入っているか。
 // 落ちたら、元の字体のフォルダを渡して node tools/make-fonts.mjs で作り直す（入っていない字はほかの字体で出るだけで、崩れはしない）
 {
