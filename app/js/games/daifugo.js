@@ -54,7 +54,7 @@ const power = (c) => {
 const powerLabel = (p) => rankLabel(p > 13 ? p - 13 : p);
 
 // 手札の並べ方（2026-11-12 本人の選択。card-games.md）: 強さ順（今まで）⇄ マーク順。画面の並びだけを変える（局面の手札は強さ順のまま）。
-// Claude の判断: 端末ごとに覚える（localStorage の bg-df-order）。マーク順では、同じマークで強さが3つ以上続く札（階段にできる札。ジョーカーは数えない。K-A-2 はつながる）を青緑の点線で囲む（.df-kai。出せる札の金の縁と見分けるため。本人には見本で金の縁と伝えた）
+// Claude の判断: 端末ごとに覚える（localStorage の bg-df-order）。マーク順では、同じマークで強さが3つ以上続く札（階段にできる札。ジョーカーは数えない。K-A-2 はつながる）を青緑の点線で囲む（.df-kai。出せる札の金の縁と見分けるため。見本の金の縁から変えたことを 2026-11-12 に本人が承認）
 const ORDER_KEY = 'bg-df-order';
 let suitOrder = (() => { try { return typeof localStorage !== 'undefined' && localStorage.getItem(ORDER_KEY) === 'suit'; } catch { return false; } })();
 const bySuit = (a, b) => (a === JOKER) - (b === JOKER) || SUITS.indexOf(suitOf(a)) - SUITS.indexOf(suitOf(b)) || power(a) - power(b);
