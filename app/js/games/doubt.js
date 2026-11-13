@@ -65,6 +65,8 @@ export default {
   },
   startSound: 'shuffle',
   // あなたの番までに起きたこと（2026-11-11。room.md「UI・UX の4回目」）: 順番の帯の札の下に出す短い言葉（出した札は言った数字で書く）
+  // あと一歩の人に印（2026-11-13。room.md「UI・UX の6回目」）: 手札が残り1枚の人の順番の帯の札に出す言葉（main.js の turnBand）
+  reach(s) { return s.phase === 'play' ? s.hands.map((h) => (h.length === 1 ? 'あと1枚' : null)) : null; },
   said(a, b, m) {
     if (m.t === 'play') return `「${rankLabel(b.played.num)}」を${b.played.cards.length}枚`;
     if (m.t === 'doubt') return 'ダウト！';

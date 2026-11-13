@@ -9,6 +9,8 @@
 // 手: { p, t: 'pick', r: 何回目か, v: 'g' | 'c' | 'p'（じゃんけん）| 'u' | 'd' | 'l' | 'r'（向き） }
 //   r と「この回はもう選んだか」で、同じ手が2回来ても2回目は反則になる。
 
+import { reachTag } from './util.js';
+
 const HANDS = { g: '✊', c: '✌️', p: '✋' };
 const HAND_NAME = { g: 'グー', c: 'チョキ', p: 'パー' };
 const DIRS = ['u', 'd', 'l', 'r'];
@@ -168,6 +170,8 @@ export default {
       const pts = document.createElement('div');
       pts.className = 'ys-left';
       pts.textContent = `${s.scores[p]}点` + (s.scores[p] === top && top > 0 && !res ? ' 👑' : '');
+      // あと一歩の人に印（2026-11-13。room.md「UI・UX の6回目」）: あと1点で勝ちの人
+      if (!res && s.scores[p] === goalOf(s) - 1) pts.append(reachTag('あと1点'));
       box.append(head, show, pts);
       grid.append(box);
     }

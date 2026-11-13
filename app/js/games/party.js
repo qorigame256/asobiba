@@ -49,8 +49,10 @@ export function winnersText(winners, me, pn) {
 // steady = true: 札を1列に並べ（はみ出したら横に送る）、extra の行をいつも1行ぶん取っておく。札に字が入っても札の高さと段の数が変わらず、
 //   下のボタンが押し下げられない（2026-10-30 本人の依頼。ぴったりストップ・色ちがい早押し・ことわざかるた・ビンゴ）
 // gain = false: 点が増えても「+3」を出さない（数が点でないゲーム。綱引き連打の回数・ミニゴルフの打数・羽根つきの墨・玉入れの玉）
+// 逆転の知らせ・勝ちまでの見通し（2026-11-13 本人の選択。room.md「UI・UX の6回目」）も、点の数のゲーム（gain が false でない）の札にここで出す（leadNote・noteLead）
 export function scoreChips(o, scores, { turn = null, won = [], extra = null, steady = false, gain = true } = {}) {
   if (gain) noteGains(o, scores);
+  const flip = gain ? noteLead(o, scores) : -1;
   const box = document.createElement('div');
   box.className = 'cc-opps' + (steady ? ' cc-steady' : '');
   scores.forEach((v, p) => {
@@ -64,6 +66,8 @@ export function scoreChips(o, scores, { turn = null, won = [], extra = null, ste
     val.innerHTML = `${v}<small>点</small>`;
     chip.append(name, val);
     if (gain) showGain(chip, val, p, v);
+    if (gain && p === o.me && !o.watching && !won.length) { const g = leadNote(scores, p); if (g) chip.append(g); }
+    if (p === flip) showFlip(chip);
     if (extra) {
       const x = extra(p);
       if (x || steady) {
@@ -78,6 +82,50 @@ export function scoreChips(o, scores, { turn = null, won = [], extra = null, ste
     box.append(chip);
   });
   return box;
+}
+
+// 勝ちまでの見通し（2026-11-13）: 自分の札に「1位まで あと ◯点」（自分だけが1位なら「2位と ◯点差」、1位に並んでいれば「1位に並んでいます」）。
+// Claude の判断: 決着の前（won が空）だけ・自分の席があるとき（観戦の人と、観戦で見ている人の札には出さない）・全員が同じ点のうちは出さない。点が小数のゲームは小数1桁まで
+function leadNote(scores, me) {
+  if (scores.length < 2 || !scores.every(Number.isFinite) || scores.every((v) => v === scores[0])) return null;
+  const v = scores[me];
+  const top = Math.max(...scores);
+  const second = Math.max(...scores.filter((_, p) => p !== me));
+  const r = (x) => Math.round(x * 10) / 10;
+  const t = document.createElement('div');
+  t.className = 'pt-gap';
+  if (v < top) t.textContent = `1位まで あと${r(top - v)}点`;
+  else if (second === v) t.textContent = '1位に並んでいます';
+  else { t.textContent = `2位と ${r(v - second)}点差`; t.classList.add('lead'); }
+  return t;
+}
+
+// 逆転の知らせ（2026-11-13）: 新しく届いた手（o.fresh）で、ひとりだけの1位が別の人に替わったら、新しい1位の札に「逆転！」を FLIP_MS の間出して札を跳ねさせる。
+// 札は描き直しのたびに作り直されるので、「+3」と同じく替わった時刻を覚えて続きから出す。札は席の順に並んでいて順位では並べ替えないので、
+// 見本の「札が入れ替わる動き」の代わりに札を跳ねさせる（Claude の判断）。同点の1位を挟んで別の人が抜けたときも逆転と見る（前のひとりだけの1位と比べる）。
+// どの札の組かは noteGains と同じ鍵で見分ける。動きを減らす設定の端末では出さない
+const FLIP_MS = 1600;
+const lead = { key: '', who: -1, at: 0, seat: -1 };
+function noteLead(o, scores) {
+  const key = (o.names || []).join('\u0001') + '#' + scores.length;
+  const top = Math.max(...scores);
+  const tops = scores.map((v, p) => (v === top ? p : -1)).filter((p) => p >= 0);
+  const who = scores.every(Number.isFinite) && tops.length === 1 ? tops[0] : -1;
+  if (lead.key !== key || scores.every((v) => v === 0)) { Object.assign(lead, { key, who, at: 0, seat: -1 }); return -1; } // 次の対局で0に戻ったら覚え直す
+  if (o.fresh && who >= 0 && lead.who >= 0 && who !== lead.who) Object.assign(lead, { at: Date.now(), seat: who });
+  if (who >= 0) lead.who = who;
+  if (lead.seat !== who) lead.seat = -1; // 逆転した人がもう1位でない
+  return lead.seat >= 0 && Date.now() - lead.at < FLIP_MS && !quiet() ? lead.seat : -1;
+}
+function showFlip(chip) {
+  const t = Date.now() - lead.at;
+  const b = document.createElement('span');
+  b.className = 'pt-flip';
+  b.textContent = '逆転！';
+  b.style.animationDelay = `-${t}ms`;
+  chip.classList.add('flip');
+  chip.style.setProperty('--flip-at', `-${t}ms`);
+  chip.append(b);
 }
 
 function tag(cls, text) {

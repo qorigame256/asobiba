@@ -20,7 +20,7 @@
 //   3〜4人と同じ広い盤（大きさは詳細設定「広い盤の大きさ」）で、4つ並べたら勝ち。おまかせは 6×6
 //   （CPU どうしで 5×5 は半分が引き分け、6×6 より広いと引き分けはほぼ無い）。CPU も3〜4人と同じ wideCpu。
 
-import { CPU_SETTING, TAP_PEEK_SETTING, DANGER_SETTING, boardCpu, boardJudge, dangerMoves, dangerOn, winLine } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, DANGER_SETTING, boardCpu, boardJudge, dangerMoves, dangerOn, winLine, col } from './util.js';
 
 const emptyCells = (x) => x.board.map((v, i) => (v === null ? i : -1)).filter((i) => i >= 0); // あぶない所の知らせで調べる手
 
@@ -236,8 +236,8 @@ let gobSel = null; // { n: 何手目の局面か, src: 出どころ（手の src
 
 function gobPiece(piece) {
   const el = document.createElement('span');
-  el.className = `gob-pc z${piece.z} p${piece.p}`;
-  el.innerHTML = MARKS[piece.p];
+  el.className = `gob-pc z${piece.z} p${col(piece.p)}`;
+  el.innerHTML = MARKS[col(piece.p)];
   return el;
 }
 
@@ -458,8 +458,8 @@ function cellButton(v, i, s, o, playable) {
   cell.type = 'button';
   cell.className = 'ttt-cell';
   if (v !== null) {
-    cell.innerHTML = MARKS[v];
-    cell.classList.add('p' + v);
+    cell.innerHTML = MARKS[col(v)];
+    cell.classList.add('p' + col(v));
     if (i === s.last) cell.classList.add('last');
     if (i === s.last && o.fresh) cell.classList.add('pop');
     if (i === s.last) cell.firstElementChild?.setAttribute('data-last', ''); // 決め手のスロー（main.js の slowFinish）
@@ -491,8 +491,8 @@ function renderBig(root, s, o) {
     if (s.owner[b] !== null) {
       box.classList.add('closed');
       const cover = document.createElement('div');
-      cover.className = 'ttt9-own' + (s.owner[b] === DRAWN ? ' drawn' : ' p' + s.owner[b]);
-      cover.innerHTML = s.owner[b] === DRAWN ? '<span>引き分け</span>' : MARKS[s.owner[b]];
+      cover.className = 'ttt9-own' + (s.owner[b] === DRAWN ? ' drawn' : ' p' + col(s.owner[b]));
+      cover.innerHTML = s.owner[b] === DRAWN ? '<span>引き分け</span>' : MARKS[col(s.owner[b])];
       box.append(cover);
     }
     root.append(box);
@@ -506,6 +506,7 @@ export default {
   icon: '⭕',
   desc: 'たて・よこ・ななめに3つ並べたら勝ち。オンラインでは 9×9 のスーパーマルバツ・印が消えるマルバツ・広い盤の4つ並べや、3〜4人で広い盤も選べる',
   ready: true,
+  keepColor: true, // 続けて遊ぶ間は、その人の色と形を変えない（util.js の col。2026-11-13）
   players: ['○', '×', '△', '□'],
   // 詳細設定の人数（2〜4人）。待合室の席の数になる
   seatCount(rules) { return rules?.players ?? 2; },

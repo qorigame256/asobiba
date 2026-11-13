@@ -8,7 +8,7 @@
 // 線の番号: 横線が先で (段 0〜h) × (列 0〜w-1) → 段*w+列。そのあとに縦線 (段 0〜h-1) × (列 0〜w) → 横線の数 + 段*(w+1)+列。
 // 四角の番号: 段*w+列。手 = 線の番号。
 
-import { CPU_SETTING, TAP_PEEK_SETTING, mulberry32 } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, mulberry32, col } from './util.js';
 
 const AUTO = { 2: 4, 3: 5, 4: 6 };
 const SIZE_CHOICES = [['auto', 'おまかせ（2人 4×4・3人 5×5・4人 6×6）'], [3, '3×3'], [4, '4×4'], [5, '5×5'], [6, '6×6']];
@@ -142,6 +142,7 @@ export default {
   icon: '🔲',
   desc: '点と点を線でつなぎ、四角を閉じたら自分のもの。四角が多い人の勝ち。2〜4人',
   ready: true,
+  keepColor: true, // 続けて遊ぶ間は、その人の色と形を変えない（util.js の col。2026-11-13）
   players: ['赤', '青', '緑', '紫'],
   seatCount(rules) { return rules?.players ?? 2; },
   settings: [
@@ -191,7 +192,7 @@ export default {
 
   info(s) {
     const sc = scoresOf(s);
-    return sc.map((v, p) => `<b class="pl p${p}">${this.players[p]} ${v}</b>`).join('　');
+    return sc.map((v, p) => `<b class="pl p${col(p)}">${this.players[col(p)]} ${v}</b>`).join('　');
   },
 
   render(root, s, o) {
@@ -219,7 +220,7 @@ export default {
           const gold = valueOf(s, b) === 2;
           e.className = 'dt-box' + (owner !== null ? ' p' + owner : '') + (gold ? ' gold' : '') + (owner !== null && fresh !== null && boxesOf(s, fresh).includes(b) ? ' pop' : '')
             + (owner !== null && res && sc[owner] === top ? ' win' : '');
-          if (owner !== null) e.textContent = this.players[owner][0] + (gold ? '★' : '');
+          if (owner !== null) e.textContent = this.players[col(owner)][0] + (gold ? '★' : '');
           else if (gold) { e.textContent = '★'; e.title = '金の四角（2点）'; }
         } else {
           const i = gr % 2 === 0 ? r * s.w + c : H + r * (s.w + 1) + c;
@@ -228,12 +229,12 @@ export default {
           e.className = 'dt-line ' + (gr % 2 === 0 ? 'h' : 'v');
           const v = s.lines[i];
           if (v !== null) {
-            e.classList.add('on', 'p' + v);
+            e.classList.add('on', 'p' + col(v));
             e.dataset.fill = ''; // 中身が無く印だけで引いたと描くので、main.js の 2回押して置く・相手の迷い・さっきの手 に知らせる（2026-11-11）
             if (i === s.last) e.classList.add('last');
             e.tabIndex = -1;
           } else if (o.canMove) {
-            e.classList.add('playable', 'p' + s.turn);
+            e.classList.add('playable', 'p' + col(s.turn));
             e.setAttribute('aria-label', '線を引く');
             e.onclick = () => o.onMove(i);
           } else {

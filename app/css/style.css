@@ -292,6 +292,13 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 @keyframes vs-left { from { opacity: 0; transform: translateX(-60vw); } }
 @keyframes vs-right { from { opacity: 0; transform: translateX(60vw); } }
 @keyframes vs-pop { from { opacity: 0; transform: scale(.3); } }
+/* 今度はあなたが先手（2026-11-13。main.js の seatSwap）: 席が入れ替わったら、札が前の席（反対側）から交差して今の席へ。自分の席が変わった人には一言 */
+.vs-fx:has(.vs-note) { align-content: center; gap: 14px; }
+.vs-plate.sw-l { animation: vs-sw-l .75s cubic-bezier(.5, 0, .3, 1.15) both; }
+.vs-plate.sw-r { animation: vs-sw-r .75s cubic-bezier(.5, 0, .3, 1.15) both; }
+@keyframes vs-sw-l { 0% { transform: translate(calc(100% + 70px), 0); } 45% { transform: translate(50%, -26px); } }
+@keyframes vs-sw-r { 0% { transform: translate(calc(-100% - 70px), 0); } 45% { transform: translate(-50%, 26px); } }
+.vs-note { color: #fff; background: rgba(0, 0, 0, .55); border-radius: 999px; padding: 6px 16px; font-weight: 800; font-size: 1.05rem; text-align: center; max-width: 100%; animation: vs-pop .35s .7s cubic-bezier(.2, .8, .3, 1.4) both; }
 .vs-mark { flex: none; font-family: "Yu Mincho", "Hiragino Mincho ProN", serif; font-weight: 900; font-size: 1.7rem; color: #fff; background: #c62d1f; border-radius: 999px; padding: .05em .45em; box-shadow: 0 4px 12px rgba(0, 0, 0, .3); animation: vs-pop .35s .25s cubic-bezier(.2, .8, .3, 1.4) both; }
 .vs-go { font-size: clamp(2rem, 10vw, 2.8rem); font-weight: 900; letter-spacing: .06em; color: var(--accent-ink); background: var(--accent); border-radius: 18px; padding: .1em .6em; box-shadow: 0 8px 20px rgba(0, 0, 0, .3); animation: vs-pop .3s cubic-bezier(.2, .8, .3, 1.4) both; }
 /* 技の名前（main.js の cutInFx）。斜めの色の帯が開き、大きな字が右から入って左へ抜ける */
@@ -2233,12 +2240,28 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 /* あなたの番までに起きたこと（2026-11-11。main.js の saidBySeat）: 札の中の下に短い吹き出し。長い言葉は「…」で切る */
 .turn-band.has-said .turn-card { max-width: 128px; }
 .turn-band.has-said .turn-card.now:has(.turn-dots) { padding-bottom: 12px; }
+/* あと一歩の人に印（2026-11-13。main.js の addReach）: 札の上の縁のまんなかに赤い印（左上は王冠、右上は連勝の炎）。付いたばかりは落ちてきて、そのあとゆっくり脈打つ */
+.turn-card.reach { opacity: 1; border-color: #d4343e; }
+.turn-reach { position: absolute; top: -11px; left: 50%; transform: translateX(-50%); padding: 0 7px; border-radius: 999px; background: #d4343e; color: #fff; font-size: .66rem; font-weight: 900; line-height: 1.6; white-space: nowrap; pointer-events: none; z-index: 1; animation: tr-beat 1.6s ease-in-out infinite; }
+.turn-reach.new { animation: tr-drop .5s cubic-bezier(.3, 1.6, .5, 1) both, tr-beat 1.6s .5s ease-in-out infinite; }
+@keyframes tr-drop { from { opacity: 0; transform: translate(-50%, -14px) scale(.6); } }
+@keyframes tr-beat { 50% { transform: translateX(-50%) scale(1.1); } }
+@media (prefers-reduced-motion: reduce) { .turn-reach, .turn-reach.new { animation: none; } }
 .turn-said { margin-top: 3px; max-width: 100%; padding: 2px 7px; border-radius: 8px; background: var(--field); border: 1px solid var(--line); color: var(--ink); font-size: .72rem; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- もう一回は全員の OK で（2026-10-26） ---------- */
 .again-box { width: 100%; text-align: center; margin: 4px 0; }
 .again-line { margin: 0 0 8px; }
 .again-acts { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+/* 結果の画面でルールを変えてもう一回（2026-11-13。main.js の againRulesBox）: OK の欄の下に、よく変える設定を3つまで。ゲストは変えられない（選ぶ欄を押せない）。変わった行は一瞬光る */
+.again-rules { display: flex; flex-wrap: wrap; gap: 6px 12px; justify-content: center; align-items: center; margin: 0 auto 10px; padding: 6px 10px; max-width: 34rem; border: 1px dashed var(--line); border-radius: 12px; font-size: .85rem; }
+.again-rules-head { width: 100%; color: var(--muted); font-size: .78rem; }
+.again-rules label { display: inline-flex; align-items: center; gap: 6px; padding: 2px 6px; border-radius: 8px; }
+.again-rules select { font: inherit; padding: 3px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--field); color: var(--ink); }
+.again-rules select:disabled { opacity: .8; }
+.again-rules label.flash { animation: again-flash 1.4s ease-out; }
+@keyframes again-flash { 0%, 55% { background: color-mix(in srgb, var(--win) 55%, transparent); } 100% { background: transparent; } }
+@media (prefers-reduced-motion: reduce) { .again-rules label.flash { animation: none; outline: 2px solid var(--win); } }
 .again-wait { color: var(--muted); }
 
 /* 待合室の「自分のこと」の段（名前を変える・自分の成績） */
@@ -3243,3 +3266,19 @@ h1, h2, .sheet-head h3, .cat-h, .tile-nm, .lobby-game-name { font-family: "asobi
 .ms-strip span { display: grid; place-items: center; height: 1.1em; line-height: 1; }
 .ms-btns { display: flex; gap: 8px; justify-content: center; }
 .board .btn.ms-stop { width: 86px; padding: 10px 0; touch-action: manipulation; }
+/* あと一歩の人に印（2026-11-13。util.js の reachTag）: ゲームが自分で描く点の欄（あっち向いてホイ・じゃんけん階段）に付ける赤い小さな印 */
+.reach-tag { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 999px; background: #d4343e; color: #fff; font-size: .68rem; font-weight: 900; line-height: 1.6; vertical-align: middle; white-space: nowrap; animation: tr-drop2 .5s cubic-bezier(.3, 1.6, .5, 1) both; }
+@keyframes tr-drop2 { from { opacity: 0; transform: translateY(-10px) scale(.6); } }
+@media (prefers-reduced-motion: reduce) { .reach-tag { animation: none; } }
+/* 勝ちまでの見通し・逆転の知らせ（2026-11-13。party.js の leadNote・showFlip）: 自分の札の下に1位との差。新しい1位の札が跳ねて「逆転！」（札の段は横に送る所ではみ出しが切れるので、札の中の上に出す） */
+.pt-gap { font-size: .72rem; font-weight: 700; color: var(--accent); white-space: nowrap; }
+.pt-gap.lead { color: #2f6fb3; }
+.cc-opp.flip { animation: pt-hop .6s cubic-bezier(.3, 1.6, .5, 1) both; animation-delay: var(--flip-at, 0ms); }
+@keyframes pt-hop { 0% { transform: translateY(0); } 35% { transform: translateY(-9px) scale(1.06); } 100% { transform: none; } }
+.pt-flip { position: absolute; left: 50%; top: 2px; padding: 0 8px; border-radius: 6px; background: #d4343e; color: #fff; font-weight: 900; font-size: .78rem; line-height: 1.6; white-space: nowrap; pointer-events: none; z-index: 2; animation: pt-flip 1.6s ease-out both; }
+@keyframes pt-flip { 0% { opacity: 0; transform: translate(-50%, 6px) scale(.4); } 15% { opacity: 1; transform: translate(-50%, -3px) scale(1.15); } 25%, 80% { opacity: 1; transform: translate(-50%, -3px) scale(1); } 100% { opacity: 0; transform: translate(-50%, -3px); } }
+/* 小さいマスの拡大鏡（2026-11-13。main.js の loupeStart）: 指の上の丸い窓。中は盤の写しを拡大したもの。まんなかの輪が指の下の場所 */
+.loupe { position: fixed; z-index: 60; width: 124px; height: 124px; border-radius: 50%; overflow: hidden; pointer-events: none; background: var(--panel); box-shadow: 0 0 0 3px #fff, 0 0 0 4px rgba(0, 0, 0, .25), 0 6px 18px rgba(0, 0, 0, .35); }
+.loupe::after { content: ""; position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; border: 2.5px solid var(--accent); box-shadow: 0 0 0 1.5px #fff; }
+.loupe-view { position: absolute; left: 0; top: 0; margin: 0 !important; transform-origin: 0 0; pointer-events: none; }
+.loupe-view * { animation: none !important; transition: none !important; }

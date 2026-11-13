@@ -17,7 +17,7 @@
 //   3人の CPU は読みをせず（2人用の読みは相手が1人の前提のため）、置けるマスごとの点数で選ぶ（threeCpu。四目並べの3人の CPU と同じ考え方）。
 // 手 = 柱の番号（上から見て 列 + 行×4。0〜15）。重力なしではマスの番号（0〜63）。マスの番号は 段×16 + 柱（段0 が一番下）。
 
-import { CPU_SETTING, TAP_PEEK_SETTING, DANGER_SETTING, boardCpu, boardJudge, dangerMoves, dangerOn } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, DANGER_SETTING, boardCpu, boardJudge, dangerMoves, dangerOn, col } from './util.js';
 
 const N = 4;
 const COLS = N * N;
@@ -141,6 +141,7 @@ export default {
   icon: '🧊',
   desc: '4×4 の柱に下から積んで、立体のどの向きでも4つ並べたら勝ち。オンラインでは3人でも遊べる',
   ready: true,
+  keepColor: true, // 続けて遊ぶ間は、その人の色と形を変えない（util.js の col。2026-11-13）
   players: ['赤', '黄', '緑'],
   // 詳細設定の人数（2〜3人）。待合室の席の数になる
   seatCount(rules) { return rules?.players === 3 ? 3 : 2; },
@@ -216,14 +217,14 @@ export default {
       const h = s.grid.filter((v, i) => i % COLS === c && v !== null).length;
       b.setAttribute('aria-label', `${y + 1}行${x + 1}列（${h}段まで積んである）`);
       if (o.canMove && landing(s, c) >= 0) {
-        b.classList.add('playable', 'p' + s.turn);
+        b.classList.add('playable', 'p' + col(s.turn));
         b.onclick = () => o.onMove(c);
       } else b.tabIndex = -1;
       for (let z = N - 1; z >= 0; z--) {
         const i = z * COLS + c;
         const slot = document.createElement('span');
         const v = s.grid[i];
-        slot.className = 'cb-slot' + (v === null ? '' : ' p' + v) + (win.has(i) ? ' win' : '') + (i === s.last ? ' last' : '');
+        slot.className = 'cb-slot' + (v === null ? '' : ' p' + col(v)) + (win.has(i) ? ' win' : '') + (i === s.last ? ' last' : '');
         if (v === null && z === h && o.canMove) slot.classList.add('next');
         if (danger.has(i)) { slot.classList.add('danger'); b.classList.add('has-danger'); }
         b.append(slot);
@@ -251,13 +252,13 @@ export default {
           cell.type = 'button';
           cell.setAttribute('aria-label', `${z + 1}段目 ${Math.floor(c / N) + 1}行${(c % N) + 1}列`);
           if (o.canMove && v === null) {
-            cell.classList.add('playable', 'p' + s.turn);
+            cell.classList.add('playable', 'p' + col(s.turn));
             cell.onclick = () => o.onMove(i);
           } else cell.tabIndex = -1;
         }
         if (v !== null) {
           const d = document.createElement('span');
-          d.className = 'cb-disc p' + v + (win.has(i) ? ' win' : '') + (i === s.last ? ' last' : '');
+          d.className = 'cb-disc p' + col(v) + (win.has(i) ? ' win' : '') + (i === s.last ? ' last' : '');
           if (i === s.last) d.dataset.last = 'still'; // 決め手のスロー（main.js の slowFinish）: 寄せるだけ
           cell.append(d);
         }

@@ -13,6 +13,7 @@
 
 import { jankenWinner } from './acchi.js';
 import { SEAT_COLORS } from './party.js';
+import { reachTag } from './util.js';
 
 const HANDS = { g: '✊', c: '✌️', p: '✋' };
 const HAND_NAME = { g: 'グー', c: 'チョキ', p: 'パー' };
@@ -144,6 +145,8 @@ export default {
       const num = document.createElement('div');
       num.className = 'kd-num';
       num.textContent = `${v}/${goal}段`;
+      // あと一歩の人に印（2026-11-13。room.md「UI・UX の6回目」）: 次に1回勝てばどの手でも（いちばん短いグリコの3段でも）ゴールに届く人
+      if (!res && v < goal && goal - v <= 3) name.append(reachTag('あと1勝'));
       row.append(name, track, num);
       stairs.append(row);
     }

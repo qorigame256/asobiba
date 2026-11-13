@@ -467,6 +467,8 @@ export default {
     });
   },
   // あなたの番までに起きたこと（2026-11-11。room.md「UI・UX の4回目」）: 順番の帯の札の下に出す短い言葉（名前は付けない）
+  // あと一歩の人に印（2026-11-13。room.md「UI・UX の6回目」）: 手札が残り1枚の人の順番の帯の札に出す言葉（main.js の turnBand）
+  reach(s) { return s.phase === 'play' ? s.hands.map((h, p) => (h.length === 1 && isActive(s, p) ? 'あと1枚' : null)) : null; },
   said(a, b, m) {
     const L = b.last;
     if (m.t === 'next' || !L || L.p !== m.p || JSON.stringify(L) === JSON.stringify(a.last)) return null;

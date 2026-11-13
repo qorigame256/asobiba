@@ -19,7 +19,7 @@
 //   隠している間は「石の数はひみつ（終わったら出ます）」と出す。ふりかえりの途中の局面は終わっていないので隠れたまま。CPU は変えない。
 //   人数・盤の大きさ・四隅封印・穴あき盤・角でもう1手と一緒に使える。
 
-import { CPU_SETTING, TAP_PEEK_SETTING, boardCpu, boardJudge, mulberry32 } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, boardCpu, boardJudge, mulberry32, col } from './util.js';
 
 const N8 = 8; // 3〜4人はいつも 8×8
 const DIRS = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
@@ -194,6 +194,7 @@ export default {
   icon: '⚫',
   desc: '相手の石をはさんでひっくり返す。最後に多い方が勝ち。オンラインでは盤の大きさ（6×6・10×10）や3〜4人も選べる',
   ready: true,
+  keepColor: true, // 続けて遊ぶ間は、その人の色と形を変えない（util.js の col。2026-11-13）
   players: ['黒', '白', '赤', '青'],
   // 詳細設定の人数（2〜4人）。待合室の席の数になる
   seatCount(rules) { return rules?.players ?? 2; },
@@ -313,16 +314,16 @@ export default {
     const secret = '<span class="rv-score">石の数はひみつ（終わったら出ます）</span>';
     if (s.n > 2) {
       const c = count(s.board, s.n);
-      let html = hidden ? secret : '<span class="rv-score">' + c.map((v, p) => `<span class="rv-mini p${p}"></span>${this.players[p]} <span data-roll="rv${p}" data-v="${v}">${v}</span>`).join('　') + '</span>';
-      if (s.again && !over) html += `<br>${this.players[s.turn]}は角を取ったので、もう1回！`;
-      if (!over && !legalMoves(s.board, s.turn, s.closed).length) html += `<br>${this.players[s.turn]}ははさめる所がないので、石のとなりならどこにでも置けます`;
+      let html = hidden ? secret : '<span class="rv-score">' + c.map((v, p) => `<span class="rv-mini p${col(p)}"></span>${this.players[col(p)]} <span data-roll="rv${p}" data-v="${v}">${v}</span>`).join('　') + '</span>';
+      if (s.again && !over) html += `<br>${this.players[col(s.turn)]}は角を取ったので、もう1回！`;
+      if (!over && !legalMoves(s.board, s.turn, s.closed).length) html += `<br>${this.players[col(s.turn)]}ははさめる所がないので、石のとなりならどこにでも置けます`;
       return html;
     }
     const [b, w] = count(s.board);
     let html = hidden ? secret : `<span class="rv-score"><span class="rv-mini p0"></span>黒 <span data-roll="rv0" data-v="${b}">${b}</span>　−　<span data-roll="rv1" data-v="${w}">${w}</span> 白<span class="rv-mini p1"></span></span>`;
-    if (s.again && !over) html += `<br>${this.players[s.turn]}は角を取ったので、もう1回！`;
-    if (s.missed != null && !over) html += `<br>${this.players[s.missed]}は角を取りましたが、続けて置ける場所がないので${this.players[s.turn]}の番です`;
-    if (s.passed !== null && !over) html += `<br>${this.players[s.passed]}は置ける場所がないのでパスです`;
+    if (s.again && !over) html += `<br>${this.players[col(s.turn)]}は角を取ったので、もう1回！`;
+    if (s.missed != null && !over) html += `<br>${this.players[col(s.missed)]}は角を取りましたが、続けて置ける場所がないので${this.players[col(s.turn)]}の番です`;
+    if (s.passed !== null && !over) html += `<br>${this.players[col(s.passed)]}は置ける場所がないのでパスです`;
     return html;
   },
 
@@ -338,7 +339,7 @@ export default {
       cell.className = 'rv-cell';
       if (v !== null) {
         const disc = document.createElement('span');
-        disc.className = 'rv-disc p' + v;
+        disc.className = 'rv-disc p' + col(v);
         if (flipped.has(i)) disc.classList.add('flip');
         if (i === s.last && o.fresh) disc.classList.add('pop');
         if (i === s.last) disc.dataset.last = ''; // 決め手のスロー（main.js の slowFinish）
@@ -347,7 +348,7 @@ export default {
       if (i === s.last) cell.classList.add('last');
       if (s.closed?.has(i)) cell.classList.add('shut');
       if (legal.has(i)) {
-        cell.classList.add('playable', 'p' + s.turn);
+        cell.classList.add('playable', 'p' + col(s.turn));
         cell.onclick = () => o.onMove(i);
       } else {
         cell.tabIndex = -1;

@@ -17,7 +17,7 @@
 const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
 export const NEUTRAL = -1; // じゃま石
 
-import { CPU_SETTING, TAP_PEEK_SETTING, DANGER_SETTING, boardCpu, boardJudge, dangerMoves, dangerOn, mulberry32, winLine } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, DANGER_SETTING, boardCpu, boardJudge, dangerMoves, dangerOn, mulberry32, winLine, col as seatCol } from './util.js';
 
 // 盤（列 w・段 h）の4つ並びの窓の一覧。マスごとに、そのマスを含む窓の番号も持つ
 const WINDOWS = {};
@@ -249,6 +249,7 @@ export default {
   icon: '🔴',
   desc: '上からコマを落として、4つ並べたら勝ち。オンラインでは自分のコマを下から抜けるポップアウトや、3〜4人で広い盤も選べる',
   ready: true,
+  keepColor: true, // 続けて遊ぶ間は、その人の色と形を変えない（util.js の col。2026-11-13）
   players: ['赤', '黄', '緑', '紫'],
   // 詳細設定の人数（2〜4人）。待合室の席の数になる
   seatCount(rules) { return rules?.players ?? 2; },
@@ -354,7 +355,7 @@ export default {
       col.className = 'c4-col';
       col.setAttribute('aria-label', `${c + 1}列目`);
       if (o.canMove && s.grid[c] === null) {
-        col.classList.add('playable', 'p' + s.turn);
+        col.classList.add('playable', 'p' + seatCol(s.turn));
         col.onclick = () => o.onMove(c);
       } else {
         col.tabIndex = -1;
@@ -366,7 +367,7 @@ export default {
         const v = s.grid[i];
         if (v !== null) {
           const disc = document.createElement('span');
-          disc.className = 'c4-disc ' + (v === NEUTRAL ? 'pn' : 'p' + v);
+          disc.className = 'c4-disc ' + (v === NEUTRAL ? 'pn' : 'p' + seatCol(v));
           if (v === NEUTRAL) disc.title = 'じゃま石';
           if (win.has(i)) disc.classList.add('win');
           if (i === s.last) {

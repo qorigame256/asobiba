@@ -21,7 +21,7 @@
 //   はさみ取りは、ほかの1人の石がちょうど2つ並んだ両側を自分の石ではさむと取れる（2つは同じ人の石。違う人の石が混ざっていたら取れない）。
 //   2人のときの局面は前と全く同じ形（3人のときだけ np: 3）。CPU は2人と同じ考え方で、守りは次の番の人を重く見る。
 
-import { CPU_SETTING, TAP_PEEK_SETTING, DANGER_SETTING, dangerMoves, dangerOn, mulberry32, winLine } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, DANGER_SETTING, dangerMoves, dangerOn, mulberry32, winLine, col } from './util.js';
 
 const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
 const DIRS8 = [...DIRS, ...DIRS.map(([r, c]) => [-r, -c])];
@@ -326,6 +326,7 @@ export default {
   icon: '⚪',
   desc: '交代で黒と白の石を置き、たて・よこ・ななめに5つ並べたら勝ち。オンラインでは3人（黒・白・赤。4つ並べ）でも遊べる',
   ready: true,
+  keepColor: true, // 続けて遊ぶ間は、その人の色と形を変えない（util.js の col。2026-11-13）
   players: ['黒', '白', '赤'],
   // 詳細設定の人数（2〜3人）。待合室の席の数になる
   seatCount(rules) { return rules?.players === 3 ? 3 : 2; },
@@ -367,8 +368,8 @@ export default {
 
   info(s) {
     if (!s.capture) return '';
-    let html = `取った組　${s.caps.map((k, p) => `<b>${this.players[p]} ${k}</b>`).join('　−　')}（${CAP_GOAL}組で勝ち）`;
-    if (s.won?.byCap) html += `<br>${this.players[s.won.winner]}が${CAP_GOAL}組取った`;
+    let html = `取った組　${s.caps.map((k, p) => `<b>${this.players[col(p)]} ${k}</b>`).join('　−　')}（${CAP_GOAL}組で勝ち）`;
+    if (s.won?.byCap) html += `<br>${this.players[col(s.won.winner)]}が${CAP_GOAL}組取った`;
     return html;
   },
 
@@ -403,7 +404,7 @@ export default {
         cell.setAttribute('aria-label', `${r + 1}段目 ${c + 1}列目（じゃま石）`);
       } else if (v !== null) {
         const stone = document.createElement('span');
-        stone.className = 'gm-stone p' + v + (win.has(i) ? ' win' : '') + (i === s.last ? ' last' : '') + (i === s.last && o.fresh ? ' pop' : '');
+        stone.className = 'gm-stone p' + col(v) + (win.has(i) ? ' win' : '') + (i === s.last ? ' last' : '') + (i === s.last && o.fresh ? ' pop' : '');
         if (i === s.last) stone.dataset.last = ''; // 決め手のスロー（main.js の slowFinish）
         cell.append(stone);
         cell.tabIndex = -1;
@@ -413,7 +414,7 @@ export default {
         cell.setAttribute('aria-label', `${r + 1}段目 ${c + 1}列目（禁じ手）`);
       } else if (o.canMove) {
         if (o.fresh && s.taken?.includes(i)) cell.append(Object.assign(document.createElement('span'), { className: 'gm-ghost' }));
-        cell.classList.add('playable', 'p' + s.turn);
+        cell.classList.add('playable', 'p' + col(s.turn));
         if (danger?.has(i)) cell.classList.add('danger');
         cell.setAttribute('aria-label', `${r + 1}段目 ${c + 1}列目${danger?.has(i) ? '（あぶない所）' : ''}`);
         cell.onclick = () => o.onMove(i);

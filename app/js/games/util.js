@@ -162,6 +162,23 @@ export function withGiveUp(def) {
   return def;
 }
 
+// 続けて遊ぶ間は、その人の色と形を変えない（2026-11-13 本人の決定。room.md「UI・UX の6回目」）。
+// 盤のゲームのもう一回で先手と後手が入れ替わっても、その人の ○× や石の色は前の対局のまま。そのため、席の番号（ゲームの中のプレイヤー番号。0 が先手）と
+// 色の番号（.p0〜.p3 の見た目と game.players の名前）がずれることがある。main.js が描く前に setSeatColors で「席の番号 → 色の番号」を入れ、
+// ゲームは描くとき（render・info）だけ col(席) で色の番号に直す。**apply・CPU・結果では使わない**（局面は席の番号のまま。全員の端末で同じ局面を作る決まり）。
+// 入れるのは keepColor を持つゲームのオンラインの対局だけ。ほかは入れない（col は席の番号をそのまま返す）
+let seatColors = null;
+export function setSeatColors(a) { seatColors = Array.isArray(a) ? a : null; }
+export const col = (p) => (seatColors && Number.isInteger(p) && Number.isInteger(seatColors[p]) ? seatColors[p] : p);
+
+// あと一歩の人に印（2026-11-13 本人の選択。room.md「UI・UX の6回目」）: ゲームが自分で描く点の欄に付ける赤い小さな印（順番の帯の印は main.js の addReach）
+export function reachTag(text) {
+  const t = document.createElement('span');
+  t.className = 'reach-tag';
+  t.textContent = text;
+  return t;
+}
+
 // 人の名前など、外から来た文字を HTML に埋め込むときに使う
 export const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 

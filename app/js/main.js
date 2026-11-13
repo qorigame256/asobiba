@@ -35,7 +35,7 @@
 import { GAMES, GAME_ORDER, winnersOf, seatPoints, CATEGORIES, categoryOf } from './games/index.js';
 import { SEAT_COLORS } from './games/party.js';
 import { connectRoom } from './net.js';
-import { esc, lineHold, finishLine } from './games/util.js';
+import { esc, lineHold, finishLine, col, setSeatColors } from './games/util.js';
 import { isOwner, unlockOwner, forgetOwner } from './owner.js';
 import { IS_APP, WEB_URL } from './platform.js';
 import { isBad, mask, BAD_TEXT_NOTE } from './filter.js';
@@ -90,7 +90,7 @@ function myDev() {
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName', 'cpuAuto', 'rps', 'hidden', 'ptsMode', 'devs', 'bannedDevs', 'again', 'away', 'bench', 'draw'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName', 'cpuAuto', 'rps', 'hidden', 'ptsMode', 'devs', 'bannedDevs', 'again', 'away', 'bench', 'draw', 'colors', 'colorKeep'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -183,10 +183,11 @@ function setBeg(id, on) {
   saveRoom();
 }
 
-/* ---------- 見やすさ（2026-11-11 本人の選択。room.md「UI・UX の4回目」）: 端末ごとの3つの切り替え ---------- */
+/* ---------- 見やすさ（2026-11-11 本人の選択。room.md「UI・UX の4回目」）: 端末ごとの切り替え（2026-11-13 に4つ目の「小さいマスの拡大鏡」を足した） ---------- */
 // big = 字の大きさ「大きい」（html の .big-text。状態の欄・ボタン・名前などを style.css の zoom でひと回り大きくする）、
 // twoTap = 2回押して置く（TWO_TAP_GAMES。下の「2回押して置く」）、shapes = 色に形を添える（html の .shapes。3〜4人の盤で人ごとの色に ● ▲ ■ ◆ を重ねる）。
-// どれも最初は切る（Claude の判断）。この端末だけ（localStorage。送らない）。ホームの「👓 見やすさ」と対局の画面の下の段の「👓 見やすさ」で開く
+// loupe = 小さいマスの拡大鏡（下の「小さいマスの拡大鏡」。最初は指で触る端末で使い、PC で切る。本人の決定。決めていなければ undefined で、loupeDefault で見る）。
+// loupe のほかは最初は切る（Claude の判断）。この端末だけ（localStorage。送らない）。ホームの「👓 見やすさ」と対局の画面の下の段の「👓 見やすさ」で開く
 // （上の段に置くと、スマホでゲームの名前が1行多く折れたため。2026-11-11 にブラウザで見て移した）。
 const VIEW_KEY = 'bg-view';
 let viewPref = { big: false, twoTap: false, shapes: false };
@@ -217,7 +218,9 @@ function openView() {
     ['big', '字の大きさ', '状態の欄・ボタン・名前などの字をひと回り大きくします', [[false, 'ふつう'], [true, '大きい']]],
     ['twoTap', '2回押して置く', 'マルバツ・四目並べ・リバーシ・五目並べ・立体四目並べ・点と線で、1回目に薄い印が出て、同じ所をもう一度押すと置きます（押し間違いを防ぎます）', [[false, '切る'], [true, '使う']]],
     ['shapes', '色に形を添える', '3〜4人の盤で、人ごとの色の上に ● ▲ ■ ◆ を重ねます（色が見分けにくいときに）', [[false, '切る'], [true, '使う']]],
+    ['loupe', '小さいマスの拡大鏡', '五目並べ・リバーシ・点と線・マルバツ・立体四目並べ・海戦ゲームで、指を当てている間は指の上に拡大した丸い窓を出し、指を離した所に置きます（指でずらして合わせられます。指で触る端末だけで働きます）', [[false, '切る'], [true, '使う']]],
   ];
+  const now = (k) => (k === 'loupe' ? loupePref() : !!viewPref[k]);
   const draw = () => {
     box.innerHTML = '<div class="invite-title">👓 見やすさ</div><p class="invite-note">この端末だけの設定です（ほかの人には変わりません）。</p>';
     for (const [k, label, note, choices] of rows) {
@@ -231,9 +234,9 @@ function openView() {
       for (const [v, t] of choices) {
         const b = document.createElement('button');
         b.type = 'button';
-        b.className = 'view-opt' + (!!viewPref[k] === v ? ' on' : '');
+        b.className = 'view-opt' + (now(k) === v ? ' on' : '');
         b.setAttribute('role', 'radio');
-        b.setAttribute('aria-checked', String(!!viewPref[k] === v));
+        b.setAttribute('aria-checked', String(now(k) === v));
         b.textContent = t;
         b.onclick = () => { setView(k, v); draw(); };
         seg.append(b);
@@ -250,6 +253,78 @@ function openView() {
   pop.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeInvite(); });
   document.body.append(pop);
   pop.querySelector('.view-opt.on')?.focus();
+}
+
+/* ---------- 小さいマスの拡大鏡（2026-11-13 本人の選択。room.md「UI・UX の6回目」） ---------- */
+// 指を当てている間、指の少し上に盤を LOUPE_ZOOM 倍にした丸い窓を出し、指を離した所を押したことにする（押したままずらして合わせられる）。端末ごとの設定（上の「見やすさ」の loupe）。
+// Claude の判断: 付ける盤は LOUPE_GAMES（盤を大きくするとマスが小さくなる盤と、マスの多い海戦ゲーム）。押せる所（.playable）があり、そのマスが LOUPE_CELL より小さいときだけ働く
+// （マルバツの3×3のような大きいマスでは窓が要らないため。2026-11-13 にブラウザで見て足した）。働かないときはふつうに押せて、スクロールもできる。
+// 窓の中身は、指を当てたときの盤の写し（cloneNode。#screen-play の中に置くので [data-game] の色もそのまま）。2本指（拡大の操作）になったら・盤の外で離したら何もしない。
+// touchstart で preventDefault するので、その間はブラウザのふつうのクリックとスクロールは起きない（指を離したときに1回だけ押したことにする。2回置かれないように）。
+// タッチのときだけ動くので、PC のマウスでは「使う」にしても何も変わらない
+const LOUPE_GAMES = new Set(['gomoku', 'reversi', 'dots', 'tictactoe', 'cube4', 'kaisen']);
+const LOUPE_R = 62; // 窓の半径（px）
+const LOUPE_ZOOM = 2.3;
+const LOUPE_CELL = 40; // これより小さい（幅か高さ。px）マスの盤だけで出す
+const loupeDefault = () => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+const loupePref = () => (typeof viewPref.loupe === 'boolean' ? viewPref.loupe : loupeDefault());
+let loupe = null;
+function loupeStart(e) {
+  if (e.touches.length !== 1) { loupeEnd(null); return; }
+  if (!loupePref() || !S || !LOUPE_GAMES.has(S.gameId) || el('screen-play').hidden) return;
+  const board = el('board');
+  const cell = board.querySelector('.playable')?.getBoundingClientRect();
+  if (!cell || Math.min(cell.width, cell.height) >= LOUPE_CELL) return;
+  e.preventDefault();
+  const rect = board.getBoundingClientRect();
+  const wrap = document.createElement('div');
+  wrap.className = 'loupe';
+  wrap.setAttribute('aria-hidden', 'true');
+  const view = board.cloneNode(true);
+  view.removeAttribute('id');
+  view.classList.add('loupe-view');
+  view.style.width = rect.width + 'px';
+  view.style.height = rect.height + 'px';
+  wrap.append(view);
+  el('screen-play').append(wrap);
+  loupe = { wrap, view, rect, x: 0, y: 0 };
+  loupeMove(e);
+}
+function loupeMove(e) {
+  if (!loupe) return;
+  if (e.touches.length !== 1) { loupeEnd(null); return; }
+  e.preventDefault();
+  const t = e.touches[0];
+  loupe.x = t.clientX;
+  loupe.y = t.clientY;
+  const { wrap, view, rect } = loupe;
+  const R = LOUPE_R;
+  let top = loupe.y - 2 * R - 44; // 指で隠れないよう指の上に（上が足りなければ下に）
+  if (top < 8) top = loupe.y + 44;
+  const left = Math.min(Math.max(8, loupe.x - R), window.innerWidth - 2 * R - 8);
+  wrap.style.left = left + 'px';
+  wrap.style.top = top + 'px';
+  view.style.transform = `translate(${R - (loupe.x - rect.left) * LOUPE_ZOOM}px, ${R - (loupe.y - rect.top) * LOUPE_ZOOM}px) scale(${LOUPE_ZOOM})`;
+}
+function loupeEnd(e) {
+  if (!loupe) return;
+  const { wrap, x, y } = loupe;
+  loupe = null;
+  wrap.remove();
+  if (!e) return;
+  e.preventDefault();
+  const board = el('board');
+  const r = board.getBoundingClientRect();
+  if (x < r.left || x > r.right || y < r.top || y > r.bottom) return;
+  const target = document.elementFromPoint(x, y);
+  if (target && board.contains(target)) target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window }));
+}
+{
+  const b = el('board');
+  b.addEventListener('touchstart', loupeStart, { passive: false });
+  b.addEventListener('touchmove', loupeMove, { passive: false });
+  b.addEventListener('touchend', loupeEnd, { passive: false });
+  b.addEventListener('touchcancel', () => loupeEnd(null));
 }
 
 /* ---------- 部屋の成績表（2026-10-06 本人の決定）: この部屋で決着した対局の数と、だれが何回勝ったか（ゲームをまたいで） ---------- */
@@ -1166,6 +1241,36 @@ function boardPick() {
   return q;
 }
 
+// 続けて遊ぶ間は、その人の色と形を変えない（2026-11-13 本人の決定。room.md「UI・UX の6回目」。描くときの直し方は util.js の col）。
+// ids = 席ごとの人（pick の 'cpu' でも order の 'cpu1' でもよい）→ 席ごとの色の番号。keepColor のゲームのオンラインだけ。ほかは null（席の番号のまま）。
+// 前の対局（S.colorKeep。ホストが startRound で覚える）と同じゲーム・同じ席の数なら、前にいた人は前の色、CPU は前の CPU の色を席の順に、残りの席は空いた色を小さい順に。
+// ゲームを替えたら覚えた色は使わない（席の順の色に戻る）。待合室を通って同じゲームを始めたときも続けて遊んでいると見て、色を引き継ぐ（Claude の判断）
+function seatColorsFor(gameId, ids) {
+  if (S.mode !== 'online' || !GAMES[gameId]?.keepColor || !Array.isArray(ids) || ids.length < 2) return null;
+  const n = ids.length;
+  const k = S.colorKeep?.game === gameId && S.colorKeep.n === n ? S.colorKeep : null;
+  const ok = (c) => Number.isInteger(c) && c >= 0 && c < n;
+  const out = Array(n).fill(null);
+  const used = new Set();
+  const cpuCols = (k?.cpu ?? []).filter(ok);
+  ids.forEach((id, i) => {
+    const c = isCpu(id) ? cpuCols.shift() : k?.of?.[id];
+    if (ok(c) && !used.has(c)) { out[i] = c; used.add(c); }
+  });
+  const free = [...Array(n).keys()].filter((c) => !used.has(c));
+  return out.map((c) => c ?? free.shift());
+}
+function keepColors(order, colors) {
+  if (!colors) { S.colorKeep = null; return; }
+  S.colorKeep = {
+    game: S.gameId, n: order.length,
+    of: Object.fromEntries(order.map((id, i) => [id, colors[i]]).filter(([id]) => !isCpu(id))),
+    cpu: order.map((id, i) => (isCpu(id) ? colors[i] : null)).filter((c) => c !== null),
+  };
+}
+// 席の色の名前（○・黒・赤 など）を色付きで。盤のゲームの状態の欄・順番の帯・ふりかえりなどで使う
+const seatMark = (game, p, tag = 'b') => `<${tag} class="pl p${col(p)}">${game.players[col(p)]}</${tag}>`;
+
 // 待合室で決まる顔ぶれ。人がゲームの上限より多ければ、あとから来た人は観戦。
 // seats(rules) を持つゲーム（麻雀）は詳細設定で人数が決まり、足りない分はすべて CPU
 function lineup(game) {
@@ -1759,7 +1864,7 @@ function statusHtml(game, st, res) {
     if (me === SPECTATOR) sub = vacantSeats().length && !res ? '観戦中です（部屋を出た人の席に、下のボタンで途中から入れます）' : '観戦中です（次の対局から参加できます）';
   } else {
     const n = roundOrder().length || 2;
-    const name = (p) => `<b class="pl p${p}">${game.players[p]}</b>`;
+    const name = (p) => seatMark(game, p);
     // 部屋を出た人の席は CPU が打っているので、そう書き添える
     const who = (p) => {
       const id = roundOrder()[p];
@@ -1848,9 +1953,9 @@ function thinkHtml(game) {
   for (const [p, ms] of c.log) if (seat(p)) used[p] += ms;
   const live = !c.res && seat(c.turn) ? Date.now() - c.at : 0;
   if (live) used[c.turn] += live;
-  const tot = used.map((_, p) => p).map((p) => `<b class="pl p${p}">${game.players[p]}</b> ${clockText(used[p])}`).join(' ／ ');
+  const tot = used.map((_, p) => p).map((p) => `${seatMark(game, p)} ${clockText(used[p])}`).join(' ／ ');
   if (c.res) return `考えた時間 ${tot}`;
-  return `⏱ <b class="pl p${c.turn}">${game.players[c.turn]}</b>が考え中 <b>${clockText(live)}</b>　合計 ${tot}`;
+  return `⏱ ${seatMark(game, c.turn)}が考え中 <b>${clockText(live)}</b>　合計 ${tot}`;
 }
 
 setInterval(() => {
@@ -1950,6 +2055,8 @@ function keepPlace(key, fn) {
 
 function render() {
   if (!S) return;
+  // 続けて遊ぶ間は、その人の色と形を変えない（2026-11-13）: ゲームの描く所（util.js の col）へ、この対局の席の色を渡す
+  setSeatColors(S.mode === 'online' && GAMES[S.gameId]?.keepColor && S.colors?.length === S.order?.length ? S.colors : null);
   const flyBefore = flySnap(); // 札や駒がすっと動く（2026-11-06）: 描き直す前の場所（描き直しの途中では測らない）
   const cleanFrom = cleanSnap(); // 片付けの動き（2026-11-10）: 決着した盤から次の対局へ進むなら、いまの石や駒の写しと場所
   const body = document.body;
@@ -2159,6 +2266,9 @@ function turnBand(game, st, res) {
   if (crowned && !crowned.size) return null; // 引き分けは今までどおり出さない
   const me = myPlayer();
   const said = res ? null : saidBySeat(game, n);
+  // あと一歩の人に印（2026-11-13 本人の選択。room.md「UI・UX の6回目」）: ゲームの reach(局面) → 席ごとの短い言葉（「あと1枚」）| null。
+  // いまは大富豪・ダウト・七並べ（Claude の判断。いろあわせは「最後の1枚の宣言」の駆け引きを壊すので付けない）。印が付いたばかりの札は印を落として揺らす（動きを減らす設定の端末では揺らさない）
+  const reach = res ? null : game.reach?.(st) ?? null;
   const band = document.createElement('div');
   band.className = 'turn-band' + (said ? ' has-said' : '') + (!game.multi && n >= 3 ? ' seats34' : ''); // seats34: 色に形を添える（2026-11-11）
   const back = st?.dir === -1;
@@ -2173,13 +2283,13 @@ function turnBand(game, st, res) {
     }
     const card = document.createElement('div');
     card.className = 'turn-card' + (i === t ? ' now' : '') + (i === me ? ' mine' : '');
-    const label = !game.multi ? game.players?.[i] : null;
+    const label = !game.multi ? game.players?.[col(i)] : null; // 続けて遊ぶ間は、その人の色と形を変えない（2026-11-13）
     const mark = document.createElement('span');
     mark.className = 'turn-mark';
     // 印は色の丸か短い記号（○・× など）。「先手」のような言葉は席の番号にし、同じ画面の対局では名前の所に言葉を出す
     const sym = label ? COLOR_DOT[label] ?? ([...label].length <= 1 ? label : null) : null;
     mark.textContent = sym ?? String(i + 1);
-    if (sym && COLOR_DOT[label]) mark.dataset.p = i; // 色に形を添える（2026-11-11）: 色の丸に ● ▲ ■ ◆ を添える（style.css の .shapes）
+    if (sym && COLOR_DOT[label]) mark.dataset.p = col(i); // 色に形を添える（2026-11-11）: 色の丸に ● ▲ ■ ◆ を添える（style.css の .shapes）
     const who = document.createElement('span');
     who.className = 'turn-name';
     who.textContent = S.mode === 'online' ? (i === me ? 'あなた' : nameOf(S.order[i])) : label && label !== sym ? label : `${i + 1}番`;
@@ -2199,12 +2309,25 @@ function turnBand(game, st, res) {
       b.textContent = said[i];
       card.append(b);
     }
+    if (typeof reach?.[i] === 'string') addReach(card, i, reach[i]);
     if (S.mode === 'online') addFlame(card, S.order[i]);
     if (crowned?.has(i)) addCrown(card);
     band.append(card);
   });
   if (S.mode === 'online') flameSeen = { key: S.streak?.key ?? null, n: { ...(S.streak?.wins ?? {}) } };
   return band;
+}
+
+const reachSeen = { key: '', on: new Set() }; // 前に描いたとき印が付いていた席（付いたばかりの札だけ揺らすため）
+function addReach(card, i, text) {
+  const key = `${S.gameId}:${S.round}:${S.seed}`;
+  if (reachSeen.key !== key) Object.assign(reachSeen, { key, on: new Set() });
+  const b = document.createElement('span');
+  b.className = 'turn-reach' + (reachSeen.on.has(i) || lessMotion() ? '' : ' new');
+  b.textContent = text;
+  card.classList.add('reach');
+  card.append(b);
+  reachSeen.on.add(i);
 }
 
 // あなたの番までに起きたこと（2026-11-11 本人の選択。room.md「UI・UX の4回目」）: 自分が最後に打った手より後に、ほかの人がした手を、
@@ -2393,9 +2516,11 @@ function renameButton() {
 const AGAIN_MS = 20000;
 const againNeed = () => (S.order ?? []).filter((id) => !isCpu(id) && S.members.includes(id));
 const againIds = () => (S.again?.round === S.round ? S.again.ids : []);
+// 結果の画面でルールを変えた回数（v）。ホストが変えるたびに OK を空にして1つ進め、20秒も数え直す（下の「結果の画面でルールを変えてもう一回」）
+const againVer = () => (S.again?.round === S.round && Number.isInteger(S.again.v) ? S.again.v : 0);
 function sayAgain(ok) {
   if (S.isHost) onAgain(S.myId, ok, S.round);
-  else { send({ type: 'again', ok, round: S.round }); if (ok) { S.again = { round: S.round, ids: [...againIds(), S.myId] }; render(); } }
+  else { send({ type: 'again', ok, round: S.round }); if (ok) { S.again = { round: S.round, ids: [...againIds(), S.myId], v: againVer() }; render(); } }
 }
 function onAgain(id, ok, round) {
   if (!S.isHost || round !== S.round || !againNeed().includes(id)) return;
@@ -2404,7 +2529,7 @@ function onAgain(id, ok, round) {
     newRound(S.gameId, { lobby: true });
     return;
   }
-  if (!againIds().includes(id)) S.again = { round: S.round, ids: [...againIds(), id] };
+  if (!againIds().includes(id)) S.again = { round: S.round, ids: [...againIds(), id], v: againVer() };
   saveRoom();
   sendState();
   checkAgain();
@@ -2418,7 +2543,8 @@ function checkAgain() {
   if (!st || !game.result(st) || game.live) return;
   const need = againNeed();
   if (!need.length) return;
-  const key = resultKey();
+  const rk = resultKey();
+  const key = rk + '#' + againVer(); // ルールを変えたら20秒を数え直す
   if (S.againKey !== key) {
     S.againKey = key;
     S.againStart = Date.now();
@@ -2427,20 +2553,83 @@ function checkAgain() {
     S.againTimer = setTimeout(() => { if (S === session) checkAgain(); }, AGAIN_MS + 50);
   }
   const ids = againIds();
-  if (need.every((id) => ids.includes(id))) { setTimeout(() => { if (S?.againKey === key && resultKey() === key) newRound(S.gameId); }, 0); return; }
+  if (need.every((id) => ids.includes(id))) { setTimeout(() => { if (S?.againKey === key && resultKey() === rk) newRound(S.gameId); }, 0); return; }
   if (Date.now() - S.againStart >= AGAIN_MS) {
     setTimeout(() => {
-      if (S?.againKey !== key || resultKey() !== key) return;
+      if (S?.againKey !== key || resultKey() !== rk) return;
       toast('全員の OK がそろわなかったので、待合室へ戻りました');
       newRound(S.gameId, { lobby: true });
     }, 0);
   }
 }
 let againTick = null;
+// 結果の画面でルールを変えてもう一回（2026-11-13 本人の選択。room.md「UI・UX の6回目」）: OK の欄の下に、そのゲームのよく変える詳細設定を3つまで出し、ホストだけが変えられる。
+// 変えたら全員の OK を空にして（知らないうちにルールが変わらないように）20秒を数え直し、ゲストの画面には何をどう変えたかを一言出す（onState の againRuleNote）。
+// Claude の判断: 出す設定は QUICK_KEYS の順でそのゲームにある選ぶ形のものから3つまで（CPU の強さは CPU が入っている対局だけ）。人数（players）は顔ぶれが変わるので出さない。
+// 変えた設定は待合室で変えたときと同じく端末に覚える（rememberRules）
+const QUICK_KEYS = ['cpu', 'level', 'size', 'rounds', 'time', 'goal'];
+function quickRules(game) {
+  const hasCpu = (S.order ?? []).some(isCpu);
+  return QUICK_KEYS.map((k) => game.settings?.find((x) => x.key === k && Array.isArray(x.choices)))
+    .filter((x) => x && (x.key !== 'cpu' || hasCpu)).slice(0, 3);
+}
+function againRule(key, value) {
+  if (!S.isHost) return;
+  S.rules = { ...S.rules, [S.gameId]: { ...rulesOf(S.gameId, S.rules), [key]: value } };
+  rememberRules();
+  S.again = { round: S.round, ids: [], v: againVer() + 1 };
+  saveRoom();
+  sendState();
+  checkAgain();
+  render();
+  toast('ルールを変えました。みんなの OK は押し直しになります');
+}
+function againRulesBox(game) {
+  const list = quickRules(game);
+  if (!list.length) return null;
+  const cur = rulesOf(S.gameId, S.rules);
+  const box = document.createElement('div');
+  box.className = 'again-rules';
+  const head = document.createElement('span');
+  head.className = 'again-rules-head';
+  head.textContent = S.isHost ? '次のルール（変えられます）' : '次のルール（部屋を作った人が変えられます）';
+  box.append(head);
+  for (const x of list) {
+    const label = document.createElement('label');
+    if (S.againFlash?.key === x.key && Date.now() < S.againFlash.until) label.classList.add('flash');
+    const t = document.createElement('span');
+    t.textContent = x.label;
+    const sel = document.createElement('select');
+    x.choices.forEach(([value, name], i) => {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = name;
+      opt.selected = value === cur[x.key];
+      sel.append(opt);
+    });
+    sel.disabled = !S.isHost;
+    sel.onchange = () => againRule(x.key, x.choices[Number(sel.value)][0]);
+    label.append(t, sel);
+    box.append(label);
+  }
+  return box;
+}
+// ゲストの画面: 結果の画面でホストがルールを変えたら、何をどう変えたかを一言出し、その設定の行を光らせる
+function againRuleNote(oldRules, oldVer) {
+  const game = GAMES[S.gameId];
+  if (!game || S.isHost || againVer() <= oldVer) return;
+  const now = rulesOf(S.gameId, S.rules);
+  const changed = quickRules(game).filter((x) => now[x.key] !== oldRules[x.key]);
+  if (!changed.length) return;
+  const name = (x) => x.choices.find(([v]) => v === now[x.key])?.[1] ?? '';
+  toast(`ホストが${changed.map((x) => `${x.label}を「${name(x)}」`).join('、')}に変えました${againNeed().includes(S.myId) ? '。もう一度 OK を押してください' : ''}`); // 観戦の人は OK を押さない
+  S.againFlash = { key: changed[0].key, until: Date.now() + 1400 };
+}
 function appendAgain() {
   const need = againNeed();
   const ids = againIds();
-  const key = resultKey();
+  const rk = resultKey();
+  const key = rk + '#' + againVer(); // ルールを変えたら残りの秒数を数え直す
   S.againSeen ??= {};
   S.againSeen[key] ??= Date.now();
   const box = document.createElement('div');
@@ -2450,6 +2639,8 @@ function appendAgain() {
   line.className = 'again-line';
   line.innerHTML = `🔁 もう一回: OK ${need.length - waitFor.length}/${need.length}人${waitFor.length ? `（まだ: ${waitFor.map((id) => esc(id === S.myId ? 'あなた' : nameOf(id))).join('・')}）` : ''}　<b class="again-left"></b>`;
   box.append(line);
+  const rules = againRulesBox(GAMES[S.gameId]);
+  if (rules) box.append(rules);
   const acts = document.createElement('div');
   acts.className = 'again-acts';
   if (need.includes(S.myId) && !ids.includes(S.myId)) {
@@ -2466,7 +2657,7 @@ function appendAgain() {
   const tick = () => {
     const left = Math.max(0, Math.ceil((AGAIN_MS - (Date.now() - (S?.againSeen?.[key] ?? Date.now()))) / 1000));
     const b = document.querySelector('.again-left');
-    if (!b || resultKey() !== key) { clearInterval(againTick); againTick = null; return; }
+    if (!b || resultKey() !== rk) { clearInterval(againTick); againTick = null; return; }
     b.textContent = `残り ${left}秒`;
   };
   clearInterval(againTick);
@@ -2537,7 +2728,7 @@ const vacantSeats = () => (S.mode === 'online' && S.order && !GAMES[S.gameId]?.l
 function appendSit(game, res) {
   if (res || myPlayer() !== SPECTATOR || S.full) return;
   for (const p of vacantSeats()) {
-    const seat = game.multi ? '' : `（${game.players[p]}）`;
+    const seat = game.multi ? '' : `（${game.players[col(p)]}）`;
     ctl().append(makeButton(`🪑 ${nameOf(S.order[p])}${seat}の代わりに入る`, () => askSit(p), 'secondary')); // 名前は textContent で入る
   }
 }
@@ -2735,7 +2926,7 @@ function judgeTurn(game) {
 const judgeWord = (game, v) => {
   const a = Math.abs(v);
   if (a < 10) return '互角';
-  const who = `<b class="pl p${v > 0 ? 0 : 1}">${game.players[v > 0 ? 0 : 1]}</b>`;
+  const who = seatMark(game, v > 0 ? 0 : 1);
   return `${who} ${a < 40 ? 'やや有利' : a < 90 ? '有利' : '勝ちそう'}`;
 };
 // 形勢の帯を出すか: 観戦の人だけ（対局している人にはヒントになるため）。
@@ -2757,7 +2948,7 @@ function judgeBar(game, st) {
   d.className = 'judge-bar';
   d.setAttribute('role', 'img');
   d.setAttribute('aria-label', `形勢: ${judgeWord(game, v).replace(/<[^>]+>/g, '')}`);
-  const name = (p) => `<span class="pl p${p}">${game.players[p]} ${esc(nameOf(roundOrder()[p]))}</span>`;
+  const name = (p) => `<span class="pl p${col(p)}">${game.players[col(p)]} ${esc(nameOf(roundOrder()[p]))}</span>`;
   d.innerHTML = `<div class="jb-lab">${name(0)}<span class="jb-mid">形勢: ${judgeWord(game, v)}</span>${name(1)}</div><div class="jb-track"><div class="jb-fill" style="width:${50 + from / 2}%"></div></div>`;
   if (from !== v) requestAnimationFrame(() => requestAnimationFrame(() => { const f = d.querySelector('.jb-fill'); if (f) f.style.width = `${50 + v / 2}%`; }));
   else d.querySelector('.jb-fill').style.width = `${50 + v / 2}%`;
@@ -2789,7 +2980,7 @@ function judgeChart(game, k) {
     <line class="jc-zero" x1="${pad}" x2="${W - pad}" y1="${y(0)}" y2="${y(0)}"></line>
     <polyline class="jc-line" points="${line}"></polyline>
     <line class="jc-now" x1="${x(k).toFixed(1)}" x2="${x(k).toFixed(1)}" y1="2" y2="${H - 2}"></line>${star}
-  </svg><div class="jc-lab"><span><b class="pl p0">${game.players[0]}</b> 優勢 ↑</span><span>↓ <b class="pl p1">${game.players[1]}</b> 優勢</span></div>`;
+  </svg><div class="jc-lab"><span>${seatMark(game, 0)} 優勢 ↑</span><span>↓ ${seatMark(game, 1)} 優勢</span></div>`;
   box.querySelector('svg').addEventListener('click', (e) => {
     const r = e.currentTarget.getBoundingClientRect();
     const i = Math.round(((e.clientX - r.left) / r.width * W - pad) / ((W - pad * 2) / n));
@@ -2803,7 +2994,7 @@ function judgeTurnNote(game, k) {
   if (k === 0 || judgeTurn(game) !== k) return '';
   const before = replay({ ...S, moves: S.moves.slice(0, k - 1) });
   const p = before ? game.turn(before) : null;
-  return `<div class="status-sub jc-note">★ 分かれ目: ${Number.isInteger(p) && game.players[p] ? `<b class="pl p${p}">${game.players[p]}</b>の` : ''}この手で形勢が大きく動きました</div>`;
+  return `<div class="status-sub jc-note">★ 分かれ目: ${Number.isInteger(p) && game.players[p] ? `${seatMark(game, p)}の` : ''}この手で形勢が大きく動きました</div>`;
 }
 
 /* ---------- 結果に名場面（2026-11-12 本人の選択。room.md「UI・UX の5回目」）: 決着のあと、対局した人1人につき1行ずつ、その人の名場面を出す ---------- */
@@ -2837,7 +3028,7 @@ function appendScenes(game, st, res, status) {
   const me = myPlayer();
   const who = (p) => {
     if (game.multi) return esc(p === me ? 'あなた' : nameOf(S.order[p]));
-    const mark = game.players?.[p] ? `<b class="pl p${p}">${game.players[p]}</b> ` : '';
+    const mark = game.players?.[p] ? `${seatMark(game, p)} ` : '';
     if (S.mode !== 'online') return mark.trim();
     return mark + esc(p === me ? 'あなた' : nameOf(roundOrder()[p]));
   };
@@ -3337,8 +3528,28 @@ function cleanPlay(c) {
 // 始まってすぐ速さを競うスピード（NO_INTRO）には出さない（始めを隠すと損をするため）。同じ画面の対局は名前が無いので出さない。
 // 札の色は席の色（盤のゲームは [data-game] ごとの --p0 など、5人目からは SEAT_COLORS）。名前は外から来た文字なので textContent
 const NO_INTRO = new Set(['speed']);
+// 今度はあなたが先手（2026-11-13 本人の選択。room.md「UI・UX の6回目」）: 色と形を人に付けるゲーム（keepColor）で、前の対局と同じ顔ぶれのまま席の順が変わったら、
+// 顔合わせで札が前の席から今の席へ入れ替わって入り、自分の席が変わった人には「今度はあなたが先手（○のまま）」を出す。動きを減らす設定の端末では一言だけ出す。
+// 前の対局の席は、この端末で前に顔合わせを考えたとき（lastSeats）のもの（読み込み直したあとの最初の対局では出さない）
+let lastSeats = null;
+function seatSwap(game, ids) {
+  const prev = lastSeats;
+  lastSeats = { key: S.code + ':' + S.gameId, ids: ids.slice() };
+  if (S.mode !== 'online' || !game?.keepColor || prev?.key !== lastSeats.key || prev.ids.length !== ids.length) return null;
+  const from = ids.map((id) => (isCpu(id) ? -1 : prev.ids.indexOf(id)));
+  if (from.some((j, i) => j < 0 && !isCpu(ids[i])) || from.every((j, i) => j === i || j < 0)) return null; // 顔ぶれが替わった・席が動いていない
+  const me = ids.indexOf(S.myId);
+  let note = '';
+  if (me >= 0 && from[me] !== me) {
+    const seat = ids.length > 2 ? `${me + 1}番目` : me === 0 ? '先手' : '後手';
+    note = `今度はあなたが${seat}（${game.players[col(me)]}のまま）`;
+  }
+  return { from, note };
+}
 function introFx(game) {
   const ids = S.order ?? [];
+  const swap = seatSwap(game, ids);
+  if (swap?.note && lessMotion()) toast('🔁 ' + swap.note);
   if (lessMotion() || S.mode !== 'online' || !game || game.live || ids.length < 2 || NO_INTRO.has(S.gameId) || ['quick', 'action'].includes(categoryOf(S.gameId))) return;
   const box = document.createElement('div');
   box.className = 'vs-fx';
@@ -3347,7 +3558,8 @@ function introFx(game) {
     const p = document.createElement('div');
     p.className = 'vs-plate';
     p.textContent = nameOf(id);
-    p.style.setProperty('--pc', `var(--p${i}, ${SEAT_COLORS[i % SEAT_COLORS.length]})`);
+    const c = game.multi ? i : col(i); // 続けて遊ぶ間は、その人の色と形を変えない（2026-11-13）
+    p.style.setProperty('--pc', `var(--p${c}, ${SEAT_COLORS[c % SEAT_COLORS.length]})`);
     return p;
   };
   const row = document.createElement('div');
@@ -3357,8 +3569,8 @@ function introFx(game) {
     vs.className = 'vs-mark';
     vs.textContent = 'VS';
     row.append(plate(ids[0], 0), vs, plate(ids[1], 1));
-    row.firstChild.classList.add('l');
-    row.lastChild.classList.add('r');
+    row.firstChild.classList.add(swap ? 'sw-l' : 'l'); // 席が入れ替わったら、前の席（反対側）から入れ替わって入る
+    row.lastChild.classList.add(swap ? 'sw-r' : 'r');
   } else {
     row.className = 'vs-grid';
     ids.forEach((id, i) => {
@@ -3368,7 +3580,13 @@ function introFx(game) {
     });
   }
   box.append(row);
-  const t1 = ids.length === 2 ? 1000 : 1000 + ids.length * 40;
+  if (swap?.note) {
+    const note = document.createElement('div');
+    note.className = 'vs-note';
+    note.textContent = swap.note;
+    box.append(note);
+  }
+  const t1 = (ids.length === 2 ? 1000 : 1000 + ids.length * 40) + (swap?.note ? 900 : swap ? 300 : 0); // 一言を読む間だけ長く
   showFx(box, t1 + 550);
   introUntil = Date.now() + t1 + 550; // 札を配るのは顔合わせが消えるころから（flyPlay）
   // 顔合わせ・配っている間にどこかを押したら、配る動きもすぐ終える（待っている間の手札の札は山札の所に重なっていて、山札を押すつもりで札を押してしまうため）。
@@ -3734,13 +3952,15 @@ function renderBoardLobby(game) {
   memberFx(faces);
   board.prepend(lobbyGameCard(game));
   const pick = boardPick();
+  const colsNext = seatColorsFor(S.gameId, pick);
   const label = (v) => (v === 'cpu' ? 'CPU' : nameOf(v) + (v === S.myId ? '（あなた）' : ''));
   const list = document.createElement('div');
   list.className = 'lobby-pick';
   pick.forEach((_, i) => {
     const row = document.createElement('label');
     const head = document.createElement('span');
-    head.innerHTML = `<b class="pl p${i}">${esc(game.players[i])}</b>${game.live ? '' : seatNote(game, i, n)}`;
+    const c = colsNext?.[i] ?? i; // 続けて遊ぶ間は、その人の色と形を変えない（2026-11-13）: 次の対局でこの席の人が使う色
+    head.innerHTML = `<b class="pl p${c}">${esc(game.players[c])}</b>${game.live ? '' : seatNote(game, i, n)}`;
     row.append(head);
     if (S.isHost) {
       const sel = document.createElement('select');
@@ -3806,7 +4026,7 @@ function renderBoardLobby(game) {
 // 席の順番だけをまぜる。何度でも引き直せる。結果はいつもの席の選び方と同じく pick に入れて state で送り、くじの合図（type: 'lot'。まぜた pick 付き）も
 // 送りっぱなしにして、全員の画面に結果を一言（toast）で出す。エアホッケーは席が打つ順番でないので出さない。席の顔ぶれが1つ（CPU だけ）なら押せない。
 function lotButton(game, pick) {
-  const b = makeButton(pick.length > 2 ? '🎲 順番をくじで決める' : `🎲 ${game.players[0]}をくじで決める`, () => {
+  const b = makeButton(pick.length > 2 ? '🎲 順番をくじで決める' : `🎲 ${game.keepColor ? '先手' : game.players[0]}をくじで決める`, () => {
     const next = pick.slice();
     for (let i = next.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -3826,7 +4046,7 @@ function lotButton(game, pick) {
 
 function lotToast(game, pick) {
   const who = (v) => (v === 'cpu' ? 'CPU' : v === S.myId ? 'あなた' : nameOf(v));
-  toast(pick.length > 2 ? '🎲 くじの結果: ' + pick.map(who).join(' → ') : `🎲 くじの結果: ${game.players[0]}は ${who(pick[0])}`);
+  toast(pick.length > 2 ? '🎲 くじの結果: ' + pick.map(who).join(' → ') : `🎲 くじの結果: ${game.keepColor ? '先手' : game.players[0]}は ${who(pick[0])}`);
 }
 
 // くじの合図を受け取った（ホストからだけ・待合室の間だけ。中身は部屋の人か cpu のときだけ使う）
@@ -4422,6 +4642,8 @@ function startRound() {
     let n = 0;
     order = S.pick.map((v) => (v === 'cpu' ? 'cpu' + ++n : v));
   }
+  S.colors = game.multi ? null : seatColorsFor(S.gameId, order); // 続けて遊ぶ間は、その人の色と形を変えない（2026-11-13）
+  keepColors(order, S.colors);
   S.round += 1;
   S.order = order;
   S.away = [];
@@ -5101,7 +5323,7 @@ document.addEventListener('visibilitychange', () => {
 function send(msg, qos) { S?.net?.send(msg, qos); }
 function sendState() {
   const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, undo, streak, beg } = S;
-  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {}, roomName: S.roomName ?? '', cpuAuto: !!S.cpuAuto, rps: S.rps ?? null, ptsMode: !!S.ptsMode, again: S.again ?? null, away: S.away ?? [], bench: S.bench ?? [], draw: S.draw ?? null });
+  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {}, roomName: S.roomName ?? '', cpuAuto: !!S.cpuAuto, rps: S.rps ?? null, ptsMode: !!S.ptsMode, again: S.again ?? null, away: S.away ?? [], bench: S.bench ?? [], draw: S.draw ?? null, colors: S.colors ?? null, colorKeep: S.colorKeep ?? null });
 }
 function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves, u: S.undo ?? 0 }); }
 function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner, mark: myMark(), dev: myDev() }); }
@@ -5272,6 +5494,8 @@ function adoptState(msg) {
   S.hostLeft = false;
   S.members = msg.members.slice();
   S.names = { ...msg.names };
+  const oldRules = rulesOf(S.gameId, S.rules); // 結果の画面でホストがルールを変えたかを見るため（againRuleNote）
+  const oldVer = S.round === msg.round && S.gameId === msg.gameId ? againVer() : Infinity;
   S.rules = msg.rules && typeof msg.rules === 'object' ? msg.rules : {};
   S.beg = Array.isArray(msg.beg) ? msg.beg.filter((id) => typeof id === 'string') : [];
   S.streak = msg.streak && typeof msg.streak === 'object' && msg.streak.wins && typeof msg.streak.wins === 'object' ? msg.streak : null;
@@ -5293,7 +5517,8 @@ function adoptState(msg) {
   S.rps = rp && Number.isInteger(rp.n) && rp.hands && typeof rp.hands === 'object' ? { n: rp.n, hands: Object.fromEntries(Object.entries(rp.hands).filter(([id, h]) => typeof id === 'string' && RPS[h])) } : null;
   S.votes = msg.votes && typeof msg.votes === 'object' ? Object.fromEntries(Object.entries(msg.votes).filter(([id, g]) => typeof id === 'string' && typeof g === 'string' && GAMES[g]?.ready)) : {};
   const ag = msg.again; // もう一回の OK
-  S.again = ag && Number.isInteger(ag.round) && Array.isArray(ag.ids) ? { round: ag.round, ids: ag.ids.filter((id) => typeof id === 'string') } : null;
+  S.again = ag && Number.isInteger(ag.round) && Array.isArray(ag.ids) ? { round: ag.round, ids: ag.ids.filter((id) => typeof id === 'string'), v: Number.isInteger(ag.v) ? ag.v : 0 } : null;
+  againRuleNote(oldRules, oldVer);
   S.away = Array.isArray(msg.away) ? msg.away.filter((id) => typeof id === 'string') : [];
   S.bench = Array.isArray(msg.bench) ? msg.bench.filter((id) => typeof id === 'string') : [];
   const dr = msg.draw; // 遊びの抽選
@@ -5320,6 +5545,11 @@ function adoptState(msg) {
     S.order = msg.order ? msg.order.slice() : null;
     S.cpus = msg.cpus;
     S.pick = Array.isArray(msg.pick) ? msg.pick.slice() : null;
+    // 席の色（2026-11-13）。外から来た値なので、席の数と同じ長さで 0〜席の数−1 がちょうど1つずつのときだけ使う
+    const cs = msg.colors, on = S.order?.length ?? 0;
+    S.colors = Array.isArray(cs) && cs.length === on && [...cs].sort().every((c, i) => c === i) ? cs.slice() : null;
+    const ck = msg.colorKeep; // 待合室で次の対局の色を出すため（seatColorsFor が中の値を1つずつ確かめる）
+    S.colorKeep = ck && typeof ck === 'object' && typeof ck.game === 'string' && Number.isInteger(ck.n) && ck.of && typeof ck.of === 'object' && Array.isArray(ck.cpu) ? ck : null;
     S.prev = Array.isArray(msg.prev) ? msg.prev.slice() : null;
     if (sameRound && mu > (S.undo ?? 0)) toast('待ったで戻しました');
     if (!sameRound || mu !== (S.undo ?? 0)) S.undoAsk = null;
