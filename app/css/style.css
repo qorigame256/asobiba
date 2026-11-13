@@ -121,6 +121,12 @@ p { margin: 0; }
 
 /* ---------- ホーム ---------- */
 .home-header p { color: var(--muted); }
+/* さっきの部屋へ戻る（main.js の checkLastRoom） */
+.last-room { margin-top: 16px; }
+.last-room .btn { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.last-room .btn small { font-weight: 400; font-size: .8rem; opacity: .85; }
+.invite-lock { margin-top: 8px; }
+.invite-lock small { color: var(--muted); }
 
 .join-form {
   margin-top: 20px;
@@ -2131,6 +2137,11 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .invite-actions .btn { flex: 1; }
 .name-ask input { display: block; width: 100%; margin-top: 10px; font: inherit; font-size: 1.1rem; padding: 8px 12px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--field); color: var(--ink); }
 .name-ask .invite-title { display: block; }
+/* 音量の小窓（main.js の openVolume） */
+.vol-row { display: grid; grid-template-columns: 4em 1fr 2.2em; align-items: center; gap: 8px; margin: 12px 0; text-align: left; }
+.vol-row input { width: 100%; accent-color: var(--accent); }
+.vol-row input.off { opacity: .4; }
+.vol-row b { text-align: right; font-variant-numeric: tabular-nums; }
 /* お開きの表彰（main.js の showAward） */
 .award-list { list-style: none; margin: 12px 0 4px; padding: 0; text-align: left; }
 .award-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 10px; background: var(--hi, #fff7e0); margin-bottom: 6px; }

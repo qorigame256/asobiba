@@ -57,6 +57,26 @@ const lastAt = {};
 let muted = false;
 try { muted = localStorage.getItem(MUTE_KEY) === '1'; } catch { /* 覚えられなくても鳴らせる */ }
 
+// 音量（2026-11-13 本人の決定「音量バーにする」）: 効果音と声（VOICEVOX の声・ブラウザの読み上げ）の大きさを別々に 0〜1 で持つ。🔇（muted）は両方を止める。
+// どちらもこの端末に覚える。声を0にしたら言いかけの声も止め、声のファイルも取らない
+const VOL_KEYS = { se: 'bg-vol-se', voice: 'bg-vol-voice' };
+const vols = { se: 1, voice: 1 };
+for (const k of Object.keys(vols)) {
+  try {
+    const raw = localStorage.getItem(VOL_KEYS[k]);
+    const v = Number(raw);
+    if (raw !== null && raw !== '' && v >= 0 && v <= 1) vols[k] = v;
+  } catch { /* 覚えられなくても鳴らせる */ }
+}
+export const getVolume = (kind) => vols[kind];
+export function setVolume(kind, v) {
+  if (!(kind in vols)) return;
+  vols[kind] = Math.max(0, Math.min(1, Number(v) || 0));
+  if (kind === 'voice' && !vols.voice) { stopVoice(); muteGen++; }
+  try { localStorage.setItem(VOL_KEYS[kind], String(vols[kind])); } catch { /* 無視 */ }
+}
+const voiceOff = () => muted || !vols.voice;
+
 export const isMuted = () => muted;
 export function setMuted(v) {
   muted = !!v;
@@ -110,7 +130,7 @@ function say(text, { rate, cut } = {}, key) {
     u.lang = 'ja-JP';
     const v = speechSynthesis.getVoices().find((x) => x.lang?.startsWith('ja'));
     if (v) u.voice = v;
-    u.volume = VOICE_VOL;
+    u.volume = VOICE_VOL * vols.voice;
     if (rate) u.rate = rate;
     keep(u);
     if (cut) { stopVoice(key); speechSynthesis.cancel(); }
@@ -140,7 +160,7 @@ function voiceFile(voice, text) {
 }
 // これから言う言葉の声のファイルを前もって取っておく（ビンゴ・かるた・旗揚げは対局の始めに呼ぶ）。🔇 のときは取らない
 export function preloadVoice(texts) {
-  if (muted || typeof fetch === 'undefined') return;
+  if (voiceOff() || typeof fetch === 'undefined') return;
   for (const t of texts) if (hasVoice(t)) for (const v of VOICES) voiceFile(v, t).catch(() => {});
 }
 const voicing = {}; // key → いま鳴らしている声の音源（cut で止めるため）
@@ -163,14 +183,14 @@ function playVoice(parts, key, opts) {
   const gen = muteGen;
   Promise.all(parts.map((t) => voiceFile(voice, t).then((b) => ctx.decodeAudioData(b.slice(0)))))
     .then((bufs) => {
-      if (muted || gen !== muteGen) return;
+      if (voiceOff() || gen !== muteGen) return;
       if (performance.now() - asked > 3000) return; // 遅れすぎた声は言わない（次の問題が出ていることがある）
       if (opts.cut) { // 前のお題がブラウザの読み上げで言いかけでも止める
         stopVoice(key);
         try { speechSynthesis.cancel(); } catch { /* 読み上げが使えない端末 */ }
       }
       const g = ctx.createGain();
-      g.gain.value = MASTER;
+      g.gain.value = MASTER * vols.voice;
       g.connect(ctx.destination);
       let t = ctx.currentTime + 0.02;
       voicing[key] = bufs.map((buf) => {
@@ -185,7 +205,7 @@ function playVoice(parts, key, opts) {
       });
     })
     .catch(() => { // 読めなかったらブラウザの読み上げで言い直す。待つ間に 🔇 にした・遅れすぎた（次の問題が出ている）なら言わない
-      if (!muted && gen === muteGen && performance.now() - asked <= 3000) say(parts.join('、'), opts, key);
+      if (!voiceOff() && gen === muteGen && performance.now() - asked <= 3000) say(parts.join('、'), opts, key);
     });
   return true;
 }
@@ -198,13 +218,14 @@ export function play(name, vol = 1) {
   if (muted || !ctx) return;
   const now = performance.now();
   if (now - (lastAt[name] ?? -1e9) < GAP_MS) return;
-  if (isVoice(name)) { lastAt[name] = now; talk([SAY[name]], name, {}); return; }
+  if (isVoice(name)) { if (vols.voice) { lastAt[name] = now; talk([SAY[name]], name, {}); } return; }
+  if (!vols.se) return;
   if (ctx.state !== 'running' || !buffers[name]) return;
   lastAt[name] = now;
   const src = ctx.createBufferSource();
   src.buffer = buffers[name];
   const g = ctx.createGain();
-  g.gain.value = MASTER * Math.max(0, Math.min(1, vol));
+  g.gain.value = MASTER * vols.se * Math.max(0, Math.min(1, vol));
   src.connect(g).connect(ctx.destination);
   src.start();
 }
@@ -214,7 +235,7 @@ export function play(name, vol = 1) {
 // 音と同じく 🔇 のときと、まだ画面に触れていないときは言わない。key ごとに GAP_MS より短い間の重なりは1回だけ
 export function speak(text, key = 'speak', opts = {}) {
   const parts = (Array.isArray(text) ? text : [text]).filter(Boolean);
-  if (muted || !ctx || !parts.length) return;
+  if (voiceOff() || !ctx || !parts.length) return;
   const now = performance.now();
   if (now - (lastAt[key] ?? -1e9) < GAP_MS) return;
   lastAt[key] = now;
