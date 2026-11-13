@@ -117,11 +117,20 @@ const LAST_KEY = 'bg-last-room';
 const LAST_AT_KEY = 'bg-last-room-at';
 const TAB_ID = newId();
 const LAST_PROBE_MS = 6000; // 部屋の人の返事を待つ長さ
+const LAST_RECHECK_MS = 15000; // ボタンを出している間、部屋にまだだれかいるかを確かめ直す間（2026-11-13 Codex の点検の指摘。空になった部屋のボタンが残っていた）
 const readJson = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
+// この画面がいま持っている部屋を、別のタブが「さっきの部屋へ」で持っていった（そのタブがいま動いている）
+const takenByOther = (at) => !!S && at?.code === S.code && at.id === S.myId && !!at.tab && at.tab !== TAB_ID && Date.now() - at.at < HEARTBEAT_MS * 3;
+// この画面（再読み込みすると替わる）が LAST_AT_KEY を書いたことのある部屋。一度書いたあとで別のタブに替わっていたら、もう書かない
+// （2026-11-13 Codex の点検の指摘。裏で止まっていた前のタブが動き出して保存すると、戻った新しいタブのほうが部屋を出されていた）。
+// 初めて書くとき（部屋に入った・再読み込みした）は、前のタブの印が新しくても書いて持ち主になる
+let ownLast = null;
 function saveLastRoom(data) {
+  if (ownLast === S.code && takenByOther(readJson(LAST_AT_KEY))) return;
   try {
     localStorage.setItem(LAST_KEY, JSON.stringify({ code: S.code, data }));
     localStorage.setItem(LAST_AT_KEY, JSON.stringify({ code: S.code, id: S.myId, at: Date.now(), tab: TAB_ID }));
+    ownLast = S.code;
   } catch { /* 覚えられなくても遊べる */ }
 }
 function forgetLastRoom(code) {
@@ -129,9 +138,8 @@ function forgetLastRoom(code) {
 }
 setInterval(() => {
   if (S?.mode !== 'online') return;
-  const at = readJson(LAST_AT_KEY);
-  if (at?.code === S.code && at.id === S.myId && at.tab && at.tab !== TAB_ID && Date.now() - at.at < HEARTBEAT_MS * 3) { yieldRoom(); return; }
-  try { localStorage.setItem(LAST_AT_KEY, JSON.stringify({ code: S.code, id: S.myId, at: Date.now(), tab: TAB_ID })); } catch { /* 無視 */ }
+  if (takenByOther(readJson(LAST_AT_KEY))) { yieldRoom(); return; }
+  try { localStorage.setItem(LAST_AT_KEY, JSON.stringify({ code: S.code, id: S.myId, at: Date.now(), tab: TAB_ID })); ownLast = S.code; } catch { /* 無視 */ }
 }, HEARTBEAT_MS);
 // 別のタブが「さっきの部屋へ」でこの部屋に戻った: この画面は bye を送らずに部屋を出る（送ると、戻った人まで部屋から外れるため）
 function yieldRoom() {
@@ -147,35 +155,56 @@ function yieldRoom() {
   showScreen('home');
   toast('別の画面でこの部屋に戻ったので、この画面は部屋を出ました');
 }
+// lastProbe = いまの問い合わせ（または次に確かめ直す予約）。close で止める。画面を切り替えるたびに checkLastRoom が止めて始め直す
 let lastProbe = null;
 function checkLastRoom() {
   const box = el('last-room');
   if (!box) return;
   lastProbe?.close();
   lastProbe = null;
-  box.hidden = true;
-  box.innerHTML = '';
+  const hide = () => { box.hidden = true; box.innerHTML = ''; };
+  hide();
   if (S) return;
   const last = readJson(LAST_KEY);
   if (!last?.code || !last.data?.myId || wasKicked(last.code)) return;
   const at = readJson(LAST_AT_KEY);
-  if (at?.code === last.code && Date.now() - at.at < HEARTBEAT_MS * 3) return; // 部屋にいるタブがまだ動いている
+  if (at?.code === last.code && Date.now() - at.at < HEARTBEAT_MS * 3) {
+    // 部屋にいるタブがまだ動いている（か、閉じたばかり）。印が古くなったら確かめ直す（2026-11-13 Codex の点検の指摘。閉じてすぐホームを開くと、待ってもボタンが出なかった）
+    const t = setTimeout(checkLastRoom, HEARTBEAT_MS * 3 - (Date.now() - at.at) + 500);
+    lastProbe = { close: () => clearTimeout(t) };
+    return;
+  }
+  // つないだままにして、返事が来たらボタンを出し、LAST_RECHECK_MS ごとに問い合わせ直す（ボタンを出したまま部屋が空になったら消す）
   const probeId = newId();
   let net = null;
   let ready = false;
   let timer = null;
+  let got = false;
   const done = () => { clearTimeout(timer); try { net?.close(); } catch { /* 無視 */ } if (lastProbe === handle) lastProbe = null; };
   const handle = { close: done };
+  const probe = () => {
+    got = false;
+    const sentReady = ready;
+    net.send({ type: 'probe' });
+    timer = setTimeout(() => {
+      if (lastProbe !== handle) return;
+      if (!ready || !sentReady) { probe(); return; } // つなぎ直している間に送った問い合わせでは決めない（届かなかっただけかもしれない）
+      done(); hide(); forgetLastRoom(last.code); // つながったのに返事が無い = 部屋に誰もいない
+    }, LAST_PROBE_MS);
+  };
   try {
     net = connectRoom(last.code, probeId, (msg) => {
-      if (msg.type !== 'here' || msg.to !== probeId || lastProbe !== handle) return;
-      done();
-      if (!S) showLastRoom(box, last);
+      if (msg.type !== 'here' || msg.to !== probeId || lastProbe !== handle || got) return;
+      got = true;
+      clearTimeout(timer);
+      if (S) { done(); return; }
+      if (box.hidden) showLastRoom(box, last);
+      timer = setTimeout(probe, LAST_RECHECK_MS);
     }, (status) => {
-      if (status !== 'ready' || ready || lastProbe !== handle) return;
-      ready = true;
-      net.send({ type: 'probe' });
-      timer = setTimeout(() => { done(); forgetLastRoom(last.code); }, LAST_PROBE_MS); // つながったのに返事が無い = 部屋に誰もいない
+      if (lastProbe !== handle) return;
+      const first = status === 'ready' && !ready && !timer;
+      ready = status === 'ready';
+      if (first) probe();
     });
   } catch { return; }
   lastProbe = handle;
@@ -4794,7 +4823,10 @@ function newRound(gameId, { lobby = false } = {}) {
   }
   // 結果の画面で変えたルールは、前の対局の当て直し（上）が済んでから入れる（againRules）。待合室へ戻るときも次の対局のルールとして残す
   const pend = againRules();
-  if (pend && gameId === S.gameId) S.rules = { ...S.rules, [gameId]: { ...rulesOf(gameId, S.rules), ...pend } };
+  if (pend && gameId === S.gameId) {
+    S.rules = { ...S.rules, [gameId]: { ...rulesOf(gameId, S.rules), ...pend } };
+    rememberRules(); // 上の adjustCpu が、結果の画面で変えたルールを入れる前の S.rules で端末の覚えを上書きしているので覚え直す（2026-11-13 Codex の点検の指摘）
+  }
   S.gameId = gameId;
   S.round += 1;
   S.away = [];
@@ -4976,6 +5008,7 @@ function joinRoom(raw) {
 }
 
 function enterRoom(code, saved) {
+  ownLast = null; // 部屋に入ったら（同じ部屋に入り直しても）最初の保存で持ち主になる（saveLastRoom）
   S = saved
     ? { ...saved, mode: 'online', code }
     : {
@@ -5469,7 +5502,7 @@ function onLocked(bad) {
   S.lockWait = true;
   render();
   if (bad) toast('パスワードがちがいます');
-  if (!document.querySelector('.pw-ask')) askPassword();
+  if (!document.querySelector('.invite-pop:not(.closing) .pw-ask')) askPassword(); // 閉じかけの小窓は数えない（間違いの返事が速いと、新しい小窓を開かずに消えたままになった。2026-11-13 Codex の点検の指摘）
 }
 function askPassword() {
   closeInvite();
@@ -5625,6 +5658,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') { hiddenAt = Date.now(); return; }
   const long = hiddenAt !== null && Date.now() - hiddenAt > HIDDEN_RECONNECT_MS;
   hiddenAt = null;
+  if (S?.mode === 'online' && takenByOther(readJson(LAST_AT_KEY))) { yieldRoom(); return; } // 裏で止まっている間に、別のタブが「さっきの部屋へ」でこの部屋に戻った（つなぎ直して古い中身を送る前に出る）
   if (!long || S?.mode !== 'online' || !S.net) return;
   const old = S.net;
   openNet(); // 赤い帯は出さない（新しいつなぎ方が 'ready' を知らせたら hello を送り直す）
@@ -5786,7 +5820,6 @@ function acceptMember(msg) {
   if (S.banned.includes(msg.from) || (dev && S.bannedDevs?.includes(dev))) { send({ type: 'kick', to: msg.from }); return; }
   const name = cleanName(msg.name);
   if (lockedOut(msg, dev)) { refuseLocked(msg, name); return; }
-  if (dev) S.devs = { ...(S.devs ?? {}), [msg.from]: dev };
   // 同じ端末から入り直してきた人（名前も同じか、前の人の合図が途切れている）は、前の席を引き継ぐ
   const old = dev && !S.members.includes(msg.from) ? S.members.find((id) => id !== S.myId && S.devs?.[id] === dev && (cleanName(S.names[id]) === name || !alive(id))) : null;
   if (old) {
@@ -5800,6 +5833,8 @@ function acceptMember(msg) {
     send({ type: 'full', to: msg.from });
     return;
   }
+  // 端末の印は部屋に入れてから覚える（鍵の「一度入ったことのある端末」に使うため。2026-11-13 Codex の点検の指摘: 満員で断った端末も、あとで鍵をパスワードなしで抜けられた）
+  if (dev) S.devs = { ...(S.devs ?? {}), [msg.from]: dev };
   setBeg(msg.from, msg.beg === true);
   setMark(msg.from, msg.mark);
   saveRoom();
@@ -5809,7 +5844,16 @@ function acceptMember(msg) {
 function adoptState(msg) {
   const game = GAMES[msg.gameId];
   if (!game?.ready || !Array.isArray(msg.moves) || !Array.isArray(msg.members)) return;
-  if (!msg.members.includes(S.myId)) return; // まだ部屋に入れてもらっていない（hello を送り続ける）
+  if (!msg.members.includes(S.myId)) {
+    // まだ部屋に入れてもらっていない（hello を送り続ける）。パスワードを聞いている間にホストが鍵を外したら、小窓を閉じて入り直す（2026-11-13 Codex の点検の指摘。入力待ちのまま止まっていた）
+    if (S.lockWait && msg.locked === false) {
+      S.lockWait = false;
+      dropPop(document.querySelector('.invite-pop:not(.closing) .pw-ask')?.closest('.invite-pop'));
+      askState();
+      render();
+    }
+    return;
+  }
   S.full = false;
   S.lockWait = false;
   S.locked = msg.locked === true;
