@@ -319,7 +319,10 @@ export default {
       if (!over && !legalMoves(s.board, s.turn, s.closed).length) html += `<br>${this.players[col(s.turn)]}ははさめる所がないので、石のとなりならどこにでも置けます`;
       return html;
     }
-    const [b, w] = count(s.board);
+    // 黒・白の数は石の色で並べる（続けて遊ぶ間は白の席が先手になることがあり、席の番号の順のままでは黒白が逆に出た。2026-11-13 Codex の点検）
+    const byColor = [0, 0];
+    count(s.board).forEach((v, p) => { byColor[col(p)] = v; });
+    const [b, w] = byColor;
     let html = hidden ? secret : `<span class="rv-score"><span class="rv-mini p0"></span>黒 <span data-roll="rv0" data-v="${b}">${b}</span>　−　<span data-roll="rv1" data-v="${w}">${w}</span> 白<span class="rv-mini p1"></span></span>`;
     if (s.again && !over) html += `<br>${this.players[col(s.turn)]}は角を取ったので、もう1回！`;
     if (s.missed != null && !over) html += `<br>${this.players[col(s.missed)]}は角を取りましたが、続けて置ける場所がないので${this.players[col(s.turn)]}の番です`;

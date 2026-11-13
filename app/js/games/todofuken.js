@@ -67,7 +67,7 @@ export function distTo(i, x, y) {
   for (const r of rings) {
     for (let k = 0, j = r.length - 2; k < r.length; j = k, k += 2) best = Math.min(best, segD2(x, y, r[j], r[j + 1], r[k], r[k + 1]));
   }
-  return Math.round(Math.sqrt(best));
+  return Math.max(1, Math.round(Math.sqrt(best))); // 外は1以上（丸めて0になると「県の中」と同じ扱いで速さのおまけまで付いた。2026-11-13 Codex の点検）
 }
 // 近い順の点（1位3点・2位2点・3位1点。同じ近さは同じ順位。押さなかった人は0点）
 export function pointsOf(ds) {

@@ -893,9 +893,9 @@ function savedRules() {
     return Object.fromEntries(Object.entries(r).filter(([id, v]) => GAMES[id] && v && typeof v === 'object' && !Array.isArray(v)));
   } catch { return {}; }
 }
-function rememberRules() {
+function rememberRules(rules = S?.rules) {
   if (S?.mode !== 'online' || !S.isHost) return;
-  try { localStorage.setItem(RULES_KEY, JSON.stringify(S.rules ?? {})); } catch { /* 覚えられなくても、この部屋では使える */ }
+  try { localStorage.setItem(RULES_KEY, JSON.stringify(rules ?? {})); } catch { /* 覚えられなくても、この部屋では使える */ }
 }
 
 function changedRules(game) {
@@ -2518,18 +2518,26 @@ const againNeed = () => (S.order ?? []).filter((id) => !isCpu(id) && S.members.i
 const againIds = () => (S.again?.round === S.round ? S.again.ids : []);
 // 結果の画面でルールを変えた回数（v）。ホストが変えるたびに OK を空にして1つ進め、20秒も数え直す（下の「結果の画面でルールを変えてもう一回」）
 const againVer = () => (S.again?.round === S.round && Number.isInteger(S.again.v) ? S.again.v : 0);
+// 結果の画面で変えた次の対局のルール（変えた鍵だけ。CPU の強さの自動合わせなど、ほかで変わった鍵を古い値で上書きしないように）。変えていなければ null。
+// S.rules に直に入れないこと: replay は S.rules でいま終わった対局を当て直すので、盤の大きさや回数を変えると終わった対局が作り直せなくなる（2026-11-13 Codex の点検）。
+// newRound が、前の対局の当て直しを終えてから S.rules へ移す
+const againRules = () => (S.again?.round === S.round && S.again.rules && typeof S.again.rules === 'object' ? S.again.rules : null);
+const nextRulesOf = () => ({ ...rulesOf(S.gameId, S.rules), ...againRules() });
+const againWith = (ids, v = againVer(), rules = againRules()) => ({ round: S.round, ids, v, ...(rules ? { rules } : {}) });
 function sayAgain(ok) {
-  if (S.isHost) onAgain(S.myId, ok, S.round);
-  else { send({ type: 'again', ok, round: S.round }); if (ok) { S.again = { round: S.round, ids: [...againIds(), S.myId], v: againVer() }; render(); } }
+  if (S.isHost) onAgain(S.myId, ok, S.round, againVer());
+  else { send({ type: 'again', ok, round: S.round, v: againVer() }); if (ok) { S.again = againWith([...againIds(), S.myId]); render(); } }
 }
-function onAgain(id, ok, round) {
+// v = OK を押した画面で見えていたルールの版。ホストがルールを変えたあとに届いた、変える前の OK は数えない（押し直してもらう）
+function onAgain(id, ok, round, v) {
   if (!S.isHost || round !== S.round || !againNeed().includes(id)) return;
+  if (ok && Number.isInteger(v) && v !== againVer()) return;
   if (!ok) {
     toast(`${id === S.myId ? 'あなた' : nameOf(id)}が待合室を選んだので、みんなで待合室へ戻ります`);
     newRound(S.gameId, { lobby: true });
     return;
   }
-  if (!againIds().includes(id)) S.again = { round: S.round, ids: [...againIds(), id], v: againVer() };
+  if (!againIds().includes(id)) S.again = againWith([...againIds(), id]);
   saveRoom();
   sendState();
   checkAgain();
@@ -2575,9 +2583,9 @@ function quickRules(game) {
 }
 function againRule(key, value) {
   if (!S.isHost) return;
-  S.rules = { ...S.rules, [S.gameId]: { ...rulesOf(S.gameId, S.rules), [key]: value } };
-  rememberRules();
-  S.again = { round: S.round, ids: [], v: againVer() + 1 };
+  const rules = { ...againRules(), [key]: value };
+  rememberRules({ ...S.rules, [S.gameId]: { ...rulesOf(S.gameId, S.rules), ...rules } });
+  S.again = againWith([], againVer() + 1, rules);
   saveRoom();
   sendState();
   checkAgain();
@@ -2587,7 +2595,7 @@ function againRule(key, value) {
 function againRulesBox(game) {
   const list = quickRules(game);
   if (!list.length) return null;
-  const cur = rulesOf(S.gameId, S.rules);
+  const cur = nextRulesOf();
   const box = document.createElement('div');
   box.className = 'again-rules';
   const head = document.createElement('span');
@@ -2618,7 +2626,7 @@ function againRulesBox(game) {
 function againRuleNote(oldRules, oldVer) {
   const game = GAMES[S.gameId];
   if (!game || S.isHost || againVer() <= oldVer) return;
-  const now = rulesOf(S.gameId, S.rules);
+  const now = nextRulesOf();
   const changed = quickRules(game).filter((x) => now[x.key] !== oldRules[x.key]);
   if (!changed.length) return;
   const name = (x) => x.choices.find(([v]) => v === now[x.key])?.[1] ?? '';
@@ -2946,6 +2954,7 @@ function judgeBar(game, st) {
   judgeShown = { key, v };
   const d = document.createElement('div');
   d.className = 'judge-bar';
+  judgeColors(d);
   d.setAttribute('role', 'img');
   d.setAttribute('aria-label', `形勢: ${judgeWord(game, v).replace(/<[^>]+>/g, '')}`);
   const name = (p) => `<span class="pl p${col(p)}">${game.players[col(p)]} ${esc(nameOf(roundOrder()[p]))}</span>`;
@@ -2953,6 +2962,11 @@ function judgeBar(game, st) {
   if (from !== v) requestAnimationFrame(() => requestAnimationFrame(() => { const f = d.querySelector('.jb-fill'); if (f) f.style.width = `${50 + v / 2}%`; }));
   else d.querySelector('.jb-fill').style.width = `${50 + v / 2}%`;
   return d;
+}
+// 形勢の帯と線の色を、名前と同じく席の色の直し（col）に合わせる（続けて遊ぶ間に先手と後手が入れ替わった対局で、色と名前が逆にならないように。2026-11-13 Codex の点検）
+function judgeColors(e) {
+  e.style.setProperty('--jb0', `var(--p${col(0)})`);
+  e.style.setProperty('--jb1', `var(--p${col(1)})`);
 }
 // ふりかえりの上の形勢の線。k = いま見ている手。押すとその手へ飛ぶ
 function judgeChart(game, k) {
@@ -2973,6 +2987,7 @@ function judgeChart(game, k) {
   };
   const box = document.createElement('div');
   box.className = 'judge-chart';
+  judgeColors(box);
   const star = turn !== null && s[turn] !== null
     ? `<circle class="jc-turn" cx="${x(turn).toFixed(1)}" cy="${y(s[turn]).toFixed(1)}" r="5"></circle><text class="jc-star" x="${x(turn).toFixed(1)}" y="${(y(s[turn]) + (s[turn] > 0 ? 16 : -9)).toFixed(1)}" text-anchor="middle">★</text>` : '';
   box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="形勢の移り変わり${turn !== null ? `。${turn}手目が分かれ目` : ''}">
@@ -4325,6 +4340,7 @@ function replaceMember(old, neu, name) {
   S.devs = rekey(S.devs);
   S.beg = (S.beg ?? []).map(swap);
   if (S.ready) S.ready = { ...S.ready, ids: S.ready.ids.map(swap) };
+  if (S.colorKeep?.of) S.colorKeep = { ...S.colorKeep, of: rekey(S.colorKeep.of) }; // 入り直しても次の対局で前の色のまま（seatColorsFor）
   S.seen[neu] = Date.now();
   delete S.seen[old];
   send({ type: 'replaced', to: old });
@@ -4608,6 +4624,9 @@ function newRound(gameId, { lobby = false } = {}) {
     const st = replay(S);
     if (st && prevGame.result(st)) S.carry = Object.fromEntries(S.order.map((id, i) => [id, prevGame.carry(st, i)]));
   }
+  // 結果の画面で変えたルールは、前の対局の当て直し（上）が済んでから入れる（againRules）。待合室へ戻るときも次の対局のルールとして残す
+  const pend = againRules();
+  if (pend && gameId === S.gameId) S.rules = { ...S.rules, [gameId]: { ...rulesOf(gameId, S.rules), ...pend } };
   S.gameId = gameId;
   S.round += 1;
   S.away = [];
@@ -5384,7 +5403,7 @@ function onMessage(msg) {
       if (!S.isHost && (!S.members.length || msg.from === S.members[0])) { onKicked(msg.ban !== false); return; }
       break;
     case 'again': // もう一回の OK（ok: false は待合室を選んだ）
-      if (S.isHost && msg.from !== S.myId) onAgain(msg.from, msg.ok === true, msg.round);
+      if (S.isHost && msg.from !== S.myId) onAgain(msg.from, msg.ok === true, msg.round, msg.v);
       return;
     case 'away': // 対局の途中で待合室へ行った・戻った（その間、席は CPU）
       if (S.isHost && msg.from !== S.myId && msg.round === S.round && S.order?.includes(msg.from)) {
@@ -5494,7 +5513,7 @@ function adoptState(msg) {
   S.hostLeft = false;
   S.members = msg.members.slice();
   S.names = { ...msg.names };
-  const oldRules = rulesOf(S.gameId, S.rules); // 結果の画面でホストがルールを変えたかを見るため（againRuleNote）
+  const oldRules = nextRulesOf(); // 結果の画面でホストがルールを変えたかを見るため（againRuleNote）
   const oldVer = S.round === msg.round && S.gameId === msg.gameId ? againVer() : Infinity;
   S.rules = msg.rules && typeof msg.rules === 'object' ? msg.rules : {};
   S.beg = Array.isArray(msg.beg) ? msg.beg.filter((id) => typeof id === 'string') : [];
@@ -5517,7 +5536,9 @@ function adoptState(msg) {
   S.rps = rp && Number.isInteger(rp.n) && rp.hands && typeof rp.hands === 'object' ? { n: rp.n, hands: Object.fromEntries(Object.entries(rp.hands).filter(([id, h]) => typeof id === 'string' && RPS[h])) } : null;
   S.votes = msg.votes && typeof msg.votes === 'object' ? Object.fromEntries(Object.entries(msg.votes).filter(([id, g]) => typeof id === 'string' && typeof g === 'string' && GAMES[g]?.ready)) : {};
   const ag = msg.again; // もう一回の OK
-  S.again = ag && Number.isInteger(ag.round) && Array.isArray(ag.ids) ? { round: ag.round, ids: ag.ids.filter((id) => typeof id === 'string'), v: Number.isInteger(ag.v) ? ag.v : 0 } : null;
+  S.again = ag && Number.isInteger(ag.round) && Array.isArray(ag.ids)
+    ? { round: ag.round, ids: ag.ids.filter((id) => typeof id === 'string'), v: Number.isInteger(ag.v) ? ag.v : 0, ...(ag.rules && typeof ag.rules === 'object' && !Array.isArray(ag.rules) ? { rules: ag.rules } : {}) }
+    : null;
   againRuleNote(oldRules, oldVer);
   S.away = Array.isArray(msg.away) ? msg.away.filter((id) => typeof id === 'string') : [];
   S.bench = Array.isArray(msg.bench) ? msg.bench.filter((id) => typeof id === 'string') : [];

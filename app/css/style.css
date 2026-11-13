@@ -316,17 +316,17 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .status-sub.pred { color: #6a4fa0; }
 .review-bar { display: flex; gap: 8px; justify-content: center; width: 100%; } /* 対局のふりかえり */
 .review-bar .btn { min-width: 52px; font-size: 1rem; }
-/* 形勢の帯・ふりかえりの形勢の線（2026-11-12。main.js の judgeBar・judgeChart）。色は席の色（--p0・--p1）で、どの色の組でも変えない */
+/* 形勢の帯・ふりかえりの形勢の線（2026-11-12。main.js の judgeBar・judgeChart）。色は席の色（--p0・--p1）で、どの色の組でも変えない。続けて遊ぶ間に色が入れ替わった席は main.js が --jb0・--jb1 で直す */
 .judge-bar { width: min(100%, 360px); margin: 6px auto 0; display: grid; gap: 3px; }
 .judge-bar .jb-lab { display: flex; justify-content: space-between; gap: 8px; font-size: .78rem; font-weight: 700; }
 .judge-bar .jb-lab > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .judge-bar .jb-mid { color: var(--muted); flex: none; }
-.judge-bar .jb-track { height: 10px; border-radius: 999px; background: var(--p1); overflow: hidden; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .15); }
-.judge-bar .jb-fill { height: 100%; background: var(--p0); border-right: 2px solid var(--panel); transition: width .7s cubic-bezier(.3, .8, .3, 1); }
+.judge-bar .jb-track { height: 10px; border-radius: 999px; background: var(--jb1, var(--p1)); overflow: hidden; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .15); }
+.judge-bar .jb-fill { height: 100%; background: var(--jb0, var(--p0)); border-right: 2px solid var(--panel); transition: width .7s cubic-bezier(.3, .8, .3, 1); }
 .judge-chart { width: min(100%, 360px); margin: 6px auto 0; }
 .judge-chart svg { display: block; width: 100%; height: auto; cursor: pointer; overflow: visible; }
-.judge-chart .jc-p0 { fill: color-mix(in srgb, var(--p0) 24%, transparent); }
-.judge-chart .jc-p1 { fill: color-mix(in srgb, var(--p1) 24%, transparent); }
+.judge-chart .jc-p0 { fill: color-mix(in srgb, var(--jb0, var(--p0)) 24%, transparent); }
+.judge-chart .jc-p1 { fill: color-mix(in srgb, var(--jb1, var(--p1)) 24%, transparent); }
 .judge-chart .jc-zero { stroke: var(--line); stroke-width: 1.5; }
 .judge-chart .jc-line { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; }
 .judge-chart .jc-now { stroke: var(--accent); stroke-width: 2; }

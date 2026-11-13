@@ -8,7 +8,9 @@
 // 手元が空いたら自分の山から自動で補充。まだ上がっていない全員が出せなくなったら「スピード！」で、それぞれ自分の山の一番上を
 // 自分の台札に出し直す（山が無ければ手元の札から出す）。札を全部出し切った順に順位が付く。
 // 2人なら先に出し切った方の勝ち。3人・4人なら残りが1人になるまで続ける（本人の決定）。同時に出し切ったら同じ順位。
-// 手: { p, t: 'play', card: 出す札, pile: 台札の番号 } / { p, t: 'flip' }（スピード！）
+// 手: { p, t: 'play', card: 出す札, pile: 台札の番号 } / { p, t: 'flip', f: 押したときの s.flips }（スピード！）
+//   f は、同じ「スピード！」が2回通らないための印（2人が同時に押した・ホストが手を足し直した とき、めくったあとも全員出せないままだと2回めくれていた。2026-11-13 Codex の点検）。
+//   f の無い手は前の版の手として通す（前の版と混ざった部屋で手の一覧を当て直せるように）
 // 札そのもので手を表すので、通信で同じ手が2回届いても2回目は反則として弾かれる（main.js の rebase が頼りにしている）。
 // スワイプ（2026-10-26 本人の依頼）: 自分の札を指で押したまま台札へ動かして離すと出せる。
 //   2026-10-30 本人の依頼で、出せる台札の上まで動かしてから離したときだけ出すようにした（タップで出す・台札の外で離しても近い台札へ出す、はやめた）。
@@ -144,7 +146,7 @@ export default {
       s.fields[p][slot] = s.decks[p].length ? s.decks[p].pop() : null;
       s.last = { p, t: 'play', card: m.card, pile: m.pile };
     } else if (m.t === 'flip') {
-      if (!stuck(s)) return null;
+      if (!stuck(s) || (m.f !== undefined && m.f !== s0.flips)) return null;
       for (const q of active(s)) {
         let card = s.decks[q].pop();
         if (!card) {
@@ -167,7 +169,7 @@ export default {
   cpu(s, p) {
     if (s.place[p] !== null) return null;
     const list = movesOf(s, p);
-    if (!list.length) return stuck(s) ? { t: 'flip' } : null;
+    if (!list.length) return stuck(s) ? { t: 'flip', f: s.flips } : null;
     const { card, pile } = list[Math.floor(Math.random() * list.length)];
     return { t: 'play', card, pile };
   },
@@ -258,7 +260,7 @@ export default {
       b.type = 'button';
       b.className = 'btn primary sp-flip';
       b.textContent = 'スピード！';
-      b.onclick = () => o.onMove({ t: 'flip' });
+      b.onclick = () => o.onMove({ t: 'flip', f: s.flips });
       actions.append(b);
       root.append(actions);
     }

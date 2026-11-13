@@ -218,7 +218,7 @@ export default {
           e = document.createElement('span');
           const owner = s.boxes[b];
           const gold = valueOf(s, b) === 2;
-          e.className = 'dt-box' + (owner !== null ? ' p' + owner : '') + (gold ? ' gold' : '') + (owner !== null && fresh !== null && boxesOf(s, fresh).includes(b) ? ' pop' : '')
+          e.className = 'dt-box' + (owner !== null ? ' p' + col(owner) : '') + (gold ? ' gold' : '') + (owner !== null && fresh !== null && boxesOf(s, fresh).includes(b) ? ' pop' : '')
             + (owner !== null && res && sc[owner] === top ? ' win' : '');
           if (owner !== null) e.textContent = this.players[col(owner)][0] + (gold ? '★' : '');
           else if (gold) { e.textContent = '★'; e.title = '金の四角（2点）'; }

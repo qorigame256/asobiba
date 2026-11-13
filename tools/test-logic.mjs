@@ -1644,6 +1644,12 @@ s = spBase({ fields: [['h3', null, null, null], ['s9', null, null, null]], piles
 t = SP.apply(s, { p: 1, t: 'flip' });
 assert.ok(t, '2人とも出せないとスピード！');
 assert.deepEqual(t.piles.map((pl) => pl[pl.length - 1]), ['h9', 's9'], 'それぞれ自分の山の一番上を自分の側へ');
+// めくったあとも全員出せないとき、同じ「スピード！」（f が同じ）が2回届いても2回目は通さない（2026-11-13 Codex の点検）
+t = SP.apply(s, { p: 1, t: 'flip', f: 0 });
+assert.ok(t && t.flips === 1, 'f 付きのスピード！');
+assert.equal(SP.apply(t, { p: 0, t: 'flip', f: 0 }), null, '同じ f のスピード！は2回目を通さない');
+assert.ok(SP.apply(t, { p: 0, t: 'flip', f: 1 }), '次の f ならめくれる');
+assert.equal(SP.cpu(t, 0)?.f, 1, 'CPU のスピード！にも f を付ける');
 s = spBase({ decks: [[], []], fields: [['h3', null, null, null], ['s9', 's10', null, null]], piles: [['d6'], ['c13']] });
 t = SP.apply(s, { p: 0, t: 'flip' });
 assert.equal(SP.result(t).winner, 0, '山が無ければ手元の札を出し、出し切ったら勝ち');
@@ -10750,6 +10756,8 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   const [tx, ty] = innerPoint(idx('東京都'));
   assert.ok(distTo(idx('神奈川県'), tx, ty) < 40, '都道府県タッチ: 東京の中から神奈川は近い');
   assert.ok(distTo(idx('北海道'), tx, ty) > 250, '都道府県タッチ: 東京の中から北海道は遠い');
+  // 外のすぐ近く（境目から 0.16 ほど外）は、丸めても0（中）にしない（速さのおまけが付いてしまった。2026-11-13 Codex の点検）
+  assert.equal(distTo(idx('北海道'), 841, 143), 1, '都道府県タッチ: 外の点は近さ1以上');
   assert.deepEqual(pointsOf([0, 0, 30, null, 90]), [3, 3, 1, 0, 0], '都道府県タッチ: 近い順に 3・2・1点（同じ近さは同じ点・押さなかった人は0点）');
   let s = G.init(3, 4);
   assert.equal(new Set(s.qs).size, 10, '都道府県タッチ: 10問とも別の県');
@@ -10825,6 +10833,31 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   }
   s = G.apply(s, { p: -1, t: 'next' });
   assert.deepEqual(G.result(s), { winners: [2], scores: [10, 1, 20] }, '目押しそろえ: 5回で終わり、点の多い人の勝ち');
+  // CPU の狙いのくじが全部外れても止まらない（前はこまごとにくじを引き、候補が0になると timeFor が終わらず、ホストの画面が固まった。2026-11-13 Codex の点検）
+  {
+    const t = timeFor(makeRounds(1)[0], 0, undefined, 0);
+    assert.ok(Number.isFinite(t) && t >= 0 && t <= LIMIT, '目押しそろえ: 狙うこまが無くても timeFor は終わる');
+    const rnd = Math.random;
+    const now = performance.now;
+    let shift = 0;
+    try {
+      performance.now = () => now.call(performance) + shift;
+      // 前の作りで候補が0になる並び: 狙いは 7、7 のこまは「外す」・ほかのこまは「狙う」にくじが出る
+      for (let seed = 1; seed <= 20; seed++) {
+        const seq = [0.1, 0.5, ...REELS[0].map((v) => (v === '7' ? 0.99 : 0)), 0.5];
+        Math.random = () => (seq.length ? seq.shift() : 0.5);
+        const st = G.apply(G.init(2, 9000 + seed), { p: -1, t: 'next' });
+        shift = 0;
+        assert.equal(G.cpu(st, 1), null, '目押しそろえ: CPU はすぐには止めない');
+        shift = LIMIT * 2;
+        const m = G.cpu(st, 1);
+        assert.ok(m && m.t === 'stop' && m.ms.length === 3 && m.ms.every((v) => Number.isFinite(v) && v >= 0 && v <= LIMIT), '目押しそろえ: くじが全部外れても CPU は止める');
+      }
+    } finally {
+      Math.random = rnd;
+      performance.now = now;
+    }
+  }
   console.log('meoshi OK');
 }
 

@@ -74,7 +74,7 @@ let ui = null; // { mount, chips }
 // CPU: 狙った絵が帯 r のまん中に来る、t0 より後の時刻
 export function timeFor(x, r, cell, t0) {
   let k = Math.ceil((t0 + x.off[r]) / x.step);
-  while (k % LEN !== cell) k += 1;
+  for (let i = 0; i < LEN && k % LEN !== cell; i++) k += 1; // cell が 0〜LEN-1 でなくても終わるように回数を区切る
   let t = k * x.step - x.off[r] + Math.floor(x.step / 2);
   while (t > LIMIT) t -= LEN * x.step;
   return Math.max(0, t);
@@ -178,7 +178,10 @@ export default {
       let t = 1200 + Math.random() * 1500;
       const ms = REELS.map((_, r) => {
         const reel = reelOf(x, r);
-        const cells = [...reel.keys()].filter((c) => (Math.random() < sure ? reel[c] === want : reel[c] !== want));
+        // 狙いどおりに止めるかを帯ごとに1回だけくじで決める（こまごとに引くと候補が0になることがあり、timeFor が終わらなかった。2026-11-13 Codex の点検）
+        const hit = Math.random() < sure;
+        let cells = [...reel.keys()].filter((c) => (hit ? reel[c] === want : reel[c] !== want));
+        if (!cells.length) cells = [...reel.keys()];
         const cell = cells[Math.floor(Math.random() * cells.length)];
         const v = timeFor(x, r, cell, t);
         t = v + 600 + Math.random() * 900;
