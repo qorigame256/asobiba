@@ -11,10 +11,15 @@
 //     画面の帯も同じ式で動かしているので、見えている絵と計算の絵は同じ。
 //   - ほかの人の帯は、その回の結果まで見せない（札に ✔ だけ）。
 //   - CPU は 7・🔔・🍒 のどれかを狙い、帯ごとに 1回目7割〜5回目4割の確かさで狙った絵に止める（外すと別の絵）。
+// 詳細設定（2026-11-13 の41回目の案。本人が選んだ。分かれ目は Claude の判断）:
+//   - 帯の並び（mix）: いつも同じ（最初。前と全く同じ）・毎回まぜる。まぜるでは回ごと・帯ごとに8こまの並びを種からくじで並べ替える（全員同じ。絵の数は変えない）。
+//     並べ替えは全部の回の帯の始まりの位置を決めたあとに、別の乱数で行う（いつも同じのときの帯と、まぜるときの帯の速さ・始まりの位置を前と同じにするため）。並びは回の `reels` に持ち、無ければ REELS。
+//   - 回数（rounds）: 3回・5回（最初）・10回。帯の速さの並び（5つ）を回数に合わせて引き伸ばす・間引く（q 回目は並びの floor(q × 5 ÷ 回数) 番目）。
+//   最初の値のときの帯は前と全く同じ（tools/test-logic.mjs が見ている）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open →（全員止めた / 10秒）→ close → shown → next … → end
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'stop', q: 何回目, ms: [左, まん中, 右の帯を止めた時刻]（0〜LIMIT の整数） }
 
-import { mulberry32 } from './util.js';
+import { mulberry32, shuffle } from './util.js';
 import { since, leaders, winnersText, scoreChips } from './party.js';
 import { play } from '../sound.js';
 
@@ -32,11 +37,25 @@ const READY_MS = 3000;
 const SHOWN_MS = 4000;
 const GRACE_MS = 1500;
 
-// 5回分の帯の始まりの位置（ms の整数）
-export function makeRounds(seed) {
+const MIX_CHOICES = [[false, 'いつも同じ（覚えて狙える）'], [true, '毎回まぜる']];
+const ROUND_CHOICES = [[3, '3回'], [5, '5回'], [10, '10回']];
+
+// 全部の回の帯の始まりの位置（ms の整数）と、まぜるときの並び
+export function makeRounds(seed, rules = {}) {
   const rnd = mulberry32(seed);
-  return STEPS.map((step) => ({ step, off: REELS.map(() => Math.floor(rnd() * LEN * step)) }));
+  const N = ROUND_CHOICES.some(([v]) => v === rules.rounds) ? rules.rounds : 5;
+  const rs = Array.from({ length: N }, (_, q) => {
+    const step = STEPS[Math.floor((q * STEPS.length) / N)];
+    return { step, off: REELS.map(() => Math.floor(rnd() * LEN * step)) };
+  });
+  if (rules.mix) {
+    const mix = mulberry32((seed ^ 0x5bd1e995) >>> 0);
+    rs.forEach((x) => { x.reels = REELS.map((reel) => shuffle(reel, mix)); });
+  }
+  return rs;
 }
+// 回 x の帯 r の並び
+export const reelOf = (x, r) => (x.reels ?? REELS)[r];
 // 時刻 ms に帯 r のまん中にある絵の番号
 export const cellAt = (x, r, ms) => Math.floor((ms + x.off[r]) / x.step) % LEN;
 // 3つの絵の点
@@ -45,7 +64,7 @@ export function pointsOf(syms) {
   if (a === b && b === c) return PTS[a];
   return a === b || b === c || a === c ? PAIR : 0;
 }
-const symsOf = (x, ms) => ms.map((v, r) => REELS[r][cellAt(x, r, v)]);
+const symsOf = (x, ms) => ms.map((v, r) => reelOf(x, r)[cellAt(x, r, v)]);
 
 const qKey = (s, q = s.q) => `meoshi:${s.seed}:${q}`;
 const clone = (s) => ({ ...s, scores: s.scores.slice(), stops: s.stops.slice(), syms: s.syms.slice() });
@@ -72,8 +91,14 @@ export default {
   minPlayers: 2,
   maxPlayers: 10,
 
-  init(n, seed) {
-    return { n, seed, rs: makeRounds(seed), q: -1, phase: 'ready', stops: Array(n).fill(null), syms: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
+  settings: [
+    { key: 'mix', label: '帯の並び', desc: '毎回まぜるでは、回ごとに帯の絵の並びが変わる（覚えて狙えない）', def: false, choices: MIX_CHOICES },
+    { key: 'rounds', label: '回数', desc: '1回の対局で回す回数（回が進むほど帯が速くなる）', def: 5, choices: ROUND_CHOICES },
+  ],
+
+  init(n, seed, { rules = {} } = {}) {
+    const r = { mix: false, rounds: 5, ...rules };
+    return { n, seed, rules: r, rs: makeRounds(seed, r), q: -1, phase: 'ready', stops: Array(n).fill(null), syms: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
   },
 
   turn() { return null; },
@@ -151,7 +176,8 @@ export default {
       const want = r0 < 0.3 ? '7' : r0 < 0.6 ? '🔔' : '🍒';
       const sure = 0.7 - (0.3 * s.q) / (s.rs.length - 1 || 1);
       let t = 1200 + Math.random() * 1500;
-      const ms = REELS.map((reel, r) => {
+      const ms = REELS.map((_, r) => {
+        const reel = reelOf(x, r);
         const cells = [...reel.keys()].filter((c) => (Math.random() < sure ? reel[c] === want : reel[c] !== want));
         const cell = cells[Math.floor(Math.random() * cells.length)];
         const v = timeFor(x, r, cell, t);
@@ -207,7 +233,8 @@ export default {
 
     const box = document.createElement('div');
     box.className = 'ms-box';
-    const reels = REELS.map((reel, r) => {
+    const reels = REELS.map((_, r) => {
+      const reel = reelOf(x, r);
       const w = document.createElement('div');
       w.className = 'ms-reel';
       const strip = document.createElement('div');

@@ -9,14 +9,30 @@
 //   - 地図に県の名前は出さない（それが問題なので）。地方ごとの色分けもしない（ヒントになるため）。沖縄県と奄美（鹿児島県）は左上の枠に寄せて描く（todofuken-data.js の作り）。
 //   - 「あと約◯km」は地図の座標1つを約1.83km として出す目安（枠に寄せた沖縄・奄美との間は本当の距離ではない）。
 //   - CPU は 4割はその県の中を、残りはその県から 20〜160（地図の座標。約40〜290km）ずれた所を押す。
+// 詳細設定（2026-11-13 の41回目の案。本人が選んだ。分かれ目は Claude の判断）:
+//   - 出し方（capital）: 都道府県の名前（最初）・県庁所在地。県庁所在地では「札幌市」のように市の名前を出し、その市のある都道府県を押す（近さと点は同じ）。
+//     出すのは県と名前が違う17の市だけ（CAPITALS。さいたま市と東京（新宿区）は名前で分かるので出さない）。問題の数がそれより多いときは17問。結果とふりかえりでは県の名前も出す。
+//   - 速さのおまけ（fast）: なし（最初）・あり。その県の中（◎）を押した人のうち、いちばん速い人に +1点（同じ ms は全員）。
+//     速さは各自の端末で問題が出てから押すまでの ms（手の `ms`。ほかの早押しと同じ。届いた順では比べない）。`ms` の無い手はおまけの対象にしない。
+//   - 問題の数（rounds）: 5問・10問（最初）・20問。
+//   最初の値のときの問題は前と全く同じ（同じ乱数の使い方。tools/test-logic.mjs が見ている）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open →（全員押した / 10秒）→ close → shown → next … → end
-// 手: { p: -1, t: 'next' | 'close' } / { p, t: 'tap', q: 何問目, x, y }（地図の座標の整数）
+// 手: { p: -1, t: 'next' | 'close' } / { p, t: 'tap', q: 何問目, x, y, ms }（x, y は地図の座標の整数。ms は問題が出てから押すまで）
 
 import { mulberry32, shuffle } from './util.js';
 import { since, leaders, winnersText, scoreChips, SEAT_COLORS } from './party.js';
 import { PREFS, BOX, OKI_BOX } from './todofuken-data.js';
 
-const QUESTIONS = 10;
+const ROUND_CHOICES = [[5, '5問'], [10, '10問'], [20, '20問']];
+const ASK_CHOICES = [['pref', '都道府県の名前'], ['city', '県庁所在地（札幌市 → 北海道 など）']];
+// 県と名前が違う県庁所在地（都道府県の名前 → [市の名前, よみ]）
+export const CAPITALS = {
+  北海道: ['札幌市', 'さっぽろし'], 岩手県: ['盛岡市', 'もりおかし'], 宮城県: ['仙台市', 'せんだいし'], 茨城県: ['水戸市', 'みとし'],
+  栃木県: ['宇都宮市', 'うつのみやし'], 群馬県: ['前橋市', 'まえばしし'], 神奈川県: ['横浜市', 'よこはまし'], 石川県: ['金沢市', 'かなざわし'],
+  山梨県: ['甲府市', 'こうふし'], 愛知県: ['名古屋市', 'なごやし'], 三重県: ['津市', 'つし'], 滋賀県: ['大津市', 'おおつし'],
+  兵庫県: ['神戸市', 'こうべし'], 島根県: ['松江市', 'まつえし'], 香川県: ['高松市', 'たかまつし'], 愛媛県: ['松山市', 'まつやまし'], 沖縄県: ['那覇市', 'なはし'],
+};
+const CITY_PREFS = PREFS.map((p, i) => (CAPITALS[p.n] ? i : -1)).filter((i) => i >= 0);
 const LIMIT = 10000;
 const READY_MS = 3000;
 const SHOWN_MS = 4000;
@@ -56,6 +72,13 @@ export function distTo(i, x, y) {
 // 近い順の点（1位3点・2位2点・3位1点。同じ近さは同じ順位。押さなかった人は0点）
 export function pointsOf(ds) {
   return ds.map((v) => (v === null ? 0 : Math.max(0, 3 - ds.filter((e) => e !== null && e < v).length)));
+}
+// 速さのおまけをもらう人（県の中を押した人のうち ms のいちばん小さい人。同じ ms は全員）
+export function fastestOf(ds, ms) {
+  const ok = ds.map((d, p) => (d === 0 && Number.isInteger(ms[p]) ? p : -1)).filter((p) => p >= 0);
+  if (!ok.length) return [];
+  const best = Math.min(...ok.map((p) => ms[p]));
+  return ok.filter((p) => ms[p] === best);
 }
 
 // 県の中の1点（CPU が押す所。いちばん大きい輪の外枠の中を細かく探して、ふちからいちばん遠い点）
@@ -105,10 +128,18 @@ export default {
   minPlayers: 2,
   maxPlayers: 10,
 
-  init(n, seed) {
+  settings: [
+    { key: 'capital', label: '出し方', desc: '県庁所在地では「札幌市」のように市の名前が出て、その市のある都道府県を押す（県と名前が違う17の市だけ）', def: 'pref', choices: ASK_CHOICES },
+    { key: 'fast', label: '速さのおまけ', desc: 'その県の中（◎）を押した人のうち、いちばん速い人に +1点', def: false },
+    { key: 'rounds', label: '問題の数', desc: '1回の対局の問題の数（県庁所在地は17問まで）', def: 10, choices: ROUND_CHOICES },
+  ],
+
+  init(n, seed, { rules = {} } = {}) {
+    const r = { capital: 'pref', fast: false, rounds: 10, ...rules };
     const rnd = mulberry32(seed);
-    const qs = shuffle([...PREFS.keys()], rnd).slice(0, QUESTIONS);
-    return { n, seed, qs, q: -1, phase: 'ready', taps: Array(n).fill(null), dists: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
+    const count = ROUND_CHOICES.some(([v]) => v === r.rounds) ? r.rounds : 10;
+    const qs = shuffle(r.capital === 'city' ? CITY_PREFS : [...PREFS.keys()], rnd).slice(0, count);
+    return { n, seed, rules: r, qs, q: -1, phase: 'ready', taps: Array(n).fill(null), dists: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
   },
 
   turn() { return null; },
@@ -156,18 +187,21 @@ export default {
         s.step += 1;
         s.phase = 'shown';
         const pts = pointsOf(s.dists);
+        const fast = s.rules?.fast ? fastestOf(s.dists, s.taps.map((t) => t?.[2] ?? null)) : [];
+        fast.forEach((p) => { pts[p] += 1; });
         pts.forEach((v, p) => { s.scores[p] += v; });
-        s.last = { pts };
-        s.log = [...s0.log, { pref: s.qs[s.q], dists: s.dists.slice() }];
+        s.last = { pts, fast };
+        s.log = [...s0.log, { pref: s.qs[s.q], dists: s.dists.slice(), fast }];
         return s;
       }
       return null;
     }
     if (m.t !== 'tap' || s0.phase !== 'open' || m.q !== s0.q || !Number.isInteger(m.p) || m.p < 0 || m.p >= s0.n || s0.taps[m.p] !== null) return null;
     if (!Number.isInteger(m.x) || !Number.isInteger(m.y) || m.x < VIEW[0] || m.y < VIEW[1] || m.x > VIEW[0] + VIEW[2] || m.y > VIEW[1] + VIEW[3]) return null;
+    if (m.ms !== undefined && (!Number.isInteger(m.ms) || m.ms < 0 || m.ms > LIMIT + GRACE_MS)) return null;
     const s = clone(s0);
     s.step += 1;
-    s.taps[m.p] = [m.x, m.y];
+    s.taps[m.p] = [m.x, m.y, m.ms ?? null];
     s.dists[m.p] = distTo(s.qs[s.q], m.x, m.y);
     return s;
   },
@@ -191,7 +225,7 @@ export default {
       cpuPlan.set(key, plan);
       if (cpuPlan.size > 300) cpuPlan.delete(cpuPlan.keys().next().value);
     }
-    return since(qKey(s)) >= plan.at ? { t: 'tap', q: s.q, x: plan.x, y: plan.y } : null;
+    return since(qKey(s)) >= plan.at ? { t: 'tap', q: s.q, x: plan.x, y: plan.y, ms: Math.round(plan.at) } : null;
   },
 
   render(root, s, o) {
@@ -202,7 +236,7 @@ export default {
       if (s.phase !== 'shown' || !s.last) return '';
       if (s.dists[p] === null) return '<span class="pt-ng">―</span>';
       const pt = s.last.pts[p];
-      return `<span class="${pt ? 'pt-ok' : 'pt-ng'}">${s.dists[p] === 0 ? '◎' : km(s.dists[p]) + 'km'}${pt ? ' +' + pt : ''}</span>`;
+      return `<span class="${pt ? 'pt-ok' : 'pt-ng'}">${s.dists[p] === 0 ? '◎' : km(s.dists[p]) + 'km'}${s.last.fast?.includes(p) ? '⚡' : ''}${pt ? ' +' + pt : ''}</span>`;
     };
     const chips = scoreChips(o, s.scores, { won, extra, steady: true });
     // 同じ場面のうちは札だけ差し替える（ほかの人の手が届くたびに作り直すと、描きかけ・押しかけが消えるため）
@@ -221,14 +255,17 @@ export default {
     head.className = 'tf-head';
     root.append(head);
     if (s.phase === 'ready') {
-      head.textContent = `よーい… 出た都道府県を地図で押そう（全${s.qs.length}問・近い順に 3・2・1点）`;
+      const city = s.rules?.capital === 'city';
+      head.textContent = `よーい… ${city ? '出た県庁所在地のある都道府県' : '出た都道府県'}を地図で押そう（全${s.qs.length}問・近い順に 3・2・1点${s.rules?.fast ? '・◎ でいちばん速い人に ⚡+1点' : ''}）`;
       return;
     }
     const target = s.qs[s.q];
     const pref = PREFS[target];
-    head.innerHTML = `<b></b><small></small>${s.phase === 'open' ? 'はどこ？' : ''}`;
-    head.querySelector('b').textContent = pref.n;
-    head.querySelector('small').textContent = `（${pref.k}）`;
+    const cap = s.rules?.capital === 'city' ? CAPITALS[pref.n] : null;
+    head.innerHTML = `<b></b><small></small>${s.phase === 'open' ? (cap ? 'はどの都道府県？' : 'はどこ？') : cap ? '<span class="tf-cap"></span>' : ''}`;
+    head.querySelector('b').textContent = cap ? cap[0] : pref.n;
+    head.querySelector('small').textContent = `（${cap ? cap[1] : pref.k}）`;
+    if (cap && s.phase !== 'open') head.querySelector('.tf-cap').textContent = ` → ${pref.n}`;
     const key = qKey(s);
     since(key);
 
@@ -263,13 +300,14 @@ export default {
         if (!t) return;
         const tag = document.createElement('span');
         tag.style.borderColor = p === me ? '#111' : SEAT_COLORS[p % SEAT_COLORS.length];
-        tag.textContent = `${p === me ? 'あなた' : o.names[p]} ${s.dists[p] === 0 ? '◎' : '約' + km(s.dists[p]) + 'km'}`;
+        tag.textContent = `${p === me ? 'あなた' : o.names[p]} ${s.dists[p] === 0 ? '◎' : '約' + km(s.dists[p]) + 'km'}${s.last.fast?.includes(p) ? ' ⚡' + (t[2] / 1000).toFixed(2) + '秒' : ''}`;
         names.append(tag);
       });
       root.append(names);
+      const quick = s.last.fast?.includes(me) ? '　⚡ いちばん速い！' : '';
       if (me === null) note.textContent = '';
       else if (!mine) note.textContent = '押せませんでした…';
-      else note.textContent = s.dists[me] === 0 ? `◎ ぴったり！${s.last.pts[me] ? ` +${s.last.pts[me]}点` : ''}` : `あと約${km(s.dists[me])}km${s.last.pts[me] ? `（+${s.last.pts[me]}点）` : ''}`;
+      else note.textContent = s.dists[me] === 0 ? `◎ ぴったり！${s.last.pts[me] ? ` +${s.last.pts[me]}点` : ''}${quick}` : `あと約${km(s.dists[me])}km${s.last.pts[me] ? `（+${s.last.pts[me]}点）` : ''}`;
       return;
     }
     if (mine) { note.textContent = '押した！ ほかの人を待っています'; return; }
@@ -299,7 +337,7 @@ export default {
       dot.setAttribute('cy', y);
       dot.setAttribute('r', 13);
       map.append(dot);
-      o.onMove({ t: 'tap', q: s.q, x, y });
+      o.onMove({ t: 'tap', q: s.q, x, y, ms: Math.min(LIMIT, Math.round(since(key))) });
     };
     const tick = () => {
       if (!map.isConnected || sent) return;
@@ -322,7 +360,8 @@ export default {
       const hits = x.dists.filter((v) => v === 0).length;
       const mine = me === null ? '' : x.dists[me] === null ? '―' : x.dists[me] === 0 ? '◎' : `約${km(x.dists[me])}km`;
       li.innerHTML = `<span class="mk-rv-n">${q + 1}</span><span></span><span>${mine}</span><span class="mk-rv-who">◎ ${hits}人</span>`;
-      li.children[1].textContent = PREFS[x.pref].n;
+      const cap = s.rules?.capital === 'city' ? CAPITALS[PREFS[x.pref].n] : null;
+      li.children[1].textContent = cap ? `${cap[0]}（${PREFS[x.pref].n}）` : PREFS[x.pref].n;
       list.append(li);
     });
     box.append(sum, list);

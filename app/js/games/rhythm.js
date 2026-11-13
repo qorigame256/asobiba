@@ -8,32 +8,51 @@
 //   - 毎回、ずれの小さい順に 3・2・1点（同じずれは同じ点。数がそろわなかった人は0点）。5回の合計で勝負（ぴったりストップと同じ）。
 //   - たたいた時刻は各自の端末で測って手に入れる（通信の遅れで不利にならない）。ほかの人のたたいた様子は、その回の結果まで見せない（札に ✔ だけ）。
 //   - CPU は各音を 40〜150ms の幅でずらしてたたく。
+// 詳細設定（2026-11-13 の41回目の案。本人が選んだ。分かれ目は Claude の判断）:
+//   - 難しさ（level）: やさしい（たたく数 4・4・5・5・6、間隔は 0.3秒・0.6秒だけ）・ふつう（最初。前と全く同じ）・
+//     むずかしい（たたく数 5・6・6・7・8、1・2回目から 0.9秒も混ぜ、3回目からは 0.15秒（半分）も混ぜる）。CPU のずれは難しさで変えない。
+//   - 耳だけ（ear）: なし（最初）・あり。お手本の間、まん中の丸を光らせず、進み具合の点も付けない（音だけで覚える）。自分がたたいたときの光はそのまま。
+//     音を消している人には「🔇 音が消えています」と出す（`isMuted`）。
+//   - 回数（rounds）: 3回・5回（最初）・10回。たたく数の並び（5つ）を回数に合わせて引き伸ばす・間引く（q 回目は並びの floor(q × 5 ÷ 回数) 番目）。
+//   最初の値のときのお手本は前と全く同じ（同じ乱数の使い方。tools/test-logic.mjs が見ている）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open →（全員たたいた / 締め切り）→ close → shown → next … → end
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'tap', q: 何回目, d: [2つ目からの、1つ目からの時刻 ms]（たたく数 − 1 個の整数） }
 
 import { mulberry32 } from './util.js';
 import { since, leaders, winnersText, scoreChips } from './party.js';
-import { play } from '../sound.js';
+import { play, isMuted } from '../sound.js';
 
 const U = 300; // 間隔のもと（ms）
-const BEATS = [4, 5, 5, 6, 7];
+// 難しさごとの、たたく数の並びと間隔（U の何倍か。前半＝並びの1・2番目、後半＝3番目から）
+const LEVELS = {
+  easy: { beats: [4, 4, 5, 5, 6], early: [1, 2], late: [1, 2] },
+  mid: { beats: [4, 5, 5, 6, 7], early: [1, 2], late: [1, 2, 3] },
+  hard: { beats: [5, 6, 6, 7, 8], early: [1, 2, 3], late: [0.5, 1, 2, 3] },
+};
+const LEVEL_CHOICES = [['mid', 'ふつう'], ['easy', 'やさしい（短く、間隔は2種類）'], ['hard', 'むずかしい（長く、細かい間隔も）']];
+const ROUND_CHOICES = [[3, '3回'], [5, '5回'], [10, '10回']];
 export const LEAD = 1500; // 回が始まってから、お手本の1つ目まで
 const WAIT = 800; // お手本の最後から「どうぞ」まで
-const LIMIT = 7000; // 「どうぞ」からたたける時間
+const LIMIT = 7000; // 「どうぞ」からたたける時間（むずかしいは長いので 9秒。limitOf）
+const limitOf = (rules = {}) => (rules.level === 'hard' ? 9000 : LIMIT);
 const READY_MS = 3000;
 const SHOWN_MS = 4500;
 const GRACE_MS = 1500;
 
-// 5回分のお手本。at = 1つ目からの各音の時刻（ms。at[0] = 0）
-export function makePatterns(seed) {
+// 全部の回のお手本。at = 1つ目からの各音の時刻（ms。at[0] = 0）
+export function makePatterns(seed, rules = {}) {
   const rnd = mulberry32(seed);
-  return BEATS.map((n, q) => {
-    const steps = q < 2 ? [1, 2] : [1, 2, 3];
+  const lv = LEVELS[rules.level] ?? LEVELS.mid;
+  const N = ROUND_CHOICES.some(([v]) => v === rules.rounds) ? rules.rounds : 5;
+  return Array.from({ length: N }, (_, q) => {
+    const k = Math.floor((q * lv.beats.length) / N); // 並びの何番目か（5回なら q のまま）
+    const n = lv.beats[k];
+    const steps = k < 2 ? lv.early : lv.late;
     const at = [0];
     for (let i = 1; i < n; i++) at.push(at[i - 1] + steps[Math.floor(rnd() * steps.length)] * U);
     // 同じ間隔ばかりにならないように: 全部同じなら最後の1つを変える
     const gaps = at.slice(1).map((v, i) => v - at[i]);
-    if (gaps.every((g) => g === gaps[0])) at[n - 1] += gaps[0] === U ? U : -U;
+    if (gaps.every((g) => g === gaps[0])) at[n - 1] += gaps[0] <= U ? U : -U;
     return at;
   });
 }
@@ -78,8 +97,15 @@ export default {
   minPlayers: 2,
   maxPlayers: 10,
 
-  init(n, seed) {
-    return { n, seed, pats: makePatterns(seed), q: -1, phase: 'ready', taps: Array(n).fill(null), errs: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
+  settings: [
+    { key: 'level', label: '難しさ', desc: 'たたく数と間隔の細かさ。むずかしいは 0.15秒の短い間隔も出る', def: 'mid', choices: LEVEL_CHOICES },
+    { key: 'ear', label: '耳だけ', desc: 'お手本の間、まん中の丸が光らない。音だけで覚える（音を出して遊ぶ）', def: false },
+    { key: 'rounds', label: '回数', desc: '1回の対局でたたく回数', def: 5, choices: ROUND_CHOICES },
+  ],
+
+  init(n, seed, { rules = {} } = {}) {
+    const r = { level: 'mid', ear: false, rounds: 5, ...rules };
+    return { n, seed, rules: r, pats: makePatterns(seed, r), q: -1, phase: 'ready', taps: Array(n).fill(null), errs: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
   },
 
   turn() { return null; },
@@ -100,7 +126,7 @@ export default {
     if (s.phase === 'ready') return { key: 'ready', ms: READY_MS, move: { t: 'next' } };
     if (s.phase === 'open') {
       if (s.taps.every((v) => v !== null)) return { key: 'all' + s.q, ms: 600, move: { t: 'close' } };
-      return { key: 'open' + s.q, ms: openAt(s.pats[s.q]) + LIMIT + GRACE_MS, move: { t: 'close' } };
+      return { key: 'open' + s.q, ms: openAt(s.pats[s.q]) + limitOf(s.rules) + GRACE_MS, move: { t: 'close' } };
     }
     if (s.phase === 'shown') return { key: 'shown' + s.q, ms: SHOWN_MS, move: { t: 'next' } };
     return null;
@@ -134,7 +160,7 @@ export default {
     if (m.t !== 'tap' || s0.phase !== 'open' || m.q !== s0.q || !Number.isInteger(m.p) || m.p < 0 || m.p >= s0.n || s0.taps[m.p] !== null) return null;
     const at = s0.pats[s0.q];
     const d = m.d;
-    if (!Array.isArray(d) || d.length !== at.length - 1 || !d.every((v, i) => Number.isInteger(v) && v > (i ? d[i - 1] : 0) && v <= LIMIT)) return null;
+    if (!Array.isArray(d) || d.length !== at.length - 1 || !d.every((v, i) => Number.isInteger(v) && v > (i ? d[i - 1] : 0) && v <= limitOf(s0.rules))) return null;
     const s = clone(s0);
     s.step += 1;
     s.taps[m.p] = d.slice();
@@ -191,7 +217,7 @@ export default {
     head.className = 'cp-head';
     root.append(head);
     if (s.phase === 'ready') {
-      head.textContent = `よーい… お手本のリズムを聞いて、同じ間隔でたたこう（全${s.pats.length}回・ずれの小さい順に 3・2・1点）`;
+      head.textContent = `よーい… お手本のリズムを聞いて、同じ間隔でたたこう（全${s.pats.length}回・ずれの小さい順に 3・2・1点${s.rules.ear ? '・👂 耳だけ: お手本は音だけ' : ''}）`;
       return;
     }
     const at = s.pats[s.q];
@@ -228,12 +254,12 @@ export default {
         setTimeout(() => {
           if (!document.querySelector('.board.rz')) return; // 対局の画面を離れていたら鳴らさない
           play('hit');
-          flash('on');
+          if (!s.rules.ear) flash('on');
         }, Math.max(0, wait));
       });
     }
     // お手本の進み具合の点
-    const showDots = () => { at.forEach((v, i) => dot[i].classList.toggle('lit', since(key) >= LEAD + v)); };
+    const showDots = () => { if (s.rules.ear && since(key) < open) return; at.forEach((v, i) => dot[i].classList.toggle('lit', since(key) >= LEAD + v)); };
     showDots();
 
     if (mine) {
@@ -248,10 +274,11 @@ export default {
     root.append(btn);
     const taps = [];
     let sent = false;
+    const lim = limitOf(s.rules);
     const noteText = () => {
       const t = since(key);
-      if (t < open) return '👂 よく聞いて…';
-      if (t >= open + LIMIT) return '時間切れ…';
+      if (t < open) return s.rules.ear && isMuted() ? '🔇 音が消えています（耳だけでは、上の 🔊 で音を出して遊びます）' : s.rules.ear ? '👂 耳だけでよく聞いて…' : '👂 よく聞いて…';
+      if (t >= open + lim) return '時間切れ…';
       return taps.length ? `${taps.length} / ${at.length}` : `どうぞ！ ${at.length}回たたこう（PC はスペースキーでも）`;
     };
     note.textContent = noteText();
@@ -259,7 +286,7 @@ export default {
       e?.preventDefault?.();
       if (sent || btn.disabled || !o.canMove) return;
       const t = since(key);
-      if (t < open || t >= open + LIMIT) return;
+      if (t < open || t >= open + lim) return;
       play('pop');
       flash('mine');
       taps.push(t);
@@ -278,9 +305,9 @@ export default {
       if (!btn.isConnected || sent) return;
       showDots();
       const t = since(key);
-      btn.disabled = t < open || t >= open + LIMIT;
-      if (!taps.length || t >= open + LIMIT) note.textContent = noteText();
-      if (t < open + LIMIT) setTimeout(tick, t < open ? 50 : 200);
+      btn.disabled = t < open || t >= open + lim;
+      if (!taps.length || t >= open + lim) note.textContent = noteText();
+      if (t < open + lim) setTimeout(tick, t < open ? 50 : 200);
     };
     tick();
   },

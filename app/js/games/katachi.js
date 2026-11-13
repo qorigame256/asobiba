@@ -12,6 +12,11 @@
 //   - 似ている度は全員の端末で同じ数になるよう、手には整数の点だけを入れ、計算は四則と平方根だけで行う（三角関数を使うお手本は読み込み時に整数へ丸める）。
 //   - CPU は お手本の形に大きさ・場所・線のゆれ・縦横のゆがみをばらばらに付けて描く（ゆれは外枠の大きさの 5〜14%、横は 0.82〜1.18倍。
 //     似ている度はおよそ 25〜90%、真ん中は 40〜80%。2026-11-13 に300枚ずつ描かせて測った）。
+// 詳細設定（2026-11-13 の41回目の案。本人が選んだ。分かれ目は Claude の判断）:
+//   - 形（shapes）: 5つ（最初。前と全く同じ）・9つ（月・しずく・矢印・十字を足す）。9つでは毎回くじで、回数が形の数より多くなるまで同じ形は2回出さない。
+//   - 描く時間（time）: 5秒・12秒（最初）・20秒。CPU は時間のおよそ 25〜67% で描き終える（12秒で前と同じ 3〜8秒）。
+//   - 回数（rounds）: 3回・5回（最初）・10回。形の数より多いときは、全部の形を1巡してから、もう1巡くじで並べる（巡の切れ目で同じ形が続かないようにする）。
+//   最初の値のときの形の順は前と全く同じ（同じ乱数の使い方。tools/test-logic.mjs が見ている）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open →（全員描いた / 12秒）→ close → shown → next … → end
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'draw', q: 何回目, pts: [x0, y0, x1, y1, …]（0〜PAD の整数。4〜MAX_PTS 点） }
 
@@ -20,20 +25,41 @@ import { since, leaders, winnersText, scoreChips, SEAT_COLORS } from './party.js
 
 export const PAD = 200; // 描く場の大きさ（手の座標の範囲）
 const MAX_PTS = 240;
-const LIMIT = 12000;
 const READY_MS = 3000;
 const SHOWN_MS = 6000;
 const GRACE_MS = 1500;
 const MIN_SIZE = 30; // これより小さい線は描き直し
 const N = 96; // 比べるときの点の数
 
+// 前の5つ（並びを変えないこと。最初の値の形の順はこの並びのくじで決まる）と、詳細設定「形」の9つで足す4つ
 export const SHAPES = [
   { id: 'circle', name: '丸' },
   { id: 'triangle', name: '三角' },
   { id: 'square', name: '四角' },
   { id: 'star', name: '星' },
   { id: 'heart', name: 'ハート' },
+  { id: 'moon', name: '月', more: true },
+  { id: 'drop', name: 'しずく', more: true },
+  { id: 'arrow', name: '矢印', more: true },
+  { id: 'cross', name: '十字', more: true },
 ];
+const SHAPE_CHOICES = [['basic', '5つ（丸・三角・四角・星・ハート）'], ['more', '9つ（月・しずく・矢印・十字も）']];
+const TIME_CHOICES = [[5, '5秒'], [12, '12秒'], [20, '20秒']];
+const ROUND_CHOICES = [[3, '3回'], [5, '5回'], [10, '10回']];
+export const limitOf = (rules = {}) => (TIME_CHOICES.some(([v]) => v === rules.time) ? rules.time : 12) * 1000;
+// 1回の対局の形の順（最初の値なら前と同じ: 5つを1回くじで並べる）
+export function orderOf(seed, rules = {}) {
+  const rnd = mulberry32(seed);
+  const pool = SHAPES.filter((x) => rules.shapes === 'more' || !x.more).map((x) => x.id);
+  const n = ROUND_CHOICES.some(([v]) => v === rules.rounds) ? rules.rounds : 5;
+  const order = [];
+  while (order.length < n) {
+    const batch = shuffle(pool, rnd);
+    if (order.length && batch[0] === order.at(-1)) [batch[0], batch[1]] = [batch[1], batch[0]];
+    order.push(...batch);
+  }
+  return order.slice(0, n);
+}
 
 // 折れ線を、線の長さにそって等しい間を空けた n 点にする（closed なら最後の点から最初の点へも結ぶ）
 export function resample(pts, n, closed) {
@@ -80,6 +106,23 @@ function outline(id) {
   if (id === 'circle') return round(Array.from({ length: 72 }, (_, i) => [R * Math.cos((i / 72) * 2 * Math.PI), R * Math.sin((i / 72) * 2 * Math.PI)]));
   if (id === 'triangle') return round([[0, -R], [R * 0.95, R * 0.65], [-R * 0.95, R * 0.65]]);
   if (id === 'square') return [[-R, -R], [R, -R], [R, R], [-R, R]];
+  if (id === 'moon') {
+    // 三日月（右が欠ける）: 外の円（半径 R）の左側の弧と、中心を右へ 0.6R ずらした円の弧（2つの円の交点は (0.5R, ±0.866R)）
+    const r2 = Math.sqrt(0.76) * R;
+    const b = Math.atan2(0.866, -0.1); // 内の円の中心から見た交点の向き
+    const outer = Array.from({ length: 41 }, (_, i) => { const a = Math.PI / 3 + (i / 40) * ((4 * Math.PI) / 3); return [R * Math.cos(a), R * Math.sin(a)]; });
+    const inner = Array.from({ length: 27 }, (_, i) => { const a = 2 * Math.PI - b - ((i + 1) / 28) * (2 * Math.PI - 2 * b); return [0.6 * R + r2 * Math.cos(a), r2 * Math.sin(a)]; });
+    return round([...outer, ...inner]);
+  }
+  if (id === 'drop') {
+    // しずく（上がとがる）: x = sin t · sin(t/2)、y = −cos t
+    return round(Array.from({ length: 72 }, (_, i) => { const t = (i / 72) * 2 * Math.PI; return [R * Math.sin(t) * Math.sin(t / 2), -R * Math.cos(t)]; }));
+  }
+  if (id === 'arrow') return round([[-R, -R * 0.3], [R * 0.1, -R * 0.3], [R * 0.1, -R * 0.75], [R, 0], [R * 0.1, R * 0.75], [R * 0.1, R * 0.3], [-R, R * 0.3]]);
+  if (id === 'cross') {
+    const w = R * 0.34;
+    return round([[-w, -R], [w, -R], [w, -w], [R, -w], [R, w], [w, w], [w, R], [-w, R], [-w, w], [-R, w], [-R, -w], [-w, -w]]);
+  }
   if (id === 'star') {
     return round(Array.from({ length: 10 }, (_, i) => {
       const a = -Math.PI / 2 + (i * Math.PI) / 5;
@@ -187,10 +230,16 @@ export default {
   minPlayers: 2,
   maxPlayers: 10,
 
-  init(n, seed) {
-    const rnd = mulberry32(seed);
-    const order = shuffle(SHAPES.map((x) => x.id), rnd);
-    return { n, seed, order, q: -1, phase: 'ready', draws: Array(n).fill(null), likes: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
+  settings: [
+    { key: 'shapes', label: '形', desc: '9つでは月・しずく・矢印・十字も出て、毎回くじで選ぶ', def: 'basic', choices: SHAPE_CHOICES },
+    { key: 'time', label: '描く時間', desc: '1回に描ける時間', def: 12, choices: TIME_CHOICES },
+    { key: 'rounds', label: '回数', desc: '1回の対局で描く回数', def: 5, choices: ROUND_CHOICES },
+  ],
+
+  init(n, seed, { rules = {} } = {}) {
+    const r = { shapes: 'basic', time: 12, rounds: 5, ...rules };
+    const order = orderOf(seed, r);
+    return { n, seed, rules: r, order, q: -1, phase: 'ready', draws: Array(n).fill(null), likes: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
   },
 
   turn() { return null; },
@@ -210,7 +259,7 @@ export default {
     if (s.phase === 'ready') return { key: 'ready', ms: READY_MS, move: { t: 'next' } };
     if (s.phase === 'open') {
       if (s.draws.every((v) => v !== null)) return { key: 'all' + s.q, ms: 600, move: { t: 'close' } };
-      return { key: 'open' + s.q, ms: LIMIT + GRACE_MS, move: { t: 'close' } };
+      return { key: 'open' + s.q, ms: limitOf(s.rules) + GRACE_MS, move: { t: 'close' } };
     }
     if (s.phase === 'shown') return { key: 'shown' + s.q, ms: SHOWN_MS, move: { t: 'next' } };
     return null;
@@ -251,14 +300,14 @@ export default {
     return s;
   },
 
-  // CPU: 3〜8秒で描き終える
+  // CPU: 描く時間のおよそ 25〜67%（12秒で 3〜8秒）で描き終える
   cpuDelay(s) { return s.phase === 'open' ? 200 : 500; },
   cpu(s, p) {
     if (s.phase !== 'open' || s.draws[p] !== null) return null;
     const key = qKey(s) + ':' + p;
     let plan = cpuPlan.get(key);
     if (!plan) {
-      plan = { at: 3000 + Math.random() * 5000, pts: cpuDraw(s.order[s.q]) };
+      plan = { at: limitOf(s.rules) * (0.25 + Math.random() * 0.42), pts: cpuDraw(s.order[s.q]) };
       cpuPlan.set(key, plan);
       if (cpuPlan.size > 200) cpuPlan.delete(cpuPlan.keys().next().value);
     }
@@ -292,7 +341,7 @@ export default {
     head.className = 'cp-head';
     root.append(head);
     if (s.phase === 'ready') {
-      head.textContent = `よーい… お手本の形を一筆で描こう（全${s.order.length}回・お手本に近い順に 3・2・1点）`;
+      head.textContent = `よーい… お手本の形を一筆で描こう（全${s.order.length}回・1回${limitOf(s.rules) / 1000}秒・お手本に近い順に 3・2・1点）`;
       return;
     }
     const shape = s.order[s.q];
@@ -350,6 +399,7 @@ export default {
     ink.setAttribute('class', 'kt-ink');
     pad.append(ink);
     pad.classList.add('live');
+    const LIMIT = limitOf(s.rules);
     const left = () => LIMIT - since(key);
     const noteText = (msg) => `${msg ? msg + '　' : ''}のこり ${Math.max(0, Math.ceil(left() / 1000))}秒`;
     note.textContent = noteText('指（マウス）を離したら描き終わり');
