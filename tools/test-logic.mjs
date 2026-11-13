@@ -1689,10 +1689,33 @@ assert.deepEqual(t.place, [1, 1, 1], '全員同時に出し切ったら同じ順
 assert.equal(SP.result(t).draw, true);
 assert.deepEqual(SP.result(sp3({ fields: [[null], [null], ['h2']], piles: [['d1'], ['c13'], ['d6']], place: [1, 1, 3] })).winners, [0, 1], '1位が同着なら2人とも勝ちの音');
 assert.equal(SP.result(sp3({ fields: [[null], ['h2'], [null]], piles: [['d1'], ['c13'], ['d6']], place: [1, 3, 2] })).winners, undefined, '同着が無ければ順位の音');
+// 4人: 13枚ずつ・余りなし・台札4つ・残りが1人になるまで続ける（2026-11-13）
+s = SP.init(4, 42, { rules: {} });
+assert.equal(s.piles.length, 4);
+assert.deepEqual(s.decks.map((d, p) => d.length + s.fields[p].length + s.piles[p].length), [13, 13, 13, 13], '13枚ずつ');
+assert.equal(s.aside, null, '4人は余りなし');
+assert.equal(new Set([...s.decks.flat(), ...s.fields.flat(), ...s.piles.flat()]).size, 52, '4人で52枚・重なりなし');
+{
+  const sp4 = (o) => ({ n: 4, rules: { cpu: 'slow' }, decks: [[], [], [], []], aside: null, place: [null, null, null, null], step: 0, last: null, flips: 0, ...o });
+  let a = sp4({ fields: [['h5', null, null, null], ['s9', 's2', null, null], ['c11', 'c3', null, null], ['d8', 'd3', null, null]], piles: [['d1'], ['c13'], ['d6'], ['h10']] });
+  assert.ok(SP.apply(a, { p: 0, t: 'play', card: 'h5', pile: 3 }) === null, '10 の上に 5 は出せない');
+  assert.ok(SP.apply(a, { p: 1, t: 'play', card: 's9', pile: 3 }), '4つ目の台札にも出せる');
+  let b = SP.apply(a, { p: 0, t: 'play', card: 'h5', pile: 2 });
+  assert.deepEqual(b.place, [1, null, null, null], '4人: 出し切った人が1位');
+  assert.equal(SP.result(b), null, '4人では1人上がっても続く');
+  b = SP.apply(b, { p: 1, t: 'play', card: 's2', pile: 0 });
+  b = SP.apply(b, { p: 1, t: 'play', card: 's9', pile: 3 });
+  assert.deepEqual(b.place, [1, 2, null, null], '2人目が2位');
+  assert.equal(SP.result(b), null, '4人では2人上がっても続く');
+  b = SP.apply(b, { p: 3, t: 'play', card: 'd3', pile: 0 });
+  b = SP.apply(b, { p: 3, t: 'play', card: 'd8', pile: 3 });
+  assert.deepEqual(SP.result(b).ranking, [0, 1, 3, 2], '3人上がったら終わり・残りが4位');
+  assert.deepEqual(SP.result(b).place, [1, 2, 4, 3]);
+}
 // CPU どうしで最後まで（だれが先に動くかは毎回ばらばら）
 let spGames = 0;
-for (let k = 0; k < 600; k++) {
-  const np = k % 2 ? 3 : 2;
+for (let k = 0; k < 900; k++) {
+  const np = 2 + (k % 3);
   let st = SP.init(np, k * 7 + 3, { rules: { same: k % 4 >= 2 } }); // 半分は「同じ数字も出せる」
   let steps = 0;
   while (!SP.result(st)) {
@@ -4933,7 +4956,48 @@ assert.ok(!('hide' in MC.init()) && !('hide' in MC.init({ rules: { hide: false }
 assert.match(MC.info(MC.apply({ ...mc, pits: [1, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 5, 0, 0] }, 0)), /（6個）/, 'なしならとった数が出る');
 t = MC.apply({ ...mc, hide: true, pits: [1, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 5, 0, 0] }, 0);
 assert.ok(t.hide && !t.over && t.last.capture.got === 6 && /とった/.test(MC.info(t)) && !/\d+個/.test(mcText(t)), 'ありではとった数を出さない');
-for (const rules of [{}, { players: 3 }, { pits: 4, nocap: true }, { stones: 6, pits: 5 }, { players: 3, stones: 3, nocap: true }]) {
+// 4人（2026-11-13）: 正方形の盤。ほかの3人のゴールを飛ばす・とれるのは向かいの人の向かいの穴だけ・誰かの側が空になったら全員終わり
+{
+  assert.equal(MC.seatCount({ players: 4 }), 4);
+  assert.equal(MC.players.length, 4);
+  const s4 = MC.init({ rules: { players: 4, pits: 4 } });
+  assert.deepEqual([s4.n, s4.holes, s4.pits.length, s4.pits[27], s4.pits[26]], [4, 6, 28, 0, 4], '4人: 穴6つ×4人＋ゴール4つ');
+  const mc4 = { n: 4, pits: [], turn: 0, last: null, over: false, count: 0 };
+  const p4 = (o) => { const a = Array(28).fill(0); for (const [i, v] of Object.entries(o)) a[i] = v; return a; };
+  // 先手の 0 番目に 26個: 1周して自分の側まで戻る。ほかの3人のゴールには入らない
+  const round = MC.apply({ ...mc4, pits: p4({ 0: 26, 8: 1 }) }, 0);
+  assert.deepEqual([round.pits[13], round.pits[20], round.pits[27]], [0, 0, 0], '4人: ほかの3人のゴールは飛ばす');
+  // 先手の 1 番目（空）で止まる: 向かいの人（三番手 = 席2）の 4 番目（= 14+4 = 18）だけをとる。両どなり（8・22）の同じ番目はとらない
+  const cap = MC.apply({ ...mc4, pits: p4({ 0: 1, 3: 1, 18: 3, 8: 5, 22: 5, 15: 2, 7: 1, 21: 1 }) }, 0);
+  assert.deepEqual(cap.last.capture, { at: 1, opp: [18], got: 4 }, '4人: 向かいの人の向かいの穴をとる');
+  assert.deepEqual([cap.pits[6], cap.pits[18], cap.pits[8], cap.pits[22], cap.pits[15]], [4, 0, 5, 5, 2], '4人: 両どなりの石はとらない');
+  assert.equal(cap.turn, 1, '4人: 次の人へ');
+  assert.equal(MC.apply({ ...mc4, pits: p4({ 0: 1, 8: 5, 22: 5, 7: 1, 21: 1, 14: 1 }) }, 0).last.capture, null, '4人: 向かいが空ならとらない');
+  assert.equal(MC.apply({ ...mc4, nocap: true, pits: p4({ 0: 1, 18: 3, 7: 1, 21: 1 }) }, 0).last.capture, null, '4人でも捕獲なし');
+  // 四番手（席3）の 5 番目（= 26）から1個: 自分のゴール 27 に入ってもう1回
+  const ex = MC.apply({ ...mc4, turn: 3, pits: p4({ 26: 1, 21: 1, 0: 1, 7: 1, 14: 1 }) }, 5);
+  assert.deepEqual([ex.pits[27], ex.turn, ex.last.extra], [1, 3, true], '4人: 自分のゴールで止まったらもう1回');
+  // 四番手の 0 番目（空）で止まる: 向かいは後手（席1）の 5 番目（= 12）
+  const cap3 = MC.apply({ ...mc4, turn: 3, pits: p4({ 21: 0, 20: 0, 19: 1, 12: 2, 0: 1, 7: 1 }) }, 0);
+  assert.equal(cap3, null, '4人: 空の穴は選べない');
+  const end = MC.apply({ ...mc4, pits: p4({ 5: 1, 7: 2, 14: 3, 21: 4, 13: 1 }) }, 5);
+  assert.ok(end.over && end.pits[6] === 1 && end.pits[13] === 3 && end.pits[20] === 3 && end.pits[27] === 4, '4人: 誰かの側が空になったら全員終わり');
+  assert.equal(MC.result(end).winner, 3);
+  assert.equal(MC.result({ ...end, pits: p4({ 6: 5, 13: 5, 20: 1, 27: 2 }) }).winner, null, '4人: 一番が2人なら引き分け');
+  for (let g = 0; g < 8; g++) {
+    let st = MC.init({ rules: { players: 4, stones: 3 + (g % 4), nocap: g >= 6 } });
+    const total = st.pits.reduce((a, b) => a + b, 0);
+    let steps = 0;
+    while (!MC.result(st)) {
+      st = MC.apply(st, MC.cpu(st, st.turn, { cpu: ['weak', 'normal'][g % 2] }));
+      assert.ok(st, '4人のマンカラの CPU が反則を出した');
+      assert.equal(st.pits.reduce((a, b) => a + b, 0), total, '4人: 途中で石の数が崩れない');
+      if (++steps > 2000) throw new Error('4人のマンカラが終わらない');
+    }
+    assert.equal(st.pits[6] + st.pits[13] + st.pits[20] + st.pits[27], total, '4人: 石の数が崩れない');
+  }
+}
+for (const rules of [{}, { players: 3 }, { players: 4 }, { pits: 4, nocap: true }, { stones: 6, pits: 5 }, { players: 3, stones: 3, nocap: true }]) {
   let st = MC.init({ rules: { ...rules, hide: true } });
   assert.equal(st.hide, true);
   let guard = 0;
@@ -5742,6 +5806,41 @@ assert.ok(sonarUsed >= 40, 'CPU もソナーを使う: ' + sonarUsed);
     const r = KS.result(st);
     assert.equal(st.out.filter((x) => !x).length, 1, '残るのは1人');
     assert.equal(r.place[r.winner], 1);
+  }
+  // 4人（2026-11-13）: 1発で残っている3人の海の同じマスに当たる
+  assert.equal(KS.seatCount({ players: 4 }), 4);
+  assert.equal(KS.players.length, 4);
+  let k4 = KS.init({ rules: { players: 4 } });
+  assert.equal(k4.np, 4);
+  for (const f of [fleet, fleet, other, fleet]) { assert.equal(k4.phase, 'place', '4人目が並べるまで撃てない'); k4 = KS.apply(k4, { t: 'place', ships: f }); }
+  assert.equal(k4.phase, 'fire');
+  let t4 = KS.apply(k4, 0); // 0 が (0,0) を撃つ: 1 と 3 の海は当たり、2 の海ははずれ
+  assert.deepEqual(t4.last.hits, [1, 3], '同じマスを残っている3人の海に撃つ');
+  assert.equal(t4.turn, 1);
+  // 0 が 1・3 の船を全部沈める → 1・3 は同じ手で脱落し、0 と 2 で続く。順番は 2 へ
+  let w4 = k4;
+  for (const c of cells.slice(0, -1)) w4 = { ...w4, shots: [w4.shots[0].map((x, i) => x || i === c), w4.shots[1], w4.shots[2], w4.shots[3]] };
+  w4 = KS.apply({ ...w4, turn: 0 }, cells[cells.length - 1]);
+  assert.deepEqual([w4.out, w4.won, w4.turn], [[false, true, false, true], null, 2], '2人脱落しても残りが2人なら続く・脱落した人の番は飛ばす');
+  assert.equal(KS.result(w4), null);
+  assert.ok(KS.info(w4).includes('全部の船が沈んだ'));
+  // 2 が 0 の船を全部沈めると 2 の勝ち。順位は 2 が1位・0 が2位・1 と 3 が同じ3位
+  for (const c of cells.slice(0, -1)) w4 = { ...w4, shots: [w4.shots[0], w4.shots[1], w4.shots[2].map((x, i) => x || i === c), w4.shots[3]] };
+  w4 = KS.apply(w4, cells[cells.length - 1]);
+  assert.equal(w4.won, 2);
+  assert.deepEqual(KS.result(w4).place, [2, 3, 1, 3], '4人の順位: 脱落が遅い人ほど上・同じ手で脱落した人は同じ順位');
+  for (let g = 0; g < 12; g++) {
+    let st = KS.init({ rules: { players: 4, size: g % 2 ? 8 : 10, apart: g % 3 ? 'off' : 'on' } });
+    let steps = 0;
+    while (!KS.result(st)) {
+      const next = KS.apply(st, KS.cpu(st, st.turn, { cpu: ['weak', 'normal', 'strong'][g % 3] }));
+      assert.ok(next, '海戦ゲーム（4人）の CPU が反則の手を出した');
+      st = next;
+      if (++steps > 1400) throw new Error('海戦ゲーム（4人）が終わらない');
+    }
+    const r = KS.result(st);
+    assert.equal(st.out.filter((x) => !x).length, 1, '4人: 残るのは1人');
+    assert.deepEqual([r.place[r.winner], r.ranking.length], [1, 4]);
   }
 }
 console.log('kaisen OK');
@@ -7727,6 +7826,23 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     let x = GM.init({ rules: { players: 3, size: 13 } });
     for (let k = 0; k < 169 && !GM.result(x); k++) x = play(GM, x, [GM.cpu(x, x.turn, { cpu })]);
     assert.ok(GM.result(x), `3人の五目並べ: CPU（${cpu}）どうしで最後まで`);
+  }
+  // 4人（2026-11-13）: 黒・白・赤・青の順・4つで勝ち・はさみ取りはいつもあり（詳細設定を見ない）・禁じ手は切る
+  assert.equal(GM.seatCount({ players: 4 }), 4);
+  assert.equal(GM.players.length, 4);
+  s = GM.init({ rules: { players: 4, renju: true } });
+  assert.deepEqual([s.np, s.capture, s.renju, s.caps], [4, true, false, [0, 0, 0, 0]], '4人の五目並べ: はさみ取りはいつもあり・禁じ手は使わない');
+  assert.equal(GM.init({ rules: { players: 3 } }).capture, false, '3人のはさみ取りは詳細設定のまま');
+  s = play(GM, s, [at(7, 3), at(8, 3), at(9, 3), at(10, 3), at(7, 4), at(8, 4), at(9, 4), at(10, 4), at(7, 5), at(8, 5), at(9, 5), at(10, 5)]);
+  assert.equal(s.turn, 0, '4人の五目並べ: 黒・白・赤・青で順番が回る');
+  assert.equal(GM.result(s), null, '4人の五目並べ: 3つではまだ');
+  assert.equal(GM.result(play(GM, s, [at(0, 0), at(0, 14), at(14, 0), at(10, 6)])).winner, 3, '4人の五目並べ: 青も4つ並べで勝ち');
+  s = play(GM, GM.init({ rules: { players: 4 } }), [at(0, 0), at(0, 1), at(5, 5), at(10, 10), at(12, 12), at(0, 2), at(5, 8), at(10, 13), at(0, 3)]);
+  assert.deepEqual([s.grid[1], s.grid[2], s.caps], [null, null, [1, 0, 0, 0]], '4人のはさみ取り: 白の2つを黒ではさむと取れる');
+  for (const cpu of ['weak', 'normal', 'strong']) {
+    let x = GM.init({ rules: { players: 4, size: 13 } });
+    for (let k = 0; k < 600 && !GM.result(x); k++) x = play(GM, x, [GM.cpu(x, x.turn, { cpu })]);
+    assert.ok(GM.result(x), `4人の五目並べ: CPU（${cpu}）どうしで最後まで`);
   }
 
   // 立体四目並べ: 赤・黄・緑の順・4つで勝ち・CPU どうしで最後まで（重力なしも）

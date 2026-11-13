@@ -8,6 +8,9 @@
 // 3人（詳細設定「人数」。2026-10-05 本人の決定）: 三角形の盤。14〜19 = 三番手の穴、20 = 三番手のゴール（p * 7 + k の形はそのまま）。
 // 石はほかの2人のゴールを飛ばして配る。自分の空いた k 番目の穴で止まったら、ほかの2人の k 番目の穴の石を両方とる（どちらかに石があれば）。
 // 誰か1人の側が空になったら全員終わり。一番多い人が2人以上なら引き分け。
+// 4人（詳細設定「人数」。2026-11-13 本人の依頼。Claude の推奨を本人が承認）: 正方形の盤。21〜26 = 四番手の穴、27 = 四番手のゴール。
+//   石はほかの3人のゴールを飛ばして配る。自分の空いた k 番目の穴で止まったら、向かいの人（2つ先の席）の向かいの穴（その人の 5 - k 番目）の石だけをとる
+//   （正方形には向かいがあるので2人のルールに合わせた。両どなりの人の石はとれない）。誰か1人の側が空になったら全員終わり。
 // 詳細設定「捕獲なし」（2026-10-06 本人の決定）: 空いた穴で止まっても石をとらない（2人・3人とも）。
 // 詳細設定「穴の数」（鍵は pits。2026-10-07。10回目の案）: 2人のときだけ、片側の穴を 6（最初）・5・4 にできる（局面の holes。3人はいつも 6）。
 //   番号の形は同じで、1人ぶんが「穴 holes 個＋ゴール」になる（穴4つなら 0〜3 = 先手の穴、4 = 先手のゴール、5〜8 = 後手の穴、9 = 後手のゴール）。
@@ -46,14 +49,14 @@ const game = {
   icon: '🫘',
   desc: '穴の石を1個ずつ配っていき、自分のゴールに多く集めた方の勝ち',
   ready: true,
-  players: ['先手', '後手', '三番手'],
+  players: ['先手', '後手', '三番手', '四番手'],
   flip: true, // 盤の向きを変える（⇅）ボタンを出す（main.js）
-  // 詳細設定の人数（2〜3人）。待合室の席の数になる
-  seatCount(rules) { return rules?.players === 3 ? 3 : 2; },
+  // 詳細設定の人数（2〜4人）。待合室の席の数になる
+  seatCount(rules) { return rules?.players === 3 || rules?.players === 4 ? rules.players : 2; },
   settings: [
-    { key: 'players', label: '人数', desc: '3人では三角形の盤で、ほかの2人のゴールを飛ばして配る', def: 2, choices: [[2, '2人'], [3, '3人']] },
+    { key: 'players', label: '人数', desc: '3人は三角形・4人は正方形の盤で、ほかの人のゴールを飛ばして配る。4人でとれるのは向かいの人の石だけ', def: 2, choices: [[2, '2人'], [3, '3人'], [4, '4人']] },
     { key: 'stones', label: '最初の石の数', desc: '穴1つあたり。多いほど長くなる', def: 4, choices: [[3, '3個'], [4, '4個'], [5, '5個'], [6, '6個']] },
-    { key: 'pits', label: '穴の数', desc: '片側の穴の数（2人のときだけ。3人はいつも6つ）。少ないほど早く終わる', def: 6, choices: [[6, '6つ'], [5, '5つ'], [4, '4つ']] },
+    { key: 'pits', label: '穴の数', desc: '片側の穴の数（2人のときだけ。3人・4人はいつも6つ）。少ないほど早く終わる', def: 6, choices: [[6, '6つ'], [5, '5つ'], [4, '4つ']] },
     { key: 'nocap', label: '捕獲なし', desc: '自分の空いた穴で止まっても、向かいの石をとらない。ゴールに入れた石だけで勝負', def: false },
     { key: 'hide', label: '石の数を隠す', desc: '終わるまで、穴とゴールの石の数が出ない。石を見て数えよう', def: false },
     CPU_SETTING,
@@ -61,7 +64,7 @@ const game = {
 
   init({ rules = {} } = {}) {
     const n = [3, 4, 5, 6].includes(rules.stones) ? rules.stones : 4;
-    const np = rules.players === 3 ? 3 : 2;
+    const np = rules.players === 3 || rules.players === 4 ? rules.players : 2;
     const holes = np === 2 && HOLES.includes(rules.pits) ? rules.pits : 6;
     const pits = Array(np * (holes + 1)).fill(n);
     const s = { n: np, holes, nocap: !!rules.nocap, pits, turn: 0, last: null, over: false, count: 0, ...(rules.hide ? { hide: true } : {}) };
@@ -95,8 +98,10 @@ const game = {
     }
     const last = { p, from, sown, extra: false, capture: null };
     let turn = (p + 1) % np;
-    // とる相手の穴: 2人は向かい・3人はほかの2人の同じ番目
-    const opp = np === 2 ? [2 * H - i] : [0, 1, 2].filter((q) => q !== p).map((q) => pitOf(s, q, i % (H + 1)));
+    // とる相手の穴: 2人は向かい・3人はほかの2人の同じ番目・4人は向かいの人（2つ先の席）の向かいの穴
+    const opp = np === 2 ? [2 * H - i]
+      : np === 4 ? [pitOf(s, (p + 2) % 4, H - 1 - (i % (H + 1)))]
+      : [0, 1, 2].filter((q) => q !== p).map((q) => pitOf(s, q, i % (H + 1)));
     if (i === mine) {
       last.extra = true;
       turn = p;
@@ -155,7 +160,7 @@ const game = {
       const score = (t, who) => t.pits[storeOf(t, who)] - t.pits[storeOf(t, 1 - who)];
       return boardCpu(game, s, rules, legal, score, { depth, mistake });
     }
-    // 3人: boardCpu は2人用（相手の得 = 自分の損）なので使えない。ほかの2人が自分の点を下げにくると考えて読む
+    // 3人・4人: boardCpu は2人用（相手の得 = 自分の損）なので使えない。ほかの2人が自分の点を下げにくると考えて読む
     const level = depth[rules?.cpu] !== undefined ? rules.cpu : 'weak';
     const moves = legal(s);
     if (moves.length === 1) return moves[0];
@@ -263,6 +268,33 @@ const game = {
     const meName = o.me === bottom ? 'あなた' : game.players[bottom];
     if (res) note.textContent = 'ゴールの石: ' + stores(s).map((v, p) => `${game.players[p]} ${v}個`).join(' ／ ');
     const secret = hide ? '。石の数はひみつ（終わったら出ます）' : '';
+
+    if (np === 4) {
+      // 正方形: 下の辺 = 自分（左→右、右下の角にゴール）、右の辺 = 次の人（下→上、右上にゴール）、上の辺 = 向かいの人（右→左、左上にゴール）、左の辺 = その次（上→下、左下にゴール）
+      const P = [[9, 91], [91, 91], [91, 9], [9, 9]];
+      const sq = document.createElement('div');
+      sq.className = 'mc-tri mc-sq';
+      sq.innerHTML = '<svg viewBox="0 0 100 100" aria-hidden="true"><polygon points="' + P.map((q) => q.join(',')).join(' ') + '"/></svg>';
+      const put = (e, [x, y], size) => {
+        e.style.left = `${x - size / 2}%`;
+        e.style.top = `${y - size / 2}%`;
+        e.style.width = `${size}%`;
+        sq.append(e);
+      };
+      P.forEach((from, side) => {
+        const to = P[(side + 1) % 4];
+        const owner = (bottom + side) % 4;
+        for (let k = 0; k < 6; k++) {
+          const t = (k + 1) / 7;
+          put(pitEl(pitOf(s, owner, k), owner), [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t], 10.5);
+        }
+        put(pitEl(storeOf(s, owner), owner), to, 13.5);
+      });
+      root.append(sq);
+      if (!res) note.textContent = pv ? pickNote(s, pv).trim() : `下の辺が${meName}の穴、右下の角がゴール。石は反時計回りに配ります（ほかの人のゴールは飛ばす）。とれるのは向かいの辺の石だけ${secret}`;
+      root.append(note);
+      return;
+    }
 
     if (np === 3) {
       // 三角形: 下の辺 = 自分（左→右、右下の角にゴール）、右の辺 = 次の人（下→上、てっぺんにゴール）、左の辺 = その次（上→下、左下にゴール）

@@ -1,12 +1,13 @@
-// スピード。2〜3人で同時に札を出し合う早い者勝ちのゲーム。
+// スピード。2〜4人で同時に札を出し合う早い者勝ちのゲーム。
 // 2人: プレイヤー0 は赤（♥♦）、プレイヤー1 は黒（♠♣）の26枚ずつ。
 // 3人: 52枚をまぜて17枚ずつ配り、余った1枚は使わない（2026-10-05 本人の決定）。
-// 手元に4枚を表向きに並べ、残りは自分の山。真ん中の台札は1人1か所（2人なら2か所、3人なら3か所）。
+// 4人: 52枚をまぜて13枚ずつ配る（余りなし。2026-11-13 本人の決定）。
+// 手元に4枚を表向きに並べ、残りは自分の山。真ん中の台札は1人1か所（2人なら2か所、3人なら3か所、4人なら4か所）。
 // どの台札の一番上とも、数字が1つ違う札（K と A もつながる）なら出せる。
 // 詳細設定「同じ数字」（2026-10-07。10回目の案）: ありにすると、台札と同じ数字の札も出せる（なしなら今までどおり前後の数字だけ）。
 // 手元が空いたら自分の山から自動で補充。まだ上がっていない全員が出せなくなったら「スピード！」で、それぞれ自分の山の一番上を
 // 自分の台札に出し直す（山が無ければ手元の札から出す）。札を全部出し切った順に順位が付く。
-// 2人なら先に出し切った方の勝ち。3人なら2人が出し切るまで続ける（本人の決定）。同時に出し切ったら同じ順位。
+// 2人なら先に出し切った方の勝ち。3人・4人なら残りが1人になるまで続ける（本人の決定）。同時に出し切ったら同じ順位。
 // 手: { p, t: 'play', card: 出す札, pile: 台札の番号 } / { p, t: 'flip' }（スピード！）
 // 札そのもので手を表すので、通信で同じ手が2回届いても2回目は反則として弾かれる（main.js の rebase が頼りにしている）。
 // スワイプ（2026-10-26 本人の依頼）: 自分の札を指で押したまま台札へ動かして離すと出せる。
@@ -70,12 +71,12 @@ export default {
   id: 'speed',
   name: 'スピード',
   icon: '⚡',
-  desc: '2〜3人で同時に、真ん中の札と数字が1つ違う札をどんどん出す早い者勝ち',
+  desc: '2〜4人で同時に、真ん中の札と数字が1つ違う札をどんどん出す早い者勝ち',
   ready: true,
   multi: true,
   realtime: true,
   minPlayers: 2,
-  maxPlayers: 3,
+  maxPlayers: 4,
   settings: [
     { key: 'cpu', label: 'CPU の速さ', desc: 'CPU が1枚出すまでの間。速いほど強い', def: 'slow', choices: [['slow', 'ゆっくり'], ['normal', 'ふつう'], ['fast', 'はやい']] },
     { key: 'same', label: '同じ数字', desc: '台札と同じ数字の札も出せる（なしなら前後の数字だけ）。札がどんどん出て早く終わる', def: false, choices: [[false, 'なし'], [true, '出せる']] },
@@ -85,10 +86,11 @@ export default {
     const rng = mulberry32(seed);
     let decks;
     let aside = null;
-    if (n === 3) {
+    if (n >= 3) {
       const all = shuffle(makeHalf(['h', 'd', 's', 'c']), rng);
-      aside = all.pop();
-      decks = [0, 1, 2].map((i) => all.slice(i * 17, i * 17 + 17));
+      if (n === 3) aside = all.pop(); // 3人は余りの1枚を使わない。4人は13枚ずつで余りなし
+      const each = Math.floor(52 / n);
+      decks = Array.from({ length: n }, (_, i) => all.slice(i * each, i * each + each));
     } else {
       decks = [shuffle(makeHalf(['h', 'd']), rng), shuffle(makeHalf(['s', 'c']), rng)];
     }
@@ -187,7 +189,7 @@ export default {
 
     const side = (p, mine) => {
       const box = document.createElement('div');
-      box.className = 'sp-side' + (mine ? ' mine' : '') + (n > 2 ? ' sp3' : '') + (s.place[p] === 1 ? ' won' : '');
+      box.className = 'sp-side' + (mine ? ' mine' : '') + (n > 2 ? ' sp3' : '') + (n > 3 ? ' sp4' : '') + (s.place[p] === 1 ? ' won' : '');
       const head = document.createElement('div');
       head.className = 'sp-head';
       const left = cardsLeft(s, p);
@@ -225,7 +227,7 @@ export default {
     for (const p of others) root.append(side(p, false));
 
     const center = document.createElement('div');
-    center.className = 'sp-center';
+    center.className = 'sp-center' + (n > 3 ? ' sp4' : '');
     seats(s).forEach((i) => {
       const e = cardEl(t[i], 'div');
       e.classList.add('sp-pile');

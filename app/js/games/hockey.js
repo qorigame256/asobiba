@@ -79,7 +79,12 @@ const FLASH = 1.4; // ゴールのとき盤を光らせる秒数（2026-11-03 �
 // （両隣の壁の半分ずつを含む）。広さは2人の盤より少し広い（3人分）
 export const HEX_R = 0.83; // 中心から角まで
 export const HEX_A = (HEX_R * Math.sqrt(3)) / 2; // 中心から辺まで
-export const GOAL3 = 0.38; // ゴールの幅（ふつうのとき）
+export const GOAL3 = 0.38; // ゴールの幅（ふつうのとき。4人も同じ）
+// 4人の八角形の盤（2026-11-13 本人の依頼。Claude の推奨を本人が承認）。上下左右の4辺がそれぞれのゴール、斜めの4辺が壁。席0 が下で、1 → 2 → 3 と 90°ずつ回る。
+//   Claude の判断: 中心から辺まで 0.85（1人あたりの広さが3人の六角形とほぼ同じ。辺の長さ 0.70 で、ひろいゴール 0.513 でも角から 0.09 離れる）。
+//   動かし方・CPU・同期・点数（失点の少ない人の勝ち）は3人と同じ関数を使う（下の shape）。じゃまブロックも3人と同じ真ん中の丸
+export const OCT_A = 0.85; // 中心から辺まで
+export const OCT_R = OCT_A / Math.cos(Math.PI / 8); // 中心から角まで
 // ゴールの広さ（詳細設定 goal）。幅に掛ける倍率。Claude の判断: せまい 0.75・ひろい 1.35
 //   （2人: 0.27・0.486。3人: 0.285・0.513 で、六角形の辺 0.83 の角から 0.16 離れる。せまいでもパック2つ分より広く、パックは通れる）
 export const GOAL_SIZES = {
@@ -112,8 +117,8 @@ export const CPU_LEVELS = {
   strong: { name: 'つよい', speed: 3.6, react: 0.06, err: 0.025 },
 };
 const POINTS = [3, 5, 7, 10];
-const COLORS = ['#d9643a', '#2f6fb3', '#2e9a52']; // style.css の --p0〜--p2 と同じ
-const PLAYERS = ['赤', '青', '緑'];
+const COLORS = ['#d9643a', '#2f6fb3', '#2e9a52', '#8a4fc0']; // style.css の --p0〜--p3 と同じ
+const PLAYERS = ['赤', '青', '緑', '紫'];
 
 /* ---------- 動き（2人・長方形） ---------- */
 
@@ -292,49 +297,56 @@ export function cpuTarget(puck, m, lv, rnd, goal = GOAL, block = null, rm = R_M)
 
 const flipO = (o) => ({ x: W - o.x, y: H - o.y, vx: -(o.vx ?? 0), vy: -(o.vy ?? 0) });
 
-/* ---------- 動き（3人・六角形） ---------- */
+/* ---------- 動き（3人の六角形・4人の八角形） ---------- */
 
 const dir = (deg) => ({ x: Math.cos((deg * Math.PI) / 180), y: Math.sin((deg * Math.PI) / 180) });
-const seatDir = (p) => dir(90 + 120 * p);
-// 6つの辺（u = 外向きの向き）。goal = その辺をゴールにしている席（壁は -1）
-const EDGES = [30, 90, 150, 210, 270, 330].map((deg) => ({ u: dir(deg), goal: (deg - 90) % 120 === 0 ? (((deg - 90) / 120) % 3 + 3) % 3 : -1 }));
-// ゴールの両端の柱（ゴールの幅ごとに1回だけ作って覚えておく）
-const POSTS = new Map();
-const postsOf = (goal) => {
-  if (!POSTS.has(goal)) {
-    POSTS.set(goal, [0, 1, 2].flatMap((p) => {
-      const u = seatDir(p);
-      return [1, -1].map((k) => ({ x: u.x * HEX_A - u.y * k * (goal / 2), y: u.y * HEX_A + u.x * k * (goal / 2) }));
+// 盤の形（n 人なら辺が 2n 本で、1辺おきにゴール）。step = となりの席との角度、A = 中心から辺まで、R = 中心から角まで。
+// 席 p のゴールは外向きの向きが 90°＋step×p の辺（席0 が下）。陣地は中心から見てその向きの ±step/2 の扇形。
+// edges = 辺（u = 外向きの向き。goal = その辺をゴールにしている席。壁は -1）。posts・limits はゴールの幅・マレットの半径ごとに1回だけ作って覚える。
+// 3人（G3）の数字と計算は、4人を足す前と全く同じ（自動確認で同じ動きになることを見ている）
+function shape(n, A, R) {
+  const step = 360 / n;
+  const edges = Array.from({ length: 2 * n }, (_, k) => 90 - step / 2 + (step / 2) * k)
+    .map((deg) => ({ u: dir(deg), goal: (deg - 90) % step === 0 ? (((deg - 90) / step) % n + n) % n : -1 }));
+  return { n, step, A, R, edges, posts: new Map(), limits: new Map() };
+}
+const G3 = shape(3, HEX_A, HEX_R);
+const G4 = shape(4, OCT_A, OCT_R);
+const seatDir = (p, g = G3) => dir(90 + g.step * p);
+// ゴールの両端の柱
+const postsOf = (goal, g = G3) => {
+  if (!g.posts.has(goal)) {
+    g.posts.set(goal, Array.from({ length: g.n }, (_, p) => p).flatMap((p) => {
+      const u = seatDir(p, g);
+      return [1, -1].map((k) => ({ x: u.x * g.A - u.y * k * (goal / 2), y: u.y * g.A + u.x * k * (goal / 2) }));
     }));
   }
-  return POSTS.get(goal);
+  return g.posts.get(goal);
 };
-// 席ごとのマレットの動ける範囲（「向き・点 ≦ 上限」の組の並び）: 盤の内側と、自分の扇形（境目から rm 離れる）。
-// マレットの半径ごとに1回だけ作って覚えておく
-const LIMITS = new Map();
-const limitsOf = (rm) => {
-  if (!LIMITS.has(rm)) {
-    LIMITS.set(rm, [0, 1, 2].map((p) => {
-      const c = 90 + 120 * p;
-      const a = dir(c + 30);
-      const b = dir(c - 30);
-      return [...EDGES.map((e) => [e.u.x, e.u.y, HEX_A - rm]), [-a.x, -a.y, -rm], [-b.x, -b.y, -rm]];
+// 席ごとのマレットの動ける範囲（「向き・点 ≦ 上限」の組の並び）: 盤の内側と、自分の扇形（境目から rm 離れる）
+const limitsOf = (rm, g = G3) => {
+  if (!g.limits.has(rm)) {
+    g.limits.set(rm, Array.from({ length: g.n }, (_, p) => p).map((p) => {
+      const c = 90 + g.step * p;
+      const a = dir(c + (90 - g.step / 2));
+      const b = dir(c - (90 - g.step / 2));
+      return [...g.edges.map((e) => [e.u.x, e.u.y, g.A - rm]), [-a.x, -a.y, -rm], [-b.x, -b.y, -rm]];
     }));
   }
-  return LIMITS.get(rm);
+  return g.limits.get(rm);
 };
 
-export const zoneHex = (q) => {
+export const zoneHex = (q, g = G3) => {
   const deg = (Math.atan2(q.y, q.x) * 180) / Math.PI;
-  return (((Math.round((deg - 90) / 120)) % 3) + 3) % 3;
+  return (((Math.round((deg - 90) / g.step)) % g.n) + g.n) % g.n;
 };
-const serveHex = (p) => { const u = seatDir(p); return { x: u.x * 0.3, y: u.y * 0.3, vx: 0, vy: 0 }; };
-const homeHex = (p) => { const u = seatDir(p); return { x: u.x * (HEX_A - 0.16), y: u.y * (HEX_A - 0.16), vx: 0, vy: 0 }; };
+const serveHex = (p, g = G3) => { const u = seatDir(p, g); return { x: u.x * 0.3, y: u.y * 0.3, vx: 0, vy: 0 }; };
+const homeHex = (p, g = G3) => { const u = seatDir(p, g); return { x: u.x * (g.A - 0.16), y: u.y * (g.A - 0.16), vx: 0, vy: 0 }; };
 
 // 範囲の外なら、はみ出した線へ順に寄せる（どの角も90°以上に開いているので数回でおさまる）
-export function clampHex(p, x, y, rm = R_M) {
+export function clampHex(p, x, y, rm = R_M, g = G3) {
   const q = { x, y };
-  const limits = limitsOf(rm)[p];
+  const limits = limitsOf(rm, g)[p];
   for (let it = 0; it < 8; it++) {
     let moved = false;
     for (const [ux, uy, lim] of limits) {
@@ -346,58 +358,59 @@ export function clampHex(p, x, y, rm = R_M) {
   return q;
 }
 
-// パックを dt 秒進める。ゴールに入ったら、入れられた席（0〜2）を返す。goal = ゴールの幅。block = じゃまブロック（なしなら null）。rm = マレットの半径
-export function stepHex(puck, mallets, dt, ev = null, goal = GOAL3, block = null, rm = R_M) {
+// パックを dt 秒進める。ゴールに入ったら、入れられた席を返す。goal = ゴールの幅。block = じゃまブロック（なしなら null）。rm = マレットの半径。g = 盤の形
+export function stepHex(puck, mallets, dt, ev = null, goal = GOAL3, block = null, rm = R_M, g = G3) {
   friction(puck, dt);
   let hit = 0;
   let wall = 0;
   for (const m of mallets) hit = Math.max(hit, bounceCircle(puck, m.x, m.y, R_P + rm, m.vx, m.vy));
   if (block) wall = Math.max(wall, bounceBlock(puck, block));
-  for (const e of EDGES) {
+  for (const e of g.edges) {
     const d = puck.x * e.u.x + puck.y * e.u.y; // 中心から外向きの距離
     if (e.goal >= 0 && Math.abs(-puck.x * e.u.y + puck.y * e.u.x) < goal / 2) { // ゴールの口の前
-      if (d > HEX_A + R_P) return e.goal;
+      if (d > g.A + R_P) return e.goal;
       continue;
     }
-    if (d > HEX_A - R_P) {
-      puck.x -= (d - (HEX_A - R_P)) * e.u.x;
-      puck.y -= (d - (HEX_A - R_P)) * e.u.y;
+    if (d > g.A - R_P) {
+      puck.x -= (d - (g.A - R_P)) * e.u.x;
+      puck.y -= (d - (g.A - R_P)) * e.u.y;
       const vn = puck.vx * e.u.x + puck.vy * e.u.y;
       if (vn > 0) { wall = Math.max(wall, vn); puck.vx -= (1 + E_WALL) * vn * e.u.x; puck.vy -= (1 + E_WALL) * vn * e.u.y; }
     }
   }
-  for (const q of postsOf(goal)) wall = Math.max(wall, bounceCircle(puck, q.x, q.y, R_P, 0, 0, E_WALL));
+  for (const q of postsOf(goal, g)) wall = Math.max(wall, bounceCircle(puck, q.x, q.y, R_P, 0, 0, E_WALL));
   if (ev) { ev.hit = Math.max(ev.hit, hit); ev.wall = Math.max(ev.wall, wall); }
   capSpeed(puck);
   return null;
 }
 
-// 3人の CPU。考え方は2人と同じで、自分のゴールが下に来る向きに回して考える。
-// 打ち込む先は、2人の相手のうちゴールの前から離れている方（ときどき逆）
+// 3人・4人の CPU。考え方は2人と同じで、自分のゴールが下に来る向きに回して考える。
+// 打ち込む先は、相手のうちゴールの前からいちばん離れている人（ときどきほかの人）
 const rot = (o, deg) => {
   const c = Math.cos((deg * Math.PI) / 180);
   const s = Math.sin((deg * Math.PI) / 180);
   return { x: o.x * c - o.y * s, y: o.x * s + o.y * c };
 };
-export function cpuHex(p, puck, m, lv, rnd, mallets, goal = GOAL3, block = null, rm = R_M) {
-  const back = (o) => rot(o, 120 * p);
-  const q = rot(puck, -120 * p);
-  const v = rot({ x: puck.vx, y: puck.vy }, -120 * p);
-  const mm = rot(m, -120 * p);
-  const defY = HEX_A - 0.2;
-  if (zoneHex(puck) === p) {
-    if (q.y > mm.y + 0.01) return back({ x: q.x * 0.5, y: HEX_A - rm - 0.01 }); // パックが後ろにある → 下がって回り込む
+export function cpuHex(p, puck, m, lv, rnd, mallets, goal = GOAL3, block = null, rm = R_M, g = G3) {
+  const back = (o) => rot(o, g.step * p);
+  const q = rot(puck, -g.step * p);
+  const v = rot({ x: puck.vx, y: puck.vy }, -g.step * p);
+  const mm = rot(m, -g.step * p);
+  const defY = g.A - 0.2;
+  if (zoneHex(puck, g) === p) {
+    if (q.y > mm.y + 0.01) return back({ x: q.x * 0.5, y: g.A - rm - 0.01 }); // パックが後ろにある → 下がって回り込む
     if (pinned(puck, m, rm)) return back({ x: mm.x + (mm.x - q.x), y: mm.y + 0.15 }); // 押しつけたまま止まった → 一度下がって打ち直す（2人と同じ）
-    const opp = [(p + 1) % 3, (p + 2) % 3].map((o) => {
-      const g = homeHex(o);
-      const om = mallets?.[o] ?? g;
-      return { o, open: Math.hypot(om.x - g.x, om.y - g.y) };
+    const opp = Array.from({ length: g.n - 1 }, (_, k) => (p + 1 + k) % g.n).map((o) => {
+      const h = homeHex(o, g);
+      const om = mallets?.[o] ?? h;
+      return { o, open: Math.hypot(om.x - h.x, om.y - h.y) };
     }).sort((a, b) => b.open - a.open);
-    const o = (rnd() < 0.75 ? opp[0] : opp[1]).o;
-    const u = seatDir(o);
+    // 3人は乱数を1回だけ使う（前と同じ動き）。4人は「ほかの人」をもう1回の乱数で選ぶ
+    const o = (rnd() < 0.75 ? opp[0] : opp.length === 2 ? opp[1] : opp[1 + Math.floor(rnd() * (opp.length - 1))]).o;
+    const u = seatDir(o, g);
     const off = (rnd() - 0.5) * goal * (1 + lv.err * 6);
-    const gx = u.x * HEX_A - u.y * off;
-    const gy = u.y * HEX_A + u.x * off;
+    const gx = u.x * g.A - u.y * off;
+    const gy = u.y * g.A + u.x * off;
     const [ax, ay] = aimPast(puck, gx, gy, block);
     const al = Math.hypot(ax, ay) || 1;
     const e = (rnd() - 0.5) * lv.err;
@@ -411,13 +424,13 @@ export function cpuHex(p, puck, m, lv, rnd, mallets, goal = GOAL3, block = null,
 
 /* ---------- 台（盤の形ごとの関数の組） ---------- */
 
-// 台を作る。n = 人数（2: 長方形、3: 六角形）、goalKey = ゴールの広さ（GOAL_SIZES の鍵）、block = じゃまブロックを置くか。
+// 台を作る。n = 人数（2: 長方形、3: 六角形、4: 八角形）、goalKey = ゴールの広さ（GOAL_SIZES の鍵）、block = じゃまブロックを置くか。
 // goal = この台のゴールの幅。block = じゃまブロック（なしなら null）。keep = マレットが動いた先をブロックの外へ押し出す（なしなら null）。
 // malletKey = マレットの大きさ（MALLET_SIZES の鍵）。rm = この台のマレットの半径。
 // じゃまブロックなし・マレットふつうの台は、前と全く同じ関数の組になる（自動確認で同じ動きになることを見ている）
 export function table(n, goalKey = 'normal', block = false, malletKey = 'normal') {
   const mul = GOAL_SIZES[goalKeyOf(goalKey)].mul;
-  const blk = block ? (n === 3 ? BLOCK3 : BLOCK2) : null;
+  const blk = block ? (n >= 3 ? BLOCK3 : BLOCK2) : null;
   const rm = R_M * MALLET_SIZES[malletKeyOf(malletKey)].mul;
   // マレットの半径に合わせた動ける範囲（ふつうなら前と同じ関数そのもの）
   const sized = (base) => (rm === R_M ? base : (p, x, y) => base(p, x, y, rm));
@@ -427,10 +440,20 @@ export function table(n, goalKey = 'normal', block = false, malletKey = 'normal'
     const goal = GOAL3 * mul;
     const clamp = fence(sized(clampHex));
     return {
-      n: 3, w: 2 * (HEX_R + PAD), h: 2 * (HEX_A + PAD), goal, block: blk, keep: blk ? clamp : null, rm,
+      n: 3, w: 2 * (HEX_R + PAD), h: 2 * (HEX_A + PAD), goal, block: blk, keep: blk ? clamp : null, rm, geo: G3,
       step: (puck, ms, dt, ev) => stepHex(puck, ms, dt, ev, goal, blk, rm),
-      clamp, zone: zoneHex, serve: serveHex, home: homeHex,
+      clamp, zone: (q) => zoneHex(q), serve: (p) => serveHex(p), home: (p) => homeHex(p), // map に渡されても、2つ目の引数（盤の形）に番号が入らないように包む
       cpu: (p, puck, m, lv, rnd, ms) => cpuHex(p, puck, m, lv, rnd, ms, goal, blk, rm),
+    };
+  }
+  if (n === 4) {
+    const goal = GOAL3 * mul;
+    const clamp = fence((p, x, y) => clampHex(p, x, y, rm, G4));
+    return {
+      n: 4, w: 2 * (OCT_A + PAD), h: 2 * (OCT_A + PAD), goal, block: blk, keep: blk ? clamp : null, rm, geo: G4,
+      step: (puck, ms, dt, ev) => stepHex(puck, ms, dt, ev, goal, blk, rm, G4),
+      clamp, zone: (q) => zoneHex(q, G4), serve: (p) => serveHex(p, G4), home: (p) => homeHex(p, G4),
+      cpu: (p, puck, m, lv, rnd, ms) => cpuHex(p, puck, m, lv, rnd, ms, goal, blk, rm, G4),
     };
   }
   const goal = GOAL * mul;
@@ -601,10 +624,11 @@ function drawRect(ctx, view, st, P, opts) {
   }
 }
 
-function drawHex(ctx, view, st, P, goal, block, rm) {
+function drawHex(ctx, view, st, P, goal, block, rm, g = G3) {
+  const HEX_A = g.A; // この関数の中では、その盤の「中心から辺まで」
   const { s, w, h } = view;
   ctx.clearRect(0, 0, w, h);
-  const corners = [0, 1, 2, 3, 4, 5].map((k) => { const v = dir(60 * k); return P(v.x * HEX_R, v.y * HEX_R); });
+  const corners = Array.from({ length: 2 * g.n }, (_, k) => { const v = dir(90 - (g.step * 3) / 4 + (g.step / 2) * k); return P(v.x * g.R, v.y * g.R); });
   const outline = () => {
     ctx.beginPath();
     corners.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
@@ -617,7 +641,7 @@ function drawHex(ctx, view, st, P, goal, block, rm) {
   ctx.strokeStyle = '#b9d3e3';
   ctx.lineWidth = Math.max(2, s * 0.008);
   const [cx, cy] = P(0, 0);
-  for (const deg of [30, 150, 270]) {
+  for (const deg of Array.from({ length: g.n }, (_, k) => 90 - g.step / 2 + g.step * k)) {
     const v = dir(deg);
     const [x, y] = P(v.x * HEX_A, v.y * HEX_A);
     ctx.beginPath();
@@ -636,8 +660,8 @@ function drawHex(ctx, view, st, P, goal, block, rm) {
   ctx.stroke();
   // ゴール（縁の上に席の色で）
   ctx.lineWidth = Math.max(5, s * 0.03);
-  for (let p = 0; p < 3; p++) {
-    const u = seatDir(p);
+  for (let p = 0; p < g.n; p++) {
+    const u = seatDir(p, g);
     const [ax, ay] = P(u.x * HEX_A - u.y * (goal / 2), u.y * HEX_A + u.x * (goal / 2));
     const [bx, by] = P(u.x * HEX_A + u.y * (goal / 2), u.y * HEX_A - u.x * (goal / 2));
     ctx.strokeStyle = COLORS[p];
@@ -653,7 +677,7 @@ function drawHex(ctx, view, st, P, goal, block, rm) {
     ctx.fillStyle = '#f2b705';
     ctx.globalAlpha = 0.18 * fl;
     ctx.fill();
-    const u = seatDir(st.flash.c);
+    const u = seatDir(st.flash.c, g);
     const [ax, ay] = P(u.x * HEX_A - u.y * (goal / 2), u.y * HEX_A + u.x * (goal / 2));
     const [bx, by] = P(u.x * HEX_A + u.y * (goal / 2), u.y * HEX_A - u.x * (goal / 2));
     ctx.globalAlpha = fl;
@@ -668,8 +692,8 @@ function drawHex(ctx, view, st, P, goal, block, rm) {
   // 失点（それぞれの陣地の中に薄く。ゴールのときは入れられた人の失点を大きく濃く）
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  for (let p = 0; p < 3; p++) {
-    const u = seatDir(p);
+  for (let p = 0; p < g.n; p++) {
+    const u = seatDir(p, g);
     const [x, y] = P(u.x * 0.42, u.y * 0.42);
     const big = fl && p === st.flash.c ? fl : 0;
     ctx.font = `700 ${Math.round(s * 0.13 * (1 + big * 0.8))}px system-ui, sans-serif`;
@@ -727,7 +751,7 @@ function mount(root, opts) {
   const ctx = canvas.getContext('2d');
   const panel = el('div', 'hk-panel');
   root.append(panel, canvas); // 設定・もう一回は盤の上（盤の下だとスマホで見落とすため）
-  let n = online && Number(opts.rules?.players) === 3 ? 3 : 2;
+  let n = online && [3, 4].includes(Number(opts.rules?.players)) ? Number(opts.rules.players) : 2;
   let goalKey = online ? goalKeyOf(opts.rules?.goal) : 'normal'; // ゴールの広さ
   let blockOn = online && opts.rules?.block === 'on'; // じゃまブロック
   let malletKey = online ? malletKeyOf(opts.rules?.mallet) : 'normal'; // マレットの大きさ（全員同じ）
@@ -736,7 +760,7 @@ function mount(root, opts) {
   const view = { s: 1, w: 1, h: 1 };
   // 盤の座標 ↔ 画面の座標。自分は常に画面の下側（2人: オンラインの青は上下逆さ。3人: 自分のゴールが下に来るように回す）
   const flip = online && opts.me === 1;
-  const ang = (-120 * (online && opts.me > 0 ? opts.me : 0) * Math.PI) / 180;
+  const ang = (-(n === 4 ? 90 : 120) * (online && opts.me > 0 ? opts.me : 0) * Math.PI) / 180; // n が変わるのは CPU 戦の設定だけで、そのとき自分は席0（回さない）
   const ca = Math.cos(ang);
   const sa = Math.sin(ang);
   const toScreen = (x, y) => {
@@ -755,10 +779,10 @@ function mount(root, opts) {
 
   function resize() {
     const avail = Math.max(260, window.innerHeight - canvas.getBoundingClientRect().top - 90);
-    const width = Math.min(root.clientWidth || 340, n === 3 ? 480 : 440, (avail / T.h) * T.w);
+    const width = Math.min(root.clientWidth || 340, n >= 3 ? 480 : 440, (avail / T.h) * T.w);
     const height = (width * T.h) / T.w;
     const dpr = window.devicePixelRatio || 1;
-    canvas.classList.toggle('hex', n === 3);
+    canvas.classList.toggle('hex', n >= 3);
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
     canvas.width = Math.round(width * dpr);
@@ -995,7 +1019,7 @@ function mount(root, opts) {
     const box = el('div', 'hk-setup');
     let pl;
     if (opts.mode === 'cpu') {
-      pl = selectEl([[2, '2人（あなたと CPU）'], [3, '3人（あなたと CPU 2人）']], prefs.players === 3 ? 3 : 2);
+      pl = selectEl([[2, '2人（あなたと CPU）'], [3, '3人（あなたと CPU 2人）'], [4, '4人（あなたと CPU 3人）']], [3, 4].includes(prefs.players) ? prefs.players : 2);
       const row0 = el('label', 'hk-row');
       row0.append(el('span', '', '人数'), pl);
       box.append(row0);
@@ -1035,7 +1059,7 @@ function mount(root, opts) {
     box.append(note);
     // 人数を変えたら、盤の形と説明をその場で切り替えて見せる
     const showPlayers = () => {
-      n = pl && Number(pl.value) === 3 ? 3 : 2;
+      n = pl && [3, 4].includes(Number(pl.value)) ? Number(pl.value) : 2;
       goalKey = goalKeyOf(gk.value);
       blockOn = bk.value === 'on';
       malletKey = malletKeyOf(mk.value);
@@ -1043,11 +1067,11 @@ function mount(root, opts) {
       pucks = Number(pk.value) === 2 ? 2 : 1;
       row1.style.display = timeOf(tm.value) > 0 ? 'none' : ''; // 時間で終わるときは「何点で」を使わない
       resetState();
-      ptsLabel.textContent = n === 3 ? '何点取られたら終わり' : '何点先取';
+      ptsLabel.textContent = n >= 3 ? '何点取られたら終わり' : '何点先取';
       note.textContent = opts.mode !== 'cpu'
         ? '下の人が赤、上の人が青です。それぞれ自分の側の画面を指で動かします。'
-        : n === 3
-          ? 'あなたは下の赤です。自分のゴール（下）を守りながら、ほかの2人のゴールへパックを入れてください。失点のいちばん少ない人の勝ちです。'
+        : n >= 3
+          ? 'あなたは下の赤です。自分のゴール（下）を守りながら、ほかの人のゴールへパックを入れてください。失点のいちばん少ない人の勝ちです。'
           : 'あなたは下の赤です。指（パソコンはマウス）でマレットを動かして、パックを上のゴールへ入れてください。';
       resize();
     };
@@ -1103,7 +1127,7 @@ function mount(root, opts) {
       status.innerHTML = `<div class="status-main">${main}</div><div class="status-sub">${who}・${goalText()}<br>通信の遅れ: ${lag}${quiet}</div>`;
       return;
     }
-    const sub = opts.mode === 'cpu' ? `CPU${n === 3 ? ' 2人' : ''}（${level.name}）と対戦・${goalText()}` : `この画面で2人で・${goalText()}`;
+    const sub = opts.mode === 'cpu' ? `CPU${n >= 3 ? ` ${n - 1}人` : ''}（${level.name}）と対戦・${goalText()}` : `この画面で2人で・${goalText()}`;
     status.innerHTML = `<div class="status-main">${st.over ? st.banner : scoreHtml() + (playing ? timeHtml() : '')}</div><div class="status-sub">${sub}</div>`;
   }
 
@@ -1335,7 +1359,7 @@ function mount(root, opts) {
     if (!alive) return;
     tick(now);
     if (n === 2) drawRect(ctx, view, st, toScreen, { rotateTop: opts.mode === 'two', flip, goal: T.goal, block: T.block, rm: T.rm });
-    else drawHex(ctx, view, st, toScreen, T.goal, T.block, T.rm);
+    else drawHex(ctx, view, st, toScreen, T.goal, T.block, T.rm, T.geo);
     raf = requestAnimationFrame(frame);
   }
   // 画面が隠れて描き替えが止まっても（ほかのアプリへ切り替えたときなど）、オンラインでは位置のやり取りを続ける
@@ -1370,22 +1394,22 @@ export default {
   id: 'hockey',
   name: 'エアホッケー',
   icon: '🏒',
-  desc: 'マレットでパックを打ち合う。CPU と、または同じ画面で2人で。3人（六角形の盤）も。オンラインは試作',
+  desc: 'マレットでパックを打ち合う。CPU と、または同じ画面で2人で。3人（六角形の盤）・4人（八角形の盤）も。オンラインは試作',
   ready: true,
   live: true,
   players: PLAYERS,
   // 詳細設定の人数（2・3人）。待合室の席の数になる。3人のときだけ CPU を選べる
-  seatCount(rules) { return rules?.players === 3 ? 3 : 2; },
-  liveCpu(rules) { return rules?.players === 3; },
+  seatCount(rules) { return rules?.players === 3 || rules?.players === 4 ? rules.players : 2; },
+  liveCpu(rules) { return rules?.players === 3 || rules?.players === 4; },
   settings: [
-    { key: 'players', label: '人数', desc: '3人は六角形の盤で、人が足りなければ CPU が入る', def: 2, choices: [[2, '2人'], [3, '3人']] },
+    { key: 'players', label: '人数', desc: '3人は六角形・4人は八角形の盤で、人が足りなければ CPU が入る', def: 2, choices: [[2, '2人'], [3, '3人'], [4, '4人']] },
     { key: 'points', label: '何点で終わり', desc: '2人は先にこの点を取った方の勝ち。3人は誰かがこの数だけ入れられたら終わりで、失点の少ない人の勝ち（制限時間を決めたときは使わない）', def: 7, choices: POINTS.map((p) => [p, `${p}点`]) },
     { key: 'time', label: '制限時間', desc: '決めると、点数でなく時間で終わる。時間が来たとき点の多い方（3人は失点の少ない人）の勝ち。同点なら次の1点で決まる', def: 0, choices: TIMES.map((t) => [t, t ? clockText(t) : '決めない']) },
     { key: 'goal', label: 'ゴールの広さ', desc: 'ひろいほど点が入りやすく、1試合が短くなる（全員のゴールが同じ広さ）', def: 'normal', choices: Object.entries(GOAL_SIZES).map(([k, v]) => [k, v.name]) },
     { key: 'block', label: 'じゃまブロック', desc: '盤の真ん中に、パックが跳ね返る動かないブロックを置く', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'mallet', label: 'マレットの大きさ', desc: '全員（CPU も）のマレットの大きさ。大きいほど守りやすく打ちやすい', def: 'normal', choices: Object.entries(MALLET_SIZES).map(([k, v]) => [k, v.name]) },
     { key: 'pucks', label: 'パック', desc: '2つにすると、2つのパックで同時に打ち合う（パックどうしもぶつかる。ゴールしても止まらずに続く）', def: 1, choices: [[1, '1つ'], [2, '2つ']] },
-    { key: 'level', label: 'CPU の強さ', desc: '3人で CPU が入るとき', def: 'weak', choices: Object.entries(CPU_LEVELS).map(([k, v]) => [k, v.name]) },
+    { key: 'level', label: 'CPU の強さ', desc: '3人・4人で CPU が入るとき', def: 'weak', choices: Object.entries(CPU_LEVELS).map(([k, v]) => [k, v.name]) },
   ],
   mount,
 };

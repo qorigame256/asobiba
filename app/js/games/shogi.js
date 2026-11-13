@@ -35,6 +35,10 @@
 
 import { CPU_SETTING, PEEK_SETTING, peekMark, mulberry32, judgeOf } from './util.js';
 import * as three from './shogi3.js';
+import * as four from './shogi4.js';
+
+// 3人・4人の局面（n: 3 / n: 4）を受け持つファイル。2人は null
+const multiOf = (s) => (s.n === 3 ? three : s.n === 4 ? four : null);
 import * as zoo from './shogi34.js';
 
 const PAWN = 1;
@@ -361,7 +365,7 @@ function notation(s, m, prevTo) {
 // 最後の手で王手になったか（局面だけから決める。決着した局面では出さない）
 function gaveCheck(s) {
   if (s.result || !s.last || s.last.resign) return false;
-  if (s.n === 3) return three.gaveCheck(s);
+  if (multiOf(s)) return multiOf(s).gaveCheck(s);
   if (s.zoo) return zoo.gaveCheck(s);
   return !!s.last.check;
 }
@@ -393,13 +397,13 @@ export default {
   name: '将棋',
   icon: '☗',
   flip: true, // 盤の向きを変える（⇅）ボタンを出す（main.js）
-  desc: '本将棋。駒落ちのハンデも選べる。オンラインでは小さい盤の5五将棋・動物の駒の 3×4 や、3人（六角形の盤）も選べる',
+  desc: '本将棋。駒落ちのハンデも選べる。オンラインでは小さい盤の5五将棋・動物の駒の 3×4 や、3人（六角形の盤）・4人も選べる',
   ready: true,
-  players: three.NAMES, // 3人目は3人将棋だけ
-  // 詳細設定の人数。3人は shogi3.js が受け持つ（局面に n: 3 を持つ）
-  seatCount(rules) { return rules?.players === 3 ? 3 : 2; },
+  players: four.NAMES, // 3人目は3人・4人将棋、4人目は4人将棋だけ
+  // 詳細設定の人数。3人は shogi3.js・4人は shogi4.js が受け持つ（局面に n: 3 / n: 4 を持つ）
+  seatCount(rules) { return rules?.players === 3 || rules?.players === 4 ? rules.players : 2; },
   settings: [
-    { key: 'players', label: '人数', desc: '3人では六角形の盤で3人が向き合う。王を取られた人は脱落（駒落ちは使わない）', def: 2, choices: [[2, '2人'], [3, '3人']] },
+    { key: 'players', label: '人数', desc: '3人では六角形の盤で3人が向き合う。4人では 9×9 の盤の4辺に1人ずつ座り、駒は少なめ（玉・飛・金2・銀2・歩3）。王を取られた人は脱落（駒落ちは使わない）', def: 2, choices: [[2, '2人'], [3, '3人'], [4, '4人']] },
     { key: 'size', label: '盤', desc: '5五将棋は 5×5 の盤に 王・金・銀・角・飛・歩 が1枚ずつ。成れるのは一番奥の1段だけ。3×4 は動物の駒（ライオン・キリン・ゾウ・ヒヨコ）で、ライオンを取るか、ライオンが相手の奥の段に入って取られなければ勝ち（どちらも2人のときだけ。駒落ちは使わない）', def: 'full', choices: [['full', '本将棋（9×9）'], ['mini', '5五将棋（5×5）'], ['zoo', '3×4（動物の駒）']] },
     { key: 'drops', label: '持ち駒', desc: '「使わない」にすると、取った駒は消えるだけで打てない（チェスのよう）。本将棋と5五将棋の2人だけ', def: 'on', choices: [['on', '使う'], ['off', '使わない']] },
     { key: 'try', label: 'トライ', desc: '自分の玉が相手の玉の最初のマスに入ったら勝ち（入玉で長引かない）。本将棋と5五将棋の2人だけ', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
@@ -415,6 +419,7 @@ export default {
     const auto = rules.autopromo === 'on';
     const quiet = rules.check === 'off'; // 王手の知らせ「なし」
     if (rules.players === 3) return three.init(auto, quiet);
+    if (rules.players === 4) return four.init(auto, quiet);
     if (rules.size === 'zoo') return zoo.init(quiet);
     const mini = rules.size === 'mini';
     const handicap = !mini && HANDICAPS[rules.handicap] ? rules.handicap : 'none';
@@ -434,7 +439,7 @@ export default {
   result(s) { return s.result; },
 
   apply(s, m) {
-    if (s.n === 3) return three.apply(s, m);
+    if (multiOf(s)) return multiOf(s).apply(s, m);
     if (s.zoo) return zoo.apply(s, m);
     if (s.result || !m || typeof m !== 'object') return null;
     if (m.resign === true) {
@@ -480,18 +485,18 @@ export default {
   // 効果音: 王手の知らせが「あり」で王手をかけた手は読み上げの「王手！」、ほかはいつもの駒の音
   sound(a, b) { return !b.quiet && gaveCheck(b) ? 'oute' : 'place'; },
 
-  cpu(s, p, rules) { return s.n === 3 ? three.cpuMove(s, rules) : s.zoo ? zoo.cpuMove(s, rules) : cpuMove(s, rules); },
+  cpu(s, p, rules) { return multiOf(s) ? multiOf(s).cpuMove(s, rules) : s.zoo ? zoo.cpuMove(s, rules) : cpuMove(s, rules); },
 
   // 形勢（2026-11-12。util.js の judgeOf）: 2人の将棋（本将棋・5五・駒落ち）だけ。先読みはせず、CPU と同じ駒の点数（evaluate）だけで数える（重くしないため。Claude の判断）。
   // 900 点（飛車1枚くらい）の差で「有利」と出る大きさ
   judge(s) {
-    if (s.n === 3 || s.zoo) return null;
+    if (multiOf(s) || s.zoo) return null;
     if (s.result) return s.result.winner === null ? 0 : s.result.winner === 0 ? 100 : -100;
     return judgeOf(evaluate(s.board, s.hands, 0), 900);
   },
 
   info(s) {
-    if (s.n === 3) return three.info(s);
+    if (multiOf(s)) return multiOf(s).info(s);
     if (s.zoo) return zoo.info(s);
     const parts = [];
     if (s.board.length === 25) parts.push('5五将棋');
@@ -507,7 +512,7 @@ export default {
   },
 
   render(root, s, o) {
-    if (s.n === 3) three.render(root, s, o);
+    if (multiOf(s)) multiOf(s).render(root, s, o);
     else if (s.zoo) zoo.render(root, s, o, this.players);
     else this.renderBoard(root, s, o);
     checkFlash(root, s, o.fresh);

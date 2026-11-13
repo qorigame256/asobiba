@@ -26,6 +26,8 @@
 //   1発で2人とも脱落させたら撃った人の勝ち（2人は同じ順位）。ソナー・当たったらもう一度・サルボは3人では使わない（盤が2つあって分かりにくいため）。
 //   CPU は、当たりを追っている相手（いなければくじ）を1人決め、その人の海で2人のときと同じ考え方で選ぶ（ほかの人が撃ったあとも見る）。
 //   手は2人のときと同じ（並べる { t: 'place', ships } / 撃つ = マスの番号）。
+// 4人（2026-11-13 本人の依頼。Claude の推奨を本人が承認）: 3人と同じ作りで np: 4。1回撃つと残っている3人の海の同じマスに同時に当たる。
+//   画面は4つの海（相手3つ＋自分）を2列に並べる（style.css の .ks.ks4）。
 
 import { CPU_SETTING } from './util.js';
 
@@ -321,7 +323,7 @@ function info3(s) {
   if (!l || l.placed || s.won !== null || s.gave !== undefined) return '';
   const name = (q) => `<b class="pl p${q}">${game.players[q]}</b>`;
   const who = name(l.p);
-  if (!l.hits.length) return `${who}の弾は どちらの海も はずれ`;
+  if (!l.hits.length) return `${who}の弾は ${np(s) > 3 ? 'どの海も' : 'どちらの海も'} はずれ`;
   const sunk = l.sunks.map(([q, k]) => `${name(q)}の${shipName(fleetOf(sizeOf(s))[k])}`).join('と');
   const outs = l.outs.length ? `。${l.outs.map(name).join('と')}は全部の船が沈んだ！` : '';
   return `${who}の弾が${l.hits.map(name).join('と')}の海に<b>命中！</b>${sunk ? `${sunk}を沈めた` : ''}${outs}`;
@@ -370,14 +372,16 @@ function render3(root, s, o) {
   status.className = 'cc-log';
   const left = (q) => fleetOf(sizeOf(s)).length - sunk3(s, q).length;
   status.innerHTML = '残りの船: ' + Array.from({ length: np(s) }, (_, q) => `<b class="pl p${q}">${q === me ? 'あなた' : game.players[q]}</b> ${s.out[q] ? '脱落' : `${left(q)}隻`}`).join(' ／ ')
-    + (o.canMove ? '<br>どちらかの海のマスを押すと、残っている2人の海の同じマスに撃ちます' : '');
+    + (o.canMove ? (np(s) > 3 ? '<br>どれかの海のマスを押すと、残っている全員の海の同じマスに撃ちます' : '<br>どちらかの海のマスを押すと、残っている2人の海の同じマスに撃ちます') : '');
   root.append(status);
-  const order = me === null ? [0, 1, 2] : [1, 2].map((d) => (me + d) % 3);
+  const n = np(s);
+  if (n > 3) root.classList.add('ks4');
+  const order = me === null ? Array.from({ length: n }, (_, q) => q) : Array.from({ length: n - 1 }, (_, d) => (me + d + 1) % n);
   for (const q of order) {
     const shoot = o.canMove && me !== null && !s.out[q] ? (i) => o.onMove(i) : null;
-    root.append(sea3(s, q, { title: `${game.players[q]}の海${s.out[q] ? '（脱落）' : ''}`, showShips: over || s.out[q], onShoot: shoot, mine: me, small: me === null }));
+    root.append(sea3(s, q, { title: `${game.players[q]}の海${s.out[q] ? '（脱落）' : ''}`, showShips: over || s.out[q], onShoot: shoot, mine: me, small: me === null && n < 4 }));
   }
-  if (me !== null) root.append(sea3(s, me, { title: 'あなたの海', showShips: true, small: true, mine: me }));
+  if (me !== null) root.append(sea3(s, me, { title: 'あなたの海', showShips: true, small: n < 4, mine: me }));
 }
 
 /* ---------- 画面 ---------- */
@@ -397,11 +401,11 @@ const game = {
   ready: true,
   noLocal: true,
   noUndo: true, // オンラインの「待った」は付けない（外れたマスを知ったまま撃ち直せてしまうため。2026-10-06 本人の決定）
-  players: ['先手', '後手', '3番手'],
-  seatCount(rules) { return rules?.players === 3 ? 3 : 2; },
+  players: ['先手', '後手', '3番手', '4番手'],
+  seatCount(rules) { return rules?.players === 3 || rules?.players === 4 ? rules.players : 2; },
   settings: [
     CPU_SETTING,
-    { key: 'players', label: '人数', desc: '3人では、1回撃つと残っている2人の海の同じマスに同時に撃ちます（ソナー・当たったらもう一度・サルボは使えません）', def: 2, choices: [[2, '2人'], [3, '3人']] },
+    { key: 'players', label: '人数', desc: '3人・4人では、1回撃つと残っているほかの全員の海の同じマスに同時に撃ちます（ソナー・当たったらもう一度・サルボは使えません）', def: 2, choices: [[2, '2人'], [3, '3人'], [4, '4人']] },
     { key: 'sonar', label: 'ソナー', desc: '撃つ代わりに1回だけ、相手の海の 3×3 に船のマスがいくつあるか調べられる（使ったら相手の番）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'again', label: '当たったらもう一度', desc: '当たったら（沈めたときも）続けてもう1回撃てる。外れたら相手の番（サルボありのときは効かない）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
     { key: 'size', label: '海の広さ', desc: '8×8 は船が4隻（4・3・3・2マス）で、早く終わる', def: 10, choices: [[10, '10×10（船5隻）'], [8, '8×8（船4隻）']] },
@@ -411,9 +415,10 @@ const game = {
 
   init({ rules = {} } = {}) {
     const n = Number(rules.size) === 8 ? 8 : N;
-    if (rules.players === 3) {
-      const three = (x) => [x(), x(), x()];
-      return { np: 3, size: n, salvo: false, again: false, apart: rules.apart === 'on', sonarOn: false, sonar: [null, null, null], phase: 'place', turn: 0, grid: [null, null, null], shots: three(() => Array(n * n).fill(false)), out: [false, false, false], outAt: [0, 0, 0], last: null, won: null, count: 0 };
+    if (rules.players === 3 || rules.players === 4) {
+      const k = rules.players;
+      const each = (x) => Array.from({ length: k }, x);
+      return { np: k, size: n, salvo: false, again: false, apart: rules.apart === 'on', sonarOn: false, sonar: each(() => null), phase: 'place', turn: 0, grid: each(() => null), shots: each(() => Array(n * n).fill(false)), out: each(() => false), outAt: each(() => 0), last: null, won: null, count: 0 };
     }
     const salvo = rules.salvo === 'on';
     return { size: n, salvo, again: rules.again === 'on' && !salvo, apart: rules.apart === 'on', sonarOn: rules.sonar === 'on', sonar: [null, null], phase: 'place', turn: 0, grid: [null, null], shots: [Array(n * n).fill(false), Array(n * n).fill(false)], last: null, won: null, count: 0 };
@@ -423,7 +428,7 @@ const game = {
 
   apply(s, m) {
     if (s.won !== null) return null;
-    if (np(s) === 3) return apply3(s, m);
+    if (np(s) > 2) return apply3(s, m);
     const N = sizeOf(s);
     if (s.phase === 'place') {
       if (!m || m.t !== 'place') return null;
@@ -480,12 +485,12 @@ const game = {
 
   result(s) {
     if (s.won === null) return null;
-    if (np(s) === 3) return result3(s);
+    if (np(s) > 2) return result3(s);
     return { winner: s.won, cells: [] };
   },
 
   cpu(s, p, rules) {
-    if (np(s) === 3) return cpu3(s, p, rules);
+    if (np(s) > 2) return cpu3(s, p, rules);
     if (s.phase === 'place') return { t: 'place', ships: randomShips(sizeOf(s), !!s.apart) };
     return s.salvo ? salvoCpu(s, p, rules) : kaisenCpu(s, p, rules);
   },
@@ -499,7 +504,7 @@ const game = {
   },
 
   info(s) {
-    if (np(s) === 3) return info3(s);
+    if (np(s) > 2) return info3(s);
     const l = s.last;
     if (!l || l.placed || s.won !== null || s.gave !== undefined) return '';
     const who = `<b class="pl p${l.p}">${game.players[l.p]}</b>`;
@@ -524,7 +529,7 @@ const game = {
       // 並べている間に推理のメモを忘れる（次の対局で自分の船を前と同じ形に並べると、前の対局のメモが残っていた。2026-11-11 Codex の点検）
       ksMemo = { key: null, cells: new Set(), on: false };
       if (o.canMove && me !== null) { renderPlace(root, s, o); return; }
-      if (np(s) === 3) {
+      if (np(s) > 2) {
         const p = document.createElement('p');
         p.className = 'cc-log';
         p.textContent = `${game.players[s.turn]}が船を並べています…`;
@@ -545,7 +550,7 @@ const game = {
       return;
     }
 
-    if (np(s) === 3) { render3(root, s, o); return; }
+    if (np(s) > 2) { render3(root, s, o); return; }
     const status = document.createElement('p');
     status.className = 'cc-log';
     if (me !== null) {

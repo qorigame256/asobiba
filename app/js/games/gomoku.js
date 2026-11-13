@@ -19,7 +19,9 @@
 //   自分の番が来る前にほかの2人が1つずつふさげるため）。結果を見せて、本人が4つに決め直した。ぴったり五目は3人では「ちょうど4つ」。
 //   Claude の判断: 3人では禁じ手を使わない（黒の先手の有利を消すための決まりなので。設定は残し、局面では切る）。
 //   はさみ取りは、ほかの1人の石がちょうど2つ並んだ両側を自分の石ではさむと取れる（2つは同じ人の石。違う人の石が混ざっていたら取れない）。
-//   2人のときの局面は前と全く同じ形（3人のときだけ np: 3）。CPU は2人と同じ考え方で、守りは次の番の人を重く見る。
+//   4人（2026-11-13 本人の依頼と決定）: 黒・白・赤・青 の順に置き、3人と同じく4つ並べたら勝ち（np: 4）。**はさみ取りをいつもあり**にする（詳細設定を見ない）。
+//   4つ並べだけでは CPU どうし60局のうち54〜60局が盤が埋まって引き分けになった（3人がかりで止められるため）。はさみ取りありでは0局・1局 60〜80手。結果を見せて本人が決めた。
+//   2人のときの局面は前と全く同じ形（3人・4人のときだけ np）。CPU は2人と同じ考え方で、守りは次の番の人を重く見る。
 
 import { CPU_SETTING, TAP_PEEK_SETTING, DANGER_SETTING, dangerMoves, dangerOn, mulberry32, winLine, col } from './util.js';
 
@@ -29,7 +31,7 @@ const CAP_GOAL = 5; // はさみ取り: この組数を取ったら勝ち
 const BLOCK = -1; // じゃま石（だれの物でもない）
 const foe = (v, p) => Number.isInteger(v) && v >= 0 && v !== p; // ほかの人の石か（空き・じゃま石・盤の外ではない）
 const np = (s) => s.np ?? 2;
-const need = (s) => (np(s) === 3 ? 4 : 5); // 何個並べたら勝ちか（3人は4つ）
+const need = (s) => (np(s) >= 3 ? 4 : 5); // 何個並べたら勝ちか（3人・4人は4つ）
 const others = (s, p) => Array.from({ length: np(s) - 1 }, (_, d) => (p + 1 + d) % np(s)); // 次の番の人から順に
 
 // じゃま石を置いた最初の盤（種から決める。乱数や時刻は使わない）
@@ -290,7 +292,7 @@ function capValue(s, i, p) {
 }
 
 function gomokuCpu(s, rules) {
-  const lv = np(s) === 3 && rules?.cpu === 'strong' ? STRONG3 : LEVEL[rules?.cpu] ?? LEVEL.weak;
+  const lv = np(s) >= 3 && rules?.cpu === 'strong' ? STRONG3 : LEVEL[rules?.cpu] ?? LEVEL.weak;
   const p = s.turn;
   const foes = others(s, p);
   const list = candidates(s).filter((i) => !(p === BLACK && banned(s, i))).map((i) => {
@@ -324,18 +326,18 @@ export default {
   id: 'gomoku',
   name: '五目並べ',
   icon: '⚪',
-  desc: '交代で黒と白の石を置き、たて・よこ・ななめに5つ並べたら勝ち。オンラインでは3人（黒・白・赤。4つ並べ）でも遊べる',
+  desc: '交代で黒と白の石を置き、たて・よこ・ななめに5つ並べたら勝ち。オンラインでは3人・4人（4つ並べ）でも遊べる',
   ready: true,
   keepColor: true, // 続けて遊ぶ間は、その人の色と形を変えない（util.js の col。2026-11-13）
-  players: ['黒', '白', '赤'],
-  // 詳細設定の人数（2〜3人）。待合室の席の数になる
-  seatCount(rules) { return rules?.players === 3 ? 3 : 2; },
+  players: ['黒', '白', '赤', '青'],
+  // 詳細設定の人数（2〜4人）。待合室の席の数になる
+  seatCount(rules) { return rules?.players === 3 || rules?.players === 4 ? rules.players : 2; },
   settings: [
-    { key: 'players', label: '人数', def: 2, desc: '3人では 黒・白・赤 の順に置き、4つ並べたら勝ち（5つだと、ほかの2人にふさがれてほぼ引き分けになるため。禁じ手は使わない）', choices: [[2, '2人'], [3, '3人（4つ並べ）']] },
+    { key: 'players', label: '人数', def: 2, desc: '3人では 黒・白・赤、4人では 黒・白・赤・青 の順に置き、4つ並べたら勝ち（5つだと、ほかの人にふさがれてほぼ引き分けになるため。禁じ手は使わない）。4人は「はさみ取り」がいつもあり', choices: [[2, '2人'], [3, '3人（4つ並べ）'], [4, '4人（4つ並べ・はさみ取り）']] },
     { key: 'size', label: '盤', desc: '13路はスマホで押しやすい', def: 15, choices: [[15, '15路（15×15）'], [13, '13路（13×13）']] },
-    { key: 'exact', label: 'ぴったり五目', desc: 'ちょうど5つ（3人は4つ）で勝ち。それより多くつながっても勝ちにならない', def: false },
+    { key: 'exact', label: 'ぴったり五目', desc: 'ちょうど5つ（3人・4人は4つ）で勝ち。それより多くつながっても勝ちにならない', def: false },
     { key: 'renju', label: '禁じ手', desc: '先手の黒だけ、三三・四四・6つ以上並ぶ点に置けない（連珠のルール。先手の有利を消す。2人のときだけ）', def: false },
-    { key: 'capture', label: 'はさみ取り', desc: '相手の石がちょうど2つ並んだ両側をはさむと取れる（3人では同じ人の石2つ）。5組（10個）取っても勝ち', def: false },
+    { key: 'capture', label: 'はさみ取り', desc: '相手の石がちょうど2つ並んだ両側をはさむと取れる（3人・4人では同じ人の石2つ）。5組（10個）取っても勝ち。4人ではいつもあり', def: false },
     { key: 'blocks', label: 'じゃま石', desc: '始める前に、だれの物でもない灰色の石を数個置く（置けない・並びが切れる）。場所は毎回ちがう', def: false },
     TAP_PEEK_SETTING,
     DANGER_SETTING,
@@ -347,7 +349,7 @@ export default {
   init({ rules = {}, seed = 0 } = {}) {
     const size = rules.size === 13 ? 13 : 15;
     const grid = rules.blocks ? blockers(size, seed) : Array(size * size).fill(null);
-    if (rules.players === 3) return { size, exact: !!rules.exact, renju: false, capture: !!rules.capture, caps: [0, 0, 0], taken: [], grid, turn: 0, last: null, won: null, count: 0, np: 3 };
+    if (rules.players === 3 || rules.players === 4) return { size, exact: !!rules.exact, renju: false, capture: !!rules.capture || rules.players === 4, caps: Array(rules.players).fill(0), taken: [], grid, turn: 0, last: null, won: null, count: 0, np: rules.players };
     return { size, exact: !!rules.exact, renju: !!rules.renju, capture: !!rules.capture, caps: [0, 0], taken: [], grid, turn: 0, last: null, won: null, count: 0 };
   },
 

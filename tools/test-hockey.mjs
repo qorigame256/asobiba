@@ -6,7 +6,7 @@
 // マレットの大きさ（小さい・大きい）でも、範囲と当たりが半径に合う・決着が付く・強さの順が崩れない・ふつうなら前と同じ、を確かめる。
 import HOCKEY, {
   stepPuck, cpuTarget, clampMallet, CPU_LEVELS, stepHex, clampHex, cpuHex, zoneHex, addGoal, overOf, overTime, HEX_A, HEX_R, GOAL3, bouncePucks, scoreOf,
-  GOAL_SIZES, table, moveMallet, BLOCK2, BLOCK3, blockDist, MALLET_SIZES,
+  GOAL_SIZES, table, moveMallet, BLOCK2, BLOCK3, blockDist, MALLET_SIZES, OCT_A, OCT_R,
 } from '../app/js/games/hockey.js';
 import { mulberry32 } from '../app/js/games/util.js';
 
@@ -771,6 +771,156 @@ function match3(lvs, seed, target = 7, goal = GOAL3) {
       check(`マレット${name}: つよい1人と よわい2人では、つよいがたいてい1位（3人・30試合）`, first3 >= 20, `${first3}回`);
     }
   }
+}
+
+/* ---------- 4人（八角形の盤。2026-11-13） ---------- */
+{
+  const seatDir4 = (p) => dir(90 + 90 * p);
+  const EDGES4 = [45, 90, 135, 180, 225, 270, 315, 360];
+  // 盤の内側にいるか（ゴールの口の前は外へ出てよい）
+  // ゴールの口に入りかけている（口の前で、ゴールの線から r より近い）ときは、となりの斜めの壁の線の先に少し出ていてもよい
+  //（柱ぎりぎりを通るパック。ひろいゴールは角から 0.09 しか離れていない）
+  const inMouth = (o, r, goal) => [90, 180, 270, 360].some((deg) => {
+    const u = dir(deg);
+    return Math.abs(-o.x * u.y + o.y * u.x) < goal / 2 && o.x * u.x + o.y * u.y > OCT_A - r;
+  });
+  const insideOct = (o, r, allowMouth, goal) => (allowMouth && inMouth(o, r, goal)) || EDGES4.every((deg) => {
+    const u = dir(deg);
+    return o.x * u.x + o.y * u.y <= OCT_A - r + 1e-6;
+  });
+  // 席 p の扇形（自分のゴールの向きの ±45°）の中か
+  const inSector4 = (p, o, r) => [dir(90 + 90 * p + 45), dir(90 + 90 * p - 45)].every((n) => o.x * n.x + o.y * n.y >= r - 1e-6);
+  check('4人: 台は八角形（席4つ・たてよこ同じ大きさ・辺の長さはひろいゴールより長い）', (() => {
+    const T = table(4);
+    const side = 2 * OCT_A * Math.tan(Math.PI / 8);
+    return T.n === 4 && T.w === T.h && Math.abs(OCT_R * Math.cos(Math.PI / 8) - OCT_A) < 1e-12 && side - GOAL3 * GOAL_SIZES.wide.mul > 4 * R_P && T.goal === GOAL3;
+  })());
+  check('4人: 呼び名と席の数（2・3・4人）', HOCKEY.players.length === 4 && HOCKEY.seatCount({ players: 4 }) === 4 && HOCKEY.seatCount({ players: 3 }) === 3 && HOCKEY.seatCount({}) === 2
+    && HOCKEY.liveCpu({ players: 4 }) === true && HOCKEY.liveCpu({}) === false);
+  // ゴール: それぞれの席のゴールに入ると、その席の失点。斜めの壁では跳ね返る
+  {
+    const T = table(4);
+    let ok = true;
+    for (const p of [0, 1, 2, 3]) {
+      const u = seatDir4(p);
+      const puck = { x: u.x * 0.3, y: u.y * 0.3, vx: u.x * 3, vy: u.y * 3 };
+      let g = null;
+      for (let i = 0; i < 240 && g === null; i++) g = T.step(puck, [], 1 / 240);
+      if (g !== p) ok = false;
+    }
+    check('4人: 各席のゴール（下・左・上・右）に入ると、その席が入れられた側になる', ok);
+    let bounce = true;
+    for (const deg of [45, 135, 225, 315]) {
+      const w = dir(deg);
+      const puck = { x: 0, y: 0, vx: w.x * 3, vy: w.y * 3 };
+      let g = null;
+      for (let i = 0; i < 160 && g === null; i++) g = T.step(puck, [], 1 / 240);
+      if (g !== null || puck.vx * w.x + puck.vy * w.y >= 0) bounce = false;
+    }
+    check('4人: 斜めの4つの壁では跳ね返る', bounce);
+    check('4人: 陣地の分け方（下 0・左 1・上 2・右 3）', T.zone({ x: 0, y: 0.5 }) === 0 && T.zone({ x: -0.5, y: 0 }) === 1 && T.zone({ x: 0, y: -0.5 }) === 2 && T.zone({ x: 0.5, y: 0.1 }) === 3);
+    check('4人: 置き場所とマレットの家は自分の陣地の中', [0, 1, 2, 3].every((p) => T.zone(T.serve(p)) === p && T.zone(T.home(p)) === p && inSector4(p, T.home(p), T.rm) && insideOct(T.home(p), T.rm, false, T.goal)));
+  }
+  // マレットはどこを指しても自分の扇形と盤の内側に収まる（大きさ3つ・じゃまブロックも）
+  {
+    const rnd = mulberry32(11);
+    let inside = true;
+    for (const mk of ['small', 'normal', 'large']) {
+      for (const block of [false, true]) {
+        const T = table(4, 'normal', block, mk);
+        for (let i = 0; i < 2000; i++) {
+          const p = i % 4;
+          const q = T.clamp(p, (rnd() - 0.5) * 3, (rnd() - 0.5) * 3);
+          if (!insideOct(q, T.rm, false, T.goal) || !inSector4(p, q, T.rm)) inside = false;
+          if (block && blockDist(T.block, q.x, q.y) < T.rm + T.block.r - 1e-9) inside = false;
+        }
+      }
+    }
+    check('4人: マレットはどこを指しても自分の陣地と盤の内側に収まり、ブロックにも入らない', inside);
+  }
+  check('4人: 失点の少ない順に順位（同点は同じ順位）・時間切れは1人に決まるまで',
+    JSON.stringify(overOf(4, [7, 2, 2, 5], 7)?.rank) === '[4,1,1,3]' && overOf(4, [6, 2, 2, 0], 7) === null
+    && JSON.stringify(overTime(4, [3, 1, 2, 2])?.rank) === '[4,1,2,2]' && overTime(4, [1, 1, 2, 3]) === null
+    && JSON.stringify(addGoal(4, [0, 0, 0, 0], 3)) === '[0,0,0,1]' && JSON.stringify(scoreOf(4, [1, 2, 0, 3])) === '[1,2,0,3]');
+  // CPU どうしの試合（台の関数をそのまま使う）
+  function match4(goalKey, block, lvs, seed, npk = 1, target = 7, mk = 'normal') {
+    const T = table(4, goalKey, block, mk);
+    const rnd = mulberry32(seed);
+    const seats = [0, 1, 2, 3];
+    const lost = [0, 0, 0, 0];
+    const ps = npk === 2 ? [T.serve(0), T.serve(1)] : [T.serve(0)];
+    const ms = seats.map((p) => T.home(p));
+    const aim = ms.map((m) => ({ ...m }));
+    const timers = [0, 0, 0, 0];
+    const still = ps.map(() => 0);
+    const pick = (p) => {
+      if (ps.length === 1) return ps[0];
+      const h = T.home(p);
+      const v = (q) => (T.zone(q) === p ? 0 : 1) + Math.hypot(q.x - h.x, q.y - h.y);
+      return v(ps[1]) < v(ps[0]) ? ps[1] : ps[0];
+    };
+    const dt = 1 / 60;
+    for (let t = 0; t < 1200; t += dt) {
+      for (const p of seats) {
+        timers[p] -= dt;
+        if (timers[p] > 0) continue;
+        timers[p] = lvs[p].react;
+        aim[p] = T.cpu(p, pick(p), ms[p], lvs[p], rnd, ms);
+      }
+      for (let i = 0; i < 4; i++) {
+        for (const p of seats) {
+          moveMallet(ms[p], p, aim[p], lvs[p].speed, dt / 4, T.clamp, T.keep);
+          if (T.block && blockDist(T.block, ms[p].x, ms[p].y) < T.rm + T.block.r - 1e-9) return { error: 'マレット' + p + 'がブロックに入った' };
+          if (!insideOct(ms[p], T.rm, false, T.goal) || !inSector4(p, ms[p], T.rm)) return { error: 'マレット' + p + 'が範囲の外' };
+        }
+        if (ps.length === 2) bouncePucks(ps[0], ps[1]);
+        for (let k = 0; k < ps.length; k++) {
+          const q = ps[k];
+          const c = T.step(q, ms, dt / 4);
+          if (c !== null) {
+            lost[c]++;
+            const over = overOf(4, scoreOf(4, lost), target);
+            if (over) return { rank: over.rank, t };
+            ps[k] = T.serve(c);
+            still[k] = 0;
+            continue;
+          }
+          if (!insideOct(q, R_P, true, T.goal)) return { error: 'パックが壁を抜けた (' + q.x.toFixed(3) + ', ' + q.y.toFixed(3) + ')' };
+          if (T.block && blockDist(T.block, q.x, q.y) < R_P + T.block.r - 1e-6) return { error: 'パックがブロックに入った' };
+        }
+      }
+      for (let k = 0; k < ps.length; k++) {
+        still[k] = Math.hypot(ps[k].vx, ps[k].vy) < 0.02 ? still[k] + dt : 0;
+        if (still[k] > 20) return { error: 'パックが20秒止まったまま (' + ps[k].x.toFixed(2) + ', ' + ps[k].y.toFixed(2) + ')' };
+      }
+    }
+    return { error: '20分たっても決着しない' };
+  }
+  let err = 0;
+  let games = 0;
+  let total = 0;
+  for (const goalKey of ['narrow', 'normal', 'wide']) {
+    for (const block of [false, true]) {
+      for (const mk of ['small', 'normal', 'large']) {
+        for (const npk of [1, 2]) {
+          const r = match4(goalKey, block, [L.normal, L.normal, L.normal, L.normal], 900 + games, npk, 7, mk);
+          games++;
+          if (r.error) { err++; if (err <= 3) console.log('   ' + goalKey + ' ' + block + ' ' + mk + ' ' + npk + ': ' + r.error); } else total += r.t;
+        }
+      }
+    }
+  }
+  check('4人: CPU どうし' + games + '試合（ゴールの広さ3つ・じゃまブロック・マレットの大きさ3つ・パック2つ）で、抜けない・止まり続けない・必ず決着する', err === 0, err + '件・1試合の平均 ' + Math.round(total / Math.max(1, games - err)) + '秒');
+  let first = 0;
+  let err2 = 0;
+  for (let seed = 1; seed <= 40; seed++) {
+    const sp = seed % 4; // 強い CPU をどの席にも置く
+    const r = match4('normal', false, [0, 1, 2, 3].map((p) => (p === sp ? L.strong : L.weak)), seed + 1300);
+    if (r.error) { err2++; continue; }
+    if (r.rank[sp] === 1) first++;
+  }
+  check('4人: 強さを比べる試合も、抜けない・必ず決着する', err2 === 0, err2 + '件');
+  check('4人: つよい1人と よわい3人では、つよいがたいてい1位（40試合）', first >= 24, first + '回');
 }
 
 console.log(failed ? `\n${failed} 件の失敗` : '\nすべて OK');

@@ -626,6 +626,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .gm-stone.p0 { background: radial-gradient(circle at 35% 30%, #555, #111 70%); }
 .gm-stone.p1 { background: radial-gradient(circle at 35% 30%, #fff, #d8d8d8 70%); }
 .gm-stone.p2 { background: radial-gradient(circle at 35% 30%, #ff7a6b, #c62828 70%); } /* 3人の赤（リバーシの赤と同じ） */
+.gm-stone.p3 { background: radial-gradient(circle at 35% 30%, #6fa8ff, #1f4fb8 70%); } /* 4人の青（リバーシの青と同じ） */
 .gm-stone.last::after { content: ""; position: absolute; inset: 36%; border-radius: 50%; background: #e04b3c; }
 .gm-stone.win { box-shadow: 0 0 0 2px var(--win), 0 1px 2px rgba(0, 0, 0, .4); }
 .gm-stone.pop { animation: pop .2s ease-out; }
@@ -770,6 +771,10 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .sg3-target.take { fill: none; stroke: rgba(217, 100, 58, .9); stroke-width: .08; }
 .sg3-hit { fill: transparent; cursor: pointer; }
 .sg-hand.out { opacity: .55; }
+/* 4人将棋（9×9 の盤の4辺に1人ずつ。shogi4.js が3人将棋と同じ部品で描く） */
+.sg3-piece.o3 polygon { stroke: var(--p3); }
+.board.sg3.sg4 { width: min(100%, 520px, max(320px, calc(100dvh - 330px))); }
+.sg4 .sg-hand { padding-block: 2px; }
 
 /* ---------- 麻雀 ---------- */
 .board.mj { width: min(100%, 560px); display: flex; flex-direction: column; gap: 6px; }
@@ -1291,6 +1296,12 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .sp-side.sp3:not(.mine) .sp-head { margin-bottom: 4px; }
 .sp-side.sp3:not(.mine) .pcard { width: min(13vw, 52px); }
 .sp-center:has(.sp-slot) { gap: 14px; }
+/* 4人: 台札4つが iPhone の幅に収まるように小さくする */
+.sp-center.sp4 { gap: 10px; padding: 12px 8px; }
+.sp-center.sp4 .pcard { width: min(18vw, 80px); }
+.sp-center.sp4 .sp-slot span { max-width: min(18vw, 80px); }
+.sp-side.sp4:not(.mine) { padding: 4px 10px; }
+.sp-side.sp4:not(.mine) .pcard { width: min(11vw, 46px); }
 .sp-slot { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .sp-slot span { color: #fff; font-size: .75rem; font-weight: 700; max-width: min(22vw, 88px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -2003,6 +2014,10 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .mc-tri .mc-pit.p2 { border-color: color-mix(in srgb, var(--p2) 75%, transparent); }
 .mc-tri .mc-num { font-size: .7rem; }
 .mc-pit.store.p2 .mc-num { color: var(--p2); }
+/* 4人の正方形の盤（mancala.js。三角形と同じ置き方） */
+.mc-tri.mc-sq { aspect-ratio: 1; }
+.mc-tri .mc-pit.p3 { border-color: color-mix(in srgb, var(--p3) 75%, transparent); }
+.mc-pit.store.p3 .mc-num { color: var(--p3); }
 /* マンカラの「石の数を隠す」: 数の代わりに石を全部描く。13個以上の穴とゴールは列を増やして小さく詰める（--cols は mancala.js） */
 .mc-stones.mc-many { gap: 1px; }
 .mc-stones.mc-many i { width: calc((100% - (var(--cols) - 1) * 1px) / var(--cols)); }
@@ -2011,6 +2026,10 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 /* ---------- 海戦ゲーム ---------- */
 .board.ks { width: min(100%, 460px, max(280px, calc((100dvh - 230px) / 1.75))); display: flex; /* 2つの海が画面の高さに収まるように */ flex-direction: column; gap: 10px; }
 .ks-sea.small { width: 72%; margin: 0 auto; }
+/* 4人: 相手3つ＋自分の4つの海を2列に並べる（1発が全員の海に当たるので、全部が一度に見えるように） */
+.board.ks.ks4 { width: min(100%, 620px); display: grid; grid-template-columns: 1fr 1fr; gap: 10px 8px; }
+.board.ks.ks4 > :not(.ks-sea) { grid-column: 1 / -1; }
+.board.ks.ks4 .ks-grid { gap: 1px; padding: 3px; }
 .ks-title { font-weight: 700; font-size: .9rem; text-align: center; margin-bottom: 4px; }
 .ks-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px; background: #2f6fb3; padding: 4px; border-radius: 10px; }
 .ks-cell { aspect-ratio: 1; background: #cfe3f5; border-radius: 3px; position: relative; display: grid; place-items: center; }

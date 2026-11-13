@@ -2,6 +2,7 @@
 // 盤のマス番号 = 段 * 9 + 列（段0 が一段目、列0 が 9筋）。正の数が先手の駒、負の数が後手の駒。
 import shogi, { _test } from '../app/js/games/shogi.js';
 import { _test3 } from '../app/js/games/shogi3.js';
+import { _test4 } from '../app/js/games/shogi4.js';
 import { _test34 } from '../app/js/games/shogi34.js';
 
 const { legalMoves } = _test;
@@ -644,11 +645,101 @@ function perft(board, hands, side, d) {
   check('王手の知らせ: 3人でも王手の手が分かり、なしでも局面は同じ', checks3 > 0 && same3, `王手 ${checks3}回`);
 }
 
+// 4人将棋（2026-11-13。9×9 の盤の4辺に1人ずつ。マス = 段 * 9 + 筋）
+{
+  const T = _test4;
+  const R4 = { players: 4 };
+  const sq = (r, c) => r * 9 + c;
+  const v = (owner, t) => owner * 16 + t;
+  const s0 = shogi.init({ rules: R4 });
+  check('4人: 席は4つ・呼び名も4つ', shogi.seatCount(R4) === 4 && shogi.players.length === 4);
+  check('4人: 盤は81マスで各自9枚', s0.n === 4 && s0.board.length === 81 && [0, 1, 2, 3].every((P) => s0.board.filter((x) => x && x >> 4 === P).length === 9));
+  check('4人: 並び（下の人）は 銀金玉金銀 / 歩飛歩 / 歩', [[8, 2, 4], [8, 3, 5], [8, 4, 8], [8, 5, 5], [8, 6, 4], [7, 3, 1], [7, 4, 7], [7, 5, 1], [6, 4, 1]].every(([r, c, t]) => s0.board[sq(r, c)] === v(0, t)));
+  check('4人: 4人とも自分から見て同じ並び', [1, 2, 3].every((P) => [[0, 2, 4], [0, 4, 8], [1, 4, 7], [2, 4, 1]].every(([rank, x, t]) => s0.board[T.sqOf(P, rank, x)] === v(P, t))));
+  check('4人: 右の人の玉は右はしの真ん中・左の人は左はし・上の人は上はし', s0.board[sq(4, 8)] === v(1, 8) && s0.board[sq(0, 4)] === v(2, 8) && s0.board[sq(4, 0)] === v(3, 8));
+  // 向き: 歩は自分から見た前へ1つ
+  const pawnTo = (P) => T.reach(s0.board, T.sqOf(P, 2, 4));
+  check('4人: 歩の前は席ごとに違う（下の人は上へ・右の人は左へ・上の人は下へ・左の人は右へ）',
+    String(pawnTo(0)) === String([sq(5, 4)]) && String(pawnTo(1)) === String([sq(4, 5)]) && String(pawnTo(2)) === String([sq(3, 4)]) && String(pawnTo(3)) === String([sq(4, 3)]));
+  check('4人: 段と筋の行き来が合う', [0, 1, 2, 3].every((P) => Array.from({ length: 81 }, (_, i) => i).every((i) => T.sqOf(P, T.rankOf(P, i), T.xOf(P, i)) === i)));
+  check('4人: 順番は 先手 → 後手 → 三番手 → 四番手', (() => { let x = s0; const order = []; for (let k = 0; k < 5; k++) { order.push(x.turn); x = shogi.apply(x, T.legalMoves(x.board, x.hands, x.turn)[0]); } return String(order) === '0,1,2,3,0'; })());
+  // 決めた盤で確かめる
+  const blank = (pieces, extra = {}) => {
+    const board = Array(81).fill(0);
+    for (const [i, x] of pieces) board[i] = x;
+    return { ...s0, board, hands: [0, 1, 2, 3].map(() => Array(8).fill(0)), keys: [], ...extra };
+  };
+  // 右の人（席1）の歩: 左へ進む。奥の3段（筋 2・1・0）に入ると成れる・いちばん奥（筋0）では必ず成る
+  let p = blank([[sq(8, 4), v(0, 8)], [sq(4, 8), v(1, 8)], [sq(0, 4), v(2, 8)], [sq(4, 0), v(3, 8)], [sq(2, 3), v(1, 1)], [sq(6, 1), v(1, 1)]], { turn: 1 });
+  const ms1 = T.legalMoves(p.board, p.hands, 1);
+  check('4人: 右の人の歩は奥の3段に入るとき成るか選べる', ms1.filter((m) => m.f === sq(2, 3) && m.t === sq(2, 2)).length === 2);
+  check('4人: いちばん奥の段では必ず成る', ms1.filter((m) => m.f === sq(6, 1)).length === 1 && ms1.find((m) => m.f === sq(6, 1)).pr === true);
+  check('4人: いつも成るなら成らない手は無い', T.legalMoves(p.board, p.hands, 1, true).filter((m) => m.f === sq(2, 3)).every((m) => m.pr));
+  // 二歩は自分から見た同じ筋（右の人は盤の段）で数える・歩はいちばん奥には打てない
+  p = blank([[sq(8, 4), v(0, 8)], [sq(4, 8), v(1, 8)], [sq(0, 4), v(2, 8)], [sq(4, 0), v(3, 8)], [sq(2, 5), v(1, 1)]], { turn: 1 });
+  p.hands[1][1] = 1;
+  const drops = T.legalMoves(p.board, p.hands, 1).filter((m) => m.d === 1).map((m) => m.t);
+  check('4人: 二歩（右の人は盤の同じ段に歩があると打てない）', !drops.some((i) => Math.floor(i / 9) === 2) && drops.includes(sq(3, 5)));
+  check('4人: 歩はいちばん奥（右の人なら筋0）に打てない', !drops.some((i) => i % 9 === 0) && drops.includes(sq(3, 1)));
+  // 王を取ると、取られた人は脱落し、駒（持ち駒も）が消える。順番は残っている人だけで回る
+  p = blank([[sq(8, 4), v(0, 8)], [sq(4, 8), v(1, 8)], [sq(0, 4), v(2, 8)], [sq(4, 0), v(3, 8)], [sq(4, 5), v(0, 7)], [sq(1, 1), v(1, 5)]], { turn: 0 });
+  p.hands[1][1] = 2;
+  check('4人: 王手の知らせは局面から分かる', T.gaveCheck({ ...p, last: { side: 0, f: 0, t: sq(4, 5) } }) === true);
+  let k = shogi.apply(p, { f: sq(4, 5), t: sq(4, 8) });
+  check('4人: 王を取られた人は脱落・駒と持ち駒が消える・次は残っている人', k && k.alive[1] === false && String(k.out) === '1' && k.board[sq(1, 1)] === 0 && k.hands[1][1] === 0 && k.turn === 2 && !k.result);
+  check('4人: 取った玉は持ち駒にならない', k.hands[0][8] === undefined || k.hands[0].every((x) => !x));
+  // 投了すると脱落して対局は続く。最後の1人が勝ち・順位は脱落が遅い人ほど上
+  k = shogi.apply(k, { resign: true });
+  check('4人: 投了した人は脱落して続く', k && k.alive[2] === false && k.turn === 3 && !k.result);
+  k = shogi.apply(k, { resign: true });
+  check('4人: 最後の1人が勝ち・順位は脱落が遅い順', k.result?.winner === 0 && String(k.result.ranking) === '0,3,2,1');
+  check('4人: 決着のあとは指せない', shogi.apply(k, { resign: true }) === null);
+  check('4人: 駒落ち・持ち駒なし・トライ・駒の並びは使わない', (() => { const x = shogi.init({ rules: { players: 4, handicap: 'two', drops: 'off', try: 'on', mix: 'on' } }); return x.n === 4 && !x.trial && !x.mixed && x.hands[0][0] === 0 && JSON.stringify(x) === JSON.stringify(s0); })());
+  check('4人: いつも成る・王手の知らせなしは局面に持つ', shogi.init({ rules: { players: 4, autopromo: 'on', check: 'off' } }).auto === true && shogi.init({ rules: { players: 4, check: 'off' } }).quiet === true);
+  // CPU どうしで最後まで（反則なし・決着か引き分け・駒の数が増えない）
+  let wins = 0;
+  let longest = 0;
+  for (let g = 0; g < 12; g++) {
+    let x = shogi.init({ rules: R4 });
+    const level = ['weak', 'normal', 'strong'][g % 3];
+    while (!x.result) {
+      const m = shogi.cpu(x, x.turn, { cpu: level });
+      const nx = shogi.apply(x, m);
+      if (!nx) { check('4人: CPU が反則の手を出した ' + JSON.stringify(m), false); break; }
+      x = nx;
+      const count = x.board.filter(Boolean).length + x.hands.flat().reduce((a, b) => a + b, 0);
+      if (count > 36) { check('4人: 駒の数が増えた', false); break; }
+    }
+    if (x.result?.winner !== null && x.result) wins++;
+    longest = Math.max(longest, x.ply);
+  }
+  check('4人: CPU どうしで最後まで（12局）', true, '決着 ' + wins + '局・いちばん長い局 ' + longest + '手');
+  check('4人: CPU どうしで決着が付く局がある', wins > 0);
+  // 当てずっぽうに指して、王手の知らせの音と「なし」の局面が同じこと
+  const G = (s) => !s.result && T.gaveCheck(s);
+  let x4 = shogi.init({ rules: R4 });
+  let y4 = shogi.init({ rules: { players: 4, check: 'off' } });
+  let checks4 = 0;
+  let same4 = true;
+  for (let i = 0; i < 300 && !x4.result; i++) {
+    const ms = T.legalMoves(x4.board, x4.hands, x4.turn);
+    const m = ms[(i * 7919) % ms.length];
+    const before = x4;
+    x4 = shogi.apply(x4, m);
+    y4 = shogi.apply(y4, m);
+    if (G(x4)) { checks4++; if (shogi.sound(before, x4) !== 'oute' || shogi.sound(before, y4) !== 'place') same4 = false; }
+    const { quiet: qq, ...r4 } = y4;
+    if (JSON.stringify(r4) !== JSON.stringify(x4) || qq !== true) same4 = false;
+  }
+  check('王手の知らせ: 4人でも王手の手が分かり、なしでも局面は同じ', checks4 > 0 && same4, `王手 ${checks4}回`);
+}
+
 // 動かす手に d（打つ駒）を付けて送られても、持っていない駒を打たせない（2026-10-10 の Codex の点検で見つかった）
 {
   const cases = [
     ['本将棋', shogi.init(), (s) => legalMoves(s.board, s.hands, s.turn)],
     ['3人将棋', shogi.init({ rules: { players: 3 } }), (s) => _test3.legalMoves(s.board, s.hands, s.turn)],
+    ['4人将棋', shogi.init({ rules: { players: 4 } }), (s) => _test4.legalMoves(s.board, s.hands, s.turn)],
     ['3×4', shogi.init({ rules: { size: 'zoo' } }), (s) => _test34.moves(s.board, s.hands, s.turn)],
   ];
   for (const [name, s, list] of cases) {
