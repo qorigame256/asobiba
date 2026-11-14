@@ -179,15 +179,19 @@ function checkLastRoom() {
   let ready = false;
   let timer = null;
   let got = false;
+  let drops = 0; // つながりが切れた回数（問い合わせを送ってから返事を待つ間に切れたかを見る）
   const done = () => { clearTimeout(timer); try { net?.close(); } catch { /* 無視 */ } if (lastProbe === handle) lastProbe = null; };
   const handle = { close: done };
   const probe = () => {
     got = false;
     const sentReady = ready;
+    const sentDrops = drops;
     net.send({ type: 'probe' });
     timer = setTimeout(() => {
       if (lastProbe !== handle) return;
-      if (!ready || !sentReady) { probe(); return; } // つなぎ直している間に送った問い合わせでは決めない（届かなかっただけかもしれない）
+      // つなぎ直している間に送った問い合わせ・返事を待つ間に一度でも切れた問い合わせでは決めない（返事を取りこぼしただけかもしれない。
+      // 2026-11-14 Codex の点検の指摘。送った直後に切れて6秒以内に戻ると、人がいる部屋のボタンと覚えを消していた）
+      if (!ready || !sentReady || drops !== sentDrops) { probe(); return; }
       done(); hide(); forgetLastRoom(last.code); // つながったのに返事が無い = 部屋に誰もいない
     }, LAST_PROBE_MS);
   };
@@ -202,6 +206,7 @@ function checkLastRoom() {
     }, (status) => {
       if (lastProbe !== handle) return;
       const first = status === 'ready' && !ready && !timer;
+      if (ready && status !== 'ready') drops++;
       ready = status === 'ready';
       if (first) probe();
     });

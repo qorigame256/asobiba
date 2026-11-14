@@ -280,8 +280,11 @@ export default {
     note.className = 'cc-log';
     // 札は最初に1度だけ作り、動くたびに字と印だけ書き替える（毎回作り直すと遅いスマホで重いため。2026-11-14 本人の報告から。Claude の判断）
     const tiles = [];
+    // 観戦の人がほかの人の画面を選んだ（o.watching。me はその人の席）: 大きな盤には、その人から届いた盤を出す
+    // （前は観戦の人の端末の loc＝問題の最初の形のまま動かず、その人は小さな盤からも外れて見えなくなった。2026-11-14 Codex の点検の指摘）
+    const watched = () => (ui.s.solved[me] !== null ? solvedBoard(n) : (others.get(me)?.key === key && unpackBoard(others.get(me).b, n)) || start);
     const draw = () => {
-      const b = s.phase === 'open' && me !== null ? loc.board : solvedBoard(n);
+      const b = s.phase === 'open' && me !== null ? (o.watching ? watched() : loc.board) : solvedBoard(n);
       if (!tiles.length) for (let i = 0; i < b.length; i++) { const t = document.createElement('div'); tiles.push(t); grid.append(t); }
       b.forEach((v, i) => {
         const t = tiles[i];
@@ -290,7 +293,7 @@ export default {
         const txt = v ? String(v) : '';
         if (t.textContent !== txt) t.textContent = txt;
       });
-      note.textContent = s.phase !== 'open' ? '' : me === null ? '観戦中' : s.solved[me] !== null ? `そろった！（${secText(s.solved[me])}）ほかの人を待っています`
+      note.textContent = s.phase !== 'open' ? '' : me === null || o.watching ? '観戦中' : s.solved[me] !== null ? `そろった！（${secText(s.solved[me])}）ほかの人を待っています`
         : s.passed[me] ? 'あきらめました。ほかの人を待っています' : `動かした回数 ${loc.seq.length}`;
     };
     const sendBoard = () => {
@@ -367,7 +370,10 @@ export default {
     draw();
     wrap.append(grid, note);
     // ほかの人の盤を小さく並べる（2026-11-14 本人の依頼。並べ方は Claude の判断: 自分の盤の下に名前つきで。そろった人は ✓、あきらめた人は薄く）
-    const seats = s.phase === 'open' ? [...Array(s.scores.length).keys()].filter((p) => p !== me && !o.cpu?.[p]) : [];
+    // 部屋を出た人・待合室へ行った人の席（o.sub。CPU が代わりに打つ）も並べる。o.cpu だけで外すと、そのあいだに描き直した端末では
+    // その人が戻っても誰かがそろえるまで出てこなかった（2026-11-14 Codex の点検の指摘。席の顔ぶれは1問の間変わらないので作り直さなくてよい）
+    const seats = s.phase === 'open' ? [...Array(s.scores.length).keys()].filter((p) => p !== me && (!o.cpu?.[p] || o.sub?.[p])) : [];
+    ui.paintOthers = () => { if (o.watching && s.phase === 'open') draw(); };
     if (seats.length) {
       const row = document.createElement('div');
       row.className = 'sl-others';
@@ -385,7 +391,9 @@ export default {
         row.append(box);
         return { p, box, cells };
       });
+      const paintBig = ui.paintOthers;
       ui.paintOthers = () => {
+        paintBig();
         const st = ui.s; // 同じ場面のうちの描き直しでは作り直さないので、いまの局面は ui.s で見る
         for (const m of minis) {
           const got = others.get(m.p);
