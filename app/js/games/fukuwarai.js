@@ -28,6 +28,7 @@ const SHOWN_MS = 8000;
 const GRACE_MS = 1000;
 const PEEK_MS = 3000;
 const LABELS = ['左のまゆ', '右のまゆ', '左の目', '右の目', '鼻', '口'];
+const SIDES = ['l', 'r', 'l', 'r', null, null]; // 画面を見ている人から見た左右（上の「左右は、画面を見ている人から見た左右」）
 
 // 部品の絵（x, y が真ん中）
 const brow = (x, y, tilt = 0, w = 14) => `<path d="M${x - 55} ${y + 10 + tilt} Q${x} ${y - 25} ${x + 55} ${y + 10 - tilt}" stroke="#2b2420" stroke-width="${w}" fill="none" stroke-linecap="round"/>`;
@@ -252,10 +253,14 @@ export default {
     };
     const paint = () => {
       const i = loc.pts.length;
+      delete board.dataset.side;
       if (me === null) { next.textContent = '観戦中'; return; }
       if (s.put[me] || loc.sent) { next.textContent = '置き終えました。ほかの人を待っています'; return; }
       if (peekLeft() > 0) { next.textContent = '👀 正しい顔をおぼえよう（3秒）'; return; }
-      next.innerHTML = `つぎは <b>${LABELS[i]}</b>（${i + 1}/${LABELS.length}）`;
+      // 左右がどちらか分かるよう、「画面の左がわ」と書き添え、盤のその半分に薄い色と矢印を重ねる（2026-11-14 本人の報告「右左がどっちなのかわからない」）
+      const side = SIDES[i];
+      next.innerHTML = `つぎは <b>${LABELS[i]}</b>${side ? ` <span class="fw-side">${side === 'l' ? '⬅ 画面の左がわ' : '画面の右がわ ➡'}</span>` : ''}（${i + 1}/${LABELS.length}）`;
+      if (side) { board.dataset.side = side; board.dataset.tag = side === 'l' ? '⬅ ここ' : 'ここ ➡'; } else delete board.dataset.side;
       const prev = document.createElement('span');
       prev.className = 'fw-prev';
       prev.innerHTML = `<svg viewBox="0 0 200 200">${face.draw[i](100, 100)}</svg>`;

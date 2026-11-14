@@ -172,7 +172,7 @@
 - `app/js/ads.js` … App Store 版の広告と追跡の許可と「広告を消す」の課金（ウェブ版では何もしない。作りは `.claude/rules/appstore.md`）。
 - `app/js/native.js` … App Store 版の振動・実績（Game Center）・画像で保存と共有（ウェブ版では何もしない。iPhone 側は `native/plugins/asobiba-native`。作りは `.claude/rules/appstore.md`）。
 - `app/privacy.html` … プライバシーポリシー（ウェブ版・アプリ版で共通。https://qorigame256.github.io/asobiba/privacy.html を App Store Connect にも登録する）。
-- `app/js/records.js` … 自分の記録（遊んだ対局・人がいた対局の勝ち・自己ベスト・CPU 図鑑）と Game Center のランキングの番号。`app/js/skin.js` … スキン（色の一覧・使えるか・当てる）。`app/js/season.js` … 季節の飾り（ホームと待合室。出す・止めるは `main.js` の `updateSeason`）。
+- `app/js/records.js` … 自分の記録（遊んだ対局・人がいた対局の勝ち・自己ベスト・CPU 図鑑）と Game Center のランキングの番号。`app/js/skin.js` … スキン（色の一覧・使えるか・当てる）。`app/js/season.js` … 日付から季節を決める（流しそうめんが使う。季節の飾りは 2026-11-14 にやめた）。
 - `app/js/filter.js` … 汚い言葉のふるい。一覧は `app/js/ngwords.js`（`tools/make-ngwords.mjs` が別のアプリの一覧から作る。手で直さない。元の場所は Git に入れない `tools/local-paths.json` の `ngwordsDir`）。
 - `native/` … App Store 版の殻（Capacitor。`native/ios/` が Xcode のプロジェクト）。`tools/build-native.mjs` が `app/` を `native/www/` へ写して組み立てる（作りは `.claude/rules/appstore.md`）。
 - `app/js/sound.js` … 効果音を鳴らす（オン・オフ、勝ち負けの音の選び方）。音のファイルは `app/sounds/<名前>.wav`。
@@ -267,7 +267,6 @@
   **新しい確認はコミットのメッセージにだけ書き、ここにもそのファイルにも足さない**（共通ルールの「経緯はコミットのメッセージに書く」に合わせた Claude の判断）。
 - **Codex の点検の基準: 7956e2a までのコミットは全部点検を終えた**（2026-11-13）。次に点検するときは、`7956e2a..HEAD` のうちコード（`app/`・`tools/`）を変えたコミットを見せる。
   点検を終えたら、この行のコミットを書き換える（1行のまま。経緯は各点検の直しのコミットのメッセージにある）。
-- **公開のやり直し用の1行: 次に `app/` を変えてコミットするとき、`app/js/main.js` の1行目のコメント（「公開のやり直し用の1行」）とこの行を消す**（2026-11-13 本人の依頼。公開の仕事は `app/` が変わったときだけ走るので、GitHub 側の一時的な失敗で落ちた公開を走らせ直すために入れた）。
 - **未確認のもの**（本人の端末か耳でないと確かめられないもの・Claude がブラウザの画面でまだ見ていないもの）の一覧は `docs/未確認のもの.md` にある。
   **確かめたらその行を消し、確かめたことはコミットのメッセージに書く。** **新しく未確認のものができたら、そのファイルに足す**（ここには書かない）。
   本人に「何を試せばいいか」と聞かれたときも、そのファイルを開く。

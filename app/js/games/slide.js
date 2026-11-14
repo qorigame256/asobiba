@@ -11,6 +11,10 @@
 //   - 問題の数は 1・3（最初）・5問。
 //   - 5×5（1〜24。2026-10-29 本人が選んだ案）: 混ぜる回数は軽め70回・しっかり250回、制限時間は軽め300秒・しっかり480秒。
 //     CPU がそろえる割合は4×4 より1割低い。
+// 2026-11-14 本人の依頼（「ほかの人の盤面を小さく見たい」「友人の動作がとても重くてまともに動かせない」）:
+//   - 自分の盤の下に、ほかの人（CPU を除く）がいま動かしている盤を小さく並べる（送り方は下の others の所）。
+//   - 重さの対策（原因は本人の端末で確かめられていない。Claude の判断）: 札を動くたびに作り直さず字だけ替える・なでた長さが足りたら指を離す前に動かす・
+//     残り時間の帯（party.js の timeBar）は値が変わったときだけ書く。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（10を作れと同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, seq, ms } / { p, t: 'pass', q }
 
@@ -75,6 +79,14 @@ export const undoPath = (path) => [...path].reverse().map((d) => BACK[d]).join('
 
 let loc = null; // この端末で動かしている盤 { key, board, seq, sent }
 let ui = null;
+// ほかの人の盤を小さく見る（2026-11-14 本人の依頼）: 動かしている盤は見た目だけなので手の一覧に入れず、動くたびに送りっぱなしにする（o.stream。0.25秒より短い間は1回にまとめる）。
+// 札の数は1文字ずつ36進（0〜24 → 0〜o）で送る。CPU の盤は出さない（CPU は札を動かさず、時間でそろえるため）。Claude の判断
+const others = new Map(); // 席 → { key, b: 盤 }
+const SEND_MS = 250;
+let lastSend = 0;
+let sendTimer = null;
+const packBoard = (b) => b.map((v) => v.toString(36)).join('');
+const unpackBoard = (t, n) => (typeof t === 'string' && t.length === n * n && /^[0-9a-o]+$/.test(t) ? [...t].map((c) => parseInt(c, 36)) : null);
 const cpuPlan = new Map();
 let keysBound = false;
 function bindKeys() {
@@ -200,6 +212,13 @@ export default {
     return { t: 'done', q: s.q, seq: undoPath(s.qs[s.q].path), ms: Math.round(t) };
   },
 
+  // ほかの人の盤（見た目だけ）
+  onStream(d, from) {
+    if (!d || typeof d.key !== 'string' || typeof d.b !== 'string' || !Number.isInteger(from) || from < 0) return;
+    others.set(from, { key: d.key, b: d.b });
+    ui?.paintOthers?.();
+  },
+
   render(root, s, o) {
     bindKeys();
     const me = o.me >= 0 ? o.me : null;
@@ -213,13 +232,13 @@ export default {
       return '<span class="pt-ng">―</span>';
     };
     const chips = scoreChips(o, s.scores, { won, extra });
-    if (ui?.mount === mount && root.contains(ui.wrap)) { ui.chips.replaceWith(chips); ui.chips = chips; return; }
+    if (ui?.mount === mount && root.contains(ui.wrap)) { ui.chips.replaceWith(chips); ui.chips = chips; ui.s = s; ui.paintOthers?.(); return; }
 
     root.innerHTML = '';
     root.className = 'board kj sl';
     const wrap = document.createElement('div');
     wrap.className = 'kj-wrap';
-    ui = { mount, wrap, chips };
+    ui = { mount, wrap, chips, s };
     wrap.append(chips);
     root.append(wrap);
     if (s.phase === 'end') { wrap.append(this.review(s, me, o)); return; }
@@ -259,17 +278,27 @@ export default {
     grid.style.setProperty('--n', n);
     const note = document.createElement('p');
     note.className = 'cc-log';
+    // 札は最初に1度だけ作り、動くたびに字と印だけ書き替える（毎回作り直すと遅いスマホで重いため。2026-11-14 本人の報告から。Claude の判断）
+    const tiles = [];
     const draw = () => {
-      grid.innerHTML = '';
       const b = s.phase === 'open' && me !== null ? loc.board : solvedBoard(n);
+      if (!tiles.length) for (let i = 0; i < b.length; i++) { const t = document.createElement('div'); tiles.push(t); grid.append(t); }
       b.forEach((v, i) => {
-        const t = document.createElement('div');
-        t.className = 'sl-tile' + (v === 0 ? ' blank' : '') + (v !== 0 && v === i + 1 ? ' ok' : '');
-        t.textContent = v || '';
-        grid.append(t);
+        const t = tiles[i];
+        const cls = 'sl-tile' + (v === 0 ? ' blank' : '') + (v !== 0 && v === i + 1 ? ' ok' : '');
+        if (t.className !== cls) t.className = cls;
+        const txt = v ? String(v) : '';
+        if (t.textContent !== txt) t.textContent = txt;
       });
       note.textContent = s.phase !== 'open' ? '' : me === null ? '観戦中' : s.solved[me] !== null ? `そろった！（${secText(s.solved[me])}）ほかの人を待っています`
         : s.passed[me] ? 'あきらめました。ほかの人を待っています' : `動かした回数 ${loc.seq.length}`;
+    };
+    const sendBoard = () => {
+      if (!o.stream) return;
+      const go = () => { lastSend = performance.now(); sendTimer = null; if (loc?.key === key) o.stream({ key, b: packBoard(loc.board) }); };
+      if (sendTimer) return;
+      const wait = SEND_MS - (performance.now() - lastSend);
+      if (wait <= 0) go(); else sendTimer = setTimeout(go, wait);
     };
     const step = (d) => {
       if (!playing || loc.sent) return false;
@@ -277,6 +306,7 @@ export default {
       if (!nb) return false;
       loc.board = nb;
       loc.seq += d;
+      sendBoard();
       return true;
     };
     const finish = () => {
@@ -308,10 +338,21 @@ export default {
       try { grid.setPointerCapture?.(e.pointerId); } catch { /* 取り込めなくても、指を離した所で決める */ }
     };
     grid.onpointercancel = () => { swipe = null; };
+    // 指を離すのを待たず、なでた長さが SWIPE_MIN を超えたところで動かす（離すまで動かないと、遅いスマホで「動かない」と感じるため。2026-11-14。Claude の判断）。
+    // 1回なでて動かすのは1回だけ（続けて動かすときは、指を離してもう一度なでる。前と同じ）
+    grid.onpointermove = (e) => {
+      if (!swipe || swipe.id !== e.pointerId || swipe.done) return;
+      if (Math.hypot(e.clientX - swipe.x, e.clientY - swipe.y) < SWIPE_MIN) return;
+      swipe.done = true;
+      act(swipe, e);
+    };
     grid.onpointerup = (e) => {
       const sw = swipe;
       swipe = null;
-      if (!sw || sw.id !== e.pointerId) return;
+      if (!sw || sw.id !== e.pointerId || sw.done) return;
+      act(sw, e);
+    };
+    const act = (sw, e) => {
       const dx = e.clientX - sw.x, dy = e.clientY - sw.y;
       if (Math.hypot(dx, dy) < SWIPE_MIN) return;
       const tile = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'R' : 'L') : dy > 0 ? 'D' : 'U';
@@ -325,6 +366,44 @@ export default {
     };
     draw();
     wrap.append(grid, note);
+    // ほかの人の盤を小さく並べる（2026-11-14 本人の依頼。並べ方は Claude の判断: 自分の盤の下に名前つきで。そろった人は ✓、あきらめた人は薄く）
+    const seats = s.phase === 'open' ? [...Array(s.scores.length).keys()].filter((p) => p !== me && !o.cpu?.[p]) : [];
+    if (seats.length) {
+      const row = document.createElement('div');
+      row.className = 'sl-others';
+      const minis = seats.map((p) => {
+        const box = document.createElement('div');
+        box.className = 'sl-mini';
+        const g = document.createElement('div');
+        g.className = 'sl-mini-grid';
+        g.style.setProperty('--n', n);
+        const cells = [...Array(n * n)].map(() => g.appendChild(document.createElement('span')));
+        const cap = document.createElement('div');
+        cap.className = 'sl-mini-cap';
+        cap.textContent = o.names?.[p] ?? '';
+        box.append(g, cap);
+        row.append(box);
+        return { p, box, cells };
+      });
+      ui.paintOthers = () => {
+        const st = ui.s; // 同じ場面のうちの描き直しでは作り直さないので、いまの局面は ui.s で見る
+        for (const m of minis) {
+          const got = others.get(m.p);
+          const b = st.solved[m.p] !== null ? solvedBoard(n) : (got?.key === key && unpackBoard(got.b, n)) || start;
+          m.box.classList.toggle('done', st.solved[m.p] !== null);
+          m.box.classList.toggle('gave', !!st.passed[m.p]);
+          b.forEach((v, i) => {
+            const c = m.cells[i];
+            const cls = v === 0 ? 'blank' : v === i + 1 ? 'ok' : '';
+            if (c.className !== cls) c.className = cls;
+            const txt = v ? String(v) : '';
+            if (c.textContent !== txt) c.textContent = txt;
+          });
+        }
+      };
+      ui.paintOthers();
+      wrap.append(row);
+    }
     if (playing) {
       const pass = document.createElement('button');
       pass.type = 'button';

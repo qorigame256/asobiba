@@ -10315,11 +10315,11 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('race OK');
 }
 
-// コップのどれ？（2026-11-12 本人の決定）: 当てた人全員に1点・5回・回が進むほどコップが増える
+// コップのどれ？（2026-11-12 本人の決定）: 5回・回が進むほどコップが増える。点は 2026-11-14 から当てた人のうち速い順に 3・2・1点
 {
   const G = GAMES.cup;
   const { makeRounds, slotsAfter, poseAt, animMs, ROUNDS } = await import('../app/js/games/cup.js');
-  assert.deepEqual(ROUNDS.map((r) => r.cups), [3, 3, 4, 4, 5], 'コップのどれ？: コップは3個から最後は5個');
+  assert.deepEqual(ROUNDS.map((r) => r.cups), [3, 4, 4, 5, 5], 'コップのどれ？: コップは3個から最後は5個');
   assert.ok(ROUNDS.every((r, i) => i === 0 || (r.swaps >= ROUNDS[i - 1].swaps && r.dur <= ROUNDS[i - 1].dur)), 'コップのどれ？: 回が進むほどまぜる回数が増え、速くなる');
   for (let seed = 1; seed <= 200; seed++) {
     const rs = makeRounds(seed);
@@ -10336,28 +10336,38 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
       assert.ok(x.swaps.every(([a, b]) => a !== b && a >= 0 && b < x.cups));
     }
   }
-  // 進行と点: 当てた人全員に1点、はずれ・選ばなかった人は0点
+  // 進行と点: 当てた人は速い順（ms）に 3・2・1点、はずれ・選ばなかった人は0点
   let s = G.init(3, 7);
   s = G.apply(s, { p: -1, t: 'next' });
   assert.equal(s.phase, 'open');
   const a = s.rs[0].ans;
   const wrong = (a + 1) % s.rs[0].cups;
-  s = G.apply(s, { p: 0, t: 'ans', q: 0, c: a });
-  assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, c: a }), null, 'コップのどれ？: 同じ人は1回だけ選べる');
-  assert.equal(G.apply(s, { p: 1, t: 'ans', q: 1, c: a }), null, 'コップのどれ？: ほかの回の答えは受け付けない');
-  assert.equal(G.apply(s, { p: 1, t: 'ans', q: 0, c: 9 }), null, 'コップのどれ？: 無い場所は選べない');
-  s = G.apply(s, { p: 1, t: 'ans', q: 0, c: wrong });
+  assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, c: a }), null, 'コップのどれ？: 速さ（ms）の無い答えは受け付けない');
+  assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, c: a, ms: -1 }), null, 'コップのどれ？: 負の ms は受け付けない');
+  s = G.apply(s, { p: 0, t: 'ans', q: 0, c: a, ms: 900 });
+  assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, c: a, ms: 100 }), null, 'コップのどれ？: 同じ人は1回だけ選べる');
+  assert.equal(G.apply(s, { p: 1, t: 'ans', q: 1, c: a, ms: 100 }), null, 'コップのどれ？: ほかの回の答えは受け付けない');
+  assert.equal(G.apply(s, { p: 1, t: 'ans', q: 0, c: 9, ms: 100 }), null, 'コップのどれ？: 無い場所は選べない');
+  s = G.apply(s, { p: 1, t: 'ans', q: 0, c: wrong, ms: 100 });
   s = G.apply(s, { p: -1, t: 'close' });
-  assert.deepEqual(s.scores, [1, 0, 0], 'コップのどれ？: 当てた人だけ1点');
+  assert.deepEqual(s.scores, [3, 0, 0], 'コップのどれ？: 当てた人だけ点（はずれは速くても0点）');
   for (let q = 1; q < 5; q++) {
     s = G.apply(s, { p: -1, t: 'next' });
-    s = G.apply(s, { p: 2, t: 'ans', q, c: s.rs[q].ans });
-    s = G.apply(s, { p: 0, t: 'ans', q, c: s.rs[q].ans });
+    s = G.apply(s, { p: 2, t: 'ans', q, c: s.rs[q].ans, ms: 500 });
+    s = G.apply(s, { p: 0, t: 'ans', q, c: s.rs[q].ans, ms: 1200 });
+    s = G.apply(s, { p: 1, t: 'ans', q, c: s.rs[q].ans, ms: 2000 });
     s = G.apply(s, { p: -1, t: 'close' });
+    if (q === 1) assert.deepEqual(s.last.pts, [2, 1, 3], 'コップのどれ？: 届いた順でなく ms の速い順に 3・2・1点');
   }
   assert.equal(G.result(s), null);
   s = G.apply(s, { p: -1, t: 'next' });
-  assert.deepEqual(G.result(s), { winners: [0], scores: [5, 0, 4] }, 'コップのどれ？: 5回で終わり、点の多い人の勝ち');
+  assert.deepEqual(G.result(s), { winners: [2], scores: [11, 4, 12] }, 'コップのどれ？: 5回で終わり、点の多い人の勝ち');
+  // 同じ ms なら同じ点
+  let t = G.apply(G.init(3, 8), { p: -1, t: 'next' });
+  t = G.apply(t, { p: 0, t: 'ans', q: 0, c: t.rs[0].ans, ms: 700 });
+  t = G.apply(t, { p: 1, t: 'ans', q: 0, c: t.rs[0].ans, ms: 700 });
+  t = G.apply(t, { p: 2, t: 'ans', q: 0, c: t.rs[0].ans, ms: 800 });
+  assert.deepEqual(G.apply(t, { p: -1, t: 'close' }).last.pts, [3, 3, 1], 'コップのどれ？: 同じ速さは同じ点');
   console.log('cup OK');
 }
 
@@ -10422,12 +10432,14 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.equal(long.length, 8);
   assert.ok(long.every((r, i) => i === 0 || (r.cups >= long[i - 1].cups && r.swaps >= long[i - 1].swaps && r.dur <= long[i - 1].dur)), 'コップのどれ？: 8回も回が進むほど難しく');
   assert.ok(planOf({ level: 'easy', rounds: 8 }).every((r) => r.cups <= 4), 'コップのどれ？: やさしいはコップ4個まで');
-  assert.ok(planOf({ level: 'hard' }).every((r) => r.cups === 5), 'コップのどれ？: むずかしいは最初から5個');
+  const hard = planOf({ level: 'hard' });
+  assert.deepEqual(hard.map((r) => r.cups), [5, 5, 5, 6, 6], 'コップのどれ？: むずかしいは5個から後半6個');
+  assert.ok(hard.every((r, i) => r.swaps > planOf({})[i].swaps && r.dur < planOf({})[i].dur), 'コップのどれ？: むずかしいはふつうより多く速くまぜる');
   assert.equal(G.init(2, 4, { rules: { rounds: 8 } }).rs.length, 8, 'コップのどれ？: 回数の設定が効く');
   // 脱落: 外した人・選ばなかった人は脱落、残りが1人で終わり
   const close = (s, picks) => {
     s = G.apply(s, { p: -1, t: 'next' });
-    picks.forEach((c, p) => { if (c !== null) s = G.apply(s, { p, t: 'ans', q: s.q, c: c === 'ok' ? s.rs[s.q].ans : (s.rs[s.q].ans + 1) % s.rs[s.q].cups }); });
+    picks.forEach((c, p) => { if (c !== null) s = G.apply(s, { p, t: 'ans', q: s.q, c: c === 'ok' ? s.rs[s.q].ans : (s.rs[s.q].ans + 1) % s.rs[s.q].cups, ms: 100 * (p + 1) }); });
     return G.apply(s, { p: -1, t: 'close' });
   };
   let s = G.init(4, 9, { rules: { drop: true } });
@@ -10436,11 +10448,11 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   s = close(s, ['ok', 'ok', 'ng', null]);
   assert.deepEqual(s.out, [null, null, 1, 1], 'コップのどれ？: 外した人と選ばなかった人が脱落');
   assert.equal(G.canAct(G.apply(s, { p: -1, t: 'next' }), 2), false, 'コップのどれ？: 脱落した人は選べない');
-  assert.equal(G.apply(G.apply(s, { p: -1, t: 'next' }), { p: 3, t: 'ans', q: 2, c: 0 }), null, 'コップのどれ？: 脱落した人の答えは受け付けない');
+  assert.equal(G.apply(G.apply(s, { p: -1, t: 'next' }), { p: 3, t: 'ans', q: 2, c: 0, ms: 100 }), null, 'コップのどれ？: 脱落した人の答えは受け付けない');
   s = close(s, ['ok', 'ng', null, null]);
   s = G.apply(s, { p: -1, t: 'next' });
   assert.equal(s.phase, 'end', 'コップのどれ？: 残りが1人になったら終わり');
-  assert.deepEqual(G.result(s), { winners: [0], scores: [2, 1, 0, 0], place: [1, 2, 3, 3] }, 'コップのどれ？: 残った人の勝ち・あとまで残った人が上');
+  assert.deepEqual(G.result(s), { winners: [0], scores: [6, 2, 0, 0], place: [1, 2, 3, 3] }, 'コップのどれ？: 残った人の勝ち・あとまで残った人が上');
   console.log('cup settings OK');
 }
 

@@ -269,7 +269,8 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 @keyframes slow-dim-in { from { opacity: 0; } }
 /* 決着の判子（main.js の endStamp）。傾けない（本人の指示）。紙の色の地に朱の判子なので、どのスキンでも同じ色のまま */
 .end-stamp {
-  position: absolute; left: 50%; top: 45%; max-width: calc(100vw - 32px); text-align: center; overflow-wrap: anywhere;
+  position: absolute; left: 50%; top: 45%; width: max-content; max-width: calc(100vw - 32px); text-align: center; overflow-wrap: anywhere;
+  /* width: max-content: left: 50% の箱は幅が画面の半分までに縮み、「勝ち！」が「勝ち」「！」に割れていた（2026-11-14 本人の報告） */
   font-family: "Yu Mincho", "Hiragino Mincho ProN", serif; font-weight: 900; line-height: 1.1; font-size: clamp(2.6rem, 13vw, 4.6rem);
   padding: .14em .42em .18em; border: 6px solid currentColor; border-radius: 18px; background: rgba(255, 253, 248, .92); color: #c62d1f;
   box-shadow: 0 8px 24px rgba(0, 0, 0, .25); transform: translate(-50%, -50%); animation: end-stamp-in .42s cubic-bezier(.2, .8, .3, 1) both;
@@ -385,11 +386,8 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .status { position: relative; text-align: center; margin: 16px 0 12px; min-height: 3.2em; }
 /* 手が届いたかの印（2026-11-11。main.js の showSendMark）: 状態の欄と盤の間に重ねる小さな札（出し入れで盤がずれないように）。待つ間は最後の手の印を点線に */
 .send-chip { position: absolute; left: 50%; bottom: -13px; transform: translateX(-50%); z-index: 3; max-width: calc(100% - 16px); padding: 1px 10px; border: 1.5px dashed var(--line); border-radius: 999px; background: var(--panel); color: var(--muted); font-size: .75rem; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
-.send-chip.ok { border-style: solid; border-color: var(--win); color: var(--win); font-weight: 700; animation: send-ok 1.2s ease-out forwards; }
 .send-chip.lost { border-color: #c0541a; color: #c0541a; }
-@keyframes send-ok { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
 .board.sending .last, .board.sending [data-last] { outline: 2px dashed var(--accent); outline-offset: 1px; opacity: .7; }
-@media (prefers-reduced-motion: reduce) { .send-chip.ok { animation: none; } }
 .status-main { font-size: 1.25rem; font-weight: 700; }
 .status-main.small { font-size: 1rem; font-weight: 400; }
 .status-sub { color: var(--muted); font-size: .92rem; }
@@ -562,7 +560,8 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .c4-disc.p0 { background: #e2493b; }
 .c4-disc.p1 { background: #f4c430; }
 .c4-disc.p2 { background: #2e9a52; }
-.c4-disc.p3 { background: #8a4fc0; }
+.c4-disc.p3 { background: #c79bff; }
+.c4 .c4-disc.p3:not(.win) { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .75), inset 0 -4px 0 rgba(0, 0, 0, .18); } /* 4人目の紫は青い盤の上で見えにくかったので明るい紫に白い縁（2026-11-14 本人の報告） */
 .c4-disc.pn { background: repeating-linear-gradient(45deg, #8d949b 0 4px, #a3aab1 4px 8px); } /* じゃま石 */
 /* 3〜4人の広い盤（列が多いので、すき間を詰める） */
 .c4w { gap: 2px; padding: 6px 4px; }
@@ -1620,6 +1619,17 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .board .sl-tile.ok { border-color: #2f8a4a; }
 .board .sl-tile.blank { visibility: hidden; }
 .sl-grid.live { touch-action: none; cursor: grab; } /* なでて動かす間は、ページが動かないように（slide.js） */
+/* ほかの人の盤を小さく（2026-11-14 本人の依頼。slide.js の paintOthers） */
+.sl-others { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 10px; }
+.sl-mini { width: 96px; text-align: center; }
+.sl-mini-grid { display: grid; grid-template-columns: repeat(var(--n, 4), 1fr); gap: 1px; padding: 2px; border-radius: 6px; background: var(--line); }
+.sl-mini-grid span { aspect-ratio: 1; display: grid; place-items: center; border-radius: 2px; background: var(--field); color: var(--ink); font-size: 11px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+.sl-mini-grid span.ok { color: #2f8a4a; }
+.sl-mini-grid span.blank { background: transparent; }
+.sl-mini.done .sl-mini-grid { background: #2f8a4a; }
+.sl-mini.gave { opacity: .45; }
+.sl-mini-cap { font-size: .72rem; font-weight: 700; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sl-mini.done .sl-mini-cap::after { content: " ✓"; color: #2f8a4a; }
 .np-grid { --n: 9; display: grid; grid-template-columns: repeat(var(--n), 1fr); width: min(100%, 420px); margin: 0 auto; border: 2.5px solid var(--ink); touch-action: manipulation; }
 .board button.np-cell { aspect-ratio: 1; padding: 0; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--field); color: var(--accent); font: inherit; font-size: clamp(1rem, 5vw, 1.5rem); font-weight: 700; cursor: pointer; min-width: 0; }
 .board button.np-cell.given { color: var(--ink); font-weight: 800; }
@@ -2517,18 +2527,24 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .sgr-log { text-align: center; font-weight: 700; display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 3em; }
 .sgr-die { font-size: 2.6rem; line-height: 1; }
 .sgr-die.pop { animation: pop .3s ease-out; }
-/* 海賊のたる */
-.tr-barrel { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px; border-radius: 20px; background: linear-gradient(90deg, #8a5a2b, #b07a40 30%, #c48a4c 50%, #b07a40 70%, #8a5a2b); }
-.tr-pirate { font-size: 2.6rem; line-height: 1; transition: transform .3s; }
+/* 海賊のたる（2026-11-14 から回せる立体のたる。taru.js の「立体のたる」）: 胴は SVG、穴はその上に重ねたボタンで、左右の位置・横の縮み・重なりの順を JS が角度から決める */
+.tr-stage { position: relative; width: min(100%, 300px); aspect-ratio: 1 / 1.08; margin: 34px auto 0; touch-action: pan-y; user-select: none; -webkit-user-select: none; cursor: grab; }
+.tr-stage:active { cursor: grabbing; }
+.tr-body { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 8px 10px rgba(0, 0, 0, .28)); }
+.tr-staves path { fill: none; stroke: #3d250d; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
+.tr-hoop { fill: none; stroke: #4a4f55; stroke-width: 6px; vector-effect: non-scaling-stroke; }
+.tr-pirate { position: absolute; left: 50%; top: 10%; z-index: 30; font-size: 2.6rem; line-height: 1; transform: translate(-50%, -78%); pointer-events: none; }
 .tr-pirate.jump { animation: trJump .7s ease-out forwards; }
-@keyframes trJump { 0% { transform: translateY(0); } 40% { transform: translateY(-40px) rotate(-20deg) scale(1.5); } 100% { transform: translateY(-20px) rotate(10deg) scale(1.3); } }
-.tr-holes { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; width: min(100%, 340px); touch-action: manipulation; }
-.board button.tr-hole { aspect-ratio: 1; border-radius: 50%; border: 3px solid #5a3a1a; background: radial-gradient(circle, #1e140b 0 55%, #3a2614); color: #fff; font-size: 1.1rem; padding: 0; cursor: pointer; }
-.board button.tr-hole:disabled { cursor: default; }
+@keyframes trJump { 0% { transform: translate(-50%, -78%); } 40% { transform: translate(-50%, -200%) rotate(-20deg) scale(1.5); } 100% { transform: translate(-50%, -150%) rotate(10deg) scale(1.3); } }
+.board button.tr-hole { position: absolute; width: 15%; aspect-ratio: 1; border-radius: 50%; border: 3px solid #4a2e12; background: radial-gradient(circle, #120b04 0 55%, #3a2614); color: #fff; font-size: clamp(.8rem, 4.5vw, 1.15rem); padding: 0; cursor: pointer; }
+.board button.tr-hole:disabled { cursor: inherit; }
 .board button.tr-hole.done { background: #e9dcc6; }
 .board button.tr-hole.sel { box-shadow: 0 0 0 3px var(--win); }
 .board button.tr-hole.hit { background: #c0392b; box-shadow: 0 0 0 3px #fff; }
-.tr-hole.pop { animation: pop .25s ease-out; }
+.tr-hole.pop { animation: tr-pop .25s ease-out; }
+@keyframes tr-pop { from { scale: .4; opacity: .3; } } /* 置き場所の transform（JS）とぶつからないよう scale で */
+.tr-spin { display: flex; justify-content: center; gap: 28px; margin-top: 6px; }
+.tr-spin .btn { min-width: 64px; font-size: 1.1rem; }
 
 /* ---------- 2026-10-30 に足した6つ（椅子取りゲーム・立体四目並べ・じゃんけん階段・後出しじゃんけん早押し・ボウリング・綱引き連打） ---------- */
 :is([data-game="isutori"], [data-game="kaidan"], [data-game="atodashi"], [data-game="tsuna"]) .board { width: min(100%, 560px); }
@@ -2759,6 +2775,12 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .fw-prev svg { width: 2.8rem; height: 2.8rem; display: block; border: 1.5px solid var(--line); border-radius: 8px; background: var(--field); }
 .fw-board { width: min(100%, 440px); aspect-ratio: 1; margin: 0 auto; border: 2px solid var(--line); border-radius: 14px; background: #fffdf8; touch-action: none; user-select: none; -webkit-user-select: none; cursor: crosshair; }
 .fw-board svg { width: 100%; height: 100%; display: block; }
+/* 福笑いの左右（2026-11-14 本人の報告。fukuwarai.js の SIDES）: 置く部品が画面のどちら側かを、盤の半分の薄い色と矢印で見せる（押すのは下の顔へ通す） */
+.fw-board { position: relative; }
+.fw-board[data-side]::after { content: attr(data-tag); position: absolute; top: 0; bottom: 0; width: 50%; display: flex; justify-content: center; padding-top: 6px; box-sizing: border-box; background: rgba(240, 170, 40, .10); color: #b0761c; font-weight: 800; font-size: .9rem; pointer-events: none; }
+.fw-board[data-side="l"]::after { left: 0; border-right: 2px dashed rgba(200, 140, 40, .45); border-radius: 12px 0 0 12px; }
+.fw-board[data-side="r"]::after { right: 0; border-left: 2px dashed rgba(200, 140, 40, .45); border-radius: 0 12px 12px 0; }
+.fw-side { font-size: .85rem; font-weight: 800; color: #b0761c; white-space: nowrap; }
 .fw-board.pop { animation: fwPop .18s; }
 @keyframes fwPop { 50% { transform: scale(.985); } }
 .fw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
@@ -2975,9 +2997,7 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .df-field, .pk-table, .bb-field, .db-field, .sv-field, .bj-table { background: var(--felt), #2e6b47; box-shadow: var(--felt-edge); }
 .mj-table { background: var(--felt), #1f6b4a; box-shadow: var(--felt-edge); }
 
-/* ---------- 季節の飾り・開いたときのタイトル（2026-11-09。js/season.js と main.js の openingTitle） ---------- */
-/* 季節の飾りは画面全体に重ねる（押せないので下の物はそのまま押せる）。小窓やお知らせより下 */
-.season-fx { position: fixed; inset: 0; width: 100%; height: 100%; display: block; pointer-events: none; z-index: 40; }
+/* ---------- 開いたときのタイトル（2026-11-09。main.js の openingTitle）。季節の飾り（js/season.js）は 2026-11-14 本人の依頼でやめた ---------- */
 #screen-home.opening .op-ch { display: inline-block; animation: op-ch .38s cubic-bezier(.2, .8, .3, 1.3) both; animation-delay: calc(var(--i) * 70ms); }
 @keyframes op-ch { from { opacity: 0; transform: perspective(200px) rotateX(90deg) translateY(-6px); } }
 #screen-home.opening .op-up { animation: op-up .32s ease-out both; animation-delay: calc(480ms + var(--op, 0) * 28ms); }
@@ -3034,24 +3054,6 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .sg .sg-cell.selected .sg-piece.flip { transform: rotate(180deg) translateY(14%) scale(1.12); }
 .sg .sg-cell.selected::before { content: ""; position: absolute; left: 16%; right: 16%; bottom: 3%; height: 18%; border: 0; border-radius: 50%; background: radial-gradient(ellipse at center, rgba(40, 20, 0, .45), transparent 70%); pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .sg .sg-cell .sg-piece { transition: none; } }
-
-/* ---------- 結果の表彰台（2026-11-09。main.js の podiumFx。.fx-clip の中に出す） ---------- */
-.podium-fx { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(92vw, 360px); padding: 16px 12px 12px; border-radius: 18px; background: var(--panel); border: 1.5px solid var(--line); box-shadow: 0 10px 30px rgba(0, 0, 0, .3); display: grid; gap: 8px; animation: pd-in .25s ease-out both; }
-@keyframes pd-in { from { opacity: 0; transform: translate(-50%, -46%); } }
-.pd-stage { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; gap: 6px; height: 200px; }
-.pd-col { display: grid; justify-items: center; align-content: end; gap: 4px; height: 100%; min-width: 0; }
-.pd-name { font-weight: 800; font-size: .85rem; padding: 2px 8px; border-radius: 10px; background: var(--panel); border: 2px solid var(--line); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; animation: op-up .3s calc(var(--at) + 300ms) ease-out both; }
-.pd-name.me { border-color: var(--accent); }
-.pd-block { width: 100%; border-radius: 10px 10px 0 0; display: grid; align-content: start; justify-items: center; padding-top: 6px; transform-origin: 50% 100%; animation: pd-rise .42s var(--at) cubic-bezier(.2, .8, .3, 1.15) both; }
-@keyframes pd-rise { from { transform: scaleY(0); } }
-.pd-rk { font-family: "Yu Mincho", "Hiragino Mincho ProN", serif; font-weight: 900; font-size: 1.6rem; line-height: 1; }
-.pd-sc { font-weight: 800; font-size: .95rem; font-variant-numeric: tabular-nums; }
-.pd-1 .pd-block { height: 110px; background: linear-gradient(#f3c74b, #d9a520); color: #3a2a05; }
-.pd-2 .pd-block { height: 80px; background: linear-gradient(#cfd6de, #a5afba); color: #26303a; }
-.pd-3 .pd-block { height: 58px; background: linear-gradient(#e2a877, #b97a47); color: #3a210c; }
-.pd-crown { font-size: 1.6rem; line-height: 1; animation: pd-crown .5s 1000ms cubic-bezier(.3, .7, .4, 1.4) both; }
-@keyframes pd-crown { from { opacity: 0; transform: translateY(-40px) rotate(-30deg); } }
-.pd-rest { margin: 0; text-align: center; font-size: .82rem; color: var(--muted); font-variant-numeric: tabular-nums; animation: op-up .3s 1000ms ease-out both; }
 
 /* 見出しの字体（2026-11-09 本人の選択。場面ごとに変える。room.md「演出・アニメーションの2回目」）: 使う字だけ切り出したファイル（tools/make-fonts.mjs）。
    タイトル・画面の見出し・ゲームの名前は丸ゴシック、判子は筆、あなたのターンの帯・技の名前は極太。入っていない字は後ろの字体で出る。
@@ -3300,13 +3302,6 @@ h1, h2, .sheet-head h3, .cat-h, .tile-nm, .lobby-game-name { font-family: "asobi
 .reach-tag { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 999px; background: #d4343e; color: #fff; font-size: .68rem; font-weight: 900; line-height: 1.6; vertical-align: middle; white-space: nowrap; animation: tr-drop2 .5s cubic-bezier(.3, 1.6, .5, 1) both; }
 @keyframes tr-drop2 { from { opacity: 0; transform: translateY(-10px) scale(.6); } }
 @media (prefers-reduced-motion: reduce) { .reach-tag { animation: none; } }
-/* 勝ちまでの見通し・逆転の知らせ（2026-11-13。party.js の leadNote・showFlip）: 自分の札の下に1位との差。新しい1位の札が跳ねて「逆転！」（札の段は横に送る所ではみ出しが切れるので、札の中の上に出す） */
-.pt-gap { font-size: .72rem; font-weight: 700; color: var(--accent); white-space: nowrap; }
-.pt-gap.lead { color: #2f6fb3; }
-.cc-opp.flip { animation: pt-hop .6s cubic-bezier(.3, 1.6, .5, 1) both; animation-delay: var(--flip-at, 0ms); }
-@keyframes pt-hop { 0% { transform: translateY(0); } 35% { transform: translateY(-9px) scale(1.06); } 100% { transform: none; } }
-.pt-flip { position: absolute; left: 50%; top: 2px; padding: 0 8px; border-radius: 6px; background: #d4343e; color: #fff; font-weight: 900; font-size: .78rem; line-height: 1.6; white-space: nowrap; pointer-events: none; z-index: 2; animation: pt-flip 1.6s ease-out both; }
-@keyframes pt-flip { 0% { opacity: 0; transform: translate(-50%, 6px) scale(.4); } 15% { opacity: 1; transform: translate(-50%, -3px) scale(1.15); } 25%, 80% { opacity: 1; transform: translate(-50%, -3px) scale(1); } 100% { opacity: 0; transform: translate(-50%, -3px); } }
 /* 小さいマスの拡大鏡（2026-11-13。main.js の loupeStart）: 指の上の丸い窓。中は盤の写しを拡大したもの。まんなかの輪が指の下の場所 */
 .loupe { position: fixed; z-index: 60; width: 124px; height: 124px; border-radius: 50%; overflow: hidden; pointer-events: none; background: var(--panel); box-shadow: 0 0 0 3px #fff, 0 0 0 4px rgba(0, 0, 0, .25), 0 6px 18px rgba(0, 0, 0, .35); }
 .loupe::after { content: ""; position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; border-radius: 50%; border: 2.5px solid var(--accent); box-shadow: 0 0 0 1.5px #fff; }

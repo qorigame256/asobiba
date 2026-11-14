@@ -23,6 +23,28 @@ const clone = (s) => ({ ...s, stabbed: s.stabbed.slice(), losses: s.losses.slice
 
 let picked = null; // 選びかけの穴 { key, holes }
 
+// 立体のたる（2026-11-14 本人の依頼「3Dで表現できないか」。形は推奨の「回せる樽」を本人が選んだ）:
+//   たるのまわりに穴を COLS 列 × ROWS 段（24個）並べ、横になでる（PC はマウスで引っぱる・◀ ▶）とたるが回る。正面に近い穴だけ押せる。
+//   Claude の判断: 8列×3段・まんなかがふくらんだ形（halfW）・横を向いた穴（正面から約78°より外）は押せない・なでたあとは列の正面で止める・
+//   新しく刺された穴が裏や横なら正面へ回す。回した向き（view.rot）は自分の画面だけのもので、送らない（手と局面は前と同じ）。
+//   穴 h は 列 h % COLS・段 floor(h / COLS)。描き方は SVG（胴・板・たが・ふた）と、その上に並べた穴のボタン（左右の位置と横の縮みを角度から計算）。
+const COLS = 8;
+const ROWS = 3;
+const COL_STEP = (Math.PI * 2) / COLS;
+const STAVES = 16;
+const DRAG_MIN = 6; // これ（画面の点）より動いたら、押したのでなく回したとみる
+const TOP_Y = 10; // 胴の上の端（100 を胴の高さとした割合）
+const BOT_Y = 94;
+const ROW_Y = [32, 52, 72];
+const view = { rot: 0, anim: 0 };
+// 高さ y での胴の半分の幅（まんなかがふくらむ）
+const halfW = (y) => 33 + 9 * (1 - ((y - 52) / 42) ** 2);
+const holeAt = (h) => ({ a: (h % COLS) * COL_STEP, y: ROW_Y[Math.floor(h / COLS) % ROWS] });
+const YS = [TOP_Y, 20, 32, 42, 52, 62, 72, 84, BOT_Y];
+const bodyPath = () => `M${YS.map((y) => `${(50 - halfW(y)).toFixed(2)} ${y}`).join(' L')} L${[...YS].reverse().map((y) => `${(50 + halfW(y)).toFixed(2)} ${y}`).join(' L')} Z`;
+const stavePath = (sin) => `M${YS.map((y) => `${(50 + halfW(y) * sin).toFixed(2)} ${y}`).join(' L')}`;
+const hoopPath = (y) => `M${(50 - halfW(y)).toFixed(2)} ${y} Q50 ${y + 3} ${(50 + halfW(y)).toFixed(2)} ${y}`;
+
 export default {
   id: 'taru',
   name: '海賊のたる',
@@ -151,12 +173,24 @@ export default {
     root.append(chips);
 
     const out = s.last?.out;
-    const barrel = document.createElement('div');
-    barrel.className = 'tr-barrel';
-    barrel.innerHTML = `<div class="tr-pirate${out ? ' jump' : ''}">🏴‍☠️</div>`;
-    const holes = document.createElement('div');
-    holes.className = 'tr-holes';
     const can = o.canMove && s.phase === 'play';
+    // 回せる立体のたる（下の「立体のたる」の節）。穴の番号・手・当たりの決め方は前と同じで、並べ方だけ変えた
+    const stage = document.createElement('div');
+    stage.className = 'tr-stage';
+    stage.innerHTML = `<svg class="tr-body" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+      <defs><linearGradient id="tr-wood" x1="0" x2="1"><stop offset="0" stop-color="#5a3816"/><stop offset=".22" stop-color="#9c6a33"/><stop offset=".5" stop-color="#cf9a57"/><stop offset=".78" stop-color="#9c6a33"/><stop offset="1" stop-color="#5a3816"/></linearGradient></defs>
+      <path d="${bodyPath()}" fill="url(#tr-wood)"/>
+      <g class="tr-staves"></g>
+      <path d="${hoopPath(TOP_Y + 6)}" class="tr-hoop"/><path d="${hoopPath(BOT_Y - 6)}" class="tr-hoop"/>
+      <ellipse cx="50" cy="${TOP_Y}" rx="${halfW(TOP_Y)}" ry="4.5" fill="#3a2410"/><ellipse cx="50" cy="${TOP_Y + 0.6}" rx="${halfW(TOP_Y) - 4}" ry="3" fill="#140c05"/>
+    </svg><div class="tr-pirate${out ? ' jump' : ''}" aria-hidden="true">🏴‍☠️</div>`;
+    const staves = stage.querySelector('.tr-staves');
+    const stavePaths = [...Array(STAVES)].map(() => {
+      const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      staves.append(p);
+      return p;
+    });
+    const holeEls = [];
     for (let h = 0; h < HOLES; h++) {
       const by = s.stabbed[h];
       const b = document.createElement('button');
@@ -164,20 +198,107 @@ export default {
       b.className = 'tr-hole' + (by >= 0 ? ' done' : '') + (picked?.holes.includes(h) ? ' sel' : '') + (out && h === s.hit ? ' hit' : '')
         + (o.fresh && s.last?.holes.includes(h) ? ' pop' : '');
       if (by >= 0) { b.textContent = '🗡️'; b.style.borderColor = SEAT_COLORS[by % SEAT_COLORS.length]; }
-      b.disabled = !can || by >= 0;
+      b.dataset.off = !can || by >= 0 ? '1' : '';
       b.setAttribute('aria-label', `${h + 1}番の穴`);
-      b.onclick = () => {
-        if (maxPick(s) === 1) { o.onMove({ t: 'stab', holes: [h] }); return; }
-        if (!picked) picked = { key, holes: [] };
-        const i = picked.holes.indexOf(h);
-        if (i >= 0) picked.holes.splice(i, 1);
-        else if (picked.holes.length < 3) picked.holes.push(h);
-        draw();
-      };
-      holes.append(b);
+      b.onclick = (e) => { if (e.detail === 0) choose(h); }; // キーボードで押したとき（指やマウスはなでたかどうかを見て下の pointerup で決める）
+      stage.append(b);
+      holeEls.push(b);
     }
-    barrel.append(holes);
-    root.append(barrel);
+    const choose = (h) => {
+      if (holeEls[h].dataset.off) return;
+      if (maxPick(s) === 1) { o.onMove({ t: 'stab', holes: [h] }); return; }
+      if (!picked) picked = { key, holes: [] };
+      const i = picked.holes.indexOf(h);
+      if (i >= 0) picked.holes.splice(i, 1);
+      else if (picked.holes.length < 3) picked.holes.push(h);
+      draw();
+    };
+    const place = () => {
+      stavePaths.forEach((p, k) => {
+        const a = (k / STAVES) * Math.PI * 2 + view.rot;
+        const c = Math.cos(a);
+        p.setAttribute('d', c > 0 ? stavePath(Math.sin(a)) : '');
+        p.style.opacity = (0.15 + 0.35 * c).toFixed(2);
+      });
+      holeEls.forEach((b, h) => {
+        const { a, y } = holeAt(h);
+        const t = a + view.rot;
+        const c = Math.cos(t);
+        const seen = c > 0.2;
+        b.style.left = `${50 + halfW(y) * 0.96 * Math.sin(t)}%`;
+        b.style.top = `${y}%`;
+        b.style.transform = `translate(-50%, -50%) scaleX(${Math.max(0.05, c).toFixed(3)})`;
+        b.style.zIndex = String(Math.round(10 + c * 10));
+        b.style.filter = `brightness(${(0.55 + 0.45 * c).toFixed(2)})`;
+        b.style.visibility = c > 0.12 ? 'visible' : 'hidden'; // 真横より向こうは見せない（細い線になって残るため）
+        b.disabled = !seen || !!b.dataset.off; // 横を向いた穴は細くて押しまちがえやすいので押せなくする
+        b.tabIndex = seen ? 0 : -1;
+      });
+    };
+    // 回す: なでる（指・マウス）・◀ ▶ のボタン・新しく刺された穴が裏なら自動で表へ
+    const turnTo = (to, ms = 260) => {
+      const from = view.rot;
+      const t0 = performance.now();
+      const id = ++view.anim;
+      const step = (now) => {
+        if (id !== view.anim || !stage.isConnected) return;
+        const k = Math.min(1, (now - t0) / ms);
+        view.rot = from + (to - from) * (1 - (1 - k) ** 3);
+        place();
+        if (k < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+      setTimeout(() => { if (id === view.anim && stage.isConnected) { view.rot = to; place(); } }, ms + 60); // 画面が隠れていて描き替えが止まっても最後の形にする
+    };
+    let drag = null;
+    stage.onpointerdown = (e) => {
+      if (e.isPrimary === false) return;
+      view.anim++;
+      drag = { id: e.pointerId, x: e.clientX, rot: view.rot, moved: false, hole: holeEls.indexOf(e.target.closest?.('.tr-hole')) };
+      try { stage.setPointerCapture(e.pointerId); } catch { /* 取り込めなくても動く */ }
+    };
+    stage.onpointermove = (e) => {
+      if (!drag || drag.id !== e.pointerId) return;
+      const dx = e.clientX - drag.x;
+      if (Math.abs(dx) > DRAG_MIN) drag.moved = true;
+      if (!drag.moved) return;
+      view.rot = drag.rot + (dx / stage.clientWidth) * Math.PI * 1.2;
+      place();
+    };
+    const end = (e) => {
+      const d = drag;
+      drag = null;
+      if (!d || d.id !== e.pointerId) return;
+      if (d.moved) { turnTo(Math.round(view.rot / COL_STEP) * COL_STEP, 160); return; } // 列の正面で止める
+      if (d.hole >= 0 && !holeEls[d.hole].disabled) choose(d.hole);
+    };
+    stage.onpointerup = end;
+    stage.onpointercancel = (e) => { drag = null; if (e.pointerId !== undefined) turnTo(Math.round(view.rot / COL_STEP) * COL_STEP, 160); };
+    place();
+    root.append(stage);
+    const spin = document.createElement('div');
+    spin.className = 'tr-spin';
+    for (const [label, dir, aria] of [['◀', 1, '左へ回す'], ['▶', -1, '右へ回す']]) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn ghost';
+      b.textContent = label;
+      b.setAttribute('aria-label', `たるを${aria}`);
+      b.onclick = () => turnTo(Math.round(view.rot / COL_STEP) * COL_STEP + dir * COL_STEP);
+      spin.append(b);
+    }
+    root.append(spin);
+    // 新しく刺された穴（当たりなら当たりの穴）が裏や横にあれば、正面へ回して見せる
+    if (o.fresh && s.last) {
+      const h = out ? s.hit : s.last.holes.at(-1);
+      const a = holeAt(h).a;
+      if (Math.cos(a + view.rot) < (out ? 0.99 : 0.7)) { // 当たりの穴はいつも真正面へ
+        let to = -a;
+        while (to - view.rot > Math.PI) to -= Math.PI * 2;
+        while (view.rot - to > Math.PI) to += Math.PI * 2;
+        turnTo(to, 420);
+      }
+    }
 
     const msg = document.createElement('p');
     msg.className = 'cc-log';

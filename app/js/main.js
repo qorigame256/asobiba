@@ -1,4 +1,3 @@
-// 公開のやり直し用の1行（2026-11-13。動きは変わらない）。次に app/ を変えてコミットするとき、この行と CLAUDE.md の「公開のやり直し用の1行」の行を消す
 // 画面の切り替え・部屋の管理・対局の同期。
 //
 // 同期の考え方: 盤面そのものは送らず「これまでの手の一覧」を送る。受け取った側は最初の局面から
@@ -45,7 +44,6 @@ import { initAds, setAdsMuted, setBanner, countFinished, beforeLeaveResult, canB
 import { initNative, haptic, canHaptic, hapticsOn, setHapticsOn, canAchieve, openAchievements, notePlayed, noteResult, noteRoomSize, canShare, shareScreen, canRank, loadBoard } from './native.js';
 import { readRecords, noteGame, recordKey, rulesText, allBoards, initRecords, onRecords } from './records.js';
 import { SKINS, shownSkins, needText, usable, currentSkin, setSkin, checkSkin, newlyUnlocked, productOf } from './skin.js';
-import { showSeason } from './season.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 見間違えやすい I O 0 1 を除く
 const CODE_LEN = 5;
@@ -1459,11 +1457,10 @@ function showScreen(name) {
   updateSeason();
 }
 
-// 季節の飾り（2026-11-09。season.js）: ホームと待合室にだけ出す（対局の画面では止めて消す）
+// ホームと待合室にだけ出す飾り（時刻で変わる空気）を出し入れする。季節の飾り（2026-11-09）は 2026-11-14 本人の依頼でやめた
 function updateSeason() {
   const home = !el('screen-home').hidden;
   const lobby = !el('screen-play').hidden && S?.viewKey === 'lobby';
-  showSeason(home || lobby);
   updateSky(home || lobby);
 }
 
@@ -1925,43 +1922,33 @@ function onSelf(msg) {
 }
 
 /* ---------- 手が届いたかの印（2026-11-11 本人の選択。room.md「UI・UX の4回目」） ---------- */
-// オンラインで自分が打った手（onBoardMove）を送ってから、中継サーバーから自分に戻ってくる（onSelf）までを「送っています…」とし、
-// 戻ったら「✓ 届きました」を一瞬出す。待っている間は盤の最後の手の印（.last・[data-last]）を点線にする（board の .sending）。
+// オンラインで自分が打った手（onBoardMove）を送ってから、中継サーバーから自分に戻ってくる（onSelf）までは、盤の最後の手の印（.last・[data-last]）を点線にする（board の .sending）。
+// 2026-11-14 本人の依頼で「✓ 届きました」「送っています…」の字はやめた。字を出すのは、つながっていない間の「まだ届いていません。つなぎ直しています…」だけ。
 // Claude の判断: 戻ってきた手の一覧が、送ったときの長さ以上で同じ対局なら届いたとみる（ホストが CPU の手を足して送り直したものでもよい）。
-// つながっていない間は「まだ届いていません。つなぎ直しています…」。つなぎ直したときはゲストが手の一覧を送り直す（onConn）ので、それが戻れば届いたになる。
-const SENT_SHOW_MS = 1200; // 「✓ 届きました」を出しておく長さ
-let sentTimer = 0;
+// つなぎ直したときはゲストが手の一覧を送り直す（onConn）ので、それが戻れば届いたになる。
 function markSending() {
   if (S.mode !== 'online') return;
   S.sendWait = { key: timerKey(), len: S.moves.length + 1 };
-  S.sentAt = 0;
 }
 function sendBack(msg) {
   const w = S.sendWait;
   if (!w || msg.gameId !== S.gameId || msg.round !== S.round || w.key !== timerKey() || !Array.isArray(msg.moves) || msg.moves.length < w.len) return;
   S.sendWait = null;
-  S.sentAt = Date.now();
   showSendMark();
 }
 function showSendMark() {
   const status = el('status');
-  const board = el('board');
   let chip = status.querySelector('.send-chip');
   const waiting = S?.sendWait && S.sendWait.key === timerKey();
-  const ok = !waiting && S?.sentAt && Date.now() - S.sentAt < SENT_SHOW_MS;
-  board.classList.toggle('sending', !!waiting);
-  if (!waiting && !ok) { chip?.remove(); return; }
+  el('board').classList.toggle('sending', !!waiting);
+  if (!waiting || S.conn === 'ready') { chip?.remove(); return; }
   if (!chip) {
     chip = document.createElement('div');
-    chip.className = 'send-chip';
+    chip.className = 'send-chip lost';
     chip.setAttribute('aria-hidden', 'true'); // 目で見る印（読み上げると打つたびにうるさい）
     status.append(chip);
   }
-  chip.classList.toggle('ok', !!ok);
-  chip.classList.toggle('lost', !!waiting && S.conn !== 'ready');
-  chip.textContent = ok ? '✓ 届きました' : S.conn !== 'ready' ? 'まだ届いていません。つなぎ直しています…' : '送っています…';
-  clearTimeout(sentTimer);
-  if (ok) sentTimer = setTimeout(showSendMark, SENT_SHOW_MS - (Date.now() - S.sentAt) + 20);
+  chip.textContent = 'まだ届いていません。つなぎ直しています…';
 }
 
 function renderNetBanner() {
@@ -2034,16 +2021,8 @@ function statusHtml(game, st, res) {
       main = t === me ? 'あなたのターン' : n > 2 ? `${name(t)}（${who(t)}）のターン…` : '相手のターン…';
     }
     if (res && Number.isInteger(res.gave)) main += `<div class="gave-note">🏳 ${res.gave === me ? 'あなた' : `${name(res.gave)}（${who(res.gave)}）`}が参りました</div>`; // 参りました（2026-11-12）
-    if (S.mode === 'online') {
-      if (me === SPECTATOR) {
-        sub = '観戦中: ' + roundOrder().map((_, p) => `${name(p)} ${who(p)}`).join(' ／ ');
-      } else if (n > 2) {
-        const others = roundOrder().map((_, p) => p).filter((p) => p !== me);
-        sub = `あなたは ${name(me)}${seatNote(game, me, n)}・ほかは ${others.map((p) => `${name(p)} ${who(p)}`).join('、')}`;
-      } else {
-        sub = `あなたは ${name(me)}${seatNote(game, me)}・相手は ${who(1 - me)}`;
-      }
-    }
+    // 対局している人の「あなたは ○・相手は △△」の行は 2026-11-14 本人の依頼でやめた（だれが何色かは順番の帯でわかる）。観戦の人の行は残す
+    if (S.mode === 'online' && me === SPECTATOR) sub = '観戦中: ' + roundOrder().map((_, p) => `${name(p)} ${who(p)}`).join(' ／ ');
   }
   let html = `<div class="status-main">${main}</div>`;
   if (sub) html += `<div class="status-sub">${sub}</div>`;
@@ -3364,8 +3343,6 @@ function endStamp(game, res, me, end, delay) {
     }
     showFx(s, 1700);
     if (kind === 'win') setTimeout(() => el('board')?.animate(SHAKE_KF, { duration: 320 }), 200);
-    const pod = podiumOf(game, res, me);
-    if (pod) setTimeout(() => { if (S && timerKey() === key && !reviewing()) podiumFx(pod); }, 1500); // 判子が消えるころに表彰台
   }, delay);
 }
 
@@ -3520,78 +3497,7 @@ function rollStep() {
   if (more) rollRaf = requestAnimationFrame(rollStep);
 }
 
-// 結果の表彰台（2026-11-09 本人の選択。room.md「演出・アニメーションの2回目」）: 点数で競うゲームで3人以上のとき、判子のあとに
-// 3位→2位→1位の順に台がせり上がり、点数が0から数え上がり、1位に王冠が落ちる。4位からは下に1行で。押せばすぐ消える（showFx）。
-// Claude の判断: 「点数で競う」は結果が席ごとの点（scores。ranking があるゲームは pts も）を持つゲーム。チーム戦（teams）と引き分け（draw）は出さない。
-// 順位は成績表の「順位で点」と同じ見方（games/index.js の seatPoints）で決め、同じ順位なら点の多い順に並べる。4位からは5人まで出して残りは「ほか○人」
-function podiumOf(game, res, me) {
-  if (!res || res.teams !== undefined || res.draw === true || !winnersOf(res).length) return null; // 勝った人のいない引き分け（点と線・マンカラの1位の同点など）も出さない
-  const okArr = (a) => Array.isArray(a) && a.length >= 3 && a.every(Number.isFinite);
-  const val = okArr(res.scores) ? res.scores : okArr(res.pts) && Array.isArray(res.ranking) ? res.pts : null;
-  if (!val) return null;
-  const n = val.length;
-  const sp = seatPoints(res, n);
-  const nm = (p) => (game.multi ? nameOf(S.order[p]) : S.mode === 'local' ? game.players?.[p] ?? `${p + 1}番` : nameOf(roundOrder()[p]));
-  return [...Array(n).keys()]
-    .sort((a, b) => sp[b] - sp[a] || val[b] - val[a])
-    .map((p) => ({ rank: 1 + sp.filter((x) => x > sp[p]).length, v: val[p], me: p === me, name: p === me ? 'あなた' : nm(p) }));
-}
-function podiumFx(list) {
-  const box = document.createElement('div');
-  box.className = 'podium-fx';
-  const stage = document.createElement('div');
-  stage.className = 'pd-stage';
-  const counts = [];
-  // 台の高さ・色と王冠は順位で決める（同点1位が2人なら、2人とも1位の台で王冠を付ける。2026-11-11 本人の決定）。並べる位置（まんなかが先頭）は今までどおり。
-  // 台は3つまでなので、4人目からの1位は下の1行で名前の前に 👑 を付ける（台は増やさない。スマホ幅で細くなりすぎるため。Claude の判断を本人が承認）
-  [[list[1], 300], [list[0], 600], [list[2], 0]].forEach(([x, at]) => {
-    const col = document.createElement('div');
-    col.className = `pd-col pd-${Math.min(3, x.rank)}`;
-    col.style.setProperty('--at', at + 'ms');
-    if (x.rank === 1) {
-      const crown = document.createElement('div');
-      crown.className = 'pd-crown';
-      crown.textContent = '👑';
-      col.append(crown);
-    }
-    const name = document.createElement('div');
-    name.className = 'pd-name' + (x.me ? ' me' : '');
-    name.textContent = x.name; // 名前は外から来た文字なので textContent
-    const block = document.createElement('div');
-    block.className = 'pd-block';
-    const rk = document.createElement('span');
-    rk.className = 'pd-rk';
-    rk.textContent = x.rank;
-    const sc = document.createElement('span');
-    sc.className = 'pd-sc';
-    sc.textContent = '0点';
-    block.append(rk, sc);
-    col.append(name, block);
-    stage.append(col);
-    counts.push([sc, x.v, at]);
-  });
-  box.append(stage);
-  const rest = list.slice(3);
-  if (rest.length) {
-    const p = document.createElement('p');
-    p.className = 'pd-rest';
-    p.textContent = rest.slice(0, 5).map((x) => `${x.rank === 1 ? '👑' : ''}${x.rank}位 ${x.name} ${x.v.toLocaleString()}点`).join('・') + (rest.length > 5 ? `・ほか${rest.length - 5}人` : '');
-    box.append(p);
-  }
-  showFx(box, 3600);
-  for (const [sc, v, at] of counts) {
-    setTimeout(() => {
-      const t0 = performance.now();
-      const step = (t) => {
-        const k = Math.min(1, (t - t0) / 420);
-        sc.textContent = Math.round(v * (1 - (1 - k) ** 3)).toLocaleString() + '点';
-        if (k < 1 && sc.isConnected) requestAnimationFrame(step);
-      };
-      requestAnimationFrame(step);
-      setTimeout(() => { sc.textContent = v.toLocaleString() + '点'; }, 520); // 裏のタブで描き替えが止まっても、数は必ず正しい値にする
-    }, at);
-  }
-}
+// 結果の表彰台（2026-11-09）は 2026-11-14 本人の依頼でやめた（判子のあとに台がせり上がる小窓）。
 
 // あなたのターンの帯: オンラインで TURN_PING_MS より長く待ったあとで自分の番が来たとき（moveSound の「番が来た」の枝。音・読み上げと同じとき）
 function turnFx() {
