@@ -24,7 +24,7 @@
 
 import { mulberry32 } from './util.js';
 import { since, scoreChips, esc } from './party.js';
-import { SEAT_COLORS, fitCanvas, toBoard, clamp } from './action.js';
+import { SEAT_COLORS, fitCanvas, toBoard, clamp, centerInView } from './action.js';
 
 const READY_MS = 3000;
 const GRACE_MS = 2500;
@@ -607,6 +607,10 @@ export default {
       bar.append(slowBtn);
       root.append(chips, bar, wrap, note);
     } else root.append(chips, wrap, note);
+    const spacer = document.createElement('div'); // ページの下が足りずに真ん中まで送れないときの余白
+    root.append(spacer);
+    // 大きさは上から測って決め（resize）、描き終わってから弾幕の場が画面の縦の真ん中に来るように送る
+    // （2026-11-16 本人の依頼「遊びが始まる前に画面の縦位置を中央に移動させてから開始する」。前は一番上へ戻していた）
     if (s.phase !== 'end') window.scrollTo(0, 0);
     since(`danmaku:${s.seed}:ready`);
     ui = {
@@ -617,6 +621,7 @@ export default {
     };
     wrap.classList.toggle('ac-live', s.phase === 'play' && me !== null);
     resize();
+    if (s.phase !== 'end') setTimeout(() => centerInView(wrap, spacer), 0);
     // なぞった分だけ動かす（指で自機が隠れないように）。マウスは押さなくても、その位置へ動く
     let drag = null;
     canvas.addEventListener('pointerdown', (e) => {

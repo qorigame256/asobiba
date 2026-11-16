@@ -10,10 +10,18 @@
 //   - 入れ替えのマスに止まったら、だれと入れ替えるかを自分で選ぶ（CPU はいちばん先にいる人を選ぶ）。
 //   - さいころの目は種と振った回数から決める（全員の端末で同じ目になる。手には目を入れない）。
 //   - 1回休みは、次に自分の番が来たときに飛ばす。
+// さいころの演出（2026-11-16 本人の依頼「サイコロの出目の演出をする。今は進むのが早すぎて何が起こっているのかが理解しずらい」。party-games.md）:
+//   振った手が新しく届いたら、さいころが転がって（ROLL_MS）目が決まり、コマが1マスずつ跳んで進み（HOP_MS ごと。ぴったりで戻るときはゴールで折り返す）、
+//   働くマスに止まったら一拍おいて（EV_MS）その先へ1マスずつ動く。入れ替えは2つのマスを弾ませるだけ。Claude の判断:
+//   - 描き直されても続きから動かす（anim に始めた時刻を覚える）。動いている間は「さいころを振る」・入れ替えの相手のボタンを押せない。
+//   - CPU は演出が終わってから振る（cpuDelay に演出の長さを足す。決めるのはホストの時計なので、ほかの端末では少しずれる）。
+//   - 手が届いたときの音は振った音（dice）だけにし、働くマスの音（進む・もう1回は正解、戻る・休みは不正解）はコマがそのマスに止まったときに鳴らす。
+//   - 動きを減らす設定の端末では動かさず、音も前のとおり手が届いたときに鳴らす。
 // 手: { p, t: 'roll' } / { p, t: 'swap', to: 入れ替える相手の番号 }
 
 import { mulberry32, shuffle } from './util.js';
 import { SEAT_COLORS } from './party.js';
+import { play } from '../sound.js';
 
 export const GOAL = 30;
 const DICE = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
@@ -45,6 +53,39 @@ export function diceOf(s, k = s.rolls) {
   return 1 + Math.floor(rng() * 6);
 }
 const clone = (s) => ({ ...s, pos: s.pos.slice(), rest: s.rest.slice() });
+
+const ROLL_MS = 800; // さいころが転がる
+const HOP_MS = 180; // 1マス跳ぶ
+const EV_MS = 500; // 働くマスに止まってから動き出すまで
+const TAIL_MS = 150;
+const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+// 振った手の動き（s.last から）。path = さいころの目で通るマス、evPath = マスの働きで通るマス、landAt = 目の数だけ進み終える時刻、total = 演出の長さ
+export function planOf(L) {
+  if (!L || L.swapWith !== undefined || !Number.isInteger(L.d)) return null;
+  const path = [];
+  let x = L.from;
+  if (L.bounce) { while (x < GOAL) path.push(++x); while (x > L.land) path.push(--x); } else while (x < L.land) path.push(++x);
+  const evPath = [];
+  x = L.land;
+  while (x < L.to) evPath.push(++x);
+  while (x > L.to) evPath.push(--x);
+  const landAt = ROLL_MS + path.length * HOP_MS;
+  const total = (evPath.length ? landAt + EV_MS + (evPath.length - 1) * HOP_MS : landAt) + TAIL_MS;
+  return { path, evPath, landAt, total };
+}
+// 始めてから t ms のときのコマの位置と段階（roll: 転がっている / go: 目の数だけ進んでいる / land: 止まった / done: 終わった）
+export function frameOf(plan, L, t) {
+  if (t < ROLL_MS) return { pos: L.from, stage: 'roll' };
+  const hops = Math.min(plan.path.length, Math.floor((t - ROLL_MS) / HOP_MS));
+  if (hops < plan.path.length) return { pos: hops ? plan.path[hops - 1] : L.from, stage: 'go' };
+  const ts = t - plan.landAt;
+  if (!plan.evPath.length || ts < EV_MS) return { pos: L.land, stage: t >= plan.total ? 'done' : 'land' };
+  const k = Math.min(plan.evPath.length, Math.floor((ts - EV_MS) / HOP_MS) + 1);
+  return { pos: plan.evPath[k - 1], stage: t >= plan.total ? 'done' : 'land' };
+}
+const evSound = (t) => (t === 'fwd' || t === 'again' ? 'correct' : t === 'back' || t === 'skip' ? 'wrong' : null);
+let anim = null; // いま動かしている手 { key: 種と手の数, t0: 始めた時刻, said: 働くマスの音を鳴らしたか }
+let animTimer = null;
 
 // 次の人へ（1回休みの人は飛ばす）。飛ばした人を返す
 function nextTurn(s) {
@@ -84,10 +125,8 @@ export default {
   resultText(res, me, pn) { return res.winner === me ? 'ゴール！あなたの勝ち！🎉' : `${pn(res.winner)}がゴールして勝ち！`; },
   sound(a, b, m) {
     if (m.t === 'swap') return 'pop';
-    const ev = b.last?.ev?.t;
-    if (ev === 'fwd' || ev === 'again') return 'correct';
-    if (ev === 'back' || ev === 'skip') return 'wrong';
-    return 'dice';
+    if (!reduced()) return 'dice'; // 働くマスの音は、演出でコマが止まったときに鳴らす（render）
+    return evSound(b.last?.ev?.t) ?? 'dice';
   },
 
   apply(s0, m) {
@@ -131,7 +170,7 @@ export default {
   },
 
   // CPU: いつも振る。入れ替えは、いちばん先にいる人と（自分より後ろしかいなくても、いちばん前の人と）
-  cpuDelay(s) { return s.phase === 'swap' ? 1200 : 900; },
+  cpuDelay(s) { return (s.phase === 'swap' ? 1200 : 900) + (reduced() ? 0 : planOf(s.last)?.total ?? 0); }, // 演出が終わってから
   cpu(s, p) {
     if (s.phase === 'swap') {
       const others = [...Array(s.n).keys()].filter((q) => q !== p);
@@ -148,6 +187,18 @@ export default {
     const res = this.result(s);
     root.innerHTML = '';
     root.className = 'board sgr';
+    // さいころの演出（ファイルの先頭）。L.p のコマだけ途中の位置に置き、残りは paint が動かす
+    clearInterval(animTimer);
+    animTimer = null;
+    const L = s.last;
+    const key = `${s.seed}:${s.step}`;
+    if (o.fresh && L && !reduced()) anim = planOf(L) ? { key, t0: Date.now(), said: false } : null;
+    const plan = anim?.key === key ? planOf(L) : null;
+    const t0 = plan ? Date.now() - anim.t0 : Infinity;
+    const moving = !!plan && t0 < plan.total;
+    const posOf = (p) => (moving && p === L.p ? frameOf(plan, L, t0).pos : s.pos[p]);
+    const toksAt = [];
+    const cellAt = [];
 
     const chips = document.createElement('div');
     chips.className = 'cc-opps';
@@ -179,14 +230,17 @@ export default {
         const cell = document.createElement('div');
         if (i > GOAL) { cell.className = 'sgr-cell none'; grid.append(cell); continue; }
         const ev = evOf(s.board[i]);
+        const swapped = L?.swapWith !== undefined && (i === s.pos[L.p] || i === s.pos[L.swapWith]);
         cell.className = 'sgr-cell' + (i === 0 ? ' start' : i === GOAL ? ' goal' : '') + (ev ? ' ev ' + s.board[i].t : '')
-          + (s.last && i === s.last.to && o.fresh ? ' pop' : '');
+          + (o.fresh && !moving && ((L && i === L.to) || swapped) ? ' pop' : '');
         cell.title = ev ? ev.label : '';
         cell.innerHTML = `<span class="sgr-n">${i === 0 ? 'スタート' : i === GOAL ? 'ゴール' : i}</span><span class="sgr-ev">${i === 0 ? '🏠' : i === GOAL ? '🏁' : ev ? ev.icon + (s.board[i].v ?? '') : ''}</span>`;
         const toks = document.createElement('div');
         toks.className = 'sgr-toks';
-        for (let p = 0; p < s.n; p++) if (s.pos[p] === i) toks.insertAdjacentHTML('beforeend', `<span class="sgr-dot" style="background:${SEAT_COLORS[p]}">${p + 1}</span>`);
+        for (let p = 0; p < s.n; p++) if (posOf(p) === i) toks.insertAdjacentHTML('beforeend', `<span class="sgr-dot${moving && p === L.p ? ' mov' : ''}" style="background:${SEAT_COLORS[p]}">${p + 1}</span>`);
         cell.append(toks);
+        toksAt[i] = toks;
+        cellAt[i] = cell;
         grid.append(cell);
       }
     }
@@ -196,24 +250,64 @@ export default {
     // さっき起きたこと
     const log = document.createElement('div');
     log.className = 'sgr-log';
-    const L = s.last;
+    let die = null;
+    let said = null;
+    let skip = null;
     if (L) {
       if (L.swapWith !== undefined) log.textContent = `🔄 ${nameP(L.p)}と${nameP(L.swapWith)}が入れ替わった`;
       else {
-        const die = document.createElement('span');
-        die.className = 'sgr-die' + (o.fresh ? ' pop' : '');
+        die = document.createElement('span');
+        die.className = 'sgr-die' + (o.fresh && !moving ? ' pop' : '');
         die.textContent = DICE[L.d];
-        const ev = evOf(L.ev);
-        const t = document.createElement('span');
-        t.textContent = `${nameP(L.p)}が ${L.d} を出して${L.land === GOAL ? 'ゴール！' : `${L.land}マス目へ`}${L.bounce ? '（多すぎた分だけ戻った）' : ''}`
-          + (ev ? `。${ev.icon} ${ev.label}${L.to !== L.land ? ` → ${L.to}マス目` : ''}` : '');
-        log.append(die, t);
+        said = document.createElement('span');
+        log.append(die, said);
       }
-      if (L.skipped?.length) log.append(Object.assign(document.createElement('div'), { className: 'kj-sub', textContent: `💤 ${L.skipped.map(nameP).join('・')}は1回休み` }));
+      if (L.skipped?.length) {
+        skip = Object.assign(document.createElement('div'), { className: 'kj-sub', textContent: `💤 ${L.skipped.map(nameP).join('・')}は1回休み` });
+        log.append(skip);
+      }
     } else log.textContent = 'さいころを振って、ゴールを目指そう';
     root.append(log);
+    // 演出の1こま（t = 始めてからの時間）。コマを動かし、さいころの面と一言を変える
+    let last = null;
+    const paint = (t) => {
+      const fr = plan && t < plan.total ? frameOf(plan, L, t) : { pos: L?.to, stage: 'done' };
+      if (die) {
+        die.classList.toggle('rolling', fr.stage === 'roll');
+        die.textContent = fr.stage === 'roll' ? DICE[1 + Math.floor(Math.random() * 6)] : DICE[L.d];
+        if (last === 'roll' && fr.stage !== 'roll') { die.classList.remove('pop'); void die.offsetWidth; die.classList.add('pop'); }
+      }
+      if (said) {
+        const ev = evOf(L.ev);
+        said.textContent = fr.stage === 'roll' ? `${nameP(L.p)}がさいころを振った…`
+          : fr.stage === 'go' ? `${nameP(L.p)}が ${L.d} を出した`
+          : `${nameP(L.p)}が ${L.d} を出して${L.land === GOAL ? 'ゴール！' : `${L.land}マス目へ`}${L.bounce ? '（多すぎた分だけ戻った）' : ''}`
+            + (ev ? `。${ev.icon} ${ev.label}${L.to !== L.land ? ` → ${L.to}マス目` : ''}` : '');
+      }
+      if (skip) skip.hidden = fr.stage === 'roll' || fr.stage === 'go';
+      if (plan) {
+        const tok = root.querySelector('.sgr-dot.mov');
+        if (tok && toksAt[fr.pos] && tok.parentNode !== toksAt[fr.pos]) {
+          toksAt[fr.pos].append(tok);
+          const c = cellAt[fr.pos];
+          c.classList.remove('pop'); void c.offsetWidth; c.classList.add('pop');
+        }
+        if (fr.stage === 'done') tok?.classList.remove('mov');
+        // 働くマスの音は止まったときに1回（描き直しで少し遅れて続きを描いたときも、止まってすぐなら鳴らす）
+        if ((fr.stage === 'land' || fr.stage === 'done') && !anim.said) {
+          anim.said = true;
+          const snd = evSound(L.ev?.t);
+          if (snd && t - plan.landAt < 400) play(snd);
+        }
+      }
+      last = fr.stage;
+    };
+    paint(t0);
 
-    if (!o.canMove || s.phase === 'end') return;
+    if (!o.canMove || s.phase === 'end') {
+      if (moving) animTimer = setInterval(() => { const t = Date.now() - anim.t0; paint(t); if (t >= plan.total || !root.isConnected) { clearInterval(animTimer); animTimer = null; } }, 60);
+      return;
+    }
     const act = document.createElement('div');
     act.className = 'cc-actions';
     if (s.phase === 'swap') {
@@ -236,5 +330,17 @@ export default {
       act.append(b);
     }
     root.append(act);
+    if (!moving) return;
+    // 動いている間は押せない。終わったら押せるようにする
+    const btns = [...act.querySelectorAll('button')];
+    for (const b of btns) b.disabled = true;
+    animTimer = setInterval(() => {
+      const t = Date.now() - anim.t0;
+      paint(t);
+      if (t < plan.total && root.isConnected) return;
+      clearInterval(animTimer);
+      animTimer = null;
+      for (const b of btns) b.disabled = false;
+    }, 60);
   },
 };

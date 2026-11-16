@@ -1,8 +1,11 @@
 // 英単語クイズ（2026-10-31 本人の依頼で追加）。全員に同じ問題が出る。詳細設定「出し方」で2通り（どちらも1つのゲームの中。本人が推奨を承認）:
 //   意味当て（最初）: 英単語が出て、4つの日本語の意味から1つ選ぶ。答えられるのは1問に1回だけ（難読漢字の「4つから選ぶ」と同じ）。
-//   スペル打ち: 日本語の意味が出て、英単語を打ち込む。何度でも打ち直せる。つづりの文字数を「_ _ _ _」で見せ、制限時間の4割がたつと1文字目も見せる（本人が推奨を承認）。
+//   スペル打ち: 日本語の意味が出て、英単語を打ち込む。何度でも打ち直せる。つづりの文字数を「_ _ _ _」で見せ、制限時間の2割がたつと1文字目、5割がたつと2文字目も見せる
+//     （本人が推奨を承認した形は「4割で1文字目」。2026-11-16 本人の依頼「1文字目の表示までを早くする。2文字目までも表示するようにする」で今の形にした。割合は Claude の判断。2文字目は3文字以上の単語だけ）。
 //   英単語を選ぶ（2026-11-02 の32回目の案「逆の4択」。本人がおすすめどおり選んだ）: 日本語の意味が出て、4つの英単語から1つ選ぶ。答えられるのは1問に1回だけ（意味当てと同じ）。
 // 点と進め方は難読漢字と同じ（本人が推奨を承認）: 正解した人は速い順に 3点・2点・それ以降は1点、パスあり、10問（詳細設定で15・20問）。
+//   ただし、だれかが正解しても締め切らず、制限時間まで続ける（2026-11-16 本人の依頼「他の人がはやめに正解しても制限時間まで続ける」。前は難読漢字と同じく正解から5秒で締め切っていた。
+//   全員が正解かパスか答え終えたら、今までどおりすぐ締め切る）。
 // 難しさは 中学（最初）・高校・むずかしい・ぜんぶまぜる（本人が推奨を承認）。単語は eitango-data.js（Claude が書いた）。
 // 進行と時間の測り方は kanji.js と同じ（ホストが p = -1 の手を足す。速さは各自の端末で画面に出てから答えるまで）。
 // Claude の判断:
@@ -25,9 +28,9 @@ const ROUNDS = [[10, '10問'], [15, '15問'], [20, '20問']];
 const READY_MS = 3000;
 const SHOWN_MS = 3500;
 const GRACE_MS = 1500;
-const AFTER_MS = 5000; // 誰かが正解してから締め切るまで
 const PTS = [3, 2]; // 速い順の点。それより後ろは1点
-const HINT_AT = 0.4; // スペル打ちで1文字目を見せるのは、制限時間のこの割合がたったとき
+const HINT_AT = 0.2; // スペル打ちで1文字目を見せるのは、制限時間のこの割合がたったとき（2026-11-16 に 0.4 から）
+const HINT2_AT = 0.5; // 2文字目（3文字以上の単語だけ。2026-11-16）
 // 2026-11-03 本人の依頼: 詳細設定「1文字目」（鍵は hint。しばらくしてから（最初。今までと同じ）・最初から）で、スペル打ちの1文字目を最初から見せられるようにした。
 //   手伝いの好みなので、おまかせでは抽選しない（main.js の KEEP_KEYS の hint）。CPU の腕前は変えない（Claude の判断）
 const hintAt = (s) => (s.rules.hint === 'start' ? 0 : HINT_AT);
@@ -90,7 +93,13 @@ export function reviewOf(s, me = null) {
 }
 
 // スペル打ちの文字数の線（「_ _ _ _」）。first なら1文字目を見せる
-export const blanksOf = (word, first = false) => [...word].map((c, i) => (i === 0 && first ? c : '_')).join(' ');
+// shown = 先頭から見せる文字の数（true は1文字）
+export const blanksOf = (word, shown = 0) => {
+  const k = shown === true ? 1 : Number(shown) || 0;
+  return [...word].map((c, i) => (i < k ? c : '_')).join(' ');
+};
+// k 文字目を見せる時刻（ms）の一覧。2文字目は3文字以上の単語だけ
+export const hintTimes = (s, word, limit) => [limit * hintAt(s), ...([...word].length >= 3 ? [limit * HINT2_AT] : [])];
 
 /* ---------- 画面 ---------- */
 
@@ -155,8 +164,7 @@ export default {
     if (s.phase === 'ready') return { key: 'ready', ms: READY_MS, move: { t: 'next' } };
     if (s.phase === 'open') {
       if ([...Array(s.n).keys()].every((p) => doneOf(s, p))) return { key: 'all' + s.q, ms: GRACE_MS, move: { t: 'close' } };
-      if (s.solved.some((v) => v !== null)) return { key: 'solved' + s.q, ms: AFTER_MS, move: { t: 'close' } };
-      return { key: 'open' + s.q, ms: limitOf(s) + GRACE_MS, move: { t: 'close' } };
+      return { key: 'open' + s.q, ms: limitOf(s) + GRACE_MS, move: { t: 'close' } }; // だれかが正解しても制限時間まで（2026-11-16）
     }
     if (s.phase === 'shown') return { key: 'shown' + s.q, ms: SHOWN_MS, move: { t: 'next' } };
     return null;
@@ -289,14 +297,11 @@ export default {
       if (!s.opts) {
         const hint = document.createElement('div');
         hint.className = 'kj-hint et-blanks';
-        const early = hintAt(s) === 0;
-        hint.textContent = blanksOf(words[0], early) + `（${[...words[0]].length}文字）`;
+        const at = hintTimes(s, words[0], limit);
+        const paint = () => { const t = since(key); hint.textContent = blanksOf(words[0], at.filter((x) => t >= x).length) + `（${[...words[0]].length}文字）`; };
+        paint();
         card.append(hint);
-        if (!early) {
-          setTimeout(() => {
-            if (hint.isConnected) hint.textContent = blanksOf(words[0], true) + `（${[...words[0]].length}文字）`;
-          }, Math.max(0, limit * hintAt(s) - since(key)));
-        }
+        for (const x of at) if (x > since(key)) setTimeout(() => { if (hint.isConnected) paint(); }, x - since(key) + 20);
       }
     } else {
       const ans = document.createElement('div');
@@ -434,8 +439,8 @@ export default {
       const someone = s.solved.some((v) => v !== null);
       if (me !== null && s.solved[me] !== null) note.textContent = `正解！（${secText(s.solved[me])}）ほかの人を待っています`;
       else if (me !== null && s.passed[me]) note.textContent = 'パスしました。ほかの人を待っています';
-      else if (me !== null && s.tries[me] && s.said[me]) note.textContent = `${s.opts ? '× ' : ''}「${s.said[me]}」はちがいます${s.opts ? '（この問題はもう答えられません）' : ''}${someone ? '（ほかの人が正解しました。5秒で締め切り）' : ''}`;
-      else if (someone) note.textContent = 'ほかの人が正解しました。5秒で締め切り！ 正解すれば点がもらえます';
+      else if (me !== null && s.tries[me] && s.said[me]) note.textContent = `${s.opts ? '× ' : ''}「${s.said[me]}」はちがいます${s.opts ? '（この問題はもう答えられません）' : ''}${someone ? '（ほかの人が正解しました）' : ''}`;
+      else if (someone) note.textContent = 'ほかの人が正解しました。時間内に正解すれば点がもらえます';
       else if (me === null) note.textContent = '観戦中';
       else note.textContent = s.opts ? '4つから1つ選んでください（答えられるのは1回だけ）' : '大文字・小文字はどちらでも大丈夫です';
     } else if (s.phase === 'shown' && s.last) {

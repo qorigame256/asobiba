@@ -20,12 +20,12 @@
 // 部屋を作る・同じ画面で遊ぶのは持ち主の端末だけ（owner.js）。ほかの人は招待された部屋に入るだけ。App Store 版はだれでも作れる（canHost）。
 // banned = ホストが退出させた人の id。あいさつが来ても入れず、もう一度「退出」を送る。
 // streak = 連勝（2026-10-06 本人の決定）。{ key: ゲームと顔ぶれ, counted: 数え終えた対局, wins: 人の id → 連勝の数 }。ホストだけが数えて全員へ送る。
-// tally = 部屋の成績表（2026-10-06 本人の決定）。{ games: 決着した対局の数, wins: 人の id → 勝った回数, preds: 人の id → 勝敗予想が当たった回数（10回目に足した。無いこともある）,
+// tally = 部屋の成績表（2026-10-06 本人の決定）。{ games: 決着した対局の数, wins: 人の id → 勝った回数,
+//   （preds: 勝敗予想が当たった回数 は 2026-11-16 に勝敗予想と一緒にやめた。古い成績表に残っていても使わない）
 //   played: 人の id → 対局した回数（勝率のため。24回目に足した。無いこともある）,
 //   pts: 人の id → 順位で点の合計（28回目に足した。無いこともある。ホストが「順位で点」を選んだときだけ表に出す。下の「成績表を順位で点」）,
 //   best: 記録の鍵（records.js の recordKey）→ [{ id, n: そのときの表示名, v: 数字 }] 上位3人（部屋の最高記録。2026-10-22 に足した。無いこともある） }。
 //   ゲームをまたいで数える。ホストが数えて全員へ送る。
-// preds = 勝敗予想（2026-10-06 本人の決定）。{ key: どの対局か, by: 人の id → 勝つと予想したプレイヤー番号 }。各自が全員へ送りっぱなしにし、受け取った端末がそれぞれ覚える。
 // beg = 初心者マークを付けている人の id の一覧（各自が自分の端末で付け外しし、ホストが集めて全員へ送る）。
 // undo = この対局で「待った」をした回数（盤のゲームのオンライン）。待ったをすると手の一覧が短くなり、ふつうの同期（長い方が正）では
 //   戻せないので、ホストだけが手を削って undo を1つ進め、受け手は undo が大きい一覧をそのまま受け入れる。対局が替わると 0 に戻る。
@@ -89,7 +89,7 @@ function myDev() {
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'preds', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName', 'cpuAuto', 'rps', 'hidden', 'ptsMode', 'devs', 'bannedDevs', 'again', 'away', 'bench', 'draw', 'colors', 'colorKeep', 'lockPw', 'pw'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName', 'cpuAuto', 'hidden', 'ptsMode', 'devs', 'bannedDevs', 'again', 'away', 'bench', 'draw', 'colors', 'colorKeep', 'lockPw', 'pw'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -472,12 +472,8 @@ function tallyHtml() {
   }).join('・');
   const head = `🏆 この部屋の成績（${t.games}回${usePts ? '・順位で点' : ''}）`
     + (S.ptsMode && !usePts ? '<small>（点は「成績を0に戻す」のあとから数えます）</small>' : '');
-  // 勝敗予想の当たり（2026-10-07。10回目の案）: 1回でも当たった人だけ、当たった回数の多い順に出す（観戦だけの人も入る）
-  const pr = t.preds && typeof t.preds === 'object' ? t.preds : {};
-  const hits = (id) => (Number.isInteger(pr[id]) && pr[id] > 0 ? pr[id] : 0);
-  const seers = Object.keys(pr).filter((id) => !isCpu(id) && hits(id) && (S.members.includes(id) || S.names[id])).sort((a, b) => hits(b) - hits(a));
-  const seerList = seers.map((id) => `<b>${esc(id === S.myId ? 'あなた' : nameOf(id))}</b> ${hits(id)}回`).join('・');
-  return `${head}: ${list}` + (seers.length ? `<br>🔮 予想の当たり: ${seerList}` : '') + roomBestHtml(t);
+  // 勝敗予想の当たり（2026-10-07。10回目の案）は 2026-11-16 本人の依頼で勝敗予想と一緒にやめた
+  return `${head}: ${list}` + roomBestHtml(t);
 }
 
 // 成績表を点で並べるか（ホストが「順位で点」を選んでいて、成績表が点を数えている形のとき）
@@ -570,7 +566,7 @@ function tallyLine() {
 // Claude の判断: 表彰するだけで、部屋も成績表もそのまま（閉じればいつもの待合室。続けて遊んでもよい）。成績表に1回でも対局があるときだけ押せる。
 // 送るのは「表彰して」という合図（type: 'award'）だけで、順位は受け取った端末がそれぞれ自分の成績表（state で全員同じ）から作る。
 // ホストからの合図だけ受け付け、送りっぱなし（あとから入った人には出ない）。勝った回数が同じ人は同じ順位。だれも勝っていなければ「みんな引き分け」。
-// 予想の当たりが1回でもあれば「🔮 予想王」（いちばん多く当てた人。同じ回数なら全員）も添える。紙吹雪は動きを減らす設定の端末では出ない（confetti）。
+// 紙吹雪は動きを減らす設定の端末では出ない（confetti）。「🔮 予想王」は 2026-11-16 本人の依頼で勝敗予想と一緒にやめた。
 function awardRanks() {
   const t = S.tally;
   const src = ptsOn(t) ? t.pts : t?.wins ?? {}; // 順位で点なら点で表彰する（28回目の案）
@@ -597,11 +593,6 @@ function showAward() {
     rows.push(`<li class="award-row"><span class="award-medal">${medal[place - 1]}</span><span class="award-place">${place}位</span><span class="award-who">${r.ids.map(who).join('・')}</span><span class="award-n">${r.n}${ptsOn(S.tally) ? '点' : '勝'}</span></li>`);
     place += r.ids.length;
   }
-  const pr = S.tally.preds && typeof S.tally.preds === 'object' ? S.tally.preds : {};
-  const hit = (id) => (Number.isInteger(pr[id]) && pr[id] > 0 ? pr[id] : 0);
-  const seers = Object.keys(pr).filter((id) => !isCpu(id) && hit(id) && (S.members.includes(id) || S.names[id]));
-  const best = Math.max(0, ...seers.map(hit));
-  const kings = seers.filter((id) => hit(id) === best);
   const pop = document.createElement('div');
   pop.className = 'invite-pop award-pop';
   pop.setAttribute('role', 'dialog');
@@ -611,7 +602,6 @@ function showAward() {
     <div class="invite-title">🏆 今日の表彰</div>${S.roomName ? `<div class="invite-room">🏷 ${esc(S.roomName)}</div>` : ''}
     <p class="invite-note">この部屋で ${games}回 遊びました。おつかれさま！</p>
     ${rows.length ? `<ol class="award-list">${rows.join('')}</ol>` : `<p class="award-none">${ptsOn(S.tally) ? 'だれも点を取らず、みんな引き分けでした' : 'だれも勝たず、みんな引き分けでした'}</p>`}
-    ${kings.length ? `<p class="award-seer">🔮 予想王: ${kings.map(who).join('・')}（${best}回 当てた）</p>` : ''}
   </div>`;
   const row = document.createElement('div');
   row.className = 'invite-actions';
@@ -642,14 +632,21 @@ function historyLine() {
 }
 
 /* ---------- 準備OK（2026-10-07 本人の決定）: 待合室で、部屋に入った人が「準備OK」を押す。ホストの画面にだれが準備できたかが出る ---------- */
-// Claude の判断: ホスト以外の部屋の人（観戦の人も）が押せる。ホストは「始める」を押す人なので数えない。始めなくても押せる（目安だけ）。
+// Claude の判断: ホスト以外の部屋の人（観戦の人も）が押せる。ホストは「始める」を押す人なので数えない。
+// 2026-11-16 本人の依頼（「他のプレイヤーの準備OKを押させてから開始する」。room.md）: 待つ人（readyNeed）の準備OK がそろうまで、ホストの「始める」は押せない。
+//   待つのは、いま始めたら対局する人（カードなどは lineup の humans、盤のゲームは pick の人）だけ。ホスト・観戦の人・CPU・合図が届いていない人（alive でない）は待たない。
 // 待合室ごと（S.round）に数え直す: ゲームを変える・対局を始めると round が進むので、前の準備OK は消える。
 // ゲストは type: 'ready' を送り、ホストが S.ready（{ round, ids }）に集めて state で送る。全員そろったら、ホストの「始める」が目立つ。
 function readyIds() {
   return S.ready?.round === S.round ? S.ready.ids.filter((id) => S.members.includes(id) && id !== S.members[0]) : [];
 }
-const readyOthers = () => S.members.slice(1);
-const allReady = () => readyOthers().length > 0 && readyOthers().every((id) => readyIds().includes(id));
+function readyNeed(game = GAMES[S.gameId]) {
+  const players = game.multi ? lineup(game).humans : boardPick().filter((v) => v !== 'cpu');
+  return players.filter((id) => id !== S.members[0] && alive(id));
+}
+const readyDone = (game = GAMES[S.gameId]) => { const ok = readyIds(); return readyNeed(game).every((id) => ok.includes(id)); };
+// 待つ人がいて、全員がそろった（「始める」を目立たせる・一言出す）
+const allReady = (game = GAMES[S.gameId]) => readyNeed(game).length > 0 && readyDone(game);
 function setReady(id, on) {
   const was = allReady();
   const ids = readyIds().filter((x) => x !== id);
@@ -658,11 +655,11 @@ function setReady(id, on) {
   saveRoom();
   if (S.isHost && !was && allReady()) toast('✋ 全員の準備ができました！');
 }
-// 待合室に出す「準備OK 2/3人」の一行（ホスト以外がいるときだけ）
+// 待合室に出す「準備OK 2/3人」の一行（待つ人がいるときだけ）
 function readyLine() {
-  const others = readyOthers();
+  const others = readyNeed();
   if (!others.length) return null;
-  const ok = readyIds();
+  const ok = readyIds().filter((id) => others.includes(id));
   const p = document.createElement('p');
   p.className = 'lobby-ready' + (allReady() ? ' all' : '');
   const wait = others.filter((id) => !ok.includes(id));
@@ -784,39 +781,35 @@ function votePanel() {
   return wrap;
 }
 
-/* ---------- 遊びの抽選（2026-11-04 本人の依頼）: 待合室で、ゲームの候補3つと「ほかの遊び」の4つからみんなで選ぶ ---------- */
-// 本人の決定: 部屋のだれでも始められる。候補は、この部屋で直近に遊んだ5種類（📜 この部屋の対局）を除いた全ゲームから3つ。
-//   みんなが4つから1つ選び、全員が選ぶか DRAW_MS（20秒）たったら、いちばん多いものに決まる（同じ数ならその中からくじ）。「ほかの遊び」に決まったら自動で引き直す。
+/* ---------- 遊びの抽選（2026-11-04 本人の依頼）: 待合室で、ゲームの候補5つと「ほかの遊び」の6つからみんなで選ぶ ---------- */
+// 本人の決定: 部屋のだれでも始められる。候補は、この部屋の新しい10回の対局（📜 この部屋の対局。同じゲームを続けて遊んだ回もそれぞれ1回）に出たゲームを除いた全ゲームから5つ
+//   （2026-11-16 本人の依頼で「直近に遊んだ5種類を除いて3つ」から変えた。room.md）。
+//   みんなが6つから1つ選び、全員が選ぶか DRAW_MS（20秒）たったら、いちばん多いものに決まる（同じ数ならその中からくじ）。「ほかの遊び」に決まったら自動で引き直す。
 // Claude の判断: いまの人数で遊べないゲームも外す（ゲームのルーレットと同じ決まり。いまのゲームは外さない）。引き直しでは、その抽選で前に出たゲームも外す
-//   （残りが3つに満たなければ、いま出ていた3つだけ外す）。だれも選ばずに時間切れのときは、3つのゲームからくじ（「ほかの遊び」も入れると、だれもいないまま引き直しが続くため）。
+//   （残りが5つに満たなければ、いま出ていた5つだけ外す）。だれも選ばずに時間切れのときは、5つのゲームからくじ（「ほかの遊び」も入れると、だれもいないまま引き直しが続くため）。
 //   決まるまでは選び直せる。CPU は選ばない。「全員」は合図が届いている人だけで数える（抜けたまま部屋に名前が残っている人を20秒待たないように）。
 //   抽選するのも数えるのもホストの端末（S.draw = { n, by, re, opts, votes: 人の id → ゲームの id か 'other', seen }。state で送る）。ゲストは type: 'drawStart'・'drawVote' を送る。
 //   決まったら、ホストが type: 'drawn' を送りっぱなしにして全員に一言出す。対局が始まる・ゲームが替わる（startRound・newRound）と抽選は消える。
 //   残りの秒数は、もう一回の OK と同じく各端末が見たときから数える（端末ごとに少しずれる。決めるのはホストの時計）。
 const DRAW_MS = 20000;
-const DRAW_RECENT = 5;
+const DRAW_RECENT = 10; // 除く対局の回数（種類の数ではない）
+const DRAW_PICK = 5; // 引くゲームの数（これに「ほかの遊び」が1つ付く）
 const DRAW_OTHER = 'other';
-function recentGames() {
-  const out = [];
-  for (const h of S.history ?? []) {
-    if (!out.includes(h.g)) out.push(h.g);
-    if (out.length >= DRAW_RECENT) break;
-  }
-  return out;
-}
-// 候補を3つまで引く（skip = その抽選で前に出たゲーム）
+// 新しい DRAW_RECENT 回の対局に出たゲーム（S.history は新しい順）
+const recentGames = () => [...new Set((S.history ?? []).slice(0, DRAW_RECENT).map((h) => h.g))];
+// 候補を DRAW_PICK まで引く（skip = その抽選で前に出たゲーム）
 function drawOpts(skip = []) {
   const recent = recentGames();
   const pool = GAME_ORDER.filter((id) => playableNow(GAMES[id]) && !recent.includes(id));
   let list = pool.filter((id) => !skip.includes(id));
-  if (list.length < 3) list = pool.filter((id) => !skip.slice(-3).includes(id));
-  if (list.length < 3) list = pool;
+  if (list.length < DRAW_PICK) list = pool.filter((id) => !skip.slice(-DRAW_PICK).includes(id));
+  if (list.length < DRAW_PICK) list = pool;
   list = list.slice();
   for (let i = list.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [list[i], list[j]] = [list[j], list[i]];
   }
-  return list.slice(0, 3);
+  return list.slice(0, DRAW_PICK);
 }
 const drawNeed = () => S.members.filter(alive);
 const drawValid = (d, c) => c === DRAW_OTHER || d.opts.includes(c);
@@ -890,7 +883,7 @@ function onDrawn(msg) {
   if (msg.g === DRAW_OTHER || GAMES[msg.g]?.ready) drawnToast(msg.g, msg.tie === true);
 }
 let drawTick = null;
-// 待合室の抽選の欄（抽選の前は始めるボタン、抽選の間は4つの札）
+// 待合室の抽選の欄（抽選の前は始めるボタン、抽選の間は6つの札）
 function drawPanel() {
   if (S.mode !== 'online' || S.order) return null;
   const d = S.draw;
@@ -903,7 +896,7 @@ function drawPanel() {
     }, 'secondary');
     b.disabled = !drawOpts().length;
     const note = document.createElement('small');
-    note.textContent = `最近遊んだ${DRAW_RECENT}種類を除いて3つのゲームを引き、「ほかの遊び」と合わせた4つからみんなで選びます`;
+    note.textContent = `直近${DRAW_RECENT}回に遊んだゲームを除いて${DRAW_PICK}つ引き、「ほかの遊び」と合わせた${DRAW_PICK + 1}つからみんなで選びます`;
     box.append(b, note);
     return box;
   }
@@ -1066,90 +1059,9 @@ function appendLobbyExtras(board) {
   else if (dp) board.append(dp);
   const v = votePanel();
   if (v) board.append(v);
-  board.append(rpsPanel());
 }
 
-/* ---------- 待合室でじゃんけん（2026-10-08。24回目の案。本人が選んだ）: 人がそろうのを待つ間のおまけ ---------- */
-// Claude の判断: 待合室にいる部屋の人（ホストも観戦の人も）が ✊✌️✋ から1つ出す（出したら変えられない）。全員が出したら手を見せて勝ち負けを出す。
-// 部屋に1人のときは CPU が相手（出した瞬間にホストの端末が CPU の手を決める）。勝ち負けはおまけなので、成績表・連勝には入れない。
-// 出した手は、全員が出すまで「✓」とだけ見せる（簡易な隠し方。開発用の道具では覗ける）。
-// ゲストは type: 'rps'（回の番号 n と手 h）を送り、ホストが S.rps（{ n, hands: 人の id → 手 }）に集めて state で送る。
-// 手を見せたあとにだれかが出すと、次の回（n + 1）が始まる。見せた直後に何人かが同時に出しても、1つ前の回の番号で届いた手は次の回に入れる。
-// 2026-10-30 本人の依頼（目立たないように）: 開け閉めできる欄にし、最初は閉じておく（開けたかは S.rpsOpen。端末ごと）。閉じている間も、だれかが出していれば見出しに人数を添える。
-const RPS = { g: '✊', c: '✌️', p: '✋' };
-const RPS_NAME = { g: 'グー', c: 'チョキ', p: 'パー' };
-const RPS_BEATS = { g: 'c', c: 'p', p: 'g' };
-// 1人で CPU とした回が残っているところに、だれかが入ってきた（その回は終わったものとして、次に出した人から新しい回）
-const rpsSolo = () => S.members.length >= 2 && !!RPS[S.rps?.hands?.cpu];
-const rpsHands = () => (rpsSolo() ? {} : S.rps?.hands ?? {});
-const rpsPlayers = () => (S.members.length >= 2 ? S.members : [...S.members, 'cpu']);
-const rpsShown = () => rpsPlayers().every((id) => RPS[rpsHands()[id]]);
-// 手を入れる（ホストは届いた手も。ゲストは自分の手を先に入れて見せ、ホストからの state で置き換わる）。入れられなければ false
-function rpsPut(id, h, n) {
-  const cur = S.rps ?? { n: 0, hands: {} };
-  if (n === cur.n - 1) n = cur.n; // 見せた直後に、ほかの人と同時に出した
-  if (n !== cur.n || !RPS[h]) return false;
-  let next;
-  if (rpsShown() || rpsSolo()) next = { n: cur.n + 1, hands: { [id]: h } };
-  else if (RPS[rpsHands()[id]] && S.members.length >= 2) return false; // 1人（CPU が相手）なら出し直せる（相手が抜けて1人になったときに止まらないように）
-  else next = { n: cur.n, hands: { ...cur.hands, [id]: h } };
-  if (S.isHost && S.members.length < 2) next.hands.cpu = 'gcp'[Math.floor(Math.random() * 3)];
-  S.rps = next;
-  saveRoom();
-  return true;
-}
-// 勝った手（あいこなら null）
-function rpsWinHand(hands) {
-  const kinds = [...new Set(hands)];
-  if (kinds.length !== 2) return null;
-  return RPS_BEATS[kinds[0]] === kinds[1] ? kinds[0] : kinds[1];
-}
-function rpsPanel() {
-  const box = document.createElement('details');
-  box.className = 'lobby-rps';
-  box.open = !!S.rpsOpen;
-  box.ontoggle = () => { S.rpsOpen = box.open; };
-  const hands = rpsHands();
-  const players = rpsPlayers();
-  const shown = rpsShown();
-  const who = (id) => esc(id === 'cpu' ? '🤖 CPU' : id === S.myId ? 'あなた' : nameOf(id));
-  let line;
-  if (shown) {
-    const win = rpsWinHand(players.map((id) => hands[id]));
-    const winners = players.filter((id) => hands[id] === win);
-    line = 'ぽん！ ' + players.map((id) => `${who(id)} ${RPS[hands[id]]}`).join('・')
-      + ` → <b>${win ? `${winners.map(who).join('・')}の勝ち！` : 'あいこ！'}</b>`;
-    // 手を見せた回ごとに1回だけ音を鳴らす（勝った人は「正解」の音）
-    if (S.rpsHeard !== S.rps.n) {
-      if (S.rpsHeard !== undefined && players.includes(S.myId)) play(winners.includes(S.myId) ? 'correct' : 'pop'); // 部屋に入ったときに見せてあった回では鳴らさない
-      S.rpsHeard = S.rps.n;
-    }
-  } else {
-    S.rpsHeard ??= null; // これより後に見せた回は鳴らす
-    const done = players.filter((id) => RPS[hands[id]]);
-    const wait = players.filter((id) => !RPS[hands[id]]);
-    line = done.length
-      ? `出した: ${done.map((id) => `${who(id)} ✓`).join('・')}<small>（まだ: ${wait.map(who).join('・')}）</small>`
-      : (S.members.length < 2 ? 'CPU と勝負できます' : '全員が出したら「ぽん！」');
-  }
-  const mine = !shown && RPS[hands[S.myId]];
-  const put = shown ? 0 : players.filter((id) => RPS[hands[id]]).length;
-  box.innerHTML = `<summary>✊ じゃんけん（待っている間のおまけ）${mine ? ` <small>あなたは ${RPS[mine]}</small>` : put ? ` <small>${put}人が出した</small>` : ''}</summary><p class="rps-line">${line}</p>`;
-  const row = document.createElement('div');
-  row.className = 'rps-btns';
-  for (const h of ['g', 'c', 'p']) {
-    const b = makeButton(`${RPS[h]} ${RPS_NAME[h]}`, () => {
-      const n = S.rps?.n ?? 0;
-      if (!rpsPut(S.myId, h, n)) return;
-      if (S.isHost) sendState(); else send({ type: 'rps', n, h });
-      render();
-    }, 'secondary small');
-    b.disabled = !!mine && S.members.length >= 2;
-    row.append(b);
-  }
-  box.append(row);
-  return box;
-}
+/* ---------- 待合室でじゃんけん（2026-10-08。24回目の案）は 2026-11-16 本人の依頼「待機室のじゃんけんを廃止」でやめた（room.md）。古い版の端末が送る rps は受け取っても何もしない ---------- */
 
 /* ---------- 対局の時間（2026-10-07 本人の決定）: 結果の画面に「この対局は ◯分◯秒」と出す ---------- */
 // Claude の判断: ホストの端末（同じ画面の対局ではその端末）が、対局の画面を最初に描いたときから決着を見たときまでを測り、
@@ -1229,11 +1141,6 @@ function countResult(res, st, game) {
   const t = S.tally ?? { games: 0, wins: {} };
   const wins = { ...t.wins };
   for (const id of won) if (!isCpu(id)) wins[id] = (wins[id] ?? 0) + 1;
-  // 勝敗予想の当たり: ホストの端末に届いている予想で数える（予想は1巡するまでに締め切るので、決着のときには全部届いている）
-  const preds = { ...(t.preds ?? {}) };
-  const by = predsNow();
-  const wonP = winnersOf(res);
-  for (const id of Object.keys(by)) if (!isCpu(id) && wonP.includes(by[id])) preds[id] = (preds[id] ?? 0) + 1;
   // 勝率のため、対局した人（人だけ）の対局の数も数える。前の形の成績表（played が無いまま対局がある）は、勝ちの数と合わなくなるので
   // 「成績を0に戻す」まで数えない
   const old = t.games > 0 && !t.played;
@@ -1261,7 +1168,7 @@ function countResult(res, st, game) {
     list = list.sort((a, b) => b.v - a.v).slice(0, 3);
     if (list.length) best = { ...(best ?? {}), [key]: list };
   }
-  S.tally = { games: t.games + 1, wins, preds, ...(old ? {} : { played }), ...(oldPts ? {} : { pts }), ...(best ? { best } : {}) };
+  S.tally = { games: t.games + 1, wins, ...(old ? {} : { played }), ...(oldPts ? {} : { pts }), ...(best ? { best } : {}) };
   // 対局の履歴: 新しいものから HISTORY_MAX 個。勝った人はそのときの表示名で覚える（CPU の名前は対局ごとに変わるため）
   const names = [...won].map((id) => nameOf(id));
   S.history = [{ g: S.gameId, w: names }, ...(S.history ?? [])].slice(0, HISTORY_MAX);
@@ -1615,7 +1522,7 @@ function appendReactions() {
     }, 'ghost small');
     bar.append(b);
   });
-  ctl().append(bar);
+  menuCtl().append(bar);
 }
 
 const playersText = (g) => (g.minPlayers === g.maxPlayers ? `${g.minPlayers}人` : `${g.minPlayers}〜${g.maxPlayers}人`);
@@ -1876,10 +1783,18 @@ function renderOwnerBox(owner) {
   box.append(det);
 }
 
+// 部屋の帯を畳む（2026-11-16 本人の依頼「部屋コード、遊びを遊んでいるときは表示しない、タップすると出てくるようにする」。room.md）:
+// 対局の画面（待合室と、ゲストが対局から見に行った待合室を除く）では、帯を小さな「🔑 部屋」（通信の具合の丸つき）に畳み、押すと開く。
+// 開けたかは S.roomOpen にその対局の round を入れて覚える（端末ごと。送らない）。次の対局ではまた畳む（Claude の判断）。
+const roomFolded = () => !!S?.order && !(S.lobbyView && !S.isHost) && S.roomOpen !== S.round;
 function renderRoomBar() {
   const bar = el('room-bar');
   if (!S || S.mode !== 'online') { bar.hidden = true; return; }
   bar.hidden = false;
+  const playing = !!S.order && !(S.lobbyView && !S.isHost);
+  bar.classList.toggle('folded', roomFolded());
+  el('btn-room-fold').hidden = !playing;
+  el('btn-room-fold').setAttribute('aria-expanded', String(!roomFolded()));
   el('room-code').textContent = S.code + (S.lockPw || S.locked ? ' 🔒' : '');
   el('room-name').textContent = S.roomName ? '🏷 ' + S.roomName : '';
   el('room-name').hidden = !S.roomName;
@@ -1907,6 +1822,8 @@ function renderRoomBar() {
   }
   el('presence-dot').className = 'dot ' + cls;
   el('presence-text').textContent = text;
+  el('btn-room-fold').innerHTML = roomFolded() ? `🔑 部屋 <span class="dot ${cls}" aria-hidden="true"></span>` : '▲ たたむ'; // cls は上の決まった言葉だけ
+  el('btn-room-fold').title = roomFolded() ? `部屋コード・${text}` : '';
   renderNetBanner();
 }
 
@@ -2038,8 +1955,6 @@ function statusHtml(game, st, res) {
   if (streak) html += `<div class="status-sub streak">${streak}</div>`;
   const watch = watchHtml();
   if (watch) html += `<div class="status-sub watch">${watch}</div>`;
-  const preds = res ? predHtml(res) : '';
-  if (preds) html += `<div class="status-sub pred">${preds}</div>`;
   const tally = res ? tallyHtml() || localTallyHtml(game) : '';
   if (tally) html += `<div class="status-sub tally">${tally}</div>`;
   const took = res ? timeHtml() : '';
@@ -2243,7 +2158,33 @@ function autoPlayers() {
   sendState();
 }
 
+/* ---------- 対局の画面のメニュー（2026-11-16 本人の依頼「遊びの操作とそれ以外の操作画面とをわかりやすいように分ける」。room.md） ---------- */
+// 対局の画面（待合室を除く）の下の段には遊びの操作だけをそのまま出し、それ以外（リアクション・見やすさ・盤の向き・待合室へ・ゲームを変える・次は見るだけ・
+// 画像で共有・部屋の人）は畳んだ「⚙ 部屋のメニュー」（同じ画面の対局は「⚙ メニュー」）の中に出す（本人の選択）。開けたかは S.menuOpen（端末ごと。送らない）。
+// 作り: 描き直しの間だけ menuBox に入れ物を置き（openMenu）、メニューに入る部品は menuCtl() へ足し、closeMenu で下の段の最後に畳んで足す。
+// 待合室では menuBox が null なので、同じ部品（部屋の人など）が今までどおり下の段へ出る。中身が無ければメニューを出さない。
+let menuBox = null;
+const menuCtl = () => menuBox ?? ctl();
+function openMenu() {
+  menuBox = document.createElement('div');
+  menuBox.className = 'play-menu-body';
+}
+function closeMenu() {
+  const body = menuBox;
+  menuBox = null;
+  if (!body?.childElementCount) return;
+  const det = document.createElement('details');
+  det.className = 'play-menu';
+  det.open = !!S.menuOpen;
+  det.ontoggle = () => { S.menuOpen = det.open; };
+  const sum = document.createElement('summary');
+  sum.textContent = S.mode === 'online' ? '⚙ 部屋のメニュー' : '⚙ メニュー';
+  det.append(sum, body);
+  ctl().append(det);
+}
+
 function renderPage() {
+  menuBox = null; // 前の描き直しが途中で止まっていても、待合室の部品がメニューの入れ物に入らないように
   if (S.mode === 'online') noteMembers(); // 人が入ったら札が飛び込む（memberFx）
   if (S.mode === 'online' && S.isHost && !S.order) autoPlayers();
   resultUp = false;
@@ -2321,7 +2262,7 @@ function renderPage() {
   const opts = { canMove: canMove(game, st, res), onMove: onBoardMove, fresh, me: watchSeat(game), view: boardView(game) };
   if (!game.multi) Object.assign(opts, { peek: opts.canMove ? sendPeek : null, peekIn: peekInNow() }); // 相手の迷いが見える（2026-11-11）
   if (!game.multi) opts.rules = rulesOf(S.gameId, S.rules); // あぶない所の知らせ（2026-11-12）など、描くときに詳細設定を見るゲームのため
-  const slow = fresh && res && slowWanted(game, prevLen); // 決め手のスロー（2026-11-10）: 線を引くのを盤を描く前に遅らせておく
+  const slow = fresh && res && slowWanted(game, prevLen, res); // 決め手のスロー（2026-11-10）: 線を引くのを盤を描く前に遅らせておく
   if (slow) lineHold.until = Date.now() + SLOW_LINE - 160; // winLine はこの時刻からいつもの 160ms 待って引く
   if (game.multi) {
     Object.assign(opts, {
@@ -2351,13 +2292,11 @@ function renderPage() {
   if (!opts.canMove && S.couldMove !== false) S.waitFrom = Date.now();
   S.couldMove = opts.canMove;
 
+  // 遊びの操作（盤の下にそのまま出す）
   if (res) {
     if (!game.multi) appendReview(game);
     if (S.mode === 'online' && againNeed().length) appendAgain();
     else controls.append(makeButton('もう一回', () => afterAd(rematch)));
-    appendShare();
-    if (restable()) controls.append(restButton());
-    if (S.mode === 'online' && S.isHost) controls.append(makeButton('🏠 みんなで待合室へ', () => afterAd(() => newRound(S.gameId, { lobby: true })), 'secondary'));
   } else if (S.mode === 'local' && S.moves.length) {
     controls.append(
       makeButton('1手戻す', () => { S.moves.pop(); render(); }, 'secondary'),
@@ -2367,18 +2306,21 @@ function renderPage() {
     appendUndo(game);
     appendGiveUp(game, opts.canMove); // 参りました（2026-11-12）
   }
-  if (!res && S.gameId === 'oekaki' && st.phase === 'show') appendShare(); // お絵描き当ての答えの場面（描き終わった絵が出ている）
   appendSit(game, res);
-  appendFlip(game);
   appendReplayLast(game, res);
-  appendPredict(game, res);
-  appendReactions();
   appendWatchSelect(game);
-  controls.append(makeButton('👓 見やすさ', openView, 'ghost small')); // 見やすさ（2026-11-11）
-  if (S.mode === 'online' && !S.isHost) controls.append(makeButton('🏠 待合室へ', () => goAwayLobby(game, st, res), 'ghost small'));
-  if (S.mode === 'online' && S.isHost && !res) controls.append(lobbyAllButton());
-  if (S.mode === 'online' && S.isHost) controls.append(gameSelect());
+  // それ以外は「⚙ 部屋のメニュー」に畳む（2026-11-16 本人の依頼。下の「対局の画面のメニュー」の節）
+  openMenu();
+  appendReactions();
+  menuCtl().append(makeButton('👓 見やすさ', openView, 'ghost small')); // 見やすさ（2026-11-11）
+  appendFlip(game);
+  if (res || (S.gameId === 'oekaki' && st.phase === 'show')) appendShare(); // お絵描き当ては答えの場面（描き終わった絵が出ている）でも出す
+  if (res && restable()) menuCtl().append(restButton());
+  if (S.mode === 'online' && !S.isHost) menuCtl().append(makeButton('🏠 待合室へ', () => goAwayLobby(game, st, res), 'ghost small'));
+  if (S.mode === 'online' && S.isHost) menuCtl().append(res ? makeButton('🏠 みんなで待合室へ', () => afterAd(() => newRound(S.gameId, { lobby: true })), 'secondary') : lobbyAllButton());
+  if (S.mode === 'online' && S.isHost) menuCtl().append(gameSelect());
   appendMemberPanel();
+  closeMenu();
   showSendMark(); // 手が届いたかの印（2026-11-11）
   scheduleCpu(game, st, res);
   scheduleReferee(game, st, res);
@@ -2856,7 +2798,7 @@ function lateToast(text) {
 // 「📷 画像で保存・共有」: いまの画面を画像にして iPhone の共有の画面を開く（画像を保存・LINE など）
 function appendShare() {
   if (!canShare()) return;
-  ctl().append(makeButton('📷 画像で保存・共有', async () => { if (!(await shareScreen())) toast('画像にできませんでした'); }, 'secondary'));
+  menuCtl().append(makeButton('📷 画像で保存・共有', async () => { if (!(await shareScreen())) toast('画像にできませんでした'); }, 'secondary'));
 }
 
 /* ---------- 途中から空いた席に入る（2026-10-22。27回目の案。Claude の案から本人が選んだ） ---------- */
@@ -2927,7 +2869,7 @@ function appendFlip(game) {
     render();
   }, 'ghost small');
   b.setAttribute('aria-label', `盤の向きを変える。いま下にいるのは ${who(cur)}`);
-  ctl().append(b); // 名前は textContent で入る（makeButton）ので、外から来た文字でもそのまま使える
+  menuCtl().append(b); // 名前は textContent で入る（makeButton）ので、外から来た文字でもそのまま使える
 }
 
 /* ---------- さっきの手をもう一度（2026-11-11 本人の選択。room.md「UI・UX の4回目」） ---------- */
@@ -2997,12 +2939,14 @@ function renderReview(game) {
   if (chart) el('status').append(chart);
   game.render(el('board'), view, { canMove: false, onMove: () => {}, fresh: false, me: myPlayer(), view: boardView(game) });
   appendReview(game);
-  appendFlip(game);
   ctl().append(makeButton('もう一回', rematch));
-  if (S.mode === 'online' && S.isHost) ctl().append(makeButton('メンバーを変える', () => newRound(S.gameId, { lobby: true }), 'secondary'));
+  openMenu();
   appendReactions();
-  if (S.mode === 'online' && S.isHost) ctl().append(gameSelect());
+  appendFlip(game);
+  if (S.mode === 'online' && S.isHost) menuCtl().append(makeButton('メンバーを変える', () => newRound(S.gameId, { lobby: true }), 'secondary'));
+  if (S.mode === 'online' && S.isHost) menuCtl().append(gameSelect());
   appendMemberPanel();
+  closeMenu();
   return true;
 }
 
@@ -3207,64 +3151,7 @@ function appendGiveUp(game, canMoveNow) {
   }, 'ghost small'));
 }
 
-/* ---------- 勝敗予想（2026-10-06 本人の決定）: 対局の始めに、観戦の人も含めて「だれが勝つか」を1回選べる ---------- */
-// Claude の判断: 選べるのは、対局の手が1巡する（打った手の数が対局する人数になる）まで。時間で進むゲームの進行役の手（p = -1）は数えない。
-// 1人1回・変えられない・自分を選んでもよい。送りっぱなし（type: 'pred'）で、受け取った端末がそれぞれ覚える（あとから入った人には届かない）。
-// 結果の画面に「予想が当たった人」を出す。オンラインの盤のゲームとカードゲームだけ（エアホッケーは結果が main.js を通らないので出さない）。
-// 2026-10-30 本人の依頼（目立たないように）: 押すまでは「🔮 予想」の小さなボタンだけにし、押すと名前が並ぶ（開けたかは S.predShow にその対局の predKey。端末ごと）。
-const predKey = () => `${S.gameId}:${S.round}`;
-const predsNow = () => (S.preds?.key === predKey() ? S.preds.by : {});
-function predOpen(game, res) {
-  if (S.mode !== 'online' || !S.order || res || game.live) return false;
-  // ヒット＆ブローの「自分で決める答え」の手（t: 'secret'）は当て合いの前の準備なので数えない
-  const played = game.multi ? S.moves.filter((m) => Number.isInteger(m?.p) && m.p >= 0 && m.t !== 'secret').length : S.moves.length;
-  return played < S.order.length;
-}
-function setPred(id, p) {
-  if (S.preds?.key !== predKey()) S.preds = { key: predKey(), by: {} };
-  if (S.preds.by[id] !== undefined) return false;
-  S.preds.by[id] = p;
-  saveRoom();
-  return true;
-}
-function appendPredict(game, res) {
-  if (!predOpen(game, res)) return;
-  const mine = predsNow()[S.myId];
-  const label = document.createElement('span');
-  if (mine !== undefined) {
-    label.className = 'pred-mine';
-    label.textContent = `🔮 あなたの予想: ${nameOf(S.order[mine])}`;
-    ctl().append(label);
-    return;
-  }
-  if (S.predShow !== predKey()) {
-    ctl().append(makeButton('🔮 予想', () => { S.predShow = predKey(); render(); }, 'ghost small'));
-    return;
-  }
-  const bar = document.createElement('div');
-  bar.className = 'pred-bar';
-  label.textContent = '🔮 だれが勝つ？';
-  bar.append(label);
-  S.order.forEach((id, p) => {
-    bar.append(makeButton(id === S.myId ? 'あなた' : nameOf(id), () => {
-      if (!predOpen(game, null) || !setPred(S.myId, p)) return;
-      send({ type: 'pred', gameId: S.gameId, round: S.round, p });
-      render();
-    }, 'ghost small'));
-  });
-  bar.append(makeButton('✕ とじる', () => { S.predShow = null; render(); }, 'ghost small'));
-  ctl().append(bar);
-}
-// 結果の画面に出す「予想が当たった人」。だれも予想していなければ出さない
-function predHtml(res) {
-  const by = predsNow();
-  const ids = Object.keys(by).filter((id) => S.members.includes(id) || S.names[id]);
-  if (!ids.length) return '';
-  const won = winnersOf(res);
-  const hit = ids.filter((id) => won.includes(by[id]));
-  if (!hit.length) return `🔮 予想が当たった人はいません（${ids.length}人が予想）`;
-  return '🔮 予想が当たった: ' + hit.map((id) => `<b>${esc(id === S.myId ? 'あなた' : nameOf(id))}</b>`).join('・');
-}
+/* ---------- 勝敗予想（2026-10-06 本人の決定）は 2026-11-16 本人の依頼「勝者の予想を廃止」でやめた（room.md）。古い版の端末が送る pred は受け取っても何もしない ---------- */
 
 /* ---------- 勝った人に紙吹雪（2026-10-06 本人の決定） ---------- */
 // 対局が決着した手が届いたとき、勝ちの音を鳴らす画面（勝った人・観戦・同じ画面の対局。sound.js の endSound）に3秒ほど降らせる。
@@ -3362,8 +3249,9 @@ const SLOW_LAND = 560; // 石が着くまで
 const SLOW_LINE = 900; // 線を引き始めるまで（winLine のいつもの 160ms を含む）
 const SLOW_HOLD = 1250; // 勝ち負けの音・判子まで
 let slowNow = null; // 決め手のスローの途中 { key, jobs, clean }
-function slowWanted(game, prevLen) {
+function slowWanted(game, prevLen, res) {
   if (game.multi || game.live || !SLOW_GAMES.has(game.id) || lessMotion() || S.moves.at(-1)?.give === true) return false; // 参りましたは盤が動かない
+  if (!winnersOf(res).length) return false; // 引き分けでは出さない（2026-11-16 本人の依頼。room.md）
   const before = replay({ ...S, moves: S.moves.slice(0, prevLen) });
   return !!before && !game.result(before);
 }
@@ -3951,9 +3839,11 @@ function renderLobby(game) {
   const board = el('board');
   const controls = ctl();
   status.innerHTML = S.isHost
-    ? (allReady()
+    ? (allReady(game)
       ? '<div class="status-main">待合室</div><div class="status-sub">✋ 全員の準備ができました。「始める」を押してください。</div>'
-      : '<div class="status-main">待合室</div><div class="status-sub">友だちがそろったら「始める」を押してください。<br>上の「招待する」で部屋のリンクを送れます。</div>')
+      : !readyDone(game)
+        ? '<div class="status-main">待合室</div><div class="status-sub">遊ぶ人が全員「準備OK」を押すと始められます。</div>'
+        : '<div class="status-main">待合室</div><div class="status-sub">友だちがそろったら「始める」を押してください。<br>上の「招待する」で部屋のリンクを送れます。</div>')
     : '<div class="status-main">待合室</div><div class="status-sub">部屋を作った人が始めるのを待っています…<br>準備ができたら「準備OK」を押してください。</div>';
 
   const { humans, watchers, cpus, seats, max } = lineup(game);
@@ -3986,9 +3876,9 @@ function renderLobby(game) {
   if (game.settings) board.append(rulesPanel(game));
 
   if (!S.isHost) { controls.append(readyButton()); return; }
-  const start = makeButton('始める', startRound);
-  start.disabled = short;
-  if (allReady() && !short) start.classList.add('ready-go');
+  const start = makeButton('始める', () => (readyDone(game) ? startRound() : render()));
+  start.disabled = short || !readyDone(game);
+  if (allReady(game) && !short) start.classList.add('ready-go');
   if (game.noCpu || seats) { controls.append(start, gameSelect(), rouletteButton()); return; }
   // 押したボタンが指の下に残るようにする（一覧が1行のびて、下のボタンがずれていた。2026-10-30 本人の依頼）
   const setCpus = (n, key) => keepPlace(key, () => { S.cpus = n; saveRoom(); sendState(); render(); });
@@ -4007,10 +3897,11 @@ function renderBoardLobby(game) {
   const status = el('status');
   const board = el('board');
   const controls = ctl();
+  const readyNote = allReady(game) ? '✋ 全員の準備ができました。' : !readyDone(game) ? '対局する人が全員「準備OK」を押すと始められます。' : '';
   status.innerHTML = S.isHost
     ? (game.live
-      ? `<div class="status-main">待合室</div><div class="status-sub">対戦する${n}人を選んで「始める」を押してください。${cpuPickable(game) ? '人が足りなければ CPU を選べます。' : ''}<br>オンラインは試作です。</div>`
-      : `<div class="status-main">待合室</div><div class="status-sub">${n > 2 ? '打つ順番に人を選んで' : '先手と後手を選んで'}「始める」を押してください。<br>${allReady() ? '✋ 全員の準備ができました。' : '相手がいなければ CPU と対局できます。'}</div>`)
+      ? `<div class="status-main">待合室</div><div class="status-sub">対戦する${n}人を選んで「始める」を押してください。${cpuPickable(game) ? '人が足りなければ CPU を選べます。' : ''}<br>${readyNote || 'オンラインは試作です。'}</div>`
+      : `<div class="status-main">待合室</div><div class="status-sub">${n > 2 ? '打つ順番に人を選んで' : '先手と後手を選んで'}「始める」を押してください。<br>${readyNote || '相手がいなければ CPU と対局できます。'}</div>`)
     : '<div class="status-main">待合室</div><div class="status-sub">部屋を作った人が始めるのを待っています…<br>準備ができたら「準備OK」を押してください。</div>';
   board.className = 'board lobby';
   board.innerHTML = `<p class="lobby-note">${n}人で対局します。ほかの人は観戦します。</p>`;
@@ -4087,8 +3978,9 @@ function renderBoardLobby(game) {
   board.append(ptsPanel());
   if (game.settings) board.append(rulesPanel(game));
   if (!S.isHost) { controls.append(readyButton()); return; }
-  const start = makeButton('始める', startRound);
-  if (allReady()) start.classList.add('ready-go');
+  const start = makeButton('始める', () => (readyDone(game) ? startRound() : render()));
+  start.disabled = !readyDone(game);
+  if (allReady(game)) start.classList.add('ready-go');
   const people = pick.filter((v) => v !== 'cpu');
   if (game.live && ((pick.includes('cpu') && !cpuPickable(game)) || new Set(people).size !== people.length)) { // CPU を選べないときは人がそろうまで始められない
     start.disabled = true;
@@ -4358,6 +4250,7 @@ function appendMemberPanel() {
     const name = document.createElement('span');
     const hidden = !!S.hidden?.includes(id);
     name.textContent = hidden ? `${S.names?.[id] ? mask(S.names[id]) : 'ゲスト'}（隠しています）` : nameOf(id);
+    name.title = name.textContent; // 長い名前は「…」で切るので（2026-11-16）
     const acts = document.createElement('span');
     acts.className = 'member-acts';
     acts.append(makeButton(hidden ? '隠すのをやめる' : 'この人を隠す', () => toggleHidden(id), 'ghost small'), makeButton('通報', () => openAbout(id), 'ghost small'));
@@ -4365,7 +4258,7 @@ function appendMemberPanel() {
     row.append(name, acts);
     det.append(row);
   }
-  ctl().append(det);
+  menuCtl().append(det);
 }
 
 // 「この人を隠す」（2026-10-21 本人の決定。App Store の審査 1.2 の締め出し）: 自分の画面だけ、その人の名前を伏せ、言葉・絵・リアクションを出さない。
@@ -4392,7 +4285,7 @@ function replaceMember(old, neu, name) {
   if (S.bench) S.bench = S.bench.map(swap); // 観戦に回した人が入り直しても観戦のまま（2026-11-03 本人の依頼）
   if (S.away) S.away = S.away.map(swap);
   if (S.tally) {
-    S.tally = { ...S.tally, wins: rekey(S.tally.wins), played: rekey(S.tally.played), pts: rekey(S.tally.pts), preds: rekey(S.tally.preds) };
+    S.tally = { ...S.tally, wins: rekey(S.tally.wins), played: rekey(S.tally.played), pts: rekey(S.tally.pts) };
     if (S.tally.best) S.tally.best = Object.fromEntries(Object.entries(S.tally.best).map(([k, list]) => [k, list.map((b) => (b.id === old ? { ...b, id: neu } : b))]));
   }
   S.marks = rekey(S.marks);
@@ -4828,9 +4721,11 @@ function renderLive(game) {
       send: (d, important) => send({ type: 'live', gameId: S.gameId, round: S.round, d }, important ? 1 : 0),
     });
   }
+  openMenu(); // エアホッケー・紙相撲の下の段は、全部「⚙ 部屋のメニュー」に入る
   appendReactions();
-  if (S.mode === 'online' && S.isHost) ctl().append(lobbyAllButton(), gameSelect());
+  if (S.mode === 'online' && S.isHost) menuCtl().append(lobbyAllButton(), gameSelect());
   if (S.mode === 'online') appendMemberPanel();
+  closeMenu();
 }
 
 function stopLive() {
@@ -5580,7 +5475,7 @@ document.addEventListener('visibilitychange', () => {
 function send(msg, qos) { S?.net?.send(msg, qos); }
 function sendState() {
   const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, undo, streak, beg } = S;
-  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {}, roomName: S.roomName ?? '', cpuAuto: !!S.cpuAuto, rps: S.rps ?? null, ptsMode: !!S.ptsMode, again: S.again ?? null, away: S.away ?? [], bench: S.bench ?? [], draw: S.draw ?? null, colors: S.colors ?? null, colorKeep: S.colorKeep ?? null, locked: !!S.lockPw });
+  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {}, roomName: S.roomName ?? '', cpuAuto: !!S.cpuAuto, ptsMode: !!S.ptsMode, again: S.again ?? null, away: S.away ?? [], bench: S.bench ?? [], draw: S.draw ?? null, colors: S.colors ?? null, colorKeep: S.colorKeep ?? null, locked: !!S.lockPw });
 }
 function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves, u: S.undo ?? 0 }); }
 function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner, mark: myMark(), dev: myDev(), pw: S.pw || undefined }); }
@@ -5667,8 +5562,7 @@ function onMessage(msg) {
     case 'undo':
       onUndo(msg);
       break;
-    case 'pred': // 勝敗予想。対局が同じで、番号が正しく、まだ予想していない人の分だけ覚える
-      if (msg.gameId === S.gameId && msg.round === S.round && S.order && Number.isInteger(msg.p) && msg.p >= 0 && msg.p < S.order.length && S.members.includes(msg.from)) setPred(msg.from, msg.p);
+    case 'pred': // 勝敗予想は 2026-11-16 にやめた。古い版の端末から届いても何もしない
       return;
     case 'lot': // 先手をくじで決めた（ホストからだけ）。席は state で届くので、ここでは一言だけ出す
       onLot(msg);
@@ -5682,12 +5576,8 @@ function onMessage(msg) {
         sendState();
       }
       break;
-    case 'rps': // 待合室でじゃんけん
-      if (S.isHost && msg.from !== S.myId && S.members.includes(msg.from) && !S.order && Number.isInteger(msg.n) && rpsPut(msg.from, msg.h, msg.n)) {
-        sendState();
-        render();
-      }
-      break;
+    case 'rps': // 待合室でじゃんけんは 2026-11-16 にやめた。古い版の端末から届いても何もしない
+      return;
     case 'vote': // 次のゲームの投票
       if (S.isHost && msg.from !== S.myId && S.members.includes(msg.from) && (msg.g === null || typeof msg.g === 'string')) {
         setVote(msg.from, msg.g);
@@ -5791,8 +5681,6 @@ function adoptState(msg) {
   S.line = Array.isArray(msg.line) ? msg.line.filter((id) => typeof id === 'string') : [];
   const rd = msg.ready;
   S.ready = rd && Number.isInteger(rd.round) && Array.isArray(rd.ids) ? { round: rd.round, ids: rd.ids.filter((id) => typeof id === 'string') } : null;
-  const rp = msg.rps; // 待合室でじゃんけん
-  S.rps = rp && Number.isInteger(rp.n) && rp.hands && typeof rp.hands === 'object' ? { n: rp.n, hands: Object.fromEntries(Object.entries(rp.hands).filter(([id, h]) => typeof id === 'string' && RPS[h])) } : null;
   S.votes = msg.votes && typeof msg.votes === 'object' ? Object.fromEntries(Object.entries(msg.votes).filter(([id, g]) => typeof id === 'string' && typeof g === 'string' && GAMES[g]?.ready)) : {};
   const ag = msg.again; // もう一回の OK
   S.again = ag && Number.isInteger(ag.round) && Array.isArray(ag.ids)
@@ -5802,7 +5690,7 @@ function adoptState(msg) {
   S.away = Array.isArray(msg.away) ? msg.away.filter((id) => typeof id === 'string') : [];
   S.bench = Array.isArray(msg.bench) ? msg.bench.filter((id) => typeof id === 'string') : [];
   const dr = msg.draw; // 遊びの抽選
-  S.draw = dr && Number.isInteger(dr.n) && Array.isArray(dr.opts) && dr.opts.length && dr.opts.length <= 3 && dr.opts.every((g) => typeof g === 'string' && GAMES[g]?.ready) && dr.votes && typeof dr.votes === 'object'
+  S.draw = dr && Number.isInteger(dr.n) && Array.isArray(dr.opts) && dr.opts.length && dr.opts.length <= DRAW_PICK && dr.opts.every((g) => typeof g === 'string' && GAMES[g]?.ready) && dr.votes && typeof dr.votes === 'object'
     ? { n: dr.n, by: typeof dr.by === 'string' ? dr.by : '', re: dr.re === true, opts: dr.opts.slice(), votes: Object.fromEntries(Object.entries(dr.votes).filter(([id, c]) => typeof id === 'string' && (c === DRAW_OTHER || dr.opts.includes(c)))), seen: [] }
     : null;
   if (S.round !== msg.round || S.gameId !== msg.gameId) S.lobbyView = false; // 次の対局が始まったら、待合室を見ていた人も対局の画面へ
@@ -6071,6 +5959,7 @@ el('btn-leave').onclick = async () => {
   if (await beforeLeaveResult()) leave(false); // 出ると答えたので、広告の間に次の対局が始まっていても出る
 };
 el('btn-invite').onclick = invite;
+el('btn-room-fold').onclick = () => { if (!S) return; S.roomOpen = roomFolded() ? S.round : null; renderRoomBar(); };
 el('btn-howto').onclick = () => {
   const box = el('howto');
   box.hidden = !box.hidden;

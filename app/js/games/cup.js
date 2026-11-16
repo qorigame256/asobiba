@@ -7,6 +7,7 @@
 // 詳細設定（2026-11-12 の40回目の案。本人が選んだ。分かれ目は Claude の判断）:
 //   - 「回数」3回・5回（最初）・8回（鍵は rounds）: 3回は ROUNDS の1・3・5回目、8回は LONG（同じく3個から5個へ、まぜる回数と速さを上げていく）。
 //   - 「難しさ」やさしい・ふつう（最初）・むずかしい（鍵は level）: やさしいはコップを最大4個に、むずかしいは最初から5個（2026-11-14 から後半は6個で、まぜる回数と速さも上げる。planOf）にする。
+//     むずかしいの上がり方は 2026-11-16 本人の依頼（「5回目までがとても簡単で、6回目が難しすぎる」）で、回数に関わらず同じ幅ずつ上げる形にした（HARD。数は Claude の判断）。
 //   - 「はずれたら脱落」なし（最初）・あり（鍵は drop）: 外したか選ばなかった人はそこで脱落し、最後まで残った人の勝ち（点は今までどおり数える）。
 //     残っている全員が外した回は、だれも脱落しない。残りが1人になったら（2人以上で始めたとき）その人の勝ちで終わる。○×クイズの脱落と同じ形。
 //   - 3つとも最初の値のときの問題は前と全く同じ（makeRounds の乱数の使い方を変えていない）。
@@ -47,12 +48,17 @@ const LONG = [
 ];
 const ROUND_CHOICES = [[3, '3回'], [5, '5回'], [8, '8回']];
 const LEVELS = [['mid', 'ふつう'], ['easy', 'やさしい（コップは4個まで）'], ['hard', 'むずかしい（5〜6個・速い）']];
+// むずかしい（2026-11-16 から）: コップは前半5個・後半6個。入れ替えの回数と1回の長さは、1回目の値から最後の回の値まで同じ幅ずつ変える（回数が3・5・8のどれでも、始まりと終わりは同じ）。
+// 前（2026-11-14）は ふつうの表の 1.4倍の回数・0.8倍の長さで、8回では 9回368ms から 26回160ms まで上がり、216ms（5回目）までは簡単すぎ、192ms（6回目）からは速すぎた
+const HARD = { swaps: [13, 20], dur: [240, 200] };
 // 詳細設定から回ごとの難しさの表を作る
-// むずかしい（2026-11-14 から）: コップは前半5個・後半6個、入れ替えは1.4倍、1回の入れ替えは0.8倍の長さ（速く）
 export function planOf(rules = {}) {
   let plan = rules.rounds === 3 ? [ROUNDS[0], ROUNDS[2], ROUNDS[4]] : rules.rounds === 8 ? LONG : ROUNDS;
   if (rules.level === 'easy') plan = plan.map((r) => ({ ...r, cups: Math.min(r.cups, 4) }));
-  if (rules.level === 'hard') plan = plan.map((r, i) => ({ cups: i < plan.length / 2 ? 5 : 6, swaps: Math.ceil(r.swaps * 1.4), dur: Math.round(r.dur * 0.8) }));
+  if (rules.level === 'hard') {
+    const at = ([a, b], i) => Math.round(a + ((b - a) * i) / Math.max(1, plan.length - 1));
+    plan = plan.map((r, i) => ({ cups: i < plan.length / 2 ? 5 : 6, swaps: at(HARD.swaps, i), dur: at(HARD.dur, i) }));
+  }
   return plan;
 }
 const cpuOk = (q, total) => (total <= 1 ? 0.9 : 0.9 - (0.4 * q) / (total - 1));
@@ -351,6 +357,8 @@ export default {
           tag.className = 'cp-who';
           tag.style.borderColor = SEAT_COLORS[p % SEAT_COLORS.length];
           tag.textContent = p === me ? 'あなた' : o.names[p];
+          // 選ぶまでの時間（2026-11-16 本人の依頼「他プレイヤーと自分のコップ選択時間を表示」）: まざり終わってから押すまで。点の速さと同じ数
+          if (Number.isFinite(s.ms[p])) tag.append(Object.assign(document.createElement('small'), { className: 'cp-ms', textContent: `${(s.ms[p] / 1000).toFixed(2)}秒` }));
           col.append(tag);
         });
         row.append(col);

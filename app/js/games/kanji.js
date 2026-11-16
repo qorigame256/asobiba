@@ -118,16 +118,18 @@ export function reviewOf(s, me = null) {
 }
 
 // ふりかえりの見た目（style.css には入れず、使うときに足す）。1問1行。読みが長いときはその欄の中で折り返す
+// 行の並べ方は mk-review（style.css。ほかの34のゲームが kj-review と一緒に付ける）には効かせない。一度足すとページに残るので、効かせると
+// 難読漢字・英単語クイズのあとに遊んだゲームのふりかえりで、2つ目の欄が1.5字の幅に押し込まれて縦書きになっていた（2026-11-16 本人の指摘「かぶったら0点」）
 export const REVIEW_CSS = `
 .kj-review { background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 8px 12px; }
 .kj-review summary { cursor: pointer; font-weight: 700; }
 .kj-review ol { list-style: none; margin: 6px 0 0; padding: 0; }
-.kj-review li { display: grid; grid-template-columns: 1.7em 1.5em auto minmax(0, 1fr) auto; gap: 6px; align-items: baseline; padding: 5px 0; border-top: 1px solid var(--line); }
+.kj-review:not(.mk-review) li { display: grid; grid-template-columns: 1.7em 1.5em auto minmax(0, 1fr) auto; gap: 6px; align-items: baseline; padding: 5px 0; border-top: 1px solid var(--line); }
 .kj-rv-n { font-size: .78rem; color: var(--muted); text-align: right; }
 .kj-rv-word { font-weight: 800; font-size: 1.15rem; white-space: nowrap; font-family: "Hiragino Mincho ProN", "Yu Mincho", "YuMincho", serif; }
 .kj-rv-yomi { color: #2f8a4a; font-weight: 700; overflow-wrap: anywhere; }
 .kj-rv-who { font-size: .75rem; color: var(--muted); max-width: 6.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.kj-review.watch li { grid-template-columns: 1.7em auto minmax(0, 1fr) auto; }
+.kj-review.watch:not(.mk-review) li { grid-template-columns: 1.7em auto minmax(0, 1fr) auto; }
 `;
 
 /* ---------- 画面 ---------- */

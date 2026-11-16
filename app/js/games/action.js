@@ -21,6 +21,17 @@ export function fitCanvas(canvas, ctx, aspect, { maxW = 520, below = 20 } = {}) 
   return width;
 }
 
+// 始まる前に、遊ぶ場（el）が画面の縦の真ん中に来るようにページを送る（的の早押しで 2026-10-30、弾幕回避で 2026-11-16 本人の依頼）。
+// ページの下が足りずに真ん中まで送れないときは、空の spacer をのばす。描き直しの途中で長さを測らない決まり（CLAUDE.md）のため、描き終わってから呼ぶ（setTimeout）
+export function centerInView(el, spacer) {
+  if (!el.isConnected) return;
+  const r = el.getBoundingClientRect();
+  const want = window.scrollY + r.top + r.height / 2 - window.innerHeight / 2;
+  const max = document.documentElement.scrollHeight - window.innerHeight;
+  if (want > max) spacer.style.height = Math.ceil(want - max) + 'px';
+  window.scrollTo(0, Math.max(0, want));
+}
+
 // ポインター（指・マウス）の位置を、盤の座標（横 0〜1）にする
 export function toBoard(canvas, e) {
   const r = canvas.getBoundingClientRect();

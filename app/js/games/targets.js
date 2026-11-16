@@ -18,6 +18,7 @@
 
 import { mulberry32 } from './util.js';
 import { since, scoreChips, leaders, winnersText } from './party.js';
+import { centerInView } from './action.js';
 
 const READY_MS = 3000;
 const GRACE_MS = 2500;
@@ -114,14 +115,7 @@ const clone = (s) => ({ ...s, best: { ...s.best }, hits: s.hits.map((h) => h.sli
 
 let ui = null;
 
-function centerField(field, spacer) {
-  if (!field.isConnected) return;
-  const r = field.getBoundingClientRect();
-  const want = window.scrollY + r.top + r.height / 2 - window.innerHeight / 2;
-  const max = document.documentElement.scrollHeight - window.innerHeight;
-  if (want > max) spacer.style.height = Math.ceil(want - max) + 'px';
-  window.scrollTo(0, Math.max(0, want));
-} // { mount, field, chips, els: Map(id → 要素), shown: Map(id → この画面に描いた時刻), tapped: Set, n, cur: { s, o } }
+// ui = { mount, field, chips, els: Map(id → 要素), shown: Map(id → この画面に描いた時刻), tapped: Set, n, cur: { s, o } }
 const cpuPlan = new Map();
 
 function float(field, x, y, text, cls) {
@@ -353,7 +347,7 @@ export default {
     root.append(top, field, legend, spacer);
     // 始まる前に、的の出る場所が画面の真ん中に来るように送る（遊んでいる間はページを動かさない。2026-10-30 本人の依頼で、上へ戻すのから替えた）。
     // 描き直しの途中で長さを測らない決まり（CLAUDE.md の「壊しやすい所」）のため、描き終わってから測る
-    if (s.phase !== 'end') setTimeout(() => centerField(field, spacer), 0);
+    if (s.phase !== 'end') setTimeout(() => centerInView(field, spacer), 0);
     fit();
 
     if (s.phase === 'ready') {

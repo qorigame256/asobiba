@@ -71,6 +71,13 @@ const SEND_IDLE_MS = 90;
 const OFFSET_T = 0.09;
 const SNAP_FAR = 0.6;
 const PRED_MS = 1000; // 先取りのあと、前の持ち主から受け取ったと分かる知らせを待つ長さ（過ぎたら先取りは確かなものとして扱う）
+// 2026-11-16 本人の報告「プレイヤーごとに球の位置が違う」「ゴールのあと、Aの画面ではBのエリアに、Bの画面ではAのエリアに球が静止して試合が進まなくなった」への対策（Claude の判断）:
+//   - 原因: 先取りが確かなものになったあとも前の持ち主が持ち続けていると、2台が別々にパックを動かす（画面ごとに位置が違う）。そのまま2台が
+//     ほぼ同時に自分の陣地で決められると、どちらもまず自分の陣地に置き、あとから届いた相手のゴールで相手の陣地へ置き直していた（届いた順で決めていたため）。
+//     お互いに相手が持ち主だと思うので、だれもパックを動かさない。
+//   - 同時のゴール（送ってきた端末が、同じパックでのほかの席の失点をまだ知らなかった）は、どの端末でも番号の小さい席の陣地に置く（mergeLost）。
+//   - それでも持ち主が食い違ったまま CLASH_MS（通信の遅れが大きいときはその分のばす）続いたら、席の番号の小さい端末に合わせる（settleOwners）。
+const CLASH_MS = 800;
 const GOAL_PAUSE = 1.2;
 const FLASH = 1.4; // ゴールのとき盤を光らせる秒数（2026-11-03 本人の依頼「点数が入ったかをわかりやすく」）
 
@@ -1140,6 +1147,8 @@ function mount(root, opts) {
   const net = {
     started: false, owners: startOwners(), ep: 0, lastSend: 0, lastPing: 0, rtt: null, rttMax: 0, rtts: [], handed: startOwners().map(() => -1), pred: startOwners().map(() => null), said: {}, heard: {},
     lastHi: 0, quietShown: false, id: Math.random().toString(36).slice(2),
+    drv: {}, // 席 → その席を動かしている端末が動かしている席の一覧（settleOwners）
+    clash: [], // パックごとの、持ち主の食い違い { key: 食い違いの形, at: 見つけた時刻 }（settleOwners）
   };
   // 待つ相手: 自分以外の人の席（CPU の席は待たない）
   const needed = () => seats().filter((p) => p !== opts.me && !botSeats().includes(p));
@@ -1154,6 +1163,9 @@ function mount(root, opts) {
     net.owners = startOwners();
     net.handed = net.owners.map(() => -1);
     net.pred = net.owners.map(() => null);
+    net.said = {};
+    net.drv = {};
+    net.clash = [];
     st.flash = null;
     st.lost = Array(n).fill(0);
     st.goalPuck = Array(n).fill(0);
@@ -1196,6 +1208,10 @@ function mount(root, opts) {
       changed = c;
       const i = Array.isArray(gi) && Number.isInteger(gi[c]) && gi[c] >= 0 && gi[c] < st.pucks.length ? gi[c] : 0;
       st.goalPuck[c] = i;
+      // 同時のゴール（2026-11-16）: 送ってきた端末がまだ知らない、同じパックでのほかの席 d の失点がある（2台がほぼ同時に自分の陣地で決められた）なら、
+      // 届いた順によらず番号の小さい席の陣地に置く（d が小さければ、d の失点で置いたままにする）
+      const rival = seats().find((d) => d !== c && st.goalPuck[d] === i && Number.isInteger(l[d]) && l[d] < st.lost[d]);
+      if (rival !== undefined && rival < c) continue;
       serveAt(c, i);
       net.owners[i] = c;
       net.handed[i] = -1;
@@ -1233,7 +1249,7 @@ function mount(root, opts) {
       mergeLost(d.l, d.gi);
       if (d.tu) setTimeUp(); // 時間切れの知らせが落ちていた（失点を合わせてから決着を見る）
       const os = Array.isArray(d.o) ? d.o : [];
-      for (const p of by) net.said[p] = os; // その端末がいま誰を持ち主だと思っているか
+      for (const p of by) { net.said[p] = os; net.drv[p] = by; } // その端末がいま誰を持ち主だと思っているか・どの席を動かしているか
       if (!Array.isArray(d.p)) return;
       d.p.forEach((e, i) => {
         if (!Array.isArray(e) || i >= st.pucks.length) return;
@@ -1257,6 +1273,45 @@ function mount(root, opts) {
           setPuck(i, advance({ x: e[0], y: e[1], vx: e[2], vy: e[3] }, lead()));
         }
       });
+    }
+  }
+
+  // 持ち主の食い違いを直す（2026-11-16。先頭の CLASH_MS の説明）。ほかの端末の知らせ（said・drv）と自分の思う持ち主が、次のどちらかのまま待ち時間を過ぎたら直す:
+  //   - 2台とも自分（の席）が持っていると思っている: 席の番号の小さいほうが持ち、もう1台は譲る（譲った端末は、持ち主から届く位置を使う）。
+  //   - 自分は席 o が持っていると思っているのに、o の端末は自分の席のどれも持っていないと思っている（だれも動かしていない）:
+  //     端末の席の番号の小さいほうが引き取る（パックが相手の陣地にあれば、いつもの渡し方ですぐ相手へ渡る）。
+  // どちらも番号で決めるので、2台が同時に直しても片方だけが動く。いつもの渡し方・先取りの途中（通信の遅れの間）は待ち時間のうちに片付くので触らない
+  function settleOwners(dv) {
+    const now = performance.now();
+    const wait = Math.max(CLASH_MS, (net.rttMax || 0) * 1.5 + 200);
+    const fresh = (p) => now - (net.heard[p] ?? -Infinity) < 1000 && Array.isArray(net.said[p]);
+    const mine = Math.min(...dv);
+    for (let i = 0; i < st.pucks.length; i++) {
+      const o = net.owners[i];
+      let key = null;
+      let to = null; // 直すときの持ち主（null は相手が直すのを待つ）
+      if (dv.includes(o)) {
+        for (let p = 0; p < n && key === null; p++) {
+          if (dv.includes(p) || !fresh(p)) continue;
+          const t = net.said[p][i];
+          if (Number.isInteger(t) && t !== o && (net.drv[p] ?? [p]).includes(t)) { key = `both:${o}:${t}`; if (t < o) to = t; }
+        }
+      } else if (Number.isInteger(o) && o >= 0 && o < n && fresh(o)) {
+        const theirs = net.drv[o] ?? [o];
+        const t = net.said[o][i];
+        if (!theirs.includes(t)) {
+          key = `none:${o}:${t}`;
+          if (mine < Math.min(...theirs)) { const z = T.zone(st.pucks[i]); to = dv.includes(z) ? z : mine; }
+        }
+      }
+      const c = net.clash[i];
+      if (key === null) { net.clash[i] = null; continue; }
+      if (c?.key !== key) { net.clash[i] = { key, at: now }; continue; }
+      if (to === null || now - c.at < wait) continue;
+      net.owners[i] = to;
+      net.handed[i] = -1;
+      net.pred[i] = null;
+      net.clash[i] = null;
     }
   }
 
@@ -1286,6 +1341,7 @@ function mount(root, opts) {
     }
     checkStart();
     if (net.started) tickClock(dt);
+    if (net.started && dv.length && !st.over) settleOwners(dv);
     tickBanner(dt);
     const bots = cpuSeats();
     runCpus(dt, bots);

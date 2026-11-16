@@ -12,6 +12,8 @@
 //     （あとから届いた手のほうが速ければ取り替える。通信の遅れでゲストが不利にならないように）。
 //   - 全部見つかったら1.5秒待って締め切る（ほかの人のもっと速い手が届く分を待つ）。結果を見せる間は3秒。
 //   - なぞった字の並びが、まだ見つかっていない言葉の場所とぴったり同じなら見つけたことにする（向きはどちらからでもよい）。
+//     2026-11-16 本人の依頼で、なぞったときは言葉の最後の字を通り過ぎてもよくし（始めの字は言葉の端と合っていること。matchWord）、
+//     1文字ずつ押しても選べるようにした（最初と最後の字だけ押す形も残す。tapStep）。
 //   - CPU は7〜20秒に1つ、まだ見つかっていない言葉を見つける。
 // 詳細設定「言葉の一覧」「盤の大きさ」（2026-11-03 の33回目の案。分かれ目は Claude の推奨を本人が承認）:
 //   - 一覧を隠すでは、お題と言葉の字数（「○○○」）だけ見せ、見つかった言葉だけ字に変わる。
@@ -86,6 +88,57 @@ export function countOf(grid, w, N = 8) {
     if (cells.every(([y, x], i) => g[y * N + x] === ch[i])) seen.add(cellsKey(cells.map(([y, x]) => y * N + x)));
   }
   return seen.size;
+}
+
+// なぞった並び（line。始めのマスから順）で見つかる、まだ見つかっていない言葉の番号（無ければ -1）。
+// 言葉の字の場所と、前からでも後ろからでもぴったり同じなら見つけたことにする。over（なぞったとき）は、言葉の端から始めて
+// 最後の字を通り過ぎてもよい（2026-11-16 本人の依頼「スワイプで選択した文字終わりを通り過ぎても正解にする、開始位置はあっていないとだめ」）。
+// 当てはまる言葉が2つあれば長いほう
+export function matchWord(words, found, line, over = false) {
+  if (!line || line.length < 2) return -1;
+  let best = -1;
+  words.forEach((wd, i) => {
+    const c = wd.cells;
+    const n = c.length;
+    if (found[i] || (over ? n > line.length : n !== line.length)) return;
+    const fwd = c.every((v, k) => line[k] === v);
+    const back = c.every((v, k) => line[n - 1 - k] === v);
+    if ((fwd || back) && (best < 0 || n > words[best].cells.length)) best = i;
+  });
+  return best;
+}
+
+// 押したマスの並び（taps）が、最初のマスから順に1本のまっすぐな並びに乗っていれば、最初から最後の押したマスまでの並び（乗っていなければ null）
+export function tapLine(taps, N = 8) {
+  if (taps.length < 2) return taps.slice();
+  const line = lineOf(taps[0], taps.at(-1), N);
+  if (!line) return null;
+  let k = -1;
+  for (const v of taps) {
+    const j = line.indexOf(v);
+    if (j <= k) return null;
+    k = j;
+  }
+  return line;
+}
+
+// 押して選ぶ（2026-11-16 本人の依頼「一文字ずつタップでも回答できるようにする」。前からの「最初と最後の字だけ押す」も同じ形で選べる）。
+// 押したマスの並び taps にマス i を足したあとの形 { taps: 次の並び, w: 見つけた言葉の番号（無ければ -1）, miss: はずれの合図を出すか }:
+//   - 同じマスをもう一度押したらやめる。押したマスが1本のまっすぐな並びに順に乗らなくなったら、そのマスから選び直す。
+//   - 最初から最後に押したマスまでの並びが言葉とぴったり同じなら見つけたことにする（間のマスは押さなくてもよい）。
+//   - 2つ目に離れたマスを押した（最初と最後の字だけ押した）のに言葉でないとき、並びがまだ見つかっていないいちばん長い言葉の字数に届いたのに言葉でないときは、はずれ
+//     （1文字ずつ押している途中では、はずれにしない。途中で外すと、言葉の始まりかどうかが分かってしまうため）
+export function tapStep(words, found, taps, i, N = 8) {
+  if (taps.at(-1) === i) return { taps: [], w: -1, miss: false };
+  let next = [...taps, i];
+  let line = tapLine(next, N);
+  if (!line) { next = [i]; line = [i]; }
+  if (line.length < 2) return { taps: next, w: -1, miss: false };
+  const w = matchWord(words, found, line);
+  if (w >= 0) return { taps: [], w, miss: false };
+  const longest = Math.max(0, ...words.filter((_, k) => !found[k]).map((wd) => wd.cells.length));
+  if ((next.length === 2 && line.length > 2) || line.length >= longest) return { taps: [], w: -1, miss: true };
+  return { taps: next, w: -1, miss: false };
 }
 
 // a から b までのまっすぐな並び（たて・よこ・ななめ45度でなければ null）
@@ -262,12 +315,12 @@ export default {
 
     let cur = s;
     let sel = null; // { a: 始めのマス, b: 今のマス, moved }
-    let pending = null; // 押すだけで選ぶときの、最初に押したマス
+    let taps = []; // 押して選ぶときの、押したマスの並び（tapStep）
     const paint = (st) => {
       cur = st;
       const marks = Array(N * N).fill(null);
       st.found.forEach((f, w) => { if (f) for (const c of x.words[w].cells) marks[c] = f.p; });
-      const line = sel ? lineOf(sel.a, sel.b, N) ?? [sel.a] : pending !== null ? [pending] : [];
+      const line = sel ? lineOf(sel.a, sel.b, N) ?? [sel.a] : taps.length ? tapLine(taps, N) ?? taps : [];
       cells.forEach((d, i) => {
         const p = marks[i];
         d.style.background = p === null ? '' : color(p) + '55';
@@ -285,15 +338,10 @@ export default {
       });
       const mineN = st.found.filter((f) => f && f.p === me).length;
       note.textContent = st.phase !== 'open' ? `${st.found.filter((f) => f).length} / ${x.words.length} 見つかりました`
-        : me === null ? '観戦中' : `最初の字から最後の字までなぞってね（最初と最後の字を押すだけでもOK）${mineN ? `・あなたは ${mineN}こ` : ''}`;
+        : me === null ? '観戦中' : `最初の字から最後の字までなぞってね（1文字ずつ押しても、最初と最後の字を押すだけでもOK）${mineN ? `・あなたは ${mineN}こ` : ''}`;
     };
     ui.paint = paint;
-    const tryFind = (a, b) => {
-      const line = lineOf(a, b, N);
-      if (!line || line.length < 2) return false;
-      const k = cellsKey(line);
-      const w = x.words.findIndex((wd, i) => !cur.found[i] && cellsKey(wd.cells) === k);
-      if (w < 0) return false;
+    const sendFind = (w) => {
       const ms = Math.round(since(key));
       if (ms >= limit) return false;
       o.onMove({ t: 'find', q: s.q, w, ms });
@@ -324,9 +372,15 @@ export default {
         if (!sel) return;
         const { a, b, moved } = sel;
         sel = null;
-        if (moved) { pending = null; if (!tryFind(a, b)) play0(); }
-        else if (pending === null || pending === a) pending = pending === a ? null : a; // 1回目に押したマスを覚える（同じマスならやめる）
-        else { const p0 = pending; pending = null; if (!tryFind(p0, a)) play0(); }
+        if (moved) {
+          taps = [];
+          const w = matchWord(x.words, cur.found, lineOf(a, b, N), true); // なぞったときは通り過ぎてもよい
+          if (w < 0 || !sendFind(w)) play0();
+        } else {
+          const r = tapStep(x.words, cur.found, taps, a, N);
+          taps = r.taps;
+          if (r.w >= 0 ? !sendFind(r.w) : r.miss) play0();
+        }
         paint(cur);
       };
       grid.addEventListener('pointerup', up);

@@ -11007,6 +11007,75 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('41回目の案（かたち描き・リズムまね・都道府県タッチ・目押しそろえの詳細設定） OK');
 }
 
+// 2026-11-16 本人の依頼（遊んでみた感想15件）のうち、ルールの中で見られるもの
+{
+  // すごろく: さいころの演出の段取り（目の数だけ1マスずつ・ぴったりで戻るときはゴールで折り返す・働くマスの先へ1マスずつ・入れ替えは動かさない）
+  const { planOf: sgPlan, frameOf: sgFrame, GOAL: SG_GOAL } = await import('../app/js/games/sugoroku.js');
+  let pl = sgPlan({ p: 0, d: 4, from: 27, land: 29, bounce: true, ev: null, to: 29 });
+  assert.deepEqual(pl.path, [28, 29, SG_GOAL, 29], 'すごろく: ぴったりで戻るときの演出はゴールで折り返す');
+  const L = { p: 0, d: 2, from: 3, land: 5, bounce: false, ev: { t: 'back', v: 3 }, to: 2 };
+  pl = sgPlan(L);
+  assert.deepEqual([pl.path, pl.evPath], [[4, 5], [4, 3, 2]], 'すごろく: 働くマスで動く先へも1マスずつ');
+  assert.deepEqual([sgFrame(pl, L, 0).stage, sgFrame(pl, L, 0).pos], ['roll', 3], 'すごろく: 始めはさいころが転がっていて、コマは元の場所');
+  assert.equal(sgFrame(pl, L, pl.landAt).pos, 5, 'すごろく: 目の数だけ進んだら止まる');
+  assert.deepEqual([sgFrame(pl, L, pl.total).stage, sgFrame(pl, L, pl.total).pos], ['done', 2], 'すごろく: 最後は働いた先');
+  let prev = 3;
+  for (let t = 0; t <= pl.total; t += 10) {
+    const p = sgFrame(pl, L, t).pos;
+    assert.ok(Math.abs(p - prev) <= 1, 'すごろく: コマは1マスずつ動く');
+    prev = p;
+  }
+  assert.equal(sgPlan({ p: 0, swapWith: 1 }), null, 'すごろく: 入れ替えはコマを跳ばさない');
+
+  // コップのどれ？: むずかしいは回数に関わらず 5個・13回・240ms から 6個・20回・200ms まで、回ごとに少しずつ
+  const { planOf: cupPlan } = await import('../app/js/games/cup.js');
+  for (const rounds of [3, 5, 8]) {
+    const h = cupPlan({ level: 'hard', rounds });
+    assert.deepEqual([h[0].cups, h[0].swaps, h[0].dur], [5, 13, 240], `コップのどれ？: むずかしいの1回目（${rounds}回）`);
+    assert.deepEqual([h.at(-1).cups, h.at(-1).swaps, h.at(-1).dur], [6, 20, 200], `コップのどれ？: むずかしいの最後の回（${rounds}回）`);
+    assert.ok(h.every((r, i) => !i || (r.swaps >= h[i - 1].swaps && r.dur <= h[i - 1].dur && r.dur >= h[i - 1].dur - 25)), `コップのどれ？: むずかしいは速さが急に上がらない（${rounds}回）`);
+  }
+
+  // 英単語クイズ: 1文字目は制限時間の2割・2文字目は5割（3文字以上の単語だけ）、だれかが正解しても制限時間まで締め切らない
+  const E = GAMES.eitango;
+  const { blanksOf: etBlanks, hintTimes } = await import('../app/js/games/eitango.js');
+  assert.equal(etBlanks('apple', 2), 'a p _ _ _', '英単語: 2文字目まで見せる');
+  assert.deepEqual(hintTimes({ rules: {} }, 'apple', 25000), [5000, 12500], '英単語: 1文字目は2割・2文字目は5割');
+  assert.deepEqual(hintTimes({ rules: { hint: 'start' } }, 'apple', 25000), [0, 12500], '英単語: 1文字目を最初から');
+  assert.deepEqual(hintTimes({ rules: {} }, 'go', 25000), [5000], '英単語: 2文字の単語は2文字目を見せない');
+  let es = E.apply(E.init(3, 5), { p: -1, t: 'next' });
+  es = E.apply(es, { p: 0, t: 'try', q: 0, text: es.qs[0][1], ms: 900, n: 1 });
+  assert.equal(es.solved[0], 900);
+  assert.equal(E.referee(es).key, 'open0', '英単語: だれかが正解しても制限時間まで続ける');
+  assert.equal(E.referee(es).ms, Number(es.rules.time) * 1000 + 1500, '英単語: 締め切りは制限時間（と少しの余裕）');
+
+  // ことばさがし: なぞったときは最後の字を通り過ぎてもよい（始めの字は言葉の端）。1文字ずつ押しても選べる
+  const { matchWord, tapStep } = await import('../app/js/games/kotoba.js');
+  const words = [{ w: 'ねこ', cells: [0, 1] }, { w: 'きりん', cells: [9, 10, 11] }, { w: 'きりんさん', cells: [9, 10, 11, 12, 13] }];
+  const none = [null, null, null];
+  assert.equal(matchWord(words, none, [9, 10, 11]), 1, 'ことばさがし: ぴったり');
+  assert.equal(matchWord(words, none, [11, 10, 9]), 1, 'ことばさがし: 逆からでもよい');
+  assert.equal(matchWord(words, none, [9, 10, 11, 12], true), 1, 'ことばさがし: なぞって通り過ぎてもよい');
+  assert.equal(matchWord(words, none, [9, 10, 11, 12, 13, 14], true), 2, 'ことばさがし: 通り過ぎたときは当てはまる長いほう');
+  assert.equal(matchWord(words, none, [9, 10, 11, 12], false), -1, 'ことばさがし: 押して選ぶときは通り過ぎない');
+  assert.equal(matchWord(words, none, [8, 9, 10, 11], true), -1, 'ことばさがし: 始めの字は合っていないとだめ');
+  assert.equal(matchWord(words, [null, { p: 0, ms: 1 }, null], [9, 10, 11, 12], true), -1, 'ことばさがし: 見つかった言葉は数えない');
+  const tapAll = (list, found = none) => list.reduce((r, i) => tapStep(words, found, r.taps, i), { taps: [] });
+  assert.equal(tapAll([9, 10, 11]).w, 1, 'ことばさがし: 1文字ずつ押して選べる');
+  assert.equal(tapAll([11, 10, 9]).w, 1, 'ことばさがし: 1文字ずつ逆から押しても選べる');
+  assert.equal(tapAll([9, 11]).w, 1, 'ことばさがし: 最初と最後の字だけ押しても選べる');
+  assert.deepEqual(tapAll([9, 12]), { taps: [], w: -1, miss: true }, 'ことばさがし: 最初と最後の字が言葉でなければはずれ');
+  assert.deepEqual(tapAll([20, 21]), { taps: [20, 21], w: -1, miss: false }, 'ことばさがし: 1文字ずつ押している途中ははずれにしない');
+  assert.deepEqual(tapAll([16, 17, 18, 19, 20]), { taps: [], w: -1, miss: true }, 'ことばさがし: いちばん長い言葉の字数まで来たらはずれ');
+  assert.deepEqual(tapAll([9, 9]), { taps: [], w: -1, miss: false }, 'ことばさがし: 同じ字をもう一度押すとやめる');
+  assert.deepEqual(tapAll([9, 10, 30]).taps, [30], 'ことばさがし: まっすぐ並ばない字を押したらそこから選び直す');
+
+  // かぶったら0点ほか34のゲームのふりかえり（kj-review mk-review）に、難読漢字のふりかえりの行の並べ方を効かせない
+  const { REVIEW_CSS } = await import('../app/js/games/kanji.js');
+  assert.ok(!/\.kj-review li\s*\{/.test(REVIEW_CSS) && !/\.kj-review\.watch li\s*\{/.test(REVIEW_CSS), 'ふりかえり: 難読漢字の行の並べ方は mk-review に効かせない');
+  console.log('2026-11-16 の感想15件 OK');
+}
+
 // 見出しの字体（2026-11-09。tools/make-fonts.mjs）: 今のコードのゲームの名前・仲間の名前・技の名前の字が、切り出した字体に全部入っているか。
 // 落ちたら、元の字体のフォルダを渡して node tools/make-fonts.mjs で作り直す（入っていない字はほかの字体で出るだけで、崩れはしない）
 {
