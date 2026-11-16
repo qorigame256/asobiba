@@ -1413,7 +1413,7 @@ function showScreen(name) {
   keepAwake(name === 'play');
   if (name !== 'play') renderNetBanner();
   resultUp = false;
-  if (name === 'home') setBanner(true); // 対局の画面（待合室を含む）は render が決める
+  if (name === 'home') { setBanner(true); resetGameFx(); } // 対局の画面（待合室を含む）は render が決める
   checkLastRoom(); // さっきの部屋へ戻る（ホームのときだけ問い合わせる。ほかの画面では閉じる）
   updateSeason();
 }
@@ -1519,6 +1519,12 @@ function makeButton(text, onClick, variant = 'primary') {
 //   押すとすぐ上へ消える。続けて変わったら前の帯を消して出し直す。動きを減らす設定の端末では、滑らせずに出して消す（知らせなので出すこと自体はやめない）。
 const GAME_BANNER_MS = 2500;
 let seenGame = null; // { code: 部屋コード, id: 前に描いたゲーム }
+// 部屋に入るとき（enterRoom）とホームを出すとき（部屋を出た・退出させられた・別のタブに譲った）に、覚えと出ている帯を捨てる
+// （2026-11-16 の Codex の点検。前は部屋を出ても覚えが残り、出ている間にゲームが変わった同じ部屋へ入り直すと、入った直後に帯が出た。出ている帯もホームに残った）
+function resetGameFx() {
+  seenGame = null;
+  document.querySelector('.game-banner')?.remove();
+}
 function gameChangeFx() {
   if (S.mode !== 'online' || !S.gameId) return;
   const prev = seenGame;
@@ -5087,6 +5093,7 @@ function joinRoom(raw) {
 
 function enterRoom(code, saved) {
   ownLast = null; // 部屋に入ったら（同じ部屋に入り直しても）最初の保存で持ち主になる（saveLastRoom）
+  resetGameFx(); // 入った直後は名前の帯を出さない
   S = saved
     ? { ...saved, mode: 'online', code }
     : {

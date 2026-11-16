@@ -493,6 +493,15 @@ export function lateLost(lost, l) {
   const out = lost.map((v, c) => (Number.isInteger(l[c]) && l[c] > v ? l[c] : v));
   return out.some((v, c) => v !== lost[c]) ? out : null;
 }
+// 決着したあとに失点 l が届いたとき: 増えていなければ null。増えていれば { lost: 合わせた失点, over: 合わせた点での決着 }。
+// over が null なら決着を取り消して続ける（制限時間の延長で、2台がほぼ同時に自分の陣地で決められて同点に戻ったとき。2026-11-16 の Codex の点検）。
+// 点数で終わる遊び方は失点が増えるだけなので、一度決着したら null にはならない
+export function lateOver(n, lost, l, limit, target) {
+  const more = lateLost(lost, l);
+  if (!more) return null;
+  const score = scoreOf(n, more);
+  return { lost: more, over: limit ? overTime(n, score) : overOf(n, score, target) };
+}
 // 席ごとの失点（lost）から点数を作る。2人は相手の失点が自分の点、3人は失点そのもの
 export const scoreOf = (n, lost) => (n === 2 ? [lost[1], lost[0]] : lost.slice());
 // 決着していれば { rank: 席ごとの順位（1から。同点は同じ順位） }
@@ -1206,18 +1215,24 @@ function mount(root, opts) {
   // （パック2つで別々の端末がほぼ同時に決めても、片方が消えない。再読み込みした端末もここで追いつく）
   // 決着したあとも合わせる（2026-11-16 の Codex の点検）: 決着の1点と同時にほかの端末で決まった失点（6対6から2台がほぼ同時に自分の陣地で決められた）が
   // あとから届いたら、点数と順位だけ全員と同じに直す（パックは置き直さない）。前は読み捨てていて、Aの画面は「Bの勝ち」・Bの画面は「Aの勝ち」のままだった。
-  // 決着したあとは新しいゴールが起きないので、ここで増えるのは行き違った失点だけ
+  // 決着したあとは新しいゴールが起きないので、ここで増えるのは行き違った失点だけ。
+  // 制限時間の延長（同点で次の1点まで）で同じことが起きると、合わせた点はまた同点になる。そのときは決着を取り消して延長を続ける
+  // （2026-11-16 の Codex の点検。前は決着のままで、2台とも「あなたの負け」が残り、試合も再開しなかった）。入れられたパックは下のふつうの合わせ方で置き直す
   function mergeLost(l, gi) {
     if (!Array.isArray(l) || l.length !== n) return;
     if (st.over) {
-      const more = lateLost(st.lost, l);
-      if (!more) return;
-      st.lost = more;
-      st.score = scoreOf(n, st.lost);
-      const o = limit ? overTime(n, st.score) : overOf(n, st.score, target);
-      if (o && o.rank.join() !== st.over.rank.join()) { st.over = o; finish(); }
-      showStatus();
-      return;
+      const late = lateOver(n, st.lost, l, limit, target);
+      if (!late) return;
+      if (late.over) {
+        st.lost = late.lost;
+        st.score = scoreOf(n, st.lost);
+        if (late.over.rank.join() !== st.over.rank.join()) { st.over = late.over; finish(); }
+        showStatus();
+        return;
+      }
+      st.over = null;
+      panel.innerHTML = ''; // 「もう一回」を消す
+      resize();
     }
     let changed = null;
     for (let c = 0; c < n; c++) {

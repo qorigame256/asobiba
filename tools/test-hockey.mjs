@@ -6,7 +6,7 @@
 // マレットの大きさ（小さい・大きい）でも、範囲と当たりが半径に合う・決着が付く・強さの順が崩れない・ふつうなら前と同じ、を確かめる。
 import HOCKEY, {
   stepPuck, cpuTarget, clampMallet, CPU_LEVELS, stepHex, clampHex, cpuHex, zoneHex, addGoal, overOf, overTime, HEX_A, HEX_R, GOAL3, bouncePucks, scoreOf,
-  GOAL_SIZES, table, moveMallet, BLOCK2, BLOCK3, blockDist, MALLET_SIZES, OCT_A, OCT_R, lateLost,
+  GOAL_SIZES, table, moveMallet, BLOCK2, BLOCK3, blockDist, MALLET_SIZES, OCT_A, OCT_R, lateLost, lateOver,
 } from '../app/js/games/hockey.js';
 import { mulberry32 } from '../app/js/games/util.js';
 
@@ -246,6 +246,11 @@ function match3(lvs, seed, target = 7, goal = GOAL3) {
     const la = lateLost(a, b), lb = lateLost(b, a);
     check('決着のあと: 行き違った失点を合わせると2台で同じ順位', JSON.stringify(la) === '[7,7]' && JSON.stringify(lb) === '[7,7]'
       && JSON.stringify(overOf(2, scoreOf(2, la), 7)?.rank) === JSON.stringify(overOf(2, scoreOf(2, lb), 7)?.rank));
+    // 制限時間の延長（2対2）で同じことが起きると、合わせた点はまた同点。2台とも決着を取り消して続ける
+    const ta = lateOver(2, [3, 2], [2, 3], 60, 7), tb = lateOver(2, [2, 3], [3, 2], 60, 7);
+    check('決着のあと: 延長で同点に戻ったら2台とも決着を取り消す', JSON.stringify(ta?.lost) === '[3,3]' && ta.over === null && JSON.stringify(tb?.lost) === '[3,3]' && tb.over === null);
+    const t3 = lateOver(3, [3, 2, 2], [2, 3, 2], 60, 7);
+    check('決着のあと: 3人の延長で、合わせても失点の少ない人が1人なら決着のまま', JSON.stringify(t3?.over?.rank) === '[2,2,1]' && lateOver(2, [7, 6], [6, 7], 0, 7)?.over !== null);
     check('決着のあと: 増えていなければ何もしない', lateLost([7, 6], [7, 6]) === null && lateLost([7, 6], [5, 6]) === null && lateLost([7, 6], [7]) === null);
   }
   check('2人: 取った点で数える（入れられた側の相手に1点）', JSON.stringify(addGoal(2, [0, 0], 1)) === '[1,0]' && JSON.stringify(overOf(2, [7, 3], 7)?.rank) === '[1,2]');
