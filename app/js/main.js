@@ -1512,6 +1512,39 @@ function makeButton(text, onClick, variant = 'primary') {
   return b;
 }
 
+/* ---------- ゲームが変わったら名前の帯（2026-11-16 本人の依頼「遊びが変わったら上からゲーム名の表示を出して、一定時間経過で上に消えるように」） ---------- */
+// 本人の選択: 約2.5秒出す・中身は名前と一言（絵は出さない）・部屋の全員の画面に出す（変えたホストにも。抽選で変わったときも）。
+// Claude の判断: 見分けは描き直しのたびに「前に描いた部屋とゲーム」と比べる（ホストは newRound、ゲストは state で gameId が替わるので、どちらもここで拾える）。
+//   部屋に入った直後・再読み込みの直後・別の部屋へ移ったときは出さない（変わったのではないので）。同じゲームのもう一回でも出さない。
+//   押すとすぐ上へ消える。続けて変わったら前の帯を消して出し直す。動きを減らす設定の端末では、滑らせずに出して消す（知らせなので出すこと自体はやめない）。
+const GAME_BANNER_MS = 2500;
+let seenGame = null; // { code: 部屋コード, id: 前に描いたゲーム }
+function gameChangeFx() {
+  if (S.mode !== 'online' || !S.gameId) return;
+  const prev = seenGame;
+  seenGame = { code: S.code, id: S.gameId };
+  if (!prev || prev.code !== S.code || prev.id === S.gameId || !GAMES[S.gameId]) return;
+  document.querySelector('.game-banner')?.remove();
+  const b = document.createElement('div');
+  b.className = 'game-banner';
+  b.setAttribute('role', 'status');
+  const name = document.createElement('b');
+  name.textContent = GAMES[S.gameId].name;
+  const said = document.createElement('span');
+  said.textContent = 'に変わりました';
+  b.append(name, said);
+  let timer = 0;
+  const hide = () => {
+    clearTimeout(timer);
+    b.classList.remove('show');
+    setTimeout(() => b.remove(), lessMotion() ? 0 : 350);
+  };
+  b.onclick = hide;
+  document.body.append(b);
+  requestAnimationFrame(() => requestAnimationFrame(() => b.classList.add('show'))); // 一度上に置いてから下ろす（同じ描き替えで足すと滑らない）
+  timer = setTimeout(hide, GAME_BANNER_MS);
+}
+
 function toast(text) {
   const t = el('toast');
   t.textContent = text;
@@ -2236,6 +2269,7 @@ function closeMenu() {
 function renderPage() {
   menuBox = null; // 前の描き直しが途中で止まっていても、待合室の部品がメニューの入れ物に入らないように
   if (S.mode === 'online') noteMembers(); // 人が入ったら札が飛び込む（memberFx）
+  gameChangeFx();
   if (S.mode === 'online' && S.isHost && !S.order) autoPlayers();
   resultUp = false;
   setBanner(false); // 待合室だけ下で出し直す（出し入れは ads.js がまとめるので、続けて呼んでもちらつかない）

@@ -1348,6 +1348,12 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
   transition: opacity .2s, transform .2s;
 }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
+/* ゲームが変わったら名前の帯（main.js の gameChangeFx）: 上から下りて約2.5秒とどまり、上へ消える。押すとすぐ消える */
+.game-banner { position: fixed; left: 0; right: 0; margin: 0 auto; width: max-content; top: calc(10px + env(safe-area-inset-top)); z-index: 45; transform: translateY(calc(-100% - 20px - env(safe-area-inset-top))); max-width: calc(100% - 32px); box-sizing: border-box; text-align: center; padding: 10px 20px; border-radius: 26px; background: var(--accent); color: var(--accent-ink); font-size: .95rem; font-weight: 700; box-shadow: 0 6px 18px rgba(0, 0, 0, .25); cursor: pointer; transition: transform .35s cubic-bezier(.2, .8, .2, 1); }
+.game-banner b { font-size: 1.25rem; overflow-wrap: anywhere; }
+.game-banner span { white-space: nowrap; } /* 「に変わりました」は割らない（名前は長ければ折り返す） */
+.game-banner.show { transform: none; }
+@media (prefers-reduced-motion: reduce) { .game-banner { transition: none; } }
 /* 通信が切れたときの帯（対局の画面の一番上。スクロールしていても上に貼り付く） */
 .net-banner { position: sticky; top: env(safe-area-inset-top); z-index: 60; margin: 0 0 8px; border-radius: 0 0 10px 10px; background: #c62d1f; color: #fff; font-weight: 700; font-size: .9rem; text-align: center; padding: 8px 12px; box-shadow: 0 2px 8px rgba(0, 0, 0, .25); }
 .net-banner[hidden] { display: none; }
@@ -3085,7 +3091,7 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 @font-face { font-family: "asobi-maru"; src: url("../fonts/zenmaru.woff") format("woff"); font-weight: 400 900; font-display: swap; }
 @font-face { font-family: "asobi-fude"; src: url("../fonts/yuji.woff") format("woff"); font-weight: 400 900; font-display: swap; }
 @font-face { font-family: "asobi-goku"; src: url("../fonts/dela.woff") format("woff"); font-weight: 400 900; font-display: swap; }
-h1, h2, .sheet-head h3, .picker-head h3, .cat-h, .tile-nm, .lobby-game-name { font-family: "asobi-maru", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", system-ui, sans-serif; }
+h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-game-name { font-family: "asobi-maru", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", system-ui, sans-serif; }
 .end-stamp { font-family: "asobi-fude", "Yu Mincho", "Hiragino Mincho ProN", serif; }
 .end-stamp .nm { font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", system-ui, sans-serif; font-weight: 800; font-size: .8em; }
 .turn-fx span, .cut-fx span { font-family: "asobi-goku", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", system-ui, sans-serif; }
