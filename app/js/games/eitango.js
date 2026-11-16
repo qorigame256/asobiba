@@ -19,7 +19,7 @@
 //   ふりかえり（出た単語と意味・自分の正誤・いちばん速く正解した人）は難読漢字と同じく、対局が終わった画面にいつも出す。
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'try', q: 問題番号, text: 答え, ms, n: その問題で何回目の答えか } / { p, t: 'pass', q }
 
-import { mulberry32, shuffle, esc } from './util.js';
+import { mulberry32, shuffle, esc, mayFocus } from './util.js';
 import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
 import { EITANGO } from './eitango-data.js';
 import { REVIEW_CSS } from './kanji.js';
@@ -355,8 +355,8 @@ export default {
     wrap.append(note);
     root.append(wrap);
     this.note(s, me);
-    // スマホは勝手にキーボードを出さない。「ゲームを変える」の一覧を開いているときも取り上げない
-    if (ui.input && !matchMedia('(pointer: coarse)').matches && document.activeElement?.tagName !== 'SELECT') ui.input.focus();
+    // スマホは勝手にキーボードを出さない。選択欄や小窓（「ゲームを変える」など）を触っているときも取り上げない（util.js の mayFocus）
+    if (ui.input && mayFocus()) ui.input.focus();
   },
 
   // ふりかえり（難読漢字と同じ見た目。kanji.js の REVIEW_CSS を使う）

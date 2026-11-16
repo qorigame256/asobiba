@@ -12,7 +12,7 @@
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open →（全員書いた1.5秒 / 制限時間）→ close → shown → next …
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q: 問題番号, text: 答え }
 
-import { mulberry32, shuffle, esc } from './util.js';
+import { mulberry32, shuffle, esc, mayFocus } from './util.js';
 import { flipTimes, flipCard, FLIP_AFTER, since, kana, scoreChips, leaders, winnersText, timeBar } from './party.js';
 import { TOPICS } from './ishin-data.js';
 import { shown as filtered } from '../filter.js';
@@ -243,7 +243,7 @@ export default {
     wrap.append(note);
     root.append(wrap);
     this.note(s, me, o);
-    if (ui.input && !matchMedia('(pointer: coarse)').matches && document.activeElement?.tagName !== 'SELECT') ui.input.focus();
+    if (ui.input && mayFocus()) ui.input.focus();
   },
 
   // 答えを見せる場面: まとまりごとに、答えと書いた人を多い順に並べる（一番多いまとまりを光らせる）

@@ -15,7 +15,7 @@
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → write → close → vote → tally → shown → next …
 // 手: { p: -1, t: 'next' | 'close' | 'tally' } / { p, t: 'ans', q, text } / { p, t: 'vote', q, to: 答えた人の席 }
 
-import { mulberry32, shuffle, esc } from './util.js';
+import { mulberry32, shuffle, esc, mayFocus } from './util.js';
 import { since, scoreChips, leaders, winnersText, timeBar } from './party.js';
 import { shown as filterShown } from '../filter.js';
 import { OOGIRI } from './oogiri-data.js';
@@ -225,7 +225,7 @@ export default {
           form.querySelector('button').disabled = true;
           note.textContent = '時間切れ！';
         }, Math.max(0, WRITE_MS - since(key)));
-        if (!matchMedia('(pointer: coarse)').matches && document.activeElement?.tagName !== 'SELECT') setTimeout(() => input.isConnected && input.focus(), 0);
+        if (mayFocus()) setTimeout(() => input.isConnected && input.focus(), 0);
         note.textContent = '答えは1回だけ出せます。名前は投票が終わるまで隠れます';
       } else note.textContent = me === null ? '観戦中' : s.said[me] ? `あなたの答え: ${text(me)}（ほかの人を待っています）` : '';
       wrap.append(note);

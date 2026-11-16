@@ -18,7 +18,7 @@
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → write → close → play →（全部出た）→ done → next … → end
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'word', r: 何こ目のお題か, text } / { p, t: 'play', r }
 
-import { mulberry32, shuffle, esc } from './util.js';
+import { mulberry32, shuffle, esc, mayFocus } from './util.js';
 import { since, kana, scoreChips, timeBar } from './party.js';
 import { TOPICS } from './kachikan-data.js';
 import { shown as filtered } from '../filter.js';
@@ -262,7 +262,7 @@ export default {
       wrap.append(note);
       root.append(wrap);
       this.note(s, me, o);
-      if (ui.input && !matchMedia('(pointer: coarse)').matches && document.activeElement?.tagName !== 'SELECT') ui.input.focus();
+      if (ui.input && mayFocus()) ui.input.focus();
       return;
     }
 

@@ -8,7 +8,7 @@
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'type', q: 問題番号, text, ms }（1問に1人1度だけ。2回目は反則）
 
-import { mulberry32, shuffle } from './util.js';
+import { mulberry32, shuffle, mayFocus } from './util.js';
 import { since, kana, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
 import { TYPING } from './typing-data.js';
 
@@ -237,8 +237,8 @@ export default {
       }
     }
     this.note(s, me);
-    // スマホは勝手にキーボードを出さない（最初に入力欄を押してもらえば、そのあとは開いたまま）。「ゲームを変える」の一覧を開いているときも取り上げない（一覧が閉じる）
-    if (ui.input && !ui.locked && !matchMedia('(pointer: coarse)').matches && document.activeElement?.tagName !== 'SELECT') ui.input.focus();
+    // スマホは勝手にキーボードを出さない（最初に入力欄を押してもらえば、そのあとは開いたまま）。選択欄や小窓（「ゲームを変える」など）を触っているときも取り上げない（util.js の mayFocus）
+    if (ui.input && !ui.locked && mayFocus()) ui.input.focus();
 
     function trySend(byEnter) {
       const { s: cur, o: co } = ui.cur;

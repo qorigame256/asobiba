@@ -31,7 +31,7 @@ const names = Object.values(GAMES).map((g) => g.name).join('') + CATEGORIES.map(
 
 export const FONT_TEXT = {
   // タイトル・画面の見出し・ゲームの名前（index.html の h1・h2、main.js の play-title・待合室のいまのゲーム）
-  zenmaru: uniq(HIRA + KATA + ASCII + PUNCT + names + 'みんなの遊び場ゲームを選ぶ部屋に参加いま選んでいる'),
+  zenmaru: uniq(HIRA + KATA + ASCII + PUNCT + names + 'みんなの遊び場ゲームを選ぶ部屋に参加いま選んでいる' + 'ゲームを変えるみんなの投票お気に入り'),
   // 決着の判子の決まった字（main.js の stampOf。名前は入れない）
   yuji: uniq(HIRA + '勝負引分位' + '0123456789！・…'),
   // あなたのターンの帯・技の名前

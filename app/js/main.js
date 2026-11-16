@@ -751,7 +751,7 @@ const restable = () => S?.mode === 'online' && S.members.length > 1;
 /* ---------- 次のゲームの投票（2026-10-07 本人の決定）: 待合室で、遊びたいゲームに1人1票入れる。決めるのは今までどおりホスト ---------- */
 // Claude の判断: 投票するのはホスト以外（ホストは「ゲームを変える」で決める人なので）。票は変えられ、「えらばない」で取り消せる。
 // ゲストは type: 'vote' を送り、ホストが S.votes（人の id → ゲームの id）に集めて state で送る。部屋を出た人の票は数えない。
-// そのゲームに切り替えたら、そのゲームへの票は消す（かなったので）。ほかのゲームへの票は残る。ホストの「ゲームを変える」の一覧に票の数が出る。
+// そのゲームに切り替えたら、そのゲームへの票は消す（かなったので）。ほかのゲームへの票は残る。ホストの「ゲームを変える」の小窓の札に票の数が出る。
 function voteCounts() {
   const n = {};
   for (const [id, g] of Object.entries(S.votes ?? {})) {
@@ -1577,7 +1577,7 @@ function appendReactions() {
 const playersText = (g) => (g.minPlayers === g.maxPlayers ? `${g.minPlayers}人` : `${g.minPlayers}〜${g.maxPlayers}人`);
 
 /* ---------- お気に入り（2026-10-07 本人の決定）: ホーム画面のゲームに ★ を付けると、一覧の先頭に並ぶ ---------- */
-// Claude の判断: 端末ごとに覚える（localStorage の bg-favs）。「ゲームを変える」の一覧でも先頭に並べる。付けた順でなく、いつもの並びのまま先頭へ寄せる。
+// Claude の判断: 端末ごとに覚える（localStorage の bg-favs）。「ゲームを変える」の小窓でも一番上の段に並べる。付けた順でなく、いつもの並びのまま先頭へ寄せる。
 const FAV_KEY = 'bg-favs';
 function favorites() {
   try {
@@ -1694,8 +1694,8 @@ function renderHome() {
   filterGames();
 }
 
-// ホームの札（絵と名前だけ）。名前と絵はコードに書いたものなので HTML のまま入れてよい
-function gameTile(id, fav) {
+// ホームの札（絵と名前だけ）。名前と絵はコードに書いたものなので HTML のまま入れてよい。onPick を渡すと押したときにそれを呼ぶ（「ゲームを変える」の小窓）
+function gameTile(id, fav, onPick) {
   const g = GAMES[id];
   const t = document.createElement('button');
   t.type = 'button';
@@ -1703,7 +1703,7 @@ function gameTile(id, fav) {
   t.dataset.id = id;
   t.innerHTML = `<span class="tile-ic" aria-hidden="true">${g.icon}</span><span class="tile-nm">${g.name}</span>`;
   if (fav) t.setAttribute('aria-label', `${g.name}（お気に入り）`);
-  t.onclick = () => openGameSheet(id);
+  t.onclick = onPick ?? (() => openGameSheet(id));
   // ホームの札が動く（2026-11-10 本人の選択。room.md「演出・アニメーションの3回目」）: 触る（PC は上にのせる）と、中の絵が仲間ごとに違う動きをする（動きは style.css の .tile[data-cat]）
   t.dataset.cat = categoryOf(id) ?? '';
   const wiggle = () => { const ic = t.firstElementChild; ic.classList.remove('ic-move'); void ic.offsetWidth; ic.classList.add('ic-move'); };
@@ -2132,8 +2132,8 @@ function renderHowto(game) {
   btn.setAttribute('aria-expanded', String(!box.hidden));
 }
 
-// 下の段（ボタンと「ゲームを変える」）を作る場所。「ゲームを変える」の一覧を開いている間は、作り直さず
-// 画面に出ない入れ物へ作って捨てる（作り直すと開いた一覧が閉じる。手が次々に届く難読漢字などで選べなかった）
+// 下の段（ボタンと「👀 見る画面」）を作る場所。下の段の選択欄を開いている間は、作り直さず
+// 画面に出ない入れ物へ作って捨てる（作り直すと開いた一覧が閉じる。手が次々に届く難読漢字などで選べなかった。「ゲームを変える」は 2026-11-16 から小窓なので当たらない）
 let controlsEl = null;
 const ctl = () => controlsEl;
 
@@ -4484,32 +4484,134 @@ function onKicked(ban = true) {
   alert(ban ? '部屋を作った人によって、部屋から締め出されました（この部屋にはもう入れません）。' : '部屋を作った人によって、部屋から退出させられました。');
 }
 
+/* ---------- ゲームを変える小窓（2026-11-16 本人の依頼「ホスト、待機室から遊びを探すのが大変」。分かれ目は Claude の問いに本人が推奨どおり答えた） ---------- */
+// 105個が1列に並ぶ選択欄をやめ、ボタンで小窓を開いて、ホームと同じ検索の欄・仲間へ飛ぶボタン・絵の札で選ぶ（filterGames・gameTile と同じ部品）。
+// 札を押したらすぐ切り替える。投票のあるゲームは一番上の段にまとめて札に 🗳 の数を出し、いまの人数で始められない札は薄くして「あと◯人」を出す（押せるまま）。
+// Claude の判断: 段の順は 投票 → ★お気に入り → 仲間（お気に入り・投票の段の札は仲間の中にも残す。ホームと同じ）。いまのゲームの札には枠を付ける。
+//   開いている間に届いた投票は出し直さない（開き直せば出る）。検索の欄に自分で focus を移すのは PC だけ（iPhone で勝手にキーボードを出さない）。
 function gameSelect() {
-  const label = document.createElement('label');
-  label.className = 'game-select';
-  label.textContent = 'ゲームを変える ';
-  const sel = document.createElement('select');
+  return makeButton('🔄 ゲームを変える', openGamePicker, 'secondary');
+}
+function openGamePicker() {
+  closeInvite();
   const favs = favorites();
-  const votes = S.mode === 'online' ? voteCounts() : {}; // 次のゲームの投票の数
-  for (const id of gameOrder()) {
-    if (!GAMES[id].ready) continue;
-    const opt = document.createElement('option');
-    opt.value = id;
-    opt.textContent = (favs.includes(id) ? '★ ' : '') + GAMES[id].name + (votes[id] ? `（🗳${votes[id]}）` : '');
-    opt.selected = id === S.gameId;
-    sel.append(opt);
-  }
-  sel.onblur = () => render(); // 開いている間に止めていた描き直しを追いつかせる
-  sel.onchange = () => {
-    sel.onblur = null;
-    sel.blur();
+  const votes = S.mode === 'online' ? voteCounts() : {};
+  const pop = document.createElement('div');
+  pop.className = 'invite-pop picker-pop';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-modal', 'true');
+  pop.setAttribute('aria-label', 'ゲームを変える');
+  const box = document.createElement('div');
+  box.className = 'invite-box game-picker';
+  const find = document.createElement('div');
+  find.className = 'picker-find';
+  const head = document.createElement('div');
+  head.className = 'picker-head';
+  const h = document.createElement('h3');
+  h.textContent = 'ゲームを変える';
+  head.append(h, makeButton('閉じる', closeInvite, 'ghost small'));
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.className = 'game-search';
+  search.placeholder = '🔍 ゲームを探す（例: しょうぎ・カード）';
+  search.autocomplete = 'off';
+  search.spellcheck = false;
+  search.enterKeyHint = 'search';
+  search.setAttribute('aria-label', 'ゲームを探す');
+  const cats = document.createElement('div');
+  cats.className = 'game-cats';
+  find.append(head, search, cats);
+  const list = document.createElement('div');
+  const none = document.createElement('p');
+  none.className = 'game-search-none';
+  none.textContent = '見つかりませんでした';
+  none.hidden = true;
+  const ready = (ids) => ids.filter((id) => GAMES[id].ready);
+  const voted = ready(GAME_ORDER.filter((id) => votes[id])).sort((a, b) => votes[b] - votes[a]);
+  const groups = [
+    ['vote', '🗳 みんなの投票', voted],
+    ['fav', '★ お気に入り', ready(GAME_ORDER.filter((id) => favs.includes(id)))],
+    ...CATEGORIES.map((c) => [c.key, c.name, ready(GAME_ORDER.filter((id) => c.ids.includes(id)))]),
+  ];
+  const pick = (id) => {
+    closeInvite();
+    if (!S?.isHost && S?.mode === 'online') return; // 開いている間にホストでなくなった
+    if (!S || id === S.gameId) return;
     const st = replay(S);
     const playing = st && S.moves.length && !GAMES[S.gameId].result(st);
-    if (playing && !confirm('対局の途中です。ゲームを変えますか？')) { sel.value = S.gameId; render(); return; }
-    newRound(sel.value, { lobby: true });
+    if (playing && !confirm('対局の途中です。ゲームを変えますか？')) return;
+    newRound(id, { lobby: true });
   };
-  label.append(sel);
-  return label;
+  for (const [key, name, ids] of groups) {
+    if (!ids.length) continue;
+    const sec = document.createElement('section');
+    sec.className = 'game-cat';
+    sec.dataset.cat = key;
+    const hd = document.createElement('h3');
+    hd.className = 'cat-h';
+    hd.textContent = `${name}（${ids.length}）`;
+    const grid = document.createElement('div');
+    grid.className = 'tiles';
+    for (const id of ids) {
+      const t = gameTile(id, favs.includes(id), () => pick(id));
+      const g = GAMES[id];
+      const notes = [];
+      if (id === S.gameId) { t.classList.add('current'); t.setAttribute('aria-current', 'true'); notes.push('いまのゲーム'); }
+      if (votes[id]) {
+        const v = document.createElement('span');
+        v.className = 'tile-vote';
+        v.textContent = `🗳${votes[id]}`;
+        t.append(v);
+        notes.push(`投票${votes[id]}`);
+      }
+      if (S.mode === 'online' && !playableNow(g)) {
+        const need = Math.max(g.live ? 2 : g.minPlayers, 2) - S.members.length;
+        t.classList.add('cant');
+        const n = document.createElement('span');
+        n.className = 'tile-need';
+        n.textContent = need > 0 ? `あと${need}人` : '人数が足りない';
+        t.append(n);
+        notes.push(n.textContent);
+      }
+      if (notes.length) t.setAttribute('aria-label', `${g.name}（${notes.join('・')}）`);
+      grid.append(t);
+    }
+    sec.append(hd, grid);
+    list.append(sec);
+    if (key === 'fav' || key === 'vote') continue; // 上の段なので、飛ぶボタンは要らない
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cat-btn';
+    b.dataset.cat = key;
+    b.textContent = name;
+    // 検索の帯の下に見出しが来るように、小窓の中を送る（小窓の中が動く。ホームのように画面は動かない）
+    b.onclick = () => pop.scrollBy({ top: hd.getBoundingClientRect().top - find.getBoundingClientRect().bottom - 6, behavior: lessMotion() ? 'auto' : 'smooth' });
+    cats.append(b);
+  }
+  // ホームの filterGames と同じ絞り方（名前・読み・説明）
+  search.oninput = () => {
+    const q = toHira(search.value);
+    let shown = 0;
+    for (const sec of list.children) {
+      let n = 0;
+      for (const t of sec.querySelectorAll('.tile')) {
+        const hit = !q || gameHay(t.dataset.id).includes(q);
+        t.hidden = !hit;
+        if (hit) n++;
+      }
+      sec.hidden = !n;
+      const chip = cats.querySelector(`[data-cat="${sec.dataset.cat}"]`);
+      if (chip) chip.hidden = !n;
+      shown += n;
+    }
+    none.hidden = shown > 0;
+  };
+  box.append(find, none, list);
+  pop.append(box);
+  pop.addEventListener('click', (e) => { if (e.target === pop) closeInvite(); });
+  pop.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeInvite(); });
+  document.body.append(pop);
+  if (!matchMedia('(pointer: coarse)').matches) search.focus({ preventScroll: true });
 }
 
 // ゲームのルーレット（2026-10-06 本人の決定）: 待合室でホストが押すと、いまの部屋の人数で遊べるゲームから1つを抽選して切り替える。

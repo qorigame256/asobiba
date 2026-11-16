@@ -179,6 +179,10 @@ export function reachTag(text) {
   return t;
 }
 
+// ゲームの入力欄へ自分で focus を移してよいか（PC だけ）。選択欄（見る画面 など）や小窓（「ゲームを変える」の検索の欄・名前を聞く欄 など）を
+// 触っている間は取り上げない（取り上げると選択欄が閉じ、小窓の欄に打った字がゲームの欄へ行く）。呼ぶのは描き直しのときだけ（Node の自動確認からは呼ばれない）
+export const mayFocus = () => !matchMedia('(pointer: coarse)').matches && !document.activeElement?.closest?.('select, .invite-pop');
+
 // 人の名前など、外から来た文字を HTML に埋め込むときに使う
 export const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 

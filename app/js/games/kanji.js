@@ -23,7 +23,7 @@
 //   4つから選ぶでは、よくある読みまちがいを必ず混ぜる（choicesOf の wrong）。正解を見せるときに読みまちがいも添える。ぜんぶまぜるには入れない（NANDOKU）。
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'try', q: 問題番号, text: 答え, ms, n: その問題で何回目の答えか } / { p, t: 'pass', q }
 
-import { mulberry32, shuffle, esc } from './util.js';
+import { mulberry32, shuffle, esc, mayFocus } from './util.js';
 import { since, kana, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
 import { KANJI } from './kanji-data.js';
 
@@ -390,8 +390,8 @@ export default {
     wrap.append(note);
     root.append(wrap);
     this.note(s, me);
-    // スマホは勝手にキーボードを出さない。「ゲームを変える」の一覧を開いているときも取り上げない（一覧が閉じる）
-    if (ui.input && !matchMedia('(pointer: coarse)').matches && document.activeElement?.tagName !== 'SELECT') ui.input.focus();
+    // スマホは勝手にキーボードを出さない。選択欄や小窓（「ゲームを変える」など）を触っているときも取り上げない（util.js の mayFocus）
+    if (ui.input && mayFocus()) ui.input.focus();
   },
 
   // ふりかえり（開け閉めできる欄。最初は開いておく。同じ場面のうちは作り直さないので、閉じたら閉じたまま）
