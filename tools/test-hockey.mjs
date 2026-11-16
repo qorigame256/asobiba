@@ -6,7 +6,7 @@
 // マレットの大きさ（小さい・大きい）でも、範囲と当たりが半径に合う・決着が付く・強さの順が崩れない・ふつうなら前と同じ、を確かめる。
 import HOCKEY, {
   stepPuck, cpuTarget, clampMallet, CPU_LEVELS, stepHex, clampHex, cpuHex, zoneHex, addGoal, overOf, overTime, HEX_A, HEX_R, GOAL3, bouncePucks, scoreOf,
-  GOAL_SIZES, table, moveMallet, BLOCK2, BLOCK3, blockDist, MALLET_SIZES, OCT_A, OCT_R,
+  GOAL_SIZES, table, moveMallet, BLOCK2, BLOCK3, blockDist, MALLET_SIZES, OCT_A, OCT_R, lateLost,
 } from '../app/js/games/hockey.js';
 import { mulberry32 } from '../app/js/games/util.js';
 
@@ -239,6 +239,15 @@ function match3(lvs, seed, target = 7, goal = GOAL3) {
   check('3人: マレットはどこを指しても自分の陣地と盤の内側に収まる', inside);
   // 点数と順位
   check('3人: 失点の少ない順に順位（同点は同じ順位）', JSON.stringify(overOf(3, [7, 2, 2], 7)?.rank) === '[3,1,1]' && overOf(3, [6, 2, 2], 7) === null);
+  // 決着したあとに届いた失点（2026-11-16 の Codex の点検）: 6対6から2台がほぼ同時に自分の陣地で決められると、どちらも自分の負けで決着する。
+  // あとから届いた相手の失点を合わせると、2台とも同じ失点・同じ順位になる
+  {
+    const a = [7, 6], b = [6, 7]; // Aの端末は席0の失点、Bの端末は席1の失点を先に数えた
+    const la = lateLost(a, b), lb = lateLost(b, a);
+    check('決着のあと: 行き違った失点を合わせると2台で同じ順位', JSON.stringify(la) === '[7,7]' && JSON.stringify(lb) === '[7,7]'
+      && JSON.stringify(overOf(2, scoreOf(2, la), 7)?.rank) === JSON.stringify(overOf(2, scoreOf(2, lb), 7)?.rank));
+    check('決着のあと: 増えていなければ何もしない', lateLost([7, 6], [7, 6]) === null && lateLost([7, 6], [5, 6]) === null && lateLost([7, 6], [7]) === null);
+  }
   check('2人: 取った点で数える（入れられた側の相手に1点）', JSON.stringify(addGoal(2, [0, 0], 1)) === '[1,0]' && JSON.stringify(overOf(2, [7, 3], 7)?.rank) === '[1,2]');
   // 制限時間が来たあと（同点なら次の1点まで続ける）
   check('時間切れ: 2人は点の多い方の勝ち・同点なら続ける', JSON.stringify(overTime(2, [2, 3])?.rank) === '[2,1]' && overTime(2, [2, 2]) === null && overTime(2, [0, 0]) === null);

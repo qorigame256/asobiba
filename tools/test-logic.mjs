@@ -8657,6 +8657,37 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.ok(d.ans[0] && d.miss[0] === null, 'てんびん当て: 答え直しなしなら外れで終わり');
     assert.equal(B.init(2, 1, { rules: { retry: true, mode: 'share' } }).retry, false, 'てんびん当て: みんなで1台では答え直しなし');
   }
+  // 答え直し: 人が1回目を外してから部屋を出た席を CPU が代わりに打つときも、外した玉を除いて答え直す（2026-11-16 の Codex の点検。
+  // CPU の予定の1回目が当たりの席・予定の答え直しが人の外した玉と同じ席で、前は締め切りまで答えなかった）
+  {
+    const realNow = performance.now;
+    let clock = 0;
+    Object.defineProperty(performance, 'now', { value: () => clock, configurable: true, writable: true });
+    try {
+      let kinds = 0;
+      for (let seed = 1; seed <= 30; seed++) {
+        const c = B.apply(B.init(3, 900 + seed, { rules: { retry: true } }), { p: -1, t: 'next' });
+        const f = c.qs[0];
+        const base = seed * 1e6;
+        clock = base;
+        B.cpu(c, 0); // この時刻を「問題が出た時刻」として覚えさせる
+        for (let p = 0; p < 3; p++) {
+          const plan = cpuPlan(c, 0, p);
+          // 人が外した玉: CPU の予定の1回目が当たりなら適当な外れ、予定の答え直しがあればそれと同じ玉
+          const miss = plan.b === f ? (f + 1) % 9 : plan.b2 ?? (f + 1) % 9;
+          if (miss === f) continue;
+          kinds += plan.b === f || plan.b2 === miss ? 1 : 0;
+          const m1 = B.apply(c, { p, t: 'ans', q: 0, b: miss, w: 0, ms: 1000, k: 1 });
+          clock = base + 59000; // 締め切り（60秒）の少し前
+          const mv = B.cpu(m1, p);
+          assert.ok(mv && mv.k === 2 && mv.b !== miss && B.apply(m1, { ...mv, p }), `てんびん当て: 代わりの CPU が答え直す（種 ${900 + seed}・席 ${p}）`);
+        }
+      }
+      assert.ok(kinds > 10, 'てんびん当て: 代わりの CPU の答え直しを確かめた');
+    } finally {
+      Object.defineProperty(performance, 'now', { value: realNow, configurable: true, writable: true });
+    }
+  }
   // みんなで1台
   {
     let c = B.apply(B.init(3, 4, { rules: { mode: 'share', fake: 'any', cap: true } }), { p: -1, t: 'next' });
@@ -11363,6 +11394,16 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.equal(d.last.card, s2.hands[v][0], '並べ替え: 引く人の1枚目は並べ替えたあとの1枚目');
   const done = { ...s0, hands: s0.hands.map((h, p) => (p === v ? h : [])) };
   assert.equal(BB.anytime(done, v, { t: 'order', h: rev }), false, '並べ替え: 決着したあとは送れない');
+  // 並べ替えと引く手が行き違うとホストが引く手を後ろへ足し直す（main.js の rebase。2026-11-16 の Codex の点検）: 並べ替えのあとでも引け、同じ引く手の2回目は弾く
+  const dm = { p: s0.turn, t: 'draw', i: 0, k: s0.step };
+  const d1 = BB.apply(s1, dm);
+  assert.ok(d1, '引く手: 並べ替えのあとに足し直しても引ける');
+  assert.equal(BB.cpu(s0).k, s0.step, '引く手: CPU の手にも k');
+  let back = d1;
+  for (let i = 0; i < 3 && back.turn !== dm.p; i++) back = BB.apply(back, { ...BB.cpu(back), p: back.turn }); // 一回りして同じ人の番に戻す
+  assert.equal(back.turn, dm.p);
+  assert.equal(BB.apply(back, dm), null, '引く手: 同じ引く手が2回届いても2回目は弾く');
+  assert.ok(BB.apply(back, { p: dm.p, t: 'draw', i: 0 }), '引く手: k の無い古い端末の手はそのまま受ける');
 
   // 大富豪の場が流れる動き: 流れたときの s.last.swept は流れる前の場の札
   const DF = GAMES.daifugo;

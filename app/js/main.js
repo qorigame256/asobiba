@@ -2996,7 +2996,8 @@ function ffwdNow(game) {
     ffw = { key, k: 0, timer: null };
     const f = ffw;
     f.timer = setInterval(() => {
-      if (ffw !== f || !S) { clearInterval(f.timer); return; }
+      // 部屋を出た（S が無い）ときは早送りも捨てる。残すと、同じ対局へ入り直したときに止まったままの早送りが出ていた（2026-11-16 の Codex の点検）
+      if (ffw !== f || !S) { clearInterval(f.timer); if (ffw === f) ffw = null; return; }
       f.k += 1;
       if (f.k >= S.moves.length) ffwStop(true); else render();
     }, step);
@@ -4977,6 +4978,7 @@ function enterPlay() {
 // ask = false は、もう聞いたあと（ブラウザの「戻る」で聞いた）
 function leave(ask = true) {
   if (S?.mode === 'online' && ask && !confirm('部屋を出ますか？')) return;
+  ffwStop(false);
   stopLive();
   closeInvite();
   dropBack();
@@ -5895,8 +5897,11 @@ function onMoves(msg) {
     if (!S.isHost && msg.from === S.members[0] && replay({ ...S, moves: msg.moves })) {
       S.moves = msg.moves.slice();
       saveRoom();
-    } else if (S.isHost && (GAMES[S.gameId].realtime || GAMES[S.gameId].concurrent?.(replay(S)))) {
-      rebase(msg); // 同時に動くゲームと、みんなが同時に押す場面（concurrent。ポーカーの結果の OK など）は、ホストが手を足し直す
+    } else if (S.isHost && (GAMES[S.gameId].realtime || GAMES[S.gameId].anytime || GAMES[S.gameId].concurrent?.(replay(S)))) {
+      // 同時に動くゲームと、みんなが同時に押す場面（concurrent。ポーカーの結果の OK など）は、ホストが手を足し直す。
+      // 番でなくても送れる手（anytime。ババ抜きの並べ替え）を持つゲームも同じ（2026-11-16 の Codex の点検。前はホストの並べ替えと
+      // ゲストの引く手がぶつかると、ホストの一覧に合わせてゲストの引く手が消えていた）。そのゲームの手は2回当たっても2回目が弾かれる形にすること
+      rebase(msg);
     } else if (S.isHost) sendState(); else askState();
   }
 }

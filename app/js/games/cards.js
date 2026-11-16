@@ -151,7 +151,8 @@ export function dragSort(box, onDone) {
       if (!on) return;
       sortSwallow = Date.now() + 350;
       mark?.classList.remove('sort-before', 'sort-after');
-      if (to === from) { clear(); return; }
+      // つまんでいる間に手札が描き直された（ほかの人の手・時間切れ）: 何もしない。onDone は古い局面で描き直すので、呼ぶと古い場やボタンが戻っていた（2026-11-16 の Codex の点検）
+      if (to === from || !box.isConnected) { clear(); return; }
       const order = items.map((_, i) => i);
       order.splice(from, 1);
       order.splice(to, 0, from);

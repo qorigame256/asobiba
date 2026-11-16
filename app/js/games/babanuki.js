@@ -3,7 +3,9 @@
 // 最初に、手札の同じ数字の2枚を全部捨てる。自分の番に、次の人（手札が残っている人）の札を裏のまま1枚引き、
 // 同じ数字がそろえば2枚捨てる。手札がなくなった人から上がり。最後まで札を持っていた1人の負け。
 // 引いた札は手札の中の決まらない位置に入る（ほかの人がどこにジョーカーが入ったか追えないように。位置は種から作るので全員同じ）。
-// 手: { p, t: 'draw', i: 引く相手の手札の何枚目か }。番の決まったゲームなので、位置で表してよい。
+// 手: { p, t: 'draw', i: 引く相手の手札の何枚目か, k: 引いたときの s.step }。番の決まったゲームなので、位置で表してよい。
+//   並べ替え（下）と引く手がぶつかるとホストが手を足し直す（main.js の rebase）ので、同じ引く手が2回当たらないよう k の違う手は弾く
+//   （2026-11-16 の Codex の点検。k の無い古い端末の手はそのまま受ける）。
 // 手札を並べ替える（2026-11-16 の UI・UX の7回目。本人の選択。card-games.md）: { p, t: 'order', h: 札の名前の並び }。自分の番でなくても、手札が2枚以上あればいつでも送れる（anytime）。
 //   並べ替えた順がそのまま局面の手札の順になるので、引く人から見た裏向きの並びも変わる（ババの位置を動かして読み合う）。
 //   h にあっていまの手札に無い札は飛ばし、h に無い札は後ろへ（引かれた・引いたと行き違っても崩れないように）。並びが変わらない手は弾く（同じ手が2回届いたときも）。
@@ -130,6 +132,7 @@ export default {
       return s;
     }
     if (!m || m.t !== 'draw' || !this.canAct(s0, m.p)) return null;
+    if (m.k !== undefined && m.k !== s0.step) return null;
     const from = this.victim(s0);
     if (from < 0 || !Number.isInteger(m.i) || m.i < 0 || m.i >= s0.hands[from].length) return null;
     const s = clone(s0);
@@ -151,7 +154,7 @@ export default {
     return s;
   },
 
-  cpu(s) { return { t: 'draw', i: Math.floor(Math.random() * s.hands[this.victim(s)].length) }; },
+  cpu(s) { return { t: 'draw', i: Math.floor(Math.random() * s.hands[this.victim(s)].length), k: s.step }; },
 
   // 引く札を見せる: 引く人がつまんだ位置が届いたら、ゲームの画面だけ描き直す
   onStream(d, from) {
@@ -222,7 +225,7 @@ export default {
           e.className = 'pcard back usable';
           e.setAttribute('aria-label', s.peek && held !== i ? `${i + 1}枚目をつまむ` : `${i + 1}枚目を引く`);
           e.onclick = () => {
-            if (!s.peek || held === i) { peek = null; o.onMove({ t: 'draw', i }); return; }
+            if (!s.peek || held === i) { peek = null; o.onMove({ t: 'draw', i, k: s.step }); return; }
             peek = { key: peekKey(s), i };
             o.stream?.({ k: s.step, i });
             this.render(root, s, { ...o, fresh: false });

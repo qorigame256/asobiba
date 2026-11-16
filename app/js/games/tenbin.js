@@ -164,7 +164,7 @@ export function cpuPlan(s, q, p) {
     if (b === null) b = left[Math.floor(rnd() * left.length)];
   }
   t += 800 + rnd() * 1500;
-  const plan = { weighs, at: Math.round(t), b, w: weighs.length };
+  const plan = { weighs, at: Math.round(t), b, w: weighs.length, left };
   // 答え直し: 外れたら、残りの候補からもう1つ選ぶ
   if (s.retry && b !== null && b !== fake) {
     const rest = left.filter((x) => x !== b);
@@ -369,8 +369,20 @@ export default {
     const plan = cpuPlan(s, s.q, p);
     const t = since(qKey(s));
     if (s.miss[p] !== null) {
-      if (plan.b2 === undefined || plan.at2 >= limitOf(s)) return null;
-      return t >= plan.at2 ? { t: 'ans', q: s.q, b: plan.b2, w: plan.w, ms: Math.max(plan.at2, Math.round(t)), k: 2 } : null;
+      let { b2, at2 } = plan;
+      const miss = s.miss[p];
+      // 人が1回目を外してから部屋を出た席（CPU が代わりに打つ）は、外した玉が CPU の予定の1回目と違う。CPU の予定の1回目が当たりなら答え直しの予定が無く、
+      // 予定の答え直しが外した玉と同じこともあるので、外した玉を除いた候補から選び直す（前は締め切りまで答えず0点だった。2026-11-16 の Codex の点検）
+      if (b2 === undefined || b2 === miss) {
+        const r2 = mulberry32((s.seed * 47 + s.q * 19 + p * 1013 + miss * 7 + 4441) >>> 0);
+        const rest = plan.left.filter((x) => x !== miss);
+        const pool = rest.length ? rest : Array.from({ length: s.size }, (_, i) => i).filter((x) => x !== miss);
+        b2 = pool[Math.floor(r2() * pool.length)];
+        at2 ??= Math.round(plan.at + 1500 + r2() * 1500);
+        at2 = Math.min(at2, limitOf(s) - 1000);
+      }
+      if (at2 >= limitOf(s)) return null;
+      return t >= at2 ? { t: 'ans', q: s.q, b: b2, w: plan.w, ms: Math.max(at2, Math.round(t)), k: 2 } : null;
     }
     if (plan.b === null || plan.at >= limitOf(s)) return null;
     return t >= plan.at ? { t: 'ans', q: s.q, b: plan.b, w: plan.w, ms: Math.max(plan.at, Math.round(t)), k: 1 } : null;
@@ -405,20 +417,22 @@ export default {
       return a.re ? `<span class="pt-ok">○ 答え直し +${s.last.pts[p]}</span>` : `<span class="pt-ok">○ ⚖️${a.w} +${s.last.pts[p]}</span>`;
     };
     const chips = scoreChips(o, s.scores, { won, extra, steady: true });
-    if (ui?.mount === mount && root.contains(ui.wrap)) { ui.chips.replaceWith(chips); ui.chips = chips; return; }
-
-    root.innerHTML = '';
-    root.className = 'board kj tb';
-    const wrap = document.createElement('div');
-    wrap.className = 'kj-wrap';
-    ui = { mount, wrap, chips };
-    ui.paintChips = () => {
+    // 名前の札の「⚖️回数」を少しずつ書き直す（下の tick）。画面を作り直さないときも、いまの局面の extra に替える
+    // （前は最初に作ったときの局面のままで、ほかの人が答えると一度「答えた」と出たあと「⚖️回数」に戻っていた。2026-11-16 の Codex の点検）
+    const paintChips = () => {
       if (s.phase !== 'open') return;
       ui.chips.querySelectorAll('.cc-opp').forEach((chip, p) => {
         const e = chip.querySelector('.pt-extra');
         if (e) e.innerHTML = extra(p);
       });
     };
+    if (ui?.mount === mount && root.contains(ui.wrap)) { ui.chips.replaceWith(chips); ui.chips = chips; ui.paintChips = paintChips; return; }
+
+    root.innerHTML = '';
+    root.className = 'board kj tb';
+    const wrap = document.createElement('div');
+    wrap.className = 'kj-wrap';
+    ui = { mount, wrap, chips, paintChips };
     wrap.append(chips);
     root.append(wrap);
     if (s.phase === 'end') { wrap.append(this.review(s, me, o)); return; }

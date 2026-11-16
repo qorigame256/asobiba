@@ -170,7 +170,8 @@ export default {
   },
 
   // CPU: いつも振る。入れ替えは、いちばん先にいる人と（自分より後ろしかいなくても、いちばん前の人と）
-  cpuDelay(s) { return (s.phase === 'swap' ? 1200 : 900) + (reduced() ? 0 : planOf(s.last)?.total ?? 0); }, // 演出が終わってから
+  // 演出が終わってから。ホストの端末が「動きを減らす」でも演出のぶん待つ（ほかの端末では演出が出ているため。2026-11-16 の Codex の点検）
+  cpuDelay(s) { return (s.phase === 'swap' ? 1200 : 900) + (planOf(s.last)?.total ?? 0); },
   cpu(s, p) {
     if (s.phase === 'swap') {
       const others = [...Array(s.n).keys()].filter((q) => q !== p);

@@ -487,6 +487,12 @@ export function addGoal(n, score, c) {
   else sc[c]++;
   return sc;
 }
+// 決着したあとに届いた失点 l を合わせた失点（増えた席が無ければ null）。mergeLost の決着したあとの所
+export function lateLost(lost, l) {
+  if (!Array.isArray(l) || l.length !== lost.length) return null;
+  const out = lost.map((v, c) => (Number.isInteger(l[c]) && l[c] > v ? l[c] : v));
+  return out.some((v, c) => v !== lost[c]) ? out : null;
+}
 // 席ごとの失点（lost）から点数を作る。2人は相手の失点が自分の点、3人は失点そのもの
 export const scoreOf = (n, lost) => (n === 2 ? [lost[1], lost[0]] : lost.slice());
 // 決着していれば { rank: 席ごとの順位（1から。同点は同じ順位） }
@@ -1198,8 +1204,21 @@ function mount(root, opts) {
   // 失点の知らせ（ゴールの知らせと、毎回の位置の知らせの両方に付いている）を合わせる。
   // 席 c の失点を増やすのは席 c を動かしている端末だけなので、大きい方を取れば全員そろう
   // （パック2つで別々の端末がほぼ同時に決めても、片方が消えない。再読み込みした端末もここで追いつく）
+  // 決着したあとも合わせる（2026-11-16 の Codex の点検）: 決着の1点と同時にほかの端末で決まった失点（6対6から2台がほぼ同時に自分の陣地で決められた）が
+  // あとから届いたら、点数と順位だけ全員と同じに直す（パックは置き直さない）。前は読み捨てていて、Aの画面は「Bの勝ち」・Bの画面は「Aの勝ち」のままだった。
+  // 決着したあとは新しいゴールが起きないので、ここで増えるのは行き違った失点だけ
   function mergeLost(l, gi) {
-    if (!Array.isArray(l) || l.length !== n || st.over) return;
+    if (!Array.isArray(l) || l.length !== n) return;
+    if (st.over) {
+      const more = lateLost(st.lost, l);
+      if (!more) return;
+      st.lost = more;
+      st.score = scoreOf(n, st.lost);
+      const o = limit ? overTime(n, st.score) : overOf(n, st.score, target);
+      if (o && o.rank.join() !== st.over.rank.join()) { st.over = o; finish(); }
+      showStatus();
+      return;
+    }
     let changed = null;
     for (let c = 0; c < n; c++) {
       const v = l[c];
