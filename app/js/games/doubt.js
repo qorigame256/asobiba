@@ -12,7 +12,7 @@
 // 全員が同時に動く（realtime）。同じ手が2回来ても、札はもう手札に無い・同じ回には1回しか押せないので2回目は弾かれる。
 
 import { mulberry32, shuffle, esc } from './util.js';
-import { makeDeck, rankOf, rankLabel, cardEl, backEl, cardLabel, fanHand } from './cards.js';
+import { makeDeck, rankOf, rankLabel, cardEl, backEl, cardLabel, fanHand, dragSort, ownOrder, setOwnOrder } from './cards.js';
 import { since, timeBar } from './party.js';
 
 const MAX_PLAYS = 400;
@@ -309,7 +309,9 @@ export default {
       row.className = 'df-hand db-hand';
       // 光らせる（初心者マーク）のは、言う数字を選んでいればその数字、まだならどれかの数字の札
       const lit = num ? [num] : opts;
-      for (const c of hand.slice().sort((a, b) => rankOf(a) - rankOf(b))) {
+      const ownKey = `db:${s.seed}:${me}`; // 手札を指でずらして並べ替える（2026-11-16。cards.js の dragSort）: 自分の画面だけ
+      const shownHand = ownOrder(ownKey, hand.slice().sort((a, b) => rankOf(a) - rankOf(b)));
+      for (const c of shownHand) {
         const e = cardEl(c, can ? 'button' : 'div');
         Object.assign(e.dataset, { fly: `c:${c}`, flyFrom: '@center', flyTurn: '', flyDeal: '' }); // 新しく来た札（場の札を引き取ったとき）はまん中から。対局の始めは配る（2026-11-06）
         if (lit.includes(rankOf(c)) && s.phase === 'play') e.classList.add('usable');
@@ -324,6 +326,7 @@ export default {
         row.append(e);
       }
       fanHand(row, !!can); // 手札を扇形に持つ（2026-11-10）
+      if (!o.watching) dragSort(row, (order) => { setOwnOrder(ownKey, order.map((i) => shownHand[i])); this.render(root, s, o); });
       root.append(head);
       if (say) root.append(say);
       root.append(row);

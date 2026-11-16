@@ -83,3 +83,83 @@ export function turnUp(e, key, fresh, delay = 0) {
   e.classList.add('turn-up');
   e.style.setProperty('--ago', `${delay - t}ms`);
 }
+
+// 手札を指でずらして並べ替える（2026-11-16 の UI・UX の7回目。本人の選択。card-games.md の「演出」）。
+// dragSort(box, onDone): box（手札を並べた入れ物）の札を、指（PC はマウス）でつまんで横にずらすと、指の下の札の前か後ろに入れる。
+// 離したら onDone(新しい並び。前の並びの何枚目かの一覧) を呼ぶ。札を押して選ぶゲームでも、10px より動かさなければいつもどおり押したことになる。
+// 指で縦になでたときはつままない（ページを動かせるように。CSS の touch-action: pan-y でブラウザに任せる）。手札は折り返して何段にもなるので、指にいちばん近い札の所へ入れる。
+// ownOrder / setOwnOrder: 自分の画面だけの並び（ババ抜きのほかのゲーム）。鍵（対局と配り）ごとに覚え、まだ並べ替えていなければゲームの並びのまま。
+// 並べ替えたあとに来た札（引き取った札・渡された札など）は後ろに足す。覚えるのはこの端末のこのタブの間だけ（Claude の判断）
+const orders = new Map();
+export function ownOrder(key, cards) {
+  const saved = orders.get(key);
+  if (!saved) return cards.slice();
+  const rest = cards.slice();
+  const out = [];
+  for (const c of saved) {
+    const i = rest.indexOf(c);
+    if (i >= 0) { out.push(c); rest.splice(i, 1); }
+  }
+  return [...out, ...rest];
+}
+export function setOwnOrder(key, cards) {
+  orders.delete(key);
+  if (cards) orders.set(key, cards.slice());
+  if (orders.size > 30) orders.delete(orders.keys().next().value);
+}
+let sortSwallow = 0; // つまんで動かしたあとのクリックを捨てる（札を選んだことにしない）
+export function dragSort(box, onDone) {
+  box.classList.add('drag-sort');
+  box.addEventListener('click', (e) => { if (Date.now() < sortSwallow) { e.preventDefault(); e.stopPropagation(); } }, true);
+  box.addEventListener('pointerdown', (e) => {
+    if (e.button > 0 || !e.isPrimary) return;
+    const items = [...box.children];
+    const card = items.find((x) => x.contains(e.target));
+    if (!card || items.length < 2) return;
+    const from = items.indexOf(card);
+    const mids = items.map((x) => { const r = x.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; });
+    const x0 = e.clientX, y0 = e.clientY;
+    let on = false, to = from, mark = null;
+    const stop = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+    };
+    const clear = () => {
+      card.classList.remove('sorting');
+      card.style.transform = '';
+      mark?.classList.remove('sort-before', 'sort-after');
+    };
+    const move = (ev) => {
+      const dx = ev.clientX - x0, dy = ev.clientY - y0;
+      if (!on) {
+        if (Math.hypot(dx, dy) < 10) return; // 指で縦になでたときは、ブラウザがページを動かして pointercancel が来る（touch-action: pan-y）
+        on = true;
+        card.classList.add('sorting');
+      }
+      ev.preventDefault();
+      card.style.transform = `translate(${dx}px, ${dy - 12}px)`;
+      let best = from, bd = Infinity;
+      mids.forEach(([mx, my], i) => { const d = Math.hypot(mx - ev.clientX, (my - ev.clientY) * 1.5); if (d < bd) { bd = d; best = i; } });
+      to = best;
+      mark?.classList.remove('sort-before', 'sort-after');
+      mark = to === from ? null : items[to];
+      mark?.classList.add(to > from ? 'sort-after' : 'sort-before');
+    };
+    const up = () => {
+      stop();
+      if (!on) return;
+      sortSwallow = Date.now() + 350;
+      mark?.classList.remove('sort-before', 'sort-after');
+      if (to === from) { clear(); return; }
+      const order = items.map((_, i) => i);
+      order.splice(from, 1);
+      order.splice(to, 0, from);
+      onDone(order); // 描き直すまで、つまんだ札は離した所に置いたまま（札が飛ぶ動きが、そこから新しい場所へ寄せる）
+    };
+    const cancel = () => { stop(); if (on) clear(); };
+    window.addEventListener('pointermove', move, { passive: false });
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', cancel);
+  });
+}

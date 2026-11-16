@@ -16,7 +16,7 @@
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'pick', r: 何回目（0 から）, v: 数字 }
 //   r が今の回と同じで、その人がまだ決めていないときだけ受け付けるので、同じ手が2回届いても2回目は反則になる。
 
-import { since, scoreChips, leaders, winnersText, timeBar } from './party.js';
+import { flipTimes, flipCard, FLIP_AFTER, since, scoreChips, leaders, winnersText, timeBar } from './party.js';
 
 const ROUNDS = [[5, '5回'], [8, '8回'], [12, '12回']];
 const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 8);
@@ -148,14 +148,14 @@ export default {
       if (s.phase === 'open') return s.picks[p] !== null ? '<span class="pt-ok">✔ 決めた</span>' : '';
       if (s.phase !== 'shown' || !s.last) return '';
       const v = s.picks[p];
-      if (v === null) return '<span class="pt-ng">―</span>';
-      return s.last.pts[p] ? `<span class="pt-ok">${v} → +${v}</span>` : `<span class="pt-ng">${v} かぶり</span>`;
+      if (v === null) return '<span class="pt-ng flip-after">―</span>';
+      return s.last.pts[p] ? `<span class="pt-ok flip-after">${v} → +${v}</span>` : `<span class="pt-ng flip-after">${v} かぶり</span>`; // 札が返ってから出す（一斉に裏返す。2026-11-16）
     };
     root.innerHTML = '';
     root.className = 'board kj kb';
     const wrap = document.createElement('div');
     wrap.className = 'kj-wrap';
-    wrap.append(scoreChips(o, s.scores, { won, extra, steady: true }));
+    wrap.append(scoreChips(o, s.scores, { won, extra, steady: true, gainDelay: s.phase === 'shown' ? FLIP_AFTER : 0 }));
     root.append(wrap);
     if (s.phase === 'end') { wrap.append(this.review(s, me, o)); return; }
     const card = document.createElement('div');
@@ -168,7 +168,15 @@ export default {
     const key = rKey(s);
     card.insertAdjacentHTML('beforeend', `<div class="kj-num">${s.r + 1}回目 / ${s.total}</div>`);
     if (s.phase === 'shown') {
-      card.append(this.reveal(s, me, o));
+      // 一斉に裏返して見せる（2026-11-16 の UI・UX の7回目。本人の選択）: 全員の札を同時に返し、かぶった札は揺らす。数字ごとのまとめはそのあとに出す
+      flipTimes(root, key + ':shown', o.fresh);
+      const row = document.createElement('div');
+      row.className = 'flip-row';
+      s.picks.forEach((v, p) => row.append(flipCard(v === null ? '―' : String(v), p === me ? 'あなた' : o.names[p], v !== null && s.picks.filter((x) => x === v).length > 1)));
+      card.append(row);
+      const list = this.reveal(s, me, o);
+      list.classList.add('flip-after');
+      card.append(list);
       return;
     }
     since(key);

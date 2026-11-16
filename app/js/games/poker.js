@@ -22,7 +22,7 @@
 //   全員が同時に押すので、この間だけホストが手を足し直す（concurrent。main.js の rebase）。
 
 import { mulberry32, shuffle } from './util.js';
-import { SUITS, JOKER, suitOf, rankOf, makeDeck, cardEl, backEl, turnUp, fanHand } from './cards.js';
+import { SUITS, JOKER, suitOf, rankOf, makeDeck, cardEl, backEl, turnUp, fanHand, dragSort, ownOrder, setOwnOrder } from './cards.js';
 import { since } from './party.js';
 
 const START_CHIPS = 1000;
@@ -617,7 +617,12 @@ export default {
       const hand = document.createElement('div');
       hand.className = 'pk-hand';
       const drawing = myTurn && h.phase === 'draw';
-      h.cards[me].forEach((c, i) => {
+      const ownKey = `pk:${s.seed}:${s.handNo}:${me}`; // 手札を指でずらして並べ替える（2026-11-16。cards.js の dragSort）: 自分の画面だけ。選んだ札は手札の何枚目か（i）のまま送る
+      const shownHand = ownOrder(ownKey, h.cards[me]);
+      const used = new Set();
+      shownHand.forEach((c) => {
+        const i = h.cards[me].findIndex((x, k) => x === c && !used.has(k));
+        used.add(i);
         const e = cardEl(c, drawing ? 'button' : 'div');
         // 札を配る動き（2026-11-09）: 場から裏向きで飛んできて表に返る。鍵は札の名前なので、交換で入った札も場から飛んでくる
         Object.assign(e.dataset, { fly: `pk:${s.handNo}:m:${c}`, flyFrom: 'table', flyTurn: '', flyDeal: '' });
@@ -632,6 +637,7 @@ export default {
         hand.append(e);
       });
       fanHand(hand, myTurn && !h.folded[me]); // 手札を扇形に持つ（2026-11-10）
+      if (!o.watching) dragSort(hand, (order) => { setOwnOrder(ownKey, order.map((k) => shownHand[k])); draw(); });
       root.append(hand);
 
       if (myTurn && h.phase !== 'end') {

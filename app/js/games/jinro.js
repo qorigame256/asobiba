@@ -22,7 +22,7 @@
 //   k・v・d で、同じ手が2回届いても2回目は反則になる（realtime。main.js の rebase）。
 
 import { mulberry32, shuffle, esc } from './util.js';
-import { timeBar } from './party.js';
+import { timeBar, voteArrows } from './party.js';
 import { shown } from '../filter.js';
 
 const MAX_TEXT = 60;
@@ -70,6 +70,7 @@ function settleVote(s) {
   for (const to of Object.values(s.votes)) if (counts.has(to)) counts.set(to, counts.get(to) + 1);
   const top = Math.max(0, ...counts.values());
   const tied = top ? [...counts].filter(([, c]) => c === top).map(([p]) => p) : [];
+  s.lastVote = { d: s.day, v: s.vote, votes: { ...s.votes } }; // だれがだれに入れたか（開票を1票ずつ見せる。2026-11-16。画面だけが使う）
   if (tied.length > 1 && s.vote === 1) { // 並んだ人だけでもう一度
     s.vote = 2;
     s.cands = tied;
@@ -347,8 +348,10 @@ export default {
 
     const chips = document.createElement('div');
     chips.className = 'cc-opps';
+    const chipOf = [];
     for (const p of range(s.n)) {
       const chip = document.createElement('div');
+      chipOf[p] = chip;
       chip.className = 'cc-opp' + (s.alive[p] ? '' : ' out') + (over && s.winner && (s.winner === 'wolf') === wolfTeam(s.roles[p]) ? ' won' : '');
       const name = document.createElement('div');
       name.className = 'cc-opp-name';
@@ -426,6 +429,11 @@ export default {
     if (s.phase === 'night') top.append(timeBar(`jinro:${s.seed}:night${s.day}`, NIGHT_MS, { secs: true }));
     ui.top.replaceWith(top);
     ui.top = top;
+    // 開票を1票ずつ見せる（2026-11-16）: その日の投票の結果を、だれがだれに入れたかの矢印で（夜の間と、やり直しの投票の間と、投票で決着したとき）。次の日の昼には消す
+    const lv = s.lastVote;
+    if (lv && lv.d === s.day && (s.phase === 'night' || over || (s.phase === 'vote' && s.vote === 2))) {
+      voteArrows(chips, chipOf, Object.entries(lv.votes).map(([p, to]) => [Number(p), to]), `jr:${s.seed}:${lv.d}:${lv.v}`, o.fresh);
+    }
     if (s.phase === 'day') chat.lastElementChild?.lastElementChild?.scrollIntoView?.({ block: 'nearest' });
 
     // 話す欄は、昼に生きている人にだけ出す（隠すだけで作り直さない）

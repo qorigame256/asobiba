@@ -165,6 +165,43 @@ function attacked(board, sq, side) {
   return false;
 }
 
+// 王手の筋（2026-11-16。画面だけが使う）: sq に利いている side の駒と、その駒と sq の間のマス。[{ from, between: [マス…] }]
+// attacked と同じ調べ方で、見つけても止めずに全部集める
+function checkLines(board, sq, side) {
+  const N = sizeOf(board);
+  const sgn = sgnOf(side);
+  const r = Math.floor(sq / N);
+  const c = sq % N;
+  const out = [];
+  for (const [dr, dc] of [...ORTHO, ...DIAG]) {
+    const rel = [-dr * sgn, -dc * sgn].join();
+    let rr = r + dr;
+    let cc = c + dc;
+    let dist = 1;
+    const between = [];
+    while (rr >= 0 && rr < N && cc >= 0 && cc < N) {
+      const v = board[rr * N + cc];
+      if (v !== 0) {
+        if (v * sgn > 0) {
+          const t = Math.abs(v);
+          if ((dist === 1 && STEP_SET[t]?.has(rel)) || SLIDE_SET[t]?.has(rel)) out.push({ from: rr * N + cc, between });
+        }
+        break;
+      }
+      between.push(rr * N + cc);
+      rr += dr;
+      cc += dc;
+      dist++;
+    }
+  }
+  for (const dc of [-1, 1]) {
+    const rr = r + 2 * sgn;
+    const cc = c + dc;
+    if (rr >= 0 && rr < N && cc >= 0 && cc < N && board[rr * N + cc] === KNIGHT * sgn) out.push({ from: rr * N + cc, between: [] });
+  }
+  return out;
+}
+
 const kingSq = (board, side) => board.indexOf(KING * sgnOf(side));
 
 function pawnOnFile(board, side, c, N) {
@@ -535,6 +572,11 @@ export default {
     const droppable = new Set(legal.filter((m) => m.d).map((m) => m.d));
     const inCheck = !s.result && attacked(s.board, kingSq(s.board, s.turn), 1 - s.turn);
     const checkedKing = inCheck ? kingSq(s.board, s.turn) : -1;
+    // 王手の筋に線を引く（2026-11-16 の UI・UX の7回目。本人の選択。shogi.md）: 王手をかけている駒から玉へ赤い線、間のマス（打てば防げる所）を薄く赤く。
+    // 王手の知らせが「なし」のときは今までどおり出さない（「なし」は状態の欄の「王手！」と赤いマスだけ、の決まりのため）。線を引く動きは新しく届いた手のときだけ
+    const lines = inCheck && !s.quiet ? checkLines(s.board, checkedKing, 1 - s.turn) : [];
+    const blockSq = new Set(lines.flatMap((x) => x.between));
+    const cellAt = {};
 
     root.innerHTML = '';
     root.className = 'board sg' + (N === 5 ? ' sg5' : '');
@@ -614,6 +656,8 @@ export default {
       if (isTarget) cell.classList.add('target');
       peekMark(cell, i, o, isTarget, () => ({ f: ui.from, d: ui.drop })); // 相手の迷いが見える（2026-11-11。main.js の o.peek・o.peekIn）: 相手の選び・PC のねらい
       if (i === checkedKing) cell.classList.add('checked');
+      if (blockSq.has(i)) cell.classList.add('sg-block');
+      cellAt[i] = cell;
       if (s.trial && (i === trySq(0, N) || i === trySq(1, N))) cell.classList.add('try'); // トライのマスに薄い印
       if (v) {
         const t = Math.abs(v);
@@ -647,6 +691,23 @@ export default {
     }
     wrap.append(files, grid, ranks);
     root.append(wrap);
+    if (lines.length) {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('class', 'sg-check-svg');
+      svg.setAttribute('aria-hidden', 'true');
+      grid.append(svg);
+      const g0 = grid.getBoundingClientRect();
+      svg.setAttribute('viewBox', `0 0 ${g0.width} ${g0.height}`);
+      const mid = (e) => { const r = e.getBoundingClientRect(); return [r.left + r.width / 2 - g0.left, r.top + r.height / 2 - g0.top]; };
+      for (const { from } of lines) {
+        const [x1, y1] = mid(cellAt[from]);
+        const [x2, y2] = mid(cellAt[checkedKing]);
+        const p = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        Object.entries({ x1, y1, x2, y2 }).forEach(([k, v]) => p.setAttribute(k, v.toFixed(1)));
+        if (o.fresh) { const len = Math.hypot(x2 - x1, y2 - y1); p.style.cssText = `stroke-dasharray:${len};--len:${len}`; p.classList.add('draw'); }
+        svg.append(p);
+      }
+    }
 
     if (!noHand) root.append(handRow(bottom));
     o.peek?.({ f: ui.from, d: ui.drop, a: null }); // 相手の迷いが見える（2026-11-11。main.js の o.peek・o.peekIn）: いまの選びを知らせる（同じ中身は main.js が送らない）
@@ -686,4 +747,4 @@ export default {
 };
 
 // テスト用
-export const _test = { gaveCheck, legalMoves, attacked, kingSq, initialBoard, miniBoard, evaluate, trySq };
+export const _test = { gaveCheck, legalMoves, attacked, kingSq, initialBoard, miniBoard, evaluate, trySq, checkLines };

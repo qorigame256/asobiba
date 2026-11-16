@@ -50,8 +50,9 @@ export function winnersText(winners, me, pn) {
 //   下のボタンが押し下げられない（2026-10-30 本人の依頼。ぴったりストップ・色ちがい早押し・ことわざかるた・ビンゴ）
 // gain = false: 点が増えても「+3」を出さない（数が点でないゲーム。綱引き連打の回数・ミニゴルフの打数・羽根つきの墨・玉入れの玉）
 // 逆転の知らせ・勝ちまでの見通し（2026-11-13）は 2026-11-14 本人の依頼でやめた（「逆転！」と「1位まで あと◯点」「2位と◯点差」）
-export function scoreChips(o, scores, { turn = null, won = [], extra = null, steady = false, gain = true } = {}) {
-  if (gain) noteGains(o, scores);
+// gainDelay = 「+3」を何 ms 遅らせて出すか（一斉に裏返す場面で、札が返る前に点が分からないように。2026-11-16）
+export function scoreChips(o, scores, { turn = null, won = [], extra = null, steady = false, gain = true, gainDelay = 0 } = {}) {
+  if (gain) noteGains(o, scores, gainDelay);
   const box = document.createElement('div');
   box.className = 'cc-opps' + (steady ? ' cc-steady' : '');
   scores.forEach((v, p) => {
@@ -96,13 +97,13 @@ function tag(cls, text) {
 const GAIN_MS = 900;
 const COUNT_MS = 500;
 const gains = { key: '', vals: [], at: [], from: [] };
-function noteGains(o, scores) {
+function noteGains(o, scores, delay = 0) {
   const key = (o.names || []).join('\u0001') + '#' + scores.length;
   if (gains.key !== key) { Object.assign(gains, { key, vals: scores.slice(), at: [], from: [] }); return; }
   const now = Date.now();
   scores.forEach((v, p) => {
     const was = gains.vals[p];
-    if (o.fresh && Number.isFinite(v) && Number.isFinite(was) && v > was) { gains.at[p] = now; gains.from[p] = was; }
+    if (o.fresh && Number.isFinite(v) && Number.isFinite(was) && v > was) { gains.at[p] = now + delay; gains.from[p] = was; }
     else if (!(v >= was)) delete gains.at[p]; // 点が減った（同じ顔ぶれのもう一回で0に戻った など）ら、前の「+3」の続きを出さない（「+-5」になるため）
     gains.vals[p] = v;
   });
@@ -115,9 +116,9 @@ function showGain(chip, val, p, v) {
   const plus = document.createElement('span');
   plus.className = 'pt-plus';
   plus.textContent = '+' + Math.round((v - from) * 10) / 10;
-  plus.style.animationDelay = `-${t}ms`; // 描き直したときは続きから
+  plus.style.animationDelay = `${-t}ms`; // 描き直したときは続きから（遅らせて出すときは t が負で、その分待つ）
   chip.classList.add('gain');
-  chip.style.animationDelay = `-${t}ms`;
+  chip.style.animationDelay = `${-t}ms`;
   chip.append(plus);
   // 「12」の字（後ろの <small>点</small> はそのまま）。札を受け取ったあとで .pt-score の中身を書き直すゲーム（価値観ならべの「クリア」など）があるので、字は毎回探し直す
   const put = (x) => { const n = [...val.childNodes].find((c) => c.nodeType === 3); if (n) n.nodeValue = String(x); };
@@ -125,7 +126,7 @@ function showGain(chip, val, p, v) {
   const start = Date.now() - t;
   let first = true; // 最初の1回は札がまだ画面に付いていない（scoreChips の中で呼ぶため）
   const step = () => {
-    const k = Math.min(1, (Date.now() - start) / COUNT_MS);
+    const k = Math.max(0, Math.min(1, (Date.now() - start) / COUNT_MS)); // 遅らせて出すときは、始まるまで前の数のまま
     if (k >= 1 || (!first && !val.isConnected)) return put(v); // 描き直しで外れた札は止める
     first = false;
     const x = from + (v - from) * (1 - (1 - k) ** 3);
@@ -192,3 +193,117 @@ export const secText = (ms) => (ms / 1000).toFixed(2) + '秒';
 // 席ごとの色（10人ぶん。最初の4つは --p0〜--p3 と同じ）。迷路早抜け・すごろくのコマ。どのスキンでも変えない
 export const SEAT_COLORS = ['#d9643a', '#2f6fb3', '#2e9a52', '#8a4fc0', '#d4a20c', '#d24a8c', '#1a9aa0', '#7a5a3a', '#5a6470', '#9acd32'];
 export { esc };
+
+// 開票を1票ずつ見せる（2026-11-16 の UI・UX の7回目。本人の選択で、見本より速く。party-games.md の「ワードウルフ」「人狼」）。
+// box = 名前の札が並んだ要素（.cc-opps）、chips[p] = p の札、votes = [[入れた人, 入れられた人], …]（この順に1本ずつ引く）。
+// 札から札へ曲がった矢印を引き、矢印が届くたびに入れられた人の札の右上の数が1つ増える。
+// 盤は描き直しのたびに作り直されるので、引き始めた時刻を key ごとに覚え、引いている間に描き直したら続きから引く（cards.js の turnUp と同じ考え）。
+// fresh = 新しく届いた手で開票になった（読み込み直し・あとから見た人には引き終わった形で出す）。矢印は開票の結果を見せている間ずっと残す。
+// 札に当たらない票（ワードウルフの「ウルフはいない」）は呼ぶ側で除く。動きを減らす設定の端末では引き終わった形で出す
+const VOTE_STEP = 330; // 1票ごとの間（見本は 800ms。本人の「もっとはやく」から Claude が決めた）
+const VOTE_DRAW = 260; // 1本の矢印を引く長さ
+const voteAt = new Map();
+export function voteArrows(box, chips, votes, key, fresh) {
+  const now = Date.now();
+  if (fresh && !voteAt.has(key) && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    voteAt.set(key, now);
+    if (voteAt.size > 50) voteAt.delete(voteAt.keys().next().value);
+  }
+  const start = voteAt.get(key) ?? -Infinity;
+  box.classList.add('va-box');
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'va-svg');
+  svg.setAttribute('aria-hidden', 'true');
+  box.append(svg);
+  // 入れられた人の札の数
+  const badge = new Map();
+  votes.forEach(([, to], i) => {
+    if (!chips[to]) return;
+    if (!badge.has(to)) {
+      const b = document.createElement('span');
+      b.className = 'va-cnt';
+      chips[to].append(b);
+      badge.set(to, { b, at: [] });
+    }
+    badge.get(to).at.push(i * VOTE_STEP + VOTE_DRAW);
+  });
+  const t = now - start;
+  for (const { b, at } of badge.values()) {
+    const put = (n, bump) => {
+      b.textContent = n;
+      b.hidden = !n;
+      if (bump) { b.classList.remove('bump'); void b.offsetWidth; b.classList.add('bump'); }
+    };
+    put(at.filter((x) => x <= t).length, false);
+    at.filter((x) => x > t).forEach((x, k, rest) => setTimeout(() => { if (b.isConnected) put(at.length - rest.length + k + 1, true); }, x - t));
+  }
+  const draw = () => {
+    const t = Date.now() - start;
+    const r0 = box.getBoundingClientRect();
+    if (!r0.width) return;
+    svg.setAttribute('viewBox', `0 0 ${r0.width} ${r0.height}`);
+    svg.innerHTML = '';
+    votes.forEach(([from, to], i) => {
+      const a = chips[from]?.getBoundingClientRect(), z = chips[to]?.getBoundingClientRect();
+      if (!a || !z) return;
+      const x1 = a.left + a.width / 2 - r0.left, y1 = a.top + a.height / 2 - r0.top;
+      const x2 = z.left + z.width / 2 - r0.left, y2 = z.top + z.height / 2 - r0.top;
+      const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L;
+      // 札の真ん中からでなく、ふちのあたりから出してふちのあたりで止める（横に並んだ札が多いので、横は札の幅の半分ほど）
+      const cut = (r) => Math.min(Math.abs(ux) > 0.01 ? r.width / 2 / Math.abs(ux) : Infinity, Math.abs(uy) > 0.01 ? r.height / 2 / Math.abs(uy) : Infinity) * 0.8;
+      const sx = x1 + ux * cut(a), sy = y1 + uy * cut(a), ex = x2 - ux * (cut(z) + 2), ey = y2 - uy * (cut(z) + 2);
+      const bend = Math.min(60, L * 0.28); // 右へ向かう矢印は上へ、左へ向かう矢印は下へふくらむ（行き違いの2本が重ならない）
+      const mx = (sx + ex) / 2 + uy * bend, my = (sy + ey) / 2 - ux * bend;
+      const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      p.setAttribute('d', `M${sx.toFixed(1)} ${sy.toFixed(1)} Q${mx.toFixed(1)} ${my.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}`);
+      p.setAttribute('class', 'va-line');
+      const g = Math.atan2(ey - my, ex - mx), s = 8;
+      const h = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      h.setAttribute('d', `M${ex.toFixed(1)} ${ey.toFixed(1)} L${(ex - s * Math.cos(g - 0.45)).toFixed(1)} ${(ey - s * Math.sin(g - 0.45)).toFixed(1)} L${(ex - s * Math.cos(g + 0.45)).toFixed(1)} ${(ey - s * Math.sin(g + 0.45)).toFixed(1)}Z`);
+      h.setAttribute('class', 'va-head');
+      svg.append(p, h);
+      const d = i * VOTE_STEP - t; // この矢印を引き始めるまで（負なら引き始めてからの時間）
+      if (d + VOTE_DRAW <= 0) return; // もう引き終わった
+      const len = p.getTotalLength();
+      p.style.cssText = `stroke-dasharray:${len};--len:${len};animation-delay:${d}ms`;
+      p.classList.add('va-anim');
+      h.style.animationDelay = `${d + VOTE_DRAW}ms`;
+      h.classList.add('va-anim');
+    });
+  };
+  // 札が並び終わってから測る（呼ぶ側が box を画面に入れたあとに呼ぶ。入れる前に呼ばれても、次の描き替えで測り直す）
+  draw();
+  if (!svg.childNodes.length) requestAnimationFrame(draw);
+  let w = box.clientWidth;
+  const ro = new ResizeObserver(() => { if (!svg.isConnected) { ro.disconnect(); return; } if (box.clientWidth !== w) { w = box.clientWidth; draw(); } });
+  ro.observe(box);
+}
+
+// 一斉に裏返して見せる（2026-11-16 の UI・UX の7回目。本人の選択。かぶったら0点・以心伝心・兵の振り分け）。
+// 全員が決めて見せ合う場面になったら、伏せた札が少し間をおいて同時にぱたっと返り、そのあとで結果（点・まとまり）が出る。
+// flipTimes(root, key, fresh) が始めた時刻を key ごとに覚え（描き直しても続きから。読み込み直し・あとから見た人には返し終わった形）、
+// root に CSS の変数 --fd（札が返り始めるまで）・--fa（結果を出すまで）を置く。返す物は flipCard で作り、あとで出す物には class="flip-after" を付ける。
+// 秒数は Claude の判断（伏せたまま見せる 0.35秒・返すのに 0.45秒）。動きを減らす設定の端末では style.css が止める
+const FLIP_WAIT = 350;
+const FLIP_TURN = 450;
+export const FLIP_AFTER = FLIP_WAIT + FLIP_TURN; // 結果を出すまで（点数の札の gainDelay に渡す）
+const flipAt = new Map();
+export function flipTimes(root, key, fresh) {
+  const now = Date.now();
+  if (fresh && !flipAt.has(key)) {
+    flipAt.set(key, now);
+    if (flipAt.size > 50) flipAt.delete(flipAt.keys().next().value);
+  }
+  const t = Math.min(1e7, now - (flipAt.get(key) ?? -Infinity));
+  root.style.setProperty('--fd', `${FLIP_WAIT - t}ms`);
+  root.style.setProperty('--fa', `${FLIP_WAIT + FLIP_TURN - t}ms`);
+}
+// 伏せた札1枚。face = 表の字、name = 下に出す名前、dup = かぶった（返ったあとで揺れる）
+export function flipCard(face, name, dup = false) {
+  const d = document.createElement('div');
+  d.className = 'flip-card' + (dup ? ' dup' : '');
+  d.innerHTML = '<div class="fc-in"><div class="fc-face fc-back"></div><div class="fc-face fc-front"></div></div><div class="fc-name"></div>';
+  d.querySelector('.fc-front').textContent = face;
+  d.querySelector('.fc-name').textContent = name;
+  return d;
+}

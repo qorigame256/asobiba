@@ -452,6 +452,55 @@ function loupeEnd(e) {
   b.addEventListener('touchcancel', () => loupeEnd(null));
 }
 
+/* ---------- 長押しで大きく見る（2026-11-16 本人の選択。room.md「UI・UX の7回目」） ---------- */
+// 麻雀の牌とトランプの札を押したままにすると、押している間だけ指の上に大きく出す（スマホで小さい捨て牌・場の札を確かめるため）。
+// 本人の「長押し時間を少し長くする」から、見本（0.35秒）より長い PRESS_MS にした。
+// Claude の判断: 押せる札（button の中の札。自分の手札など、もとから大きく、押すと選ぶもの）と裏向きの札は出さない。スピード（札をつまんで動かすゲーム）でも出さない。
+// 押したまま指が少し動いたら（スクロール）やめる。大きく出したあとに指を離したときのクリックは捨てる（下の札を押したことにしない）。PC はマウスを押したままで同じ
+const PRESS_MS = 500;
+const PRESS_SEL = '.mj-tile:not(.back), .pcard:not(.back)';
+const PRESS_OFF = new Set(['speed']);
+let press = null; // { timer, x, y, look: 押したときの見た目, big }
+let pressSwallow = 0; // この時刻まで、大きく出したあとのクリックを捨てる
+function pressEnd() {
+  if (!press) return;
+  clearTimeout(press.timer);
+  press.big?.remove();
+  if (press.big) pressSwallow = Date.now() + 400;
+  press = null;
+}
+function pressShow() {
+  if (!press) return;
+  const { look, x, y } = press;
+  const big = document.createElement('div');
+  big.className = 'press-big ' + look.cls;
+  big.style.backgroundImage = look.bg;
+  big.innerHTML = look.html;
+  big.setAttribute('aria-hidden', 'true');
+  document.body.append(big);
+  const w = big.offsetWidth, h = big.offsetHeight;
+  let top = y - h - 36; // 指で隠れないよう指の上に（上が足りなければ下に）
+  if (top < 8) top = y + 36;
+  big.style.left = Math.min(Math.max(8, x - w / 2), window.innerWidth - w - 8) + 'px';
+  big.style.top = top + 'px';
+  press.big = big;
+}
+document.addEventListener('pointerdown', (e) => {
+  pressEnd();
+  if (!e.isPrimary || e.button > 0 || !S || el('screen-play').hidden || PRESS_OFF.has(S.gameId)) return;
+  const src = e.target.closest?.(PRESS_SEL);
+  if (!src || src.closest('button') || !el('board').contains(src)) return;
+  // 見た目は押した時に写しておく（麻雀などは、押している間にほかの人の手で盤が描き直され、押した牌の要素が入れ替わるため）
+  const mj = src.classList.contains('mj-tile');
+  const look = { cls: mj ? 'mj-tile' : 'pcard' + (src.classList.contains('red') ? ' red' : '') + (src.classList.contains('joker') ? ' joker' : ''), bg: src.style.backgroundImage, html: mj ? '' : src.innerHTML };
+  press = { x: e.clientX, y: e.clientY, look, big: null, timer: setTimeout(pressShow, PRESS_MS) };
+}, true);
+document.addEventListener('pointermove', (e) => { if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 10) pressEnd(); }, true);
+document.addEventListener('pointerup', pressEnd, true);
+document.addEventListener('pointercancel', pressEnd, true);
+document.addEventListener('click', (e) => { if (Date.now() < pressSwallow) { pressSwallow = 0; e.preventDefault(); e.stopPropagation(); } }, true);
+document.addEventListener('contextmenu', (e) => { if (press) e.preventDefault(); }, true); // 長押しで出るブラウザのメニューを止める
+
 /* ---------- 部屋の成績表（2026-10-06 本人の決定）: この部屋で決着した対局の数と、だれが何回勝ったか（ゲームをまたいで） ---------- */
 // Claude の判断: 人だけを出す（CPU は出さない）。引き分けはだれも勝ちにしない。同点の1位・チームの勝ちは全員を数える。
 // 部屋にいる人は0勝でも出し、出た人は勝ちがあれば出す。勝った回数の多い順。待合室と、対局の結果の画面に出す。
@@ -2233,6 +2282,7 @@ function renderPage() {
     return;
   }
   if (S.lobbyView && S.mode === 'online' && !S.isHost) { renderAwayLobby(game, st); return; }
+  if (ffwdNow(game)) return; // 途中から来た人に、ここまでを早送りで見せている（2026-11-16）
 
   const res = game.result(st);
   S.myTurnNow = myTurnNow(game, st, res);
@@ -2416,7 +2466,7 @@ function saidBySeat(game, n) {
   const me = watchSeat(game);
   if (!Number.isInteger(me) || me < 0) return null;
   let from = -1;
-  for (let i = S.moves.length - 1; i >= 0; i--) if (S.moves[i]?.p === me) { from = i; break; }
+  for (let i = S.moves.length - 1; i >= 0; i--) if (S.moves[i]?.p === me && !game.minor?.(S.moves[i])) { from = i; break; } // 手札の並べ替え（minor）は打ったに数えない
   const out = {};
   let any = false;
   replay(S, (a, b, m, i) => {
@@ -2920,8 +2970,61 @@ function replayLast(game) {
   }, REPLAY_WAIT_MS);
 }
 
+/* ---------- 途中から来た人に、ここまでを早送りで見せる（2026-11-16 本人の選択。room.md「UI・UX の7回目」） ---------- */
+// 盤のゲームのオンラインで、観戦の人がこの対局を初めて描くとき（途中から部屋に入った・観戦で読み込み直した）、ここまでの手を早送りで見せてから今の盤にする。
+// 盤を押すか「⏭ 今の盤へ」で飛ばせる。空いた席に入る人は、その前に観戦でこれを見ている（席に入るときには出さない）。
+// Claude の判断: 1手 FFW_STEP_MS、ただし全部で FFW_TOTAL_MS ほどに収める（長い将棋でも数秒）。手が FFW_MIN 手より少ない・決着している（ふりかえりがある）・
+// カードゲーム（伏せた札が見えてしまう）・ホストの端末（CPU の手を考えるのを止めないため）・動きを減らす設定の端末では出さない。早送りの間に届いた手も続けて見せる。
+// 早送りの間は render がここで止まるので、音・判子などは出ない（終わってからの描き直しは「新しく届いた手」に数えない）
+const FFW_STEP_MS = 150;
+const FFW_TOTAL_MS = 4000;
+const FFW_MIN = 3;
+let ffw = null; // { key, k: いま見せている手の数, timer }
+const ffwSeen = new Set(); // 早送りを始めた対局（同じ対局で2回出さない）
+function ffwdNow(game) {
+  const key = reviewKey();
+  if (ffw && (ffw.key !== key || S.mode !== 'online')) ffwStop(false);
+  if (!ffw) {
+    const first = S.shownKey !== S.gameId + ':' + S.round;
+    if (!first || ffwSeen.has(key) || game.multi || game.live || S.mode !== 'online' || S.isHost || myPlayer() !== SPECTATOR
+      || S.moves.length < FFW_MIN || lessMotion()) return false;
+    const now = replay(S);
+    if (!now || game.result(now)) return false;
+    ffwSeen.add(key);
+    if (ffwSeen.size > 50) ffwSeen.delete(ffwSeen.values().next().value);
+    const step = Math.max(30, Math.min(FFW_STEP_MS, FFW_TOTAL_MS / S.moves.length));
+    ffw = { key, k: 0, timer: null };
+    const f = ffw;
+    f.timer = setInterval(() => {
+      if (ffw !== f || !S) { clearInterval(f.timer); return; }
+      f.k += 1;
+      if (f.k >= S.moves.length) ffwStop(true); else render();
+    }, step);
+    el('board').addEventListener('pointerdown', ffwSkip, { once: true });
+  }
+  const k = Math.min(ffw.k, S.moves.length);
+  const view = replay({ ...S, moves: S.moves.slice(0, k) });
+  if (!view) { ffwStop(false); return false; }
+  el('status').innerHTML = `<div class="status-main">ここまでの流れ</div><div class="status-sub">${k}手目 / ${S.moves.length}手</div><div class="ffw-bar"><i style="width:${(k / S.moves.length * 100).toFixed(1)}%"></i></div>`;
+  game.render(el('board'), view, { canMove: false, onMove: () => {}, fresh: false, me: watchSeat(game), view: boardView(game) });
+  ctl().append(makeButton('⏭ 今の盤へ', ffwSkip, 'secondary'));
+  return true;
+}
+function ffwStop(draw) {
+  if (!ffw) return;
+  clearInterval(ffw.timer);
+  ffw = null;
+  el('board').removeEventListener('pointerdown', ffwSkip);
+  if (draw) render();
+}
+function ffwSkip(e) {
+  e?.preventDefault?.();
+  ffwStop(true);
+}
+
 /* ---------- 対局のふりかえり（2026-10-06 本人の決定）: 盤のゲームが終わったあと、最初から1手ずつ見返せる ---------- */
 // Claude の判断: 見ている所は各自の端末だけ（ほかの人とは合わせない。S.review = { key: どの対局か, k: 何手目まで }。保存しない）。
+// → 2026-11-16 から感想戦（下の goReview）: オンラインではホストが動かした所に全員の画面が合わせて動く。
 // 途中の局面は手の一覧の先頭 k 手を当て直して作る（replay）。見ている間は盤を押せない。最後の手まで進めると、いつもの終わりの画面に戻る。
 // カードゲームは出さない（伏せた札が見えてしまうため）。
 const reviewKey = () => `${S.gameId}:${S.round}:${S.seed}`;
@@ -2955,11 +3058,12 @@ function renderReview(game) {
 function appendReview() {
   const n = S.moves.length;
   if (!n) return;
-  const go = (k) => { S.review = { key: reviewKey(), k: Math.max(0, Math.min(n, k)) }; render(); };
+  const go = (k) => goReview(k);
   if (!reviewing()) {
     ctl().append(makeButton('ふりかえり（最初から見る）', () => go(0), 'secondary'));
     const turn = judgeTurn(GAMES[S.gameId]); // ふりかえりの分かれ目（2026-11-12）
     if (turn !== null) ctl().append(makeButton('★ 分かれ目へ', () => go(turn), 'secondary')); // 最後の手が分かれ目のときも出す（2026-11-12 の Codex の点検）
+    if (followable()) ctl().append(makeButton('👥 ホストに合わせる', followHost, 'ghost small'));
     return;
   }
   const k = S.review.k;
@@ -2975,6 +3079,34 @@ function appendReview() {
   ctl().append(bar);
   const turn = judgeTurn(GAMES[S.gameId]);
   if (turn !== null && k !== turn) ctl().append(makeButton('★ 分かれ目へ', () => go(turn), 'ghost small'));
+  if (followable()) ctl().append(makeButton('👥 ホストに合わせる', followHost, 'ghost small'));
+}
+
+/* ---------- 感想戦（2026-11-16 本人の選択。room.md「UI・UX の7回目」） ---------- */
+// オンラインの盤のゲームのふりかえりで、ホストが手を進める・戻すと、全員の画面も同じ手に動く（送りっぱなしの合図 review。ホストからだけ受け付ける）。
+// ゲストが自分でふりかえりのボタンを押したら、その対局の間は自分で見る形になり（S.reviewOwn。送らない）、「👥 ホストに合わせる」で戻れる。
+// Claude の判断: 見本の「自分で見る」ボタンは置かず、ゲストが自分で動かしたら自分で見る形に切り替える（ボタンを増やさないため）。
+// ホストが「ふりかえり」を押していない間は、ゲストは今までどおり自分で見られる。あとから入った人には、ホストが次に動かしたときから合う
+function goReview(k) {
+  const n = S.moves.length;
+  S.review = { key: reviewKey(), k: Math.max(0, Math.min(n, k)) };
+  if (S.mode === 'online' && S.isHost) send({ type: 'review', key: S.review.key, k: S.review.k });
+  else if (S.mode === 'online') S.reviewOwn = S.review.key;
+  render();
+}
+const followable = () => S.mode === 'online' && !S.isHost && S.reviewOwn === reviewKey() && S.hostReview?.key === reviewKey()
+  && S.hostReview.k !== (S.review?.key === reviewKey() ? S.review.k : S.moves.length);
+function followHost() {
+  S.reviewOwn = null;
+  if (S.hostReview?.key === reviewKey()) S.review = { ...S.hostReview };
+  render();
+}
+function onReviewMsg(msg) {
+  if (S.isHost || msg.from !== S.members[0] || typeof msg.key !== 'string' || msg.key !== reviewKey()) return;
+  if (!Number.isInteger(msg.k) || msg.k < 0 || msg.k > S.moves.length || GAMES[S.gameId]?.multi) return;
+  S.hostReview = { key: msg.key, k: msg.k };
+  if (S.reviewOwn !== msg.key) S.review = { key: msg.key, k: msg.k };
+  render();
 }
 
 /* ---------- 形勢（2026-11-12 本人の選択。room.md「UI・UX の5回目」の「形勢の帯」「ふりかえりの分かれ目」） ---------- */
@@ -3078,8 +3210,7 @@ function judgeChart(game, k) {
   box.querySelector('svg').addEventListener('click', (e) => {
     const r = e.currentTarget.getBoundingClientRect();
     const i = Math.round(((e.clientX - r.left) / r.width * W - pad) / ((W - pad * 2) / n));
-    S.review = { key: reviewKey(), k: Math.max(0, Math.min(s.length - 1, i)) };
-    render();
+    goReview(Math.max(0, Math.min(s.length - 1, i)));
   });
   return box;
 }
@@ -4495,7 +4626,9 @@ function onBoardMove(move) {
   if (badText(move)) { toast(BAD_TEXT_NOTE); return; }
   const game = GAMES[S.gameId];
   const st = replay(S);
-  if (!st || !canMove(game, st, game.result(st))) return;
+  // 番でなくても送れる手（ゲームの anytime。ババ抜きの手札の並べ替え。2026-11-16）
+  const any = !!st && game.multi && !S.full && !game.result(st) && myPlayer() !== SPECTATOR && !!game.anytime?.(st, myPlayer(), move);
+  if (!st || (!any && !canMove(game, st, game.result(st)))) return;
   if (game.multi) move = { ...move, p: myPlayer() };
   if (!game.apply(st, move)) return;
   // 2回押して置くの1回目（2026-11-11）。参りましたは確かめの窓を出しているので2回押しにしない（2026-11-12 の Codex の点検）
@@ -5567,6 +5700,9 @@ function onMessage(msg) {
       return;
     case 'lot': // 先手をくじで決めた（ホストからだけ）。席は state で届くので、ここでは一言だけ出す
       onLot(msg);
+      return;
+    case 'review': // 感想戦（ホストからだけ。2026-11-16）
+      onReviewMsg(msg);
       return;
     case 'award': // お開きの表彰（ホストからだけ）。描き直さない
       if (!S.isHost && S.members.length && msg.from === S.members[0]) showAward();

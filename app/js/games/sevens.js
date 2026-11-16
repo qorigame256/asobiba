@@ -14,7 +14,7 @@
 // 手: { p, t: 'play', c: 札 } / { p, t: 'play', c: 'JK', at: 置く所 } / { p, t: 'pass' }
 
 import { mulberry32, shuffle } from './util.js';
-import { makeDeck, suitOf, rankOf, cardEl, cardLabel, SUITS, SUIT_MARK, JOKER, fanHand } from './cards.js';
+import { makeDeck, suitOf, rankOf, cardEl, cardLabel, SUITS, SUIT_MARK, JOKER, fanHand, dragSort, ownOrder, setOwnOrder } from './cards.js';
 
 const clone = (s) => ({ ...s, hands: s.hands.map((h) => h.slice()), field: { ...s.field }, passes: s.passes.slice(), done: s.done.slice(), outs: s.outs.slice() });
 const ORDER = (c) => (c === JOKER ? 99 : SUITS.indexOf(suitOf(c)) * 13 + rankOf(c));
@@ -305,7 +305,9 @@ export default {
       const hand = document.createElement('div');
       hand.className = 'bb-hand sv-hand';
       const can = o.canMove ? playable(s, me) : [];
-      for (const c of s.hands[me]) {
+      const ownKey = `sv:${s.seed}:${me}`; // 手札を指でずらして並べ替える（2026-11-16。cards.js の dragSort）: 自分の画面だけ
+      const shownHand = ownOrder(ownKey, s.hands[me]);
+      for (const c of shownHand) {
         const usable = can.includes(c);
         const e = cardEl(c, usable ? 'button' : 'div');
         Object.assign(e.dataset, { fly: `c:${c}`, flyFrom: 'field', flyTurn: '', flyDeal: '' }); // 対局の始めは場から配る（2026-11-06）
@@ -319,6 +321,7 @@ export default {
         hand.append(e);
       }
       fanHand(hand, !!o.canMove); // 手札を扇形に持つ（2026-11-10）
+      if (!o.watching) dragSort(hand, (order) => { setOwnOrder(ownKey, order.map((i) => shownHand[i])); redraw(); });
       root.append(hand);
       if (o.canMove && !forced) {
         const act = document.createElement('div');

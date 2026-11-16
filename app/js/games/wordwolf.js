@@ -22,7 +22,7 @@ const NONE = -1; // 投票の「ウルフはいない」
 // 手: { p, t: 'tovote' }（p = -1 はホストの時間切れ）/ { p, t: 'vote', to（-1 は「ウルフはいない」）, v: 何回目の投票か } / { p, t: 'guess', text } / { p, t: 'giveup' } / { p, t: 'judge', ok }
 
 import { mulberry32, esc } from './util.js';
-import { kana, timeBar, since } from './party.js';
+import { kana, timeBar, since, voteArrows } from './party.js';
 import { PAIRS } from './wordwolf-data.js';
 import { shown } from '../filter.js';
 
@@ -188,8 +188,10 @@ export default {
     // 参加者
     const chips = document.createElement('div');
     chips.className = 'cc-opps';
+    const chipOf = [];
     for (let p = 0; p < s.n; p++) {
       const chip = document.createElement('div');
+      chipOf[p] = chip;
       chip.className = 'cc-opp' + (p === me ? ' me' : '') + (s.phase === 'end' && this.result(s).winners.includes(p) ? ' won' : '');
       const name = document.createElement('div');
       name.className = 'cc-opp-name';
@@ -209,6 +211,9 @@ export default {
       chips.append(chip);
     }
     root.append(chips);
+    // 開票を1票ずつ見せる（2026-11-16）: いちばん新しい投票の結果を、だれがだれに入れたかの矢印で。やり直しの投票の間は1回目の矢印を残す。「ウルフはいない」の票は矢印にしない
+    const last = s.phase === 'talk' || (s.phase === 'vote' && s.vote === 1) ? null : s.history[s.history.length - 1];
+    if (last) voteArrows(chips, chipOf, Object.entries(last.votes).map(([p, to]) => [Number(p), to]).filter(([, to]) => to !== NONE), `ww:${s.seed}:${last.round}`, o.fresh);
 
     // 自分のお題
     if (me !== null && s.phase !== 'end') {

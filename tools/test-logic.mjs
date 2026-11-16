@@ -1342,7 +1342,8 @@ console.log('daifugo games', dgames);
         let prev = null;
         for (let g = 0; g < 2; g++) {
           let st = D.init(n, k * 7919 + g, { rules, prev });
-          const put = (x) => { const r = { ...x.rules }; delete r.match; h.update(JSON.stringify({ ...x, rules: r })); };
+          // 流れた札（last.swept。場が流れる動き。2026-11-16。画面だけが使う）も外して比べる
+          const put = (x) => { const r = { ...x.rules }; delete r.match; const L = x.last?.swept ? { ...x.last } : x.last; if (L?.swept) delete L.swept; h.update(JSON.stringify({ ...x, rules: r, last: L })); };
           put(st);
           while (!D.result(st)) {
             const p = st.phase === 'exchange' ? st.gives[0].from : D.turn(st);
@@ -11338,6 +11339,73 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.equal(lack.join(''), '', `字体: ${name}.woff に入っていない字（node tools/make-fonts.mjs で作り直す）`);
   }
   console.log('見出しの字体 OK');
+}
+
+// UI・UX の7回目（2026-11-16）のうち、ルールの側に手を入れたもの
+{
+  // ババ抜きの手札の並べ替え: 番でなくても送れ、並べた順が局面の手札の順になり、引く人の「何枚目」もその順で決まる
+  const BB = GAMES.babanuki;
+  const s0 = BB.init(3, 11, { rules: {} });
+  const v = BB.victim(s0);
+  assert.notEqual(v, s0.turn);
+  const rev = s0.hands[v].slice().reverse();
+  assert.ok(BB.anytime(s0, v, { t: 'order', h: rev }), '並べ替え: 番でなくても送れる');
+  const s1 = BB.apply(s0, { p: v, t: 'order', h: rev });
+  assert.deepEqual(s1.hands[v], rev, '並べ替え: 並べた順が手札の順になる');
+  assert.equal(s1.turn, s0.turn, '並べ替え: 番は変わらない');
+  assert.equal(BB.apply(s1, { p: v, t: 'order', h: rev }), null, '並べ替え: 同じ手が2回届いても2回目は弾く');
+  const s2 = BB.apply(s1, { p: v, t: 'order', h: ['zz', rev[2]] });
+  assert.deepEqual(s2.hands[v], [rev[2], ...rev.filter((c, i) => i !== 2)], '並べ替え: 手札に無い札は飛ばし、書いていない札は後ろへ');
+  assert.equal(BB.said(s1, s2, { p: v, t: 'order' }), null, '並べ替え: 順番の帯の吹き出しを出さない');
+  assert.equal(BB.sound(s1, s2, { p: v, t: 'order' }), null, '並べ替え: 音を鳴らさない');
+  assert.ok(BB.minor({ t: 'order' }), '並べ替え: 打ったに数えない');
+  const d = BB.apply(s2, { p: s2.turn, t: 'draw', i: 0 });
+  assert.equal(d.last.card, s2.hands[v][0], '並べ替え: 引く人の1枚目は並べ替えたあとの1枚目');
+  const done = { ...s0, hands: s0.hands.map((h, p) => (p === v ? h : [])) };
+  assert.equal(BB.anytime(done, v, { t: 'order', h: rev }), false, '並べ替え: 決着したあとは送れない');
+
+  // 大富豪の場が流れる動き: 流れたときの s.last.swept は流れる前の場の札
+  const DF = GAMES.daifugo;
+  const { mulberry32 } = await import("../app/js/games/util.js");
+  const orig = Math.random;
+  let found = 0;
+  try {
+    Math.random = mulberry32(31);
+    let st = DF.init(4, 123, { rules: {} });
+    for (let i = 0; i < 400 && !DF.result(st) && found < 5; i++) {
+      const p = st.phase === 'exchange' ? st.gives[0].from : DF.turn(st);
+      const next = DF.apply(st, { ...DF.cpu(st, p), p });
+      if (st.field && !next.field && st.phase === 'play') {
+        const was = next.last.t === 'play' && next.last.effects?.some((x) => /8切り|スペ3/.test(x)) ? next.last.cards : st.field.cards;
+        assert.deepEqual(next.last.swept, was, '場が流れる: 流れた札が残る');
+        found++;
+      }
+      st = next;
+    }
+  } finally { Math.random = orig; }
+  assert.ok(found > 0, '場が流れる: 確かめた');
+
+  // 人狼の開票: 投票で決まったら、だれがだれに入れたかが lastVote に残る（並んでやり直すときも1回目の分）
+  const J = GAMES.jinro;
+  const jb = { ...J.init(6, 1, { rules: {} }), roles: ['wolf', 'seer', 'knight', 'villager', 'villager', 'villager'] };
+  let js = J.apply(jb, { p: 1, t: 'tovote', d: 1 });
+  for (const [p, to] of [[0, 3], [1, 3], [2, 4], [3, 4], [4, 5], [5, 2]]) js = J.apply(js, { p, t: 'vote', to, v: 1, d: 1 });
+  assert.deepEqual(js.lastVote, { d: 1, v: 1, votes: { 0: 3, 1: 3, 2: 4, 3: 4, 4: 5, 5: 2 } }, '開票: 並んだ1回目の票が残る');
+  js = J.apply(js, { p: 0, t: 'vote', to: 3, v: 2, d: 1 });
+  js = J.apply(js, { p: -1, t: 'votetime', d: 1, v: 2 });
+  assert.deepEqual(js.lastVote, { d: 1, v: 2, votes: { 0: 3 } }, '開票: やり直しの票に替わる');
+
+  // 将棋の王手の筋: 王手をかけている駒と、間のマス（打てば防げる所）
+  const { _test: SG } = await import('../app/js/games/shogi.js');
+  const b = Array(81).fill(0);
+  b[8 * 9 + 4] = 8; // 先手の玉 5九
+  b[4 * 9 + 4] = -7; // 後手の飛 5五（間に3マス）
+  b[6 * 9 + 3] = -3; // 後手の桂 6七（跳んで玉に利く）
+  b[7 * 9 + 5] = -4; // 後手の銀 4八（後手から見て斜め前の玉に利く）
+  const lines = SG.checkLines(b, 8 * 9 + 4, 1).map((x) => [x.from, x.between]).sort((a, c) => a[0] - c[0]);
+  assert.deepEqual(lines, [[4 * 9 + 4, [7 * 9 + 4, 6 * 9 + 4, 5 * 9 + 4]], [6 * 9 + 3, []], [7 * 9 + 5, []]], '王手の筋: 飛・桂・銀と、飛との間の3マス');
+  assert.equal(SG.checkLines(b, 8 * 9 + 4, 1).length > 0, SG.attacked(b, 8 * 9 + 4, 1), '王手の筋: attacked と同じ答え');
+  console.log('UI・UX の7回目 OK');
 }
 
 console.log('ALL OK');

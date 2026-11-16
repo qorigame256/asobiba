@@ -13,7 +13,7 @@
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q: 問題番号, text: 答え }
 
 import { mulberry32, shuffle, esc } from './util.js';
-import { since, kana, scoreChips, leaders, winnersText, timeBar } from './party.js';
+import { flipTimes, flipCard, FLIP_AFTER, since, kana, scoreChips, leaders, winnersText, timeBar } from './party.js';
 import { TOPICS } from './ishin-data.js';
 import { shown as filtered } from '../filter.js';
 
@@ -167,9 +167,10 @@ export default {
     const extra = (p) => {
       if (s.phase === 'open') return s.said[p] ? '<span class="pt-ok">書いた</span>' : '';
       if (!shownPhase || !s.last) return '';
-      return s.last.pts[p] ? '<span class="pt-ok">○ +1</span>' : '<span class="pt-ng">―</span>';
+      return s.last.pts[p] ? '<span class="pt-ok flip-after">○ +1</span>' : '<span class="pt-ng flip-after">―</span>'; // 札が返ってから出す（一斉に裏返す。2026-11-16）
     };
-    const chips = scoreChips(o, s.scores, { won, extra });
+    if (shownPhase) flipTimes(root, qKey(s) + ':shown', o.fresh); // 描き直しで札の段を作り直すときも、続きの時間で
+    const chips = scoreChips(o, s.scores, { won, extra, gainDelay: shownPhase ? FLIP_AFTER : 0 });
     if (ui?.mount === mount && root.contains(ui.wrap)) {
       ui.chips.replaceWith(chips);
       ui.chips = chips;
@@ -205,7 +206,13 @@ export default {
       since(key);
       card.append(timeBar(key, limit, { secs: true }));
     } else {
-      card.append(this.answers(s, me, o, topic));
+      // 一斉に裏返して見せる（2026-11-16 の UI・UX の7回目。本人の選択）: 全員の答えの札を同時に返し、まとまりはそのあとに出す
+      const row = document.createElement('div');
+      row.className = 'flip-row';
+      s.said.forEach((x, p) => row.append(flipCard(x ? filtered(x, o.hidden?.[p]) : '―', p === me ? 'あなた' : o.names?.[p] ?? '')));
+      const groups = this.answers(s, me, o, topic);
+      groups.classList.add('flip-after');
+      card.append(row, groups);
     }
     wrap.append(card);
 

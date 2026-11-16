@@ -4,6 +4,10 @@
 // 同じ数字がそろえば2枚捨てる。手札がなくなった人から上がり。最後まで札を持っていた1人の負け。
 // 引いた札は手札の中の決まらない位置に入る（ほかの人がどこにジョーカーが入ったか追えないように。位置は種から作るので全員同じ）。
 // 手: { p, t: 'draw', i: 引く相手の手札の何枚目か }。番の決まったゲームなので、位置で表してよい。
+// 手札を並べ替える（2026-11-16 の UI・UX の7回目。本人の選択。card-games.md）: { p, t: 'order', h: 札の名前の並び }。自分の番でなくても、手札が2枚以上あればいつでも送れる（anytime）。
+//   並べ替えた順がそのまま局面の手札の順になるので、引く人から見た裏向きの並びも変わる（ババの位置を動かして読み合う）。
+//   h にあっていまの手札に無い札は飛ばし、h に無い札は後ろへ（引かれた・引いたと行き違っても崩れないように）。並びが変わらない手は弾く（同じ手が2回届いたときも）。
+//   自分の手札は局面の順のまま出す（前は数字の順に並べ替えて見せていた）。並べ替えは「打った」に数えない（minor。あなたの番までに起きたこと・音）
 // 詳細設定「同じ色でそろえる」（あり）: 同じ数字で同じ色（赤の♥♦どうし・黒の♠♣どうし）の2枚だけがそろう（最初に捨てる組も、引いたときも）。
 //   どの数字も赤2枚・黒2枚なので、どの札にも相方がちょうど1枚ある。ジジ抜きでは抜いた札の相方（同じ数字・同じ色）が最後の1枚になる。
 //   ありのときだけ局面に color: true を持つ（なしでは今までと全く同じ形）。
@@ -13,13 +17,14 @@
 //   CPU はつままずにすぐ引く。ありのときだけ局面に peek: true を持つ。
 
 import { mulberry32, shuffle } from './util.js';
-import { makeDeck, rankOf, suitOf, cardEl, backEl, cardLabel, JOKER, fanHand } from './cards.js';
+import { makeDeck, rankOf, suitOf, cardEl, backEl, cardLabel, JOKER, fanHand, dragSort } from './cards.js';
 
 const clone = (s) => ({ ...s, hands: s.hands.map((h) => h.slice()), out: s.out.slice() });
 
 // 引く札を見せる: いまつまんでいる札（{ key: 対局の種と何手目か, i: 引く相手の手札の何枚目か }）と、描き直し用の最後の画面
 let peek = null;
 let view = null;
+let popped = null; // 引いた札をふくらませた手（並べ替えの手が届いたときに、もう一度ふくらませない）
 const peekKey = (s) => `${s.seed}:${s.step}`;
 
 const isRed = (c) => suitOf(c) === 'h' || suitOf(c) === 'd';
@@ -87,12 +92,16 @@ export default {
   startSound: 'shuffle',
   // あなたの番までに起きたこと（2026-11-11。room.md「UI・UX の4回目」）: 順番の帯の札の下に出す短い言葉（引いた札は伏せたまま。そろって捨てた札は場に出るので書く）
   said(a, b, m) {
+    if (m?.t === 'order') return null;
     const L = b.last;
     if (!L || L.p !== m.p) return null;
     const t = L.pair ? `${L.pair.map(cardLabel).join('と')}を捨てた` : '1枚引いた';
     return b.out.includes(m.p) && !a.out.includes(m.p) ? t + ' → 上がり' : t;
   },
-  sound(a, b) { return b.last?.pair ? 'card' : 'draw'; },
+  sound(a, b, m) { return m?.t === 'order' ? null : b.last?.pair ? 'card' : 'draw'; },
+  // 番でなくても送れる手（main.js の onBoardMove）と、「打った」に数えない手（main.js の saidBySeat）
+  anytime(s, p, m) { return m?.t === 'order' && !this.done(s) && Number.isInteger(p) && p >= 0 && p < s.n && s.hands[p].length > 1; },
+  minor(m) { return m?.t === 'order'; },
 
   result(s) {
     if (!this.done(s)) return null;
@@ -106,6 +115,20 @@ export default {
   },
 
   apply(s0, m) {
+    if (m?.t === 'order') {
+      if (!this.anytime(s0, m.p, m) || !Array.isArray(m.h) || m.h.length > 60) return null;
+      const rest = s0.hands[m.p].slice();
+      const out = [];
+      for (const c of m.h) {
+        const i = typeof c === 'string' ? rest.indexOf(c) : -1;
+        if (i >= 0) { out.push(c); rest.splice(i, 1); }
+      }
+      const next = [...out, ...rest];
+      if (next.join() === s0.hands[m.p].join()) return null;
+      const s = clone(s0);
+      s.hands[m.p] = next;
+      return s;
+    }
     if (!m || m.t !== 'draw' || !this.canAct(s0, m.p)) return null;
     const from = this.victim(s0);
     if (from < 0 || !Number.isInteger(m.i) || m.i < 0 || m.i >= s0.hands[from].length) return null;
@@ -235,17 +258,18 @@ export default {
         + (s.color ? ' <small>同じ数字・同じ色でそろいます</small>' : '');
       const hand = document.createElement('div');
       hand.className = 'bb-hand';
-      // 同じ色でそろえるときは、同じ数字の中で黒・赤の順に並べる
-      const order = (c) => (c === JOKER ? 99 : s.color ? rankOf(c) + (isRed(c) ? 0.5 : 0) : rankOf(c));
-      for (const c of s.hands[me].slice().sort((a, b) => order(a) - order(b))) {
+      // 手札は局面の順のまま（引く人から見た裏向きの並びと同じ。つまんでずらすと並べ替えられる。2026-11-16）
+      const popKey = `${s.seed}:${s.step}`;
+      for (const c of s.hands[me]) {
         const e = cardEl(c);
-        if (o.fresh && s.last?.p === me && !s.last.pair && s.last.card === c) e.classList.add('pop');
+        if (o.fresh && s.last?.p === me && !s.last.pair && s.last.card === c && popped !== popKey) { e.classList.add('pop'); popped = popKey; }
         // 札がすっと動く（2026-11-06。main.js の flyPlay）: 引いた札は引いた相手の席から裏返りながら。対局の始めはまん中から配る
         Object.assign(e.dataset, { fly: `c:${c}`, flyFrom: s.last ? `opp:${s.last.from}` : '@center', flyTurn: '', flyDeal: '' });
         if (held !== null && me === from && s.hands[me][held] === c) e.classList.add('bb-held');
         hand.append(e);
       }
       fanHand(hand, !!o.canMove); // 手札を扇形に持つ（2026-11-10）
+      if (!res && !o.watching && s.hands[me].length > 1) dragSort(hand, (order) => o.onMove({ t: 'order', h: order.map((i) => s.hands[me][i]) }));
       root.append(head, hand);
     }
   },

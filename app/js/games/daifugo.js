@@ -44,7 +44,7 @@
 //     対局をまたぐ順位の引き継ぎ（carry）は合計点の順（同じ点なら最後の回の順位で決める）。1回のときは match を持たず、今までと全く同じ局面。
 
 import { mulberry32, shuffle } from './util.js';
-import { JOKER, SUITS, SUIT_MARK, suitOf, rankOf, rankLabel, makeDeck, cardEl, cardLabel, fanHand } from './cards.js';
+import { JOKER, SUITS, SUIT_MARK, suitOf, rankOf, rankLabel, makeDeck, cardEl, cardLabel, fanHand, dragSort, ownOrder, setOwnOrder } from './cards.js';
 
 const power = (c) => {
   if (c === JOKER) return 16;
@@ -216,6 +216,8 @@ function nextActive(s, from) {
 }
 
 function clearField(s) {
+  // 流れた札（場が流れる動き。2026-11-16。画面だけが使う）。s.last はどの手でもこの手の中で新しく作ったものなので、書き足してよい
+  if (s.field && s.last) s.last.swept = s.field.cards.slice();
   s.field = null;
   s.by = null;
   s.passed = s.passed.map(() => false);
@@ -351,6 +353,48 @@ const RULE_LIST = [
   { key: 'foul', label: '反則上がり', desc: '2・ジョーカー・8（革命中は3）で上がると最下位', def: false },
   { key: 'match', label: '何回か勝負', desc: '決めた回数だけ続けて遊ぶ。1回ごとに順位で点（最下位 0点・1つ上がるごとに +1点）をもらい、合計点がいちばん多い人の優勝。2回目からは前の回の順位でカード交換', def: 1, choices: [[1, '1回'], [3, '3回'], [5, '5回']] },
 ];
+
+// 場が流れる動き（2026-11-16 の UI・UX の7回目。本人の選択。card-games.md の「演出」）: 場が流れたとき（全員のパス・8切り・スペ3返し など）、
+// 流れた札（s.last.swept）が次に出す人の席へ滑って消え、その人の札が光る。次が自分なら下（手札のほう）へ滑る。
+// 盤は描き直しのたびに作り直されるので、始めた時刻を覚えて続きから動かす（cards.js の turnUp と同じ考え）。読み込み直し・あとから見た人には出さない。
+// 8切りなどで出した札そのものが流れるときは、札が場へ飛んで来終わってから滑らせる（main.js の flyPlay がおよそ 0.5秒）。秒数は Claude の判断
+const SWEEP_MS = 520;
+const sweptAt = new Map();
+function sweepField(root, cards, opps, s, o, me) {
+  const L = s.last;
+  if (!L?.swept || s.field) return;
+  const key = `${s.seed}:${s.step}`;
+  const now = Date.now();
+  if (o.fresh && !sweptAt.has(key) && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    sweptAt.set(key, now);
+    if (sweptAt.size > 30) sweptAt.delete(sweptAt.keys().next().value);
+  }
+  const wait = L.t === 'play' ? (L.p === me ? 380 : 620) : 250; // 流れる前に場の札を見せる時間
+  const t = now - (sweptAt.get(key) ?? -Infinity);
+  if (t >= wait + SWEEP_MS + 700) return;
+  const lead = s.phase === 'play' ? s.turn : null;
+  const chip = lead !== null && lead !== me ? opps.children[me === null ? lead : (lead - me + s.n) % s.n - 1] : null; // 席の札は自分の次の人から順に並んでいる
+  const pile = document.createElement('div');
+  pile.className = 'df-sweep';
+  pile.setAttribute('aria-hidden', 'true');
+  L.swept.forEach((c, j) => {
+    const e = cardEl(c);
+    if (t < 60) { // 出したばかりの札は、いつもどおり席（手札）から場へ飛んで来る（描き直しの途中からは飛ばさない）
+      e.dataset.fly = `c:${c}#${L.swept.slice(0, j).filter((x) => x === c).length}`;
+      if (L.t === 'play' && L.p !== me) Object.assign(e.dataset, { flyFrom: `opp:${L.p}`, flyTurn: '' });
+    }
+    pile.append(e);
+  });
+  cards.classList.add('df-sweeping');
+  cards.style.setProperty('--wait-empty', `${wait + SWEEP_MS - t}ms`); // 「場は空です」は札が滑り終わってから出す
+  cards.append(pile);
+  const a = cards.getBoundingClientRect();
+  const z = chip?.getBoundingClientRect();
+  const dx = z ? z.left + z.width / 2 - (a.left + a.width / 2) : 0;
+  const dy = z ? z.top + z.height / 2 - (a.top + a.height / 2) : lead === me ? 150 : 0;
+  pile.style.cssText = `--dx:${dx.toFixed(0)}px;--dy:${dy.toFixed(0)}px;--wait:${wait - t}ms`;
+  if (chip) { chip.classList.add('df-lead'); chip.style.setProperty('--wait', `${wait + SWEEP_MS - 120 - t}ms`); }
+}
 
 function logText(s, nameP) {
   const L = s.last;
@@ -785,6 +829,7 @@ export default {
     else cards.innerHTML = `<span class="df-empty">${s.phase === 'play' ? '場は空です（好きな組を出せます）' : ''}</span>`;
     field.append(cards);
     root.append(field);
+    sweepField(root, cards, opps, s, o, me);
 
     const log = document.createElement('p');
     log.className = 'cc-log';
@@ -862,12 +907,15 @@ export default {
           : legal.length ? '出す札を選んで「出す」。光っている札が使えます' : '出せる札がありません。自動でパスします';
         head.append(hint);
       }
+      // 手札を指でずらして並べ替える（2026-11-16。cards.js の dragSort）: 自分の画面だけ。並べ方のボタンを押すと、その並べ方に戻る
+      const ownKey = `df:${s.seed}:${M?.no ?? 1}:${me}`;
       const ord = document.createElement('button');
       ord.type = 'button';
       ord.className = 'btn ghost small df-order';
       ord.textContent = suitOrder ? '並べ方: マーク順 → 強さ順にする' : '並べ方: 強さ順 → マーク順にする';
       ord.onclick = () => {
         suitOrder = !suitOrder;
+        setOwnOrder(ownKey, null); // 指で並べ替えた順は捨てて、選んだ並べ方にする
         try { localStorage.setItem(ORDER_KEY, suitOrder ? 'suit' : 'power'); } catch { /* 覚えられなくても切り替えはできる */ }
         draw();
       };
@@ -885,7 +933,8 @@ export default {
       const seen = {};
       // 札がすっと動く（2026-11-06）: 新しく来た札は、渡してきた人の席から（交換など）か場のあたりから裏返りながら（対局の始めは配る）
       const comeFrom = s.last?.to === me && s.last.p !== me ? `opp:${s.last.p}` : 'field';
-      for (const c of suitOrder ? [...s.hands[me]].sort(bySuit) : s.hands[me]) {
+      const shownHand = ownOrder(ownKey, suitOrder ? [...s.hands[me]].sort(bySuit) : s.hands[me]);
+      for (const c of shownHand) {
         const can = giving || !!pd || usable.has(c);
         const pickable = myTurn && !bombing;
         const e = cardEl(c, pickable ? 'button' : 'div');
@@ -903,6 +952,7 @@ export default {
         hand.append(e);
       }
       fanHand(hand, myTurn || giving || !!pd); // 手札を扇形に持つ（2026-11-10）
+      if (!o.watching) dragSort(hand, (order) => { setOwnOrder(ownKey, order.map((i) => shownHand[i])); draw(); });
       root.append(hand);
 
       if (myTurn) {

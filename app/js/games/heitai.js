@@ -21,7 +21,7 @@
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'pick', r: 何回目（0 から）, a: [5つの戦場の人数] }
 //   r が今の回と同じで、その人がまだ決めていないときだけ受け付けるので、同じ手が2回届いても2回目は反則になる。
 
-import { since, scoreChips, leaders, winnersText, timeBar } from './party.js';
+import { flipTimes, FLIP_AFTER, since, scoreChips, leaders, winnersText, timeBar } from './party.js';
 import { mulberry32 } from './util.js';
 
 export const FIELDS = 5;
@@ -209,13 +209,13 @@ export default {
     const extra0 = (p) => {
       if (s.phase === 'open') return s.picks[p] !== null ? '<span class="pt-ok">✔ 決めた</span>' : '';
       if (s.phase !== 'shown' || !s.last) return '';
-      return s.last.pts[p] ? `<span class="pt-ok">+${s.last.pts[p]}</span>` : '<span class="pt-ng">0</span>';
+      return s.last.pts[p] ? `<span class="pt-ok flip-after">+${s.last.pts[p]}</span>` : '<span class="pt-ng flip-after">0</span>'; // 表が返ってから出す（一斉に裏返す。2026-11-16）
     };
     root.innerHTML = '';
     root.className = 'board kj ht';
     const wrap = document.createElement('div');
     wrap.className = 'kj-wrap';
-    wrap.append(scoreChips(o, s.scores, { won, extra, steady: true }));
+    wrap.append(scoreChips(o, s.scores, { won, extra, steady: true, gainDelay: s.phase === 'shown' ? FLIP_AFTER : 0 }));
     root.append(wrap);
     if (s.phase === 'end') { wrap.append(this.review(s, me, o)); return; }
     if (s.phase === 'ready') {
@@ -227,7 +227,11 @@ export default {
     }
     const key = rKey(s);
     if (s.phase === 'shown') {
-      wrap.append(this.table(s.log[s.log.length - 1], me, o, true));
+      // 一斉に裏返して見せる（2026-11-16 の UI・UX の7回目。本人の選択）: 全員の配り方の表のマスを同時に返す
+      flipTimes(root, key + ':shown', o.fresh);
+      const tb = this.table(s.log[s.log.length - 1], me, o, true);
+      tb.querySelector('table').classList.add('flip-rows');
+      wrap.append(tb);
       return;
     }
     since(key);
