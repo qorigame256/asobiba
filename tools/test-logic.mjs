@@ -8451,6 +8451,94 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('numtouch OK');
 }
 
+// 時計あわせ（2026-11-16）: 問題の形・針の向きと時刻の行き来・速すぎる手と遅すぎる手と2回目を弾く・速い順に点・CPU どうしで最後まで
+{
+  const T = GAMES.tokei;
+  const { minOf, hourOf, minAngle, hourAngle, timeText } = await import('../app/js/games/tokei.js');
+  for (const [level, step] of [['easy', 5], ['hard', 1]]) {
+    for (let seed = 1; seed <= 30; seed++) {
+      const s = T.init(3, seed, { rules: { level } });
+      assert.equal(s.qs.length, 10, '時計あわせ: 10問');
+      for (const q of s.qs) {
+        assert.ok(q.h >= 1 && q.h <= 12 && q.m >= 0 && q.m < 60 && q.m % step === 0, `時計あわせ: ${level} の時刻 ${q.h}:${q.m}`);
+        assert.ok(q.sm % step === 0 && (q.sh !== q.h || q.sm !== q.m), '時計あわせ: はじめの針は答えとちがう・きざみに乗る');
+      }
+    }
+  }
+  assert.equal(T.init(2, 5, { rules: {} }).level, 'easy', '時計あわせ: 最初はふつう');
+  for (let h = 1; h <= 12; h++) for (let m = 0; m < 60; m++) {
+    assert.equal(minOf(minAngle(m), 1), m, `時計あわせ: 長い針 ${m}分`);
+    assert.equal(hourOf(hourAngle(h, m), m), h, `時計あわせ: 短い針 ${h}時${m}分`);
+  }
+  assert.equal(minOf(minAngle(43), 5), 45, '時計あわせ: 5分きざみに丸める');
+  assert.equal(minOf(359, 5), 0, '時計あわせ: 12 の少し手前は0分');
+  assert.equal(hourOf(4 * 30, 40), 3, '時計あわせ: 40分のとき 4 の上に置いた短い針は3時（4 寄りの位置）');
+  assert.equal(hourOf(3 * 30, 40), 2, '時計あわせ: 40分のとき 3 の上に置いた短い針は2時');
+  assert.equal(timeText(3, 0), '3時ちょうど');
+  let s = T.apply(T.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  assert.equal(T.apply(s, { p: 0, t: 'done', q: 0, ms: 300 }), null, '時計あわせ: 速すぎる手は弾く');
+  assert.equal(T.apply(s, { p: 0, t: 'done', q: 0, ms: 21000 }), null, '時計あわせ: 制限時間を過ぎた手は弾く');
+  assert.equal(T.apply(s, { p: 0, t: 'done', q: 1, ms: 3000 }), null, '時計あわせ: ちがう問題の手は弾く');
+  s = T.apply(s, { p: 1, t: 'done', q: 0, ms: 6000 });
+  s = T.apply(s, { p: 2, t: 'done', q: 0, ms: 4000 });
+  assert.equal(T.apply(s, { p: 2, t: 'done', q: 0, ms: 3500 }), null, '時計あわせ: 2回目は弾く');
+  s = T.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [0, 2, 3], '時計あわせ: 速い順に3・2点');
+  for (const rules of [{}, { level: 'hard' }]) {
+    const end = runCpus(T, 5, 3, rules, 200, 8000);
+    assert.ok(T.result(end) && end.scores.some((v) => v > 0), `時計あわせ: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('tokei OK');
+}
+
+// てんびん当て（2026-11-16）: はかった結果・点は回数の少ない順で同じ回数なら速い順・外れは0点・答えは1回・CPU は種から同じ・CPU どうしで最後まで
+{
+  const B = GAMES.tenbin;
+  const { weigh, pointsOf, cpuPlan } = await import('../app/js/games/tenbin.js');
+  assert.equal(weigh(2, [1, 2], [3, 4]), 'L', 'てんびん当て: 偽物が左なら左が重い');
+  assert.equal(weigh(4, [1, 2], [3, 4]), 'R', 'てんびん当て: 偽物が右なら右が重い');
+  assert.equal(weigh(5, [1, 2], [3, 4]), '=', 'てんびん当て: のせていなければつりあう');
+  const A = (b, w, ms) => ({ b, w, ms });
+  assert.deepEqual(pointsOf([A(3, 2, 9000), A(3, 1, 20000), A(3, 2, 5000), A(1, 0, 1000)], 3), [1, 3, 2, 0], 'てんびん当て: 回数が少ない順、同じ回数は速い順、外れは0点');
+  assert.deepEqual(pointsOf([A(3, 2, 5000), A(3, 2, 5000), null], 3), [3, 3, 0], 'てんびん当て: まったく同じなら同じ点・答えなしは0点');
+  for (const size of [4, 9, 27]) {
+    const s = B.init(3, 7, { rules: { size } });
+    assert.equal(s.qs.length, 5, 'てんびん当て: 5回');
+    assert.ok(s.qs.every((v) => Number.isInteger(v) && v >= 0 && v < size), `てんびん当て: ${size}個の偽物の場所`);
+  }
+  assert.equal(B.init(2, 9, { rules: {} }).size, 9, 'てんびん当て: 最初は9個');
+  // CPU: 当てずっぽうでない答えは必ず当たり・はかる回数は多すぎない・種から同じ
+  for (const size of [4, 9, 27]) {
+    let right = 0, total = 0;
+    for (let seed = 1; seed <= 60; seed++) {
+      const s = B.init(4, seed, { rules: { size } });
+      for (let q = 0; q < 5; q++) for (let p = 0; p < 4; p++) {
+        const plan = cpuPlan(s, q, p);
+        assert.deepEqual(plan, cpuPlan(B.init(4, seed, { rules: { size } }), q, p), 'てんびん当て: CPU は種から同じ');
+        assert.ok(plan.b !== null && plan.w <= (size === 27 ? 6 : 4), `てんびん当て: CPU のはかる回数 ${plan.w}（${size}個）`);
+        total += 1; if (plan.b === s.qs[q]) right += 1;
+      }
+    }
+    assert.ok(right / total > 0.7 && right < total, `てんびん当て: CPU の当たる割合 ${right}/${total}（${size}個）`);
+  }
+  let s = B.apply(B.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  assert.equal(B.apply(s, { p: 0, t: 'ans', q: 0, b: 9, w: 1, ms: 3000 }), null, 'てんびん当て: ない玉は弾く');
+  assert.equal(B.apply(s, { p: 0, t: 'ans', q: 0, b: 1, w: 1, ms: 61000 }), null, 'てんびん当て: 制限時間を過ぎた手は弾く');
+  const fake = s.qs[0], other = (fake + 1) % 9;
+  s = B.apply(s, { p: 0, t: 'ans', q: 0, b: other, w: 0, ms: 2000 });
+  assert.equal(B.apply(s, { p: 0, t: 'ans', q: 0, b: fake, w: 2, ms: 9000 }), null, 'てんびん当て: 答えは1回だけ');
+  s = B.apply(s, { p: 1, t: 'ans', q: 0, b: fake, w: 2, ms: 8000 });
+  s = B.apply(s, { p: 2, t: 'ans', q: 0, b: fake, w: 1, ms: 15000 });
+  s = B.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [0, 2, 3], 'てんびん当て: 外れ0点・少ない回数が上');
+  assert.deepEqual(s.last.winners, [2], 'てんびん当て: いちばんは回数の少ない人');
+  for (const rules of [{}, { size: 4 }, { size: 27 }]) {
+    const end = runCpus(B, 5, 3, rules, 250, 8000);
+    assert.ok(B.result(end) && end.scores.some((v) => v > 0), `てんびん当て: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('tenbin OK');
+}
+
 // まんなかの漢字（2026-11-03）: 問題の形・まわりの4字が全部ちがう・札は4つで正解が1つ・速い順に点・CPU どうしで最後まで
 {
   const M = GAMES.mannaka;
