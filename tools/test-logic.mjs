@@ -8488,6 +8488,53 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     const end = runCpus(T, 5, 3, rules, 200, 8000);
     assert.ok(T.result(end) && end.scores.some((v) => v > 0), `時計あわせ: CPU どうしで最後まで ${JSON.stringify(rules)}`);
   }
+  // 42回目の案（2026-11-16）: 問題の数・いろいろな言い方・何分後・数字なしの文字盤
+  const { sayText, minus, questionText } = await import('../app/js/games/tokei.js');
+  assert.equal(T.init(2, 3, { rules: { rounds: 5 } }).qs.length, 5, '時計あわせ: 5問');
+  assert.equal(T.init(2, 3, { rules: { rounds: 15 } }).qs.length, 15, '時計あわせ: 15問');
+  assert.equal(T.init(2, 3, { rules: { rounds: 7 } }).qs.length, 10, '時計あわせ: ない数は10問');
+  assert.equal(sayText(4, 40, 1), '5時20分前');
+  assert.equal(sayText(12, 40, 1), '1時20分前', '時計あわせ: 12時台の「前」は1時');
+  assert.equal(sayText(3, 30, 2), '3時半');
+  assert.equal(sayText(3, 40, 3), '15時40分');
+  assert.equal(sayText(12, 5, 3), '0時5分', '時計あわせ: 12時台の24時間の言い方は0時');
+  assert.equal(sayText(3, 0, 3), '15時ちょうど');
+  assert.deepEqual(minus(1, 10, 25), { h: 12, m: 45 }, '時計あわせ: 何分前で時をまたぐ');
+  assert.deepEqual(minus(3, 40, 95), { h: 2, m: 5 });
+  {
+    const kinds = new Set();
+    for (let seed = 1; seed <= 60; seed++) {
+      const plain = T.init(2, seed, { rules: {} }), mix = T.init(2, seed, { rules: { say: 'mix' } });
+      assert.deepEqual(mix.qs.map((q) => [q.h, q.m]), plain.qs.map((q) => [q.h, q.m]), '時計あわせ: 言い方を変えても時刻は同じ');
+      for (const q of mix.qs) {
+        kinds.add(q.f);
+        if (q.f === 1) assert.ok(q.m >= 40, '時計あわせ: 「○分前」は40分より後だけ');
+        if (q.f === 2) assert.equal(q.m, 30, '時計あわせ: 「半」は30分だけ');
+      }
+      for (const [level, step, lo] of [['easy', 5, 10], ['hard', 1, 3]]) {
+        const c = T.init(2, seed, { rules: { calc: true, say: 'mix', level } });
+        for (const q of c.qs) {
+          assert.ok(q.d >= lo && q.d <= 95 && q.d % step === 0, `時計あわせ: 何分後の分 ${q.d}`);
+          const b = minus(q.h, q.m, q.d);
+          assert.equal(((b.h % 12) * 60 + b.m + q.d) % 720, ((q.h % 12) * 60 + q.m) % 720, '時計あわせ: いまの時刻＋何分＝答え');
+          if (q.f === 1) assert.ok(b.m >= 40, '時計あわせ: 何分後の「いま」の「前」も40分より後だけ');
+          const t = questionText(q);
+          assert.ok(t.main === `${q.d}分後は？` && t.sub.startsWith('いま '), '時計あわせ: 何分後の問題の文');
+        }
+      }
+    }
+    assert.deepEqual([...kinds].sort(), [0, 1, 2, 3], '時計あわせ: いろいろな言い方が全部出る');
+  }
+  {
+    let c = T.apply(T.init(2, 4, { rules: { calc: true } }), { p: -1, t: 'next' });
+    assert.ok(T.apply(c, { p: 0, t: 'done', q: 0, ms: 24000 }), '時計あわせ: 何分後は制限時間が5秒長い');
+    assert.equal(T.apply(T.apply(T.init(2, 4, { rules: {} }), { p: -1, t: 'next' }), { p: 0, t: 'done', q: 0, ms: 24000 }), null);
+  }
+  assert.equal(T.init(2, 1, { rules: { face: 'plain' } }).face, 'plain', '時計あわせ: 数字なしの文字盤');
+  for (const rules of [{ say: 'mix', calc: true, rounds: 5 }, { calc: true, level: 'hard', face: 'plain' }]) {
+    const end = runCpus(T, 4, 9, rules, 200, 8000);
+    assert.ok(T.result(end) && end.scores.some((v) => v > 0), `時計あわせ: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
   console.log('tokei OK');
 }
 
@@ -8534,6 +8581,121 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.deepEqual(s.last.winners, [2], 'てんびん当て: いちばんは回数の少ない人');
   for (const rules of [{}, { size: 4 }, { size: 27 }]) {
     const end = runCpus(B, 5, 3, rules, 250, 8000);
+    assert.ok(B.result(end) && end.scores.some((v) => v > 0), `てんびん当て: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  // 42回目の案（2026-11-16）: 回数・重いか軽いか分からない・はかれる回数の上限・答え直し・みんなで1台
+  const { capOf, narrow, chooseSplit } = await import('../app/js/games/tenbin.js');
+  const { mulberry32 } = await import('../app/js/games/util.js');
+  assert.equal(weigh(2, [1, 2], [3, 4], true), 'R', 'てんびん当て: 軽い偽物が左なら右が重い');
+  assert.equal(weigh(5, [1, 2], [3, 4], true), '=', 'てんびん当て: 軽い偽物をのせていなければつりあう');
+  assert.equal(B.init(2, 1, { rules: { rounds: 3 } }).qs.length, 3, 'てんびん当て: 3回');
+  assert.equal(B.init(2, 1, { rules: { rounds: 8 } }).qs.length, 8, 'てんびん当て: 8回');
+  assert.deepEqual(B.init(2, 5, { rules: { fake: 'any' } }).qs, B.init(2, 5, { rules: {} }).qs, 'てんびん当て: 偽物の向きを変えても場所は同じ');
+  {
+    const lights = B.init(2, 5, { rules: { fake: 'any', rounds: 8 } }).light;
+    assert.ok(lights.includes(true) && lights.includes(false), 'てんびん当て: 軽い偽物と重い偽物の両方が出る');
+    assert.ok(B.init(2, 5, { rules: { rounds: 8 } }).light.every((v) => !v), 'てんびん当て: 「重い」では軽い偽物は出ない');
+  }
+  for (const [fake, caps] of [['heavy', { 4: 2, 9: 2, 27: 3 }], ['any', { 4: 2, 9: 3, 27: 4 }]]) {
+    for (const size of [4, 9, 27]) {
+      assert.equal(capOf(B.init(2, 1, { rules: { size, fake, cap: true } })), caps[size], `てんびん当て: 上限 ${fake} ${size}個`);
+      assert.equal(capOf(B.init(2, 1, { rules: { size, fake } })), Infinity, 'てんびん当て: 上限なし');
+    }
+  }
+  // 絞り込みは本当の偽物を必ず残す（重いか軽いか分からない・はずれの答えも使う）
+  for (let seed = 1; seed <= 40; seed++) {
+    const rnd = mulberry32(seed);
+    const size = [4, 9, 27][seed % 3], fb = Math.floor(rnd() * size), light = rnd() < 0.5;
+    const hist = [];
+    for (let k = 0; k < 4; k++) {
+      const sp = chooseSplit(narrow(size, 'any', hist), size, rnd, k % 2 === 0);
+      if (!sp) break;
+      assert.ok(sp.L.length === sp.R.length && sp.L.length > 0 && !sp.L.some((x) => sp.R.includes(x)), 'てんびん当て: CPU ののせ方は左右同じ数で重ならない');
+      hist.push({ L: sp.L, R: sp.R, r: weigh(fb, sp.L, sp.R, light) });
+    }
+    hist.push({ b: (fb + 1) % size, ok: false });
+    assert.ok(narrow(size, 'any', hist).some((h) => h.b === fb && h.d === (light ? -1 : 1)), 'てんびん当て: 絞り込みで本当の偽物を消さない');
+  }
+  for (const size of [4, 9, 27]) {
+    let right = 0, total = 0;
+    for (let seed = 1; seed <= 40; seed++) {
+      const s0 = B.init(4, seed, { rules: { size, fake: 'any' } });
+      const sc = B.init(4, seed, { rules: { size, fake: 'any', cap: true } });
+      for (let q = 0; q < 5; q++) for (let p = 0; p < 4; p++) {
+        const plan = cpuPlan(s0, q, p);
+        assert.ok(plan.b !== null && plan.w <= 8, `てんびん当て: 重いか軽いか分からないときの CPU のはかる回数 ${plan.w}（${size}個）`);
+        assert.ok(cpuPlan(sc, q, p).w <= capOf(sc), 'てんびん当て: CPU は上限を超えてはからない');
+        total += 1; if (plan.b === s0.qs[q]) right += 1;
+      }
+    }
+    assert.ok(right / total > 0.6 && right < total, `てんびん当て: 重いか軽いか分からないときの CPU の当たる割合 ${right}/${total}（${size}個）`);
+  }
+  {
+    let c = B.apply(B.init(3, 4, { rules: { cap: true } }), { p: -1, t: 'next' });
+    assert.equal(B.apply(c, { p: 0, t: 'ans', q: 0, b: 1, w: 3, ms: 3000 }), null, 'てんびん当て: 上限より多い回数の答えは弾く');
+  }
+  // 答え直し
+  {
+    let c = B.apply(B.init(3, 4, { rules: { retry: true } }), { p: -1, t: 'next' });
+    const f = c.qs[0], o1 = (f + 1) % 9, o2 = (f + 2) % 9;
+    assert.equal(B.apply(c, { p: 0, t: 'ans', q: 0, b: f, w: 1, ms: 3000, k: 2 }), null, 'てんびん当て: 1回目の前に答え直しはできない');
+    c = B.apply(c, { p: 0, t: 'ans', q: 0, b: o1, w: 0, ms: 2000, k: 1 });
+    assert.equal(c.miss[0], o1, 'てんびん当て: 外れた玉を覚える');
+    assert.equal(c.ans[0], null, 'てんびん当て: 外れてもまだ答え終わっていない');
+    assert.equal(B.apply(c, { p: 0, t: 'ans', q: 0, b: o1, w: 0, ms: 2000, k: 1 }), null, 'てんびん当て: 同じ1回目の手が2回届いたら弾く');
+    assert.equal(B.apply(c, { p: 0, t: 'ans', q: 0, b: o1, w: 0, ms: 2500, k: 2 }), null, 'てんびん当て: 外れた玉で答え直しはできない');
+    c = B.apply(c, { p: 0, t: 'ans', q: 0, b: f, w: 1, ms: 4000, k: 2 });
+    assert.equal(B.apply(c, { p: 0, t: 'ans', q: 0, b: f, w: 1, ms: 4500, k: 2 }), null, 'てんびん当て: 答え直しは1回だけ');
+    c = B.apply(c, { p: 1, t: 'ans', q: 0, b: f, w: 2, ms: 9000, k: 1 });
+    c = B.apply(c, { p: 2, t: 'ans', q: 0, b: o2, w: 0, ms: 9000, k: 1 });
+    c = B.apply(c, { p: 2, t: 'ans', q: 0, b: o1, w: 0, ms: 9500, k: 2 });
+    c = B.apply(c, { p: -1, t: 'close' });
+    assert.deepEqual(c.scores, [1, 3, 0], 'てんびん当て: 答え直しの当たりは1点で、ほかの人の順位に数えない');
+    let d = B.apply(B.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+    d = B.apply(d, { p: 0, t: 'ans', q: 0, b: (d.qs[0] + 1) % 9, w: 0, ms: 2000, k: 1 });
+    assert.ok(d.ans[0] && d.miss[0] === null, 'てんびん当て: 答え直しなしなら外れで終わり');
+    assert.equal(B.init(2, 1, { rules: { retry: true, mode: 'share' } }).retry, false, 'てんびん当て: みんなで1台では答え直しなし');
+  }
+  // みんなで1台
+  {
+    let c = B.apply(B.init(3, 4, { rules: { mode: 'share', fake: 'any', cap: true } }), { p: -1, t: 'next' });
+    const f = c.qs[0], lt = c.light[0];
+    assert.equal(c.turnP, 0, 'てんびん当て: 第1回は席0から');
+    assert.equal(B.turn(c), 0);
+    assert.equal(B.apply(c, { p: 1, t: 'weigh', q: 0, tn: 0, L: [0], R: [1] }), null, 'てんびん当て: 番でない人ははかれない');
+    assert.equal(B.apply(c, { p: 0, t: 'weigh', q: 0, tn: 0, L: [0, 1], R: [1, 2] }), null, 'てんびん当て: 同じ玉を左右にのせられない');
+    assert.equal(B.apply(c, { p: 0, t: 'weigh', q: 0, tn: 0, L: [0, 1], R: [2] }), null, 'てんびん当て: 左右の数がちがうとはかれない');
+    c = B.apply(c, { p: 0, t: 'weigh', q: 0, tn: 0, L: [0, 1, 2], R: [3, 4, 5] });
+    assert.equal(c.hist[0].r, weigh(f, [0, 1, 2], [3, 4, 5], lt), 'てんびん当て: みんなで1台の結果');
+    assert.equal(c.turnP, 1, 'てんびん当て: はかったら次の人の番');
+    assert.equal(B.apply(c, { p: 0, t: 'weigh', q: 0, tn: 0, L: [0], R: [1] }), null, 'てんびん当て: 古い番の手は弾く');
+    const wrong = (f + 1) % 9;
+    c = B.apply(c, { p: 1, t: 'ans', q: 0, tn: 1, b: wrong });
+    assert.ok(c.out[1] && c.turnP === 2 && c.win === null, 'てんびん当て: 外したらその回は抜けて次の人へ');
+    c = B.apply(c, { p: -1, t: 'pass', tn: 2 });
+    assert.equal(c.turnP, 0, 'てんびん当て: 時間切れで次の人へ（抜けた人は飛ばす）');
+    assert.equal(B.apply(c, { p: 0, t: 'weigh', q: 0, tn: 0, L: [6], R: [7] }), null, 'てんびん当て: 同じ人の番でも古い番の通し番号の手は弾く');
+    c = B.apply(c, { p: 0, t: 'weigh', q: 0, tn: 3, L: [6], R: [7] });
+    c = B.apply(c, { p: 2, t: 'weigh', q: 0, tn: 4, L: [0], R: [8] });
+    assert.equal(B.apply(c, { p: 0, t: 'weigh', q: 0, tn: 5, L: [0], R: [1] }), null, 'てんびん当て: みんなで1台の上限（9個・分からないは3回）');
+    c = B.apply(c, { p: 0, t: 'ans', q: 0, tn: 5, b: f });
+    assert.equal(c.win, 0, 'てんびん当て: 当てた人');
+    assert.equal(B.turn(c), null, 'てんびん当て: 当たったら番はない');
+    assert.equal(B.apply(c, { p: 2, t: 'ans', q: 0, tn: 6, b: f }), null, 'てんびん当て: 当たったあとは答えられない');
+    assert.equal(B.referee(c).move.t, 'close');
+    c = B.apply(c, { p: -1, t: 'close' });
+    assert.deepEqual(c.scores, [1, 0, 0], 'てんびん当て: 当てた人の1点');
+    c = B.apply(c, { p: -1, t: 'next' });
+    assert.ok(c.turnP === 1 && c.hist.length === 0 && c.out.every((v) => !v), 'てんびん当て: 次の回は最初の人をずらして始める');
+    // 全員パスしたらその回は終わり
+    c = B.apply(c, { p: -1, t: 'pass', tn: 0 });
+    c = B.apply(c, { p: -1, t: 'pass', tn: 1 });
+    assert.equal(B.referee(c).move.t, 'pass');
+    c = B.apply(c, { p: -1, t: 'pass', tn: 2 });
+    assert.equal(B.referee(c).move.t, 'close', 'てんびん当て: 全員パスしたら締め切り');
+  }
+  for (const rules of [{ mode: 'share' }, { mode: 'share', fake: 'any', size: 27, cap: true }, { mode: 'share', size: 4, rounds: 3 }, { fake: 'any', cap: true, retry: true }, { retry: true, size: 27, rounds: 3 }]) {
+    const end = runCpus(B, 4, 6, rules, 250, 20000);
     assert.ok(B.result(end) && end.scores.some((v) => v > 0), `てんびん当て: CPU どうしで最後まで ${JSON.stringify(rules)}`);
   }
   console.log('tenbin OK');

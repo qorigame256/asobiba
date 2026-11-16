@@ -12,6 +12,14 @@
 //   - 制限時間は1問 20秒（むずかしいは25秒）。最初に合わせた人が出てから8秒で締め切る（制限時間のほうが先なら制限時間で）。全員合わせたら1.5秒。
 //   - どちらの針をつかむかは、押した所の向きにいちばん近い針。2本とも近い（20度以内）ときは、まん中寄り（半径60未満）なら短い針、外寄りなら長い針。
 //   - CPU は 1問 4〜9秒（むずかしいは 6〜13秒）で合わせ、7回に1回ほど合わせられない。どちらも種から決める。
+// 2026-11-16 の42回目の案（本人が選んだ。分かれ目は Claude の判断）:
+//   - 問題の数（rounds）: 5・10（最初）・15問。
+//   - 言い方（say）: ふつう（最初）・いろいろ。いろいろは問題ごとに種から言い方を選ぶ: 30分は半分ほど「3時半」、40分より後は半分ほど「4時20分前」、
+//     残りの4割ほどは24時間の言い方（「15時40分」。12時台は「0時」）、ほかは「3時40分」。
+//   - 何分後（calc。はい/いいえ）: 「いま 3時40分 → 35分後は？」。合わせるのは足した後の時刻。足す分は 5分きざみでは 10〜95分、1分きざみでは 3〜95分（時をまたぐことが多い）。
+//     「いま」の時刻にも言い方（say）を使う。制限時間は5秒のばし、CPU も2.5秒遅くする。
+//   - 文字盤（face）: 数字あり（最初）・数字なし（目盛りだけ。5分ごとの太い目盛りは残す）。難しさなので、おまかせで抽選しない（main.js の KEEP_KEYS）。
+//   - 言い方と何分後の分の乱数は、問題の時刻とは別の種から引く（入れても、同じ種の問題の時刻は変わらない）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（数字タッチと同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, ms }
 
@@ -25,17 +33,40 @@ const SHOWN_MS = 3500;
 const GRACE_MS = 1500;
 const AFTER_MS = 8000;
 const MIN_MS = 800; // これより速い手は弾く
-const ROUNDS = 10;
+const ROUNDS = [[5, '5問'], [10, '10問'], [15, '15問']];
 const LEVELS = [['easy', 'ふつう（5分きざみ）'], ['hard', 'むずかしい（1分きざみ）']];
+const SAYS = [['plain', 'ふつう（3時40分）'], ['mix', 'いろいろ（4時20分前・15時40分 など）']];
+const FACES = [['num', '数字あり'], ['plain', '数字なし（目盛りだけ）']];
+const CALC_MS = 5000;
 const levelOf = (r) => (r.level === 'hard' ? 'hard' : 'easy');
+const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 10);
 const stepOf = (s) => (s.level === 'hard' ? 1 : 5);
-const limitOf = (s) => (s.level === 'hard' ? 25000 : 20000);
+const limitOf = (s) => (s.level === 'hard' ? 25000 : 20000) + (s.calc ? CALC_MS : 0);
 const qKey = (s, q = s.q) => `tokei:${s.seed}:${q}`;
 const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice() });
 const doneOf = (s, p) => s.solved[p] !== null;
 
 // 「3時40分」「3時ちょうど」
 export const timeText = (h, m) => (m === 0 ? `${h}時ちょうど` : `${h}時${m}分`);
+// 言い方つき（f: 0 ふつう・1 ○分前・2 半・3 24時間）
+export function sayText(h, m, f = 0) {
+  if (f === 1 && m > 0) return `${(h % 12) + 1}時${60 - m}分前`;
+  if (f === 2 && m === 30) return `${h}時半`;
+  if (f === 3) return timeText(h === 12 ? 0 : h + 12, m);
+  return timeText(h, m);
+}
+// 何分前の時刻（何分後の問題の「いま」）
+export function minus(h, m, d) {
+  const t = ((((h % 12) * 60 + m - d) % 720) + 720) % 720;
+  return { h: Math.floor(t / 60) || 12, m: t % 60 };
+}
+// 問題の文（何分後なら「いま …」と「○分後」を分けて返す）
+export function questionText(Q) {
+  if (!Q.d) return { main: sayText(Q.h, Q.m, Q.f ?? 0), sub: '' };
+  const b = minus(Q.h, Q.m, Q.d);
+  return { main: `${Q.d}分後は？`, sub: `いま ${sayText(b.h, b.m, Q.f ?? 0)}` };
+}
+const qText = (Q) => { const t = questionText(Q); return t.sub ? `${t.sub} の${t.main.replace('は？', '')}` : t.main; };
 // 針の向き（度。12時が0、時計回り）
 export const minAngle = (m) => m * 6;
 export const hourAngle = (h, m) => ((h % 12) + m / 60) * 30;
@@ -50,7 +81,7 @@ export function cpuTime(s, q, p) {
   const rnd = mulberry32((s.seed * 37 + q * 11 + p * 1013 + 7771) >>> 0);
   if (rnd() < 0.15) return null;
   const [lo, hi] = s.level === 'hard' ? [6000, 13000] : [4000, 9000];
-  return Math.round(lo + rnd() * (hi - lo));
+  return Math.round(lo + rnd() * (hi - lo)) + (s.calc ? 2500 : 0);
 }
 
 let loc = null; // この端末の針 { key, h, m, sent }
@@ -68,24 +99,37 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'level', label: 'むずかしさ', desc: '長い針が止まるきざみ', def: 'easy', choices: LEVELS },
+    { key: 'rounds', label: '問題の数', desc: '全部で何問出すか', def: 10, choices: ROUNDS },
+    { key: 'say', label: '言い方', desc: 'いろいろ: 「4時20分前」「3時半」「15時40分」のような言い方も混ぜる', def: 'plain', choices: SAYS },
+    { key: 'calc', label: '何分後', desc: '「いま 3時40分 → 35分後は？」のように、足し算してから合わせる（1問の時間は5秒長い）', def: false },
+    { key: 'face', label: '文字盤', desc: '数字なし: 文字盤の数字を消して目盛りだけにする', def: 'num', choices: FACES },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { level: 'easy', ...rules };
+    const r = { level: 'easy', rounds: 10, say: 'plain', calc: false, face: 'num', ...rules };
     const level = levelOf(r);
     const step = level === 'hard' ? 1 : 5;
+    const mix = r.say === 'mix', calc = !!r.calc;
     const rnd = mulberry32(seed);
+    const rnd2 = mulberry32((seed * 7 + 90917) >>> 0); // 言い方・何分後（問題の時刻とは別の種）
     const pick = () => ({ h: 1 + Math.floor(rnd() * 12), m: Math.floor(rnd() * (60 / step)) * step });
     const qs = [];
-    for (let i = 0; i < ROUNDS; i++) {
+    for (let i = 0; i < roundsOf(r); i++) {
       let t = pick();
       // 同じ時刻が続かないように
       for (let k = 0; k < 20 && qs.some((x) => x.h === t.h && x.m === t.m); k++) t = pick();
       let st = pick();
       for (let k = 0; k < 20 && (st.h === t.h || st.m === t.m); k++) st = pick();
-      qs.push({ h: t.h, m: t.m, sh: st.h, sm: st.m });
+      const Q = { h: t.h, m: t.m, sh: st.h, sm: st.m };
+      if (calc) Q.d = step === 5 ? 10 + Math.floor(rnd2() * 18) * 5 : 3 + Math.floor(rnd2() * 93);
+      if (mix) {
+        const b = calc ? minus(Q.h, Q.m, Q.d) : Q; // 言い方を使うのは読む時刻（何分後なら「いま」）
+        const x = rnd2();
+        Q.f = b.m === 30 && x < 0.5 ? 2 : b.m >= 40 && x < 0.5 ? 1 : rnd2() < 0.4 ? 3 : 0;
+      }
+      qs.push(Q);
     }
-    return { n, seed, rules: r, level, qs, q: -1, phase: 'ready', solved: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
+    return { n, seed, rules: r, level, calc, face: r.face === 'plain' ? 'plain' : 'num', qs, q: -1, phase: 'ready', solved: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
   },
 
   turn() { return null; },
@@ -188,7 +232,8 @@ export default {
       return;
     }
     const Q = s.qs[s.q];
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div><div class="kj-word tk-word">${timeText(Q.h, Q.m)}</div>`;
+    const qt = questionText(Q);
+    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>${qt.sub ? `<div class="kj-sub tk-now">${qt.sub}</div>` : ''}<div class="kj-word tk-word">${qt.main}</div>`;
     if (s.phase === 'open') {
       since(key);
       if (s.solved.some((v) => v !== null)) {
@@ -206,7 +251,7 @@ export default {
     const playing = s.phase === 'open' && me !== null && o.canMove && !doneOf(s, me) && !loc.sent;
     // 結果の間は正しい時刻を見せる
     const show = s.phase === 'shown' ? { h: Q.h, m: Q.m } : me === null ? { h: Q.sh, m: Q.sm } : loc;
-    const clock = drawClock();
+    const clock = drawClock(s.face !== 'plain');
     clock.svg.classList.toggle('live', playing);
     clock.svg.classList.toggle('answer', s.phase === 'shown');
     const note = document.createElement('p');
@@ -277,7 +322,9 @@ export default {
       const li = document.createElement('li');
       const fast = x.winners.map((p) => (p === me ? 'あなた' : o.names?.[p] ?? ''));
       const mine = me === null ? '' : x.solved[me] !== null ? `⭕ ${secText(x.solved[me])}` : '❌';
-      li.innerHTML = `<span class="mk-rv-n">${q + 1}</span><span>${timeText(s.qs[q].h, s.qs[q].m)}</span><span>${mine}</span><span class="mk-rv-who">${fast.length ? '⚡' + esc(fast.join('・')) : '―'}</span>`;
+      const Q = s.qs[q];
+      const said = qText(Q), ans = timeText(Q.h, Q.m);
+      li.innerHTML = `<span class="mk-rv-n">${q + 1}</span><span>${said === ans ? ans : `${said} → ${ans}`}</span><span>${mine}</span><span class="mk-rv-who">${fast.length ? '⚡' + esc(fast.join('・')) : '―'}</span>`;
       list.append(li);
     });
     box.append(sum, list);
@@ -286,14 +333,14 @@ export default {
 };
 
 // 時計の絵（SVG）。set(時, 分) で針を動かす
-function drawClock() {
+function drawClock(withNums = true) {
   const box = document.createElement('div');
   box.className = 'tk-box';
   const ticks = Array.from({ length: 60 }, (_, i) => {
     const big = i % 5 === 0;
     return `<line x1="0" y1="${big ? -84 : -87}" x2="0" y2="-91" class="${big ? 'tk-tick big' : 'tk-tick'}" transform="rotate(${i * 6})"/>`;
   }).join('');
-  const nums = Array.from({ length: 12 }, (_, i) => {
+  const nums = !withNums ? '' : Array.from({ length: 12 }, (_, i) => {
     const h = i + 1, a = h * 30 * Math.PI / 180;
     return `<text x="${(Math.sin(a) * 70).toFixed(1)}" y="${(-Math.cos(a) * 70).toFixed(1)}" class="tk-n">${h}</text>`;
   }).join('');

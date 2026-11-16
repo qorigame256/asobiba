@@ -3326,6 +3326,7 @@ h1, h2, .sheet-head h3, .cat-h, .tile-nm, .lobby-game-name { font-family: "asobi
 :is([data-game="tokei"], [data-game="tenbin"]) .board { width: min(100%, 560px); }
 /* 時計あわせ。字の色は skin で変わる --ink、文字盤は --field（暗い色の組でも読めるように） */
 .tk .tk-word { font-family: inherit; letter-spacing: .02em; }
+.tk .tk-now { font-size: 1.35rem; font-weight: 800; color: var(--ink); margin-top: 2px; }
 .tk-box { width: min(100%, 360px); margin: 0 auto; }
 .tk-clock { display: block; width: 100%; height: auto; touch-action: none; user-select: none; -webkit-user-select: none; }
 .tk-clock.live { cursor: grab; }
@@ -3366,7 +3367,9 @@ h1, h2, .sheet-head h3, .cat-h, .tile-nm, .lobby-game-name { font-family: "asobi
 .board button.tb-ball:disabled { cursor: default; }
 .board button.tb-ball.tb-l { background: radial-gradient(circle at 35% 30%, #fff, #f2b49a 55%, #d9643a); border-color: #a8452a; }
 .board button.tb-ball.tb-r { background: radial-gradient(circle at 35% 30%, #fff, #9cc0e6 55%, #2f6fb3); border-color: #1f4f85; }
-.board button.tb-ball.tb-pick { animation: tbPick 1s ease-in-out infinite; }
+.board button.tb-ball.tb-choose { animation: tbPick 1s ease-in-out infinite; }
+.board button.tb-ball.tb-no { opacity: .45; background: radial-gradient(circle at 35% 30%, #fff, #d6dbe0 55%, #b4bcc4); }
+.board button.tb-ball.tb-no small { color: #c0392b; font-size: .8rem; }
 .board button.tb-ball.tb-fake { background: radial-gradient(circle at 35% 30%, #fff, #f3d873 55%, #d4a20c); border-color: #8a6a0a; }
 .board button.tb-ball.tb-mine:not(.tb-fake) { outline: 3px solid #c0392b; outline-offset: 1px; }
 @keyframes tbPick { 50% { transform: scale(1.08); box-shadow: 0 0 0 3px var(--accent); } }
