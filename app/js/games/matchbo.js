@@ -13,8 +13,18 @@
 //   - 制限時間は1問 45秒。最初に解いた人が出てから10秒で締め切る（制限時間のほうが先なら制限時間で）。全員解いたら1.5秒。
 //   - CPU は 1問 7〜20秒（2けたの入る問題は＋4秒）で解き、5回に1回ほど解けない。どちらも種から決める。
 //   - 結果の間は、正しい式にする動かし方を1つ見せる（抜いた所を赤い点線、置いた所を緑で光らせる）。
+// 2026-11-17 の43回目の案（本人が選んだ。分かれ目は Claude が決めた）:
+//   - 「問題の数」5・10（最初）・20問（鍵は rounds）。2けたの入る問題が増える所は、問題の数の 4割・7割の所（10問なら前と同じ 5問目・8問目から）。
+//   - 「取る・足す」なし（最初）・あり（鍵は take）: 1本動かす問題に、1本取る問題・1本足す問題をまぜる（動かす5割・取る2割5分・足す2割5分）。
+//     問題の上に「✋ 1本動かす」「✂️ 1本取る」「➕ 1本足す」を出す。取る問題は棒を1本押すと取れ、足す問題は点線を1つ押すと足される（その場で確かめる）。
+//     取った棒の跡・足した棒を押すと元に戻る。お題とちがう種類の手（取る問題で動かす など）は apply が弾く。
+//   - 「×も使う」なし（最初）・あり（鍵は times）: 3問に1問ほど、＋− の代わりに × の式を出す。× は2本のななめの棒で、＝ と同じく動かせない（＋や − に変わらない）。
+//   - 「ちがう直し方でおまけ」なし（最初）・あり（鍵は bonus）: 直し方が2通りある問題で、自分より速く解いた人のだれともちがう式に直した人に +1点
+//     （いちばん速い人はおまけなし。速さはいつもの ms で並べる）。ありのときは、直し方が2通りある問題を選んで出す（作れなければ1通りの問題）。
+//     2通りの問題には「🎁 直し方は2通り」と出し、結果では2つとも見せる。
+//   - 4つとも最初の値のときの問題は前と全く同じ（種類とかけ算を決める乱数は別に持つ。tools/test-logic.mjs が見ている）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（時計あわせと同じ）
-// 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, ms, mv: [抜いた場所, 置いた場所] }
+// 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, ms, mv: [抜いた場所, 置いた場所] }（取る問題は置いた場所が -1、足す問題は抜いた場所が -1）
 
 import { mulberry32, esc } from './util.js';
 import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText } from './party.js';
@@ -27,14 +37,16 @@ const GRACE_MS = 1500;
 const AFTER_MS = 10000;
 const LIMIT = 45000;
 const MIN_MS = 800;
-const ROUNDS = 10;
+const ROUNDS = [[5, '5問'], [10, '10問'], [20, '20問']];
+export const roundsOf = (r) => (ROUNDS.some(([v]) => v === Number(r?.rounds)) ? Number(r.rounds) : 10);
+const TYPE_LABEL = { move: '✋ 1本動かす', take: '✂️ 1本取る', add: '➕ 1本足す' };
 
 // 7本の棒（a 上・b 右上・c 右下・d 下・e 左下・f 左上・g まん中）の並びの印。bit i が i 番目の棒
 export const DIGITS = ['abcdef', 'bc', 'abdeg', 'abcdg', 'bcfg', 'acdfg', 'acdefg', 'abc', 'abcdefg', 'abcdfg']
   .map((w) => [...w].reduce((m, ch) => m | (1 << 'abcdefg'.indexOf(ch)), 0));
 const digitOf = (mask) => { const d = DIGITS.indexOf(mask); return d >= 0 ? d : null; };
 
-// 式の並び（d = 数字、o = ＋か−、= = 等号）。例 'do d=d'（空白なし）
+// 式の並び（d = 数字、o = ＋か−、x = ×（動かせない）、= = 等号）。例 'dod=d'
 // 棒の場所の番号: 数字ごとに7つ（並びの順）、＋−の所にたての棒1つ
 export function slotsOf(lay) {
   const out = [];
@@ -45,11 +57,11 @@ export function slotsOf(lay) {
   return out;
 }
 
-// 棒の有る無し（0/1 の配列）から式を読む → { nums: [a, b, c] | null（読めない数字がある）, op: '+' | '-', text: 画面の文字 }
+// 棒の有る無し（0/1 の配列）から式を読む → { nums: [a, b, c] | null（読めない数字がある）, op: '+' | '-' | '×', text: 画面の文字 }
 export function readEq(lay, on) {
   const slots = slotsOf(lay);
   const masks = {};
-  let op = '-';
+  let op = lay.includes('x') ? '×' : '-';
   slots.forEach((x, i) => {
     if (!on[i]) return;
     if (x.k === 7) op = '+';
@@ -66,7 +78,7 @@ export function readEq(lay, on) {
       text += d === null ? '？' : String(d);
     } else {
       groups.push([]);
-      text += ch === 'o' ? (op === '+' ? '＋' : '−') : '＝';
+      text += ch === 'o' ? (op === '+' ? '＋' : '−') : ch === 'x' ? '×' : '＝';
     }
   });
   if (!ok) return { nums: null, op, text };
@@ -78,36 +90,53 @@ export function isTrue(lay, on) {
   const { nums, op } = readEq(lay, on);
   if (!nums) return false;
   const [a, b, c] = nums;
-  return op === '+' ? a + b === c : a - b === c;
+  return op === '+' ? a + b === c : op === '×' ? a * b === c : a - b === c;
 }
-// 1本動かした後の棒（動かせないときは null）
+// 手の種類: 動かす [抜いた, 置いた]・取る [抜いた, -1]・足す [-1, 置いた]
+export const typeOfMv = (mv) => (mv[1] === -1 ? 'take' : mv[0] === -1 ? 'add' : 'move');
+// 1本動かした（取った・足した）後の棒（できないときは null）
 export function moved(on, mv) {
   if (!Array.isArray(mv) || mv.length !== 2) return null;
   const [f, t] = mv;
-  if (!Number.isInteger(f) || !Number.isInteger(t) || f === t || !on[f] || on[t] !== 0) return null;
+  if (!Number.isInteger(f) || !Number.isInteger(t) || f === t) return null;
+  if (f !== -1 && !on[f]) return null;
+  if (t !== -1 && on[t] !== 0) return null;
   const x = on.slice();
-  x[f] = 0;
-  x[t] = 1;
+  if (f !== -1) x[f] = 0;
+  if (t !== -1) x[t] = 1;
   return x;
 }
-// 正しい式にする動かし方の一覧（同じ式になるものは1つにまとめる）
-export function solutions(lay, on) {
-  const seen = new Map();
+// その種類の手の一覧（動かすは 抜く棒の順 → 置く場所の順）
+function movesOf(on, type) {
+  const out = [];
+  if (type === 'add') {
+    for (let t = 0; t < on.length; t++) if (!on[t]) out.push([-1, t]);
+    return out;
+  }
   for (let f = 0; f < on.length; f++) {
     if (!on[f]) continue;
-    for (let t = 0; t < on.length; t++) {
-      const x = moved(on, [f, t]);
-      if (!x || !isTrue(lay, x)) continue;
-      const key = x.join('');
-      if (!seen.has(key)) seen.set(key, [f, t]);
-    }
+    if (type === 'take') { out.push([f, -1]); continue; }
+    for (let t = 0; t < on.length; t++) if (!on[t]) out.push([f, t]);
+  }
+  return out;
+}
+// 正しい式にする手の一覧（同じ式になるものは1つにまとめる）
+export function solutions(lay, on, type = 'move') {
+  const seen = new Map();
+  for (const mv of movesOf(on, type)) {
+    const x = moved(on, mv);
+    if (!isTrue(lay, x)) continue;
+    const key = x.join('');
+    if (!seen.has(key)) seen.set(key, mv);
   }
   return [...seen.values()];
 }
+// 問題を作るとき、正しい式から逆にたどる手の種類（取る問題は正しい式に1本足して作り、足す問題は1本取って作る）
+const BACK = { move: 'move', take: 'add', add: 'take' };
 
 // 正しい式の棒を作る
 function barsOf(lay, nums, op) {
-  const ds = nums.flatMap((v, i) => String(v).padStart(lay.split(/[o=]/)[i].length, '0').split('').map(Number));
+  const ds = nums.flatMap((v, i) => String(v).padStart(lay.split(/[ox=]/)[i].length, '0').split('').map(Number));
   const on = [];
   let di = 0;
   for (const ch of lay) {
@@ -117,55 +146,86 @@ function barsOf(lay, nums, op) {
   return on;
 }
 const LAYS = [['dod=d'], ['ddod=dd', 'dod=dd', 'ddod=d'], ['ddodd=dd', 'ddod=dd', 'ddodd=d']];
-const layFor = (q, rnd) => { const g = LAYS[q < 4 ? 0 : q < 7 ? 1 : 2]; return g[Math.floor(rnd() * g.length)]; };
-const lens = (lay) => lay.split(/[o=]/).map((x) => x.length);
+const TLAYS = [['dxd=d', 'dxd=dd'], ['dxd=dd', 'ddxd=dd'], ['ddxd=dd', 'dxdd=dd']];
+// 何問目かで長さの段を決める（問題の数の 4割・7割で上がる。10問なら前と同じ 1〜4問目・5〜7問目・8〜10問目）
+const stage = (q, n) => (q * 10 < n * 4 ? 0 : q * 10 < n * 7 ? 1 : 2);
+const layFor = (q, n, rnd, times) => { const g = (times ? TLAYS : LAYS)[stage(q, n)]; return g[Math.floor(rnd() * g.length)]; };
+const lens = (lay) => lay.split(/[ox=]/).map((x) => x.length);
 const fits = (v, n) => String(v).length === n;
+const pack = (lay, type, x, sol, two) => {
+  const Q = { lay, on: x, sol: sol[0], ans: readEq(lay, moved(x, sol[0])).text };
+  if (type !== 'move') Q.type = type;
+  if (two) { Q.alt = sol.length > 1 ? readEq(lay, moved(x, sol[1])).text : null; Q.altMv = sol[1] ?? null; }
+  return Q;
+};
 
-// 1問作る。作れなければ null（種を進めてやり直す）
-function makeOne(lay, rnd, used) {
+// 1問作る。作れなければ null（種を進めてやり直す）。opt: { type: 'move' | 'take' | 'add', two: 直し方が2通りの問題を選ぶ }
+function makeOne(lay, rnd, used, opt = {}) {
+  const type = opt.type ?? 'move';
   const [la, lb, lc] = lens(lay);
+  const times = lay.includes('x');
   const rand = (n) => (n === 1 ? Math.floor(rnd() * 10) : 10 + Math.floor(rnd() * 90));
+  let spare = null; // two のとき、2通りが見つからなかったら使う1通りの問題
   for (let k = 0; k < 60; k++) {
-    const op = rnd() < 0.5 ? '+' : '-';
+    const op = times ? '×' : rnd() < 0.5 ? '+' : '-';
     const a = rand(la), b = rand(lb);
-    const c = op === '+' ? a + b : a - b;
+    const c = op === '+' ? a + b : op === '×' ? a * b : a - b;
     if (c < 0 || !fits(c, lc)) continue;
     const good = barsOf(lay, [a, b, c], op);
-    // 1本動かして、数字の形は正しいのに式がまちがっているもの
+    // 1本動かして（足して・取って）、数字の形は正しいのに式がまちがっているもの
     const cands = [];
-    for (let f = 0; f < good.length; f++) {
-      if (!good[f]) continue;
-      for (let t = 0; t < good.length; t++) {
-        const x = moved(good, [f, t]);
-        if (!x || !readEq(lay, x).nums || isTrue(lay, x)) continue;
-        cands.push(x);
-      }
+    for (const mv of movesOf(good, BACK[type])) {
+      const x = moved(good, mv);
+      if (!readEq(lay, x).nums || isTrue(lay, x)) continue;
+      cands.push(x);
     }
     while (cands.length) {
       const x = cands.splice(Math.floor(rnd() * cands.length), 1)[0];
-      const sol = solutions(lay, x);
-      const key = lay + x.join('');
+      const sol = solutions(lay, x, type);
+      const key = lay + (type === 'move' ? '' : type) + x.join('');
       if (!sol.length || sol.length > 2 || used.has(key)) continue;
+      if (opt.two && sol.length < 2) { spare ??= { key, x, sol }; continue; }
       used.add(key);
-      return { lay, on: x, sol: sol[0], ans: readEq(lay, moved(x, sol[0])).text };
+      return pack(lay, type, x, sol, opt.two);
     }
+    if (spare && k >= 12) break;
   }
+  if (spare) { used.add(spare.key); return pack(lay, type, spare.x, spare.sol, true); }
   return null;
 }
-export function makeQuestions(seed, n = ROUNDS) {
+// opt: { take: 取る・足すもまぜる, times: ×も使う, bonus: 直し方が2通りの問題を選ぶ }
+export function makeQuestions(seed, n = 10, opt = {}) {
   const rnd = mulberry32(seed);
+  const pick = mulberry32((seed ^ 0x3c6ef372) >>> 0); // 種類と × を決める（最初の値のときは使わないので、問題は前と同じ）
   const used = new Set();
   const qs = [];
   for (let q = 0; q < n; q++) {
+    let type = 'move';
+    if (opt.take) { const v = pick(); type = v < 0.5 ? 'move' : v < 0.75 ? 'take' : 'add'; }
+    const times = !!opt.times && pick() < 0.35;
+    const two = !!opt.bonus;
     let x = null;
-    for (let k = 0; !x && k < 20; k++) x = makeOne(layFor(q, rnd), rnd, used);
-    qs.push(x ?? makeOne('dod=d', rnd, used));
+    for (let k = 0; !x && k < 20; k++) x = makeOne(layFor(q, n, rnd, times), rnd, used, { type, two });
+    qs.push(x ?? makeOne('dod=d', rnd, used, { two }));
   }
   return qs;
 }
 
 const qKey = (s, q = s.q) => `matchbo:${s.seed}:${q}`;
-const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice() });
+const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice(), ways: s.ways.slice() });
+const typeOf = (Q) => Q.type ?? 'move';
+// おまけ: 速い順に見て、自分より速いだれともちがう式に直した人に1点（いちばん速い人はなし）
+export function bonusOf(s) {
+  const out = Array(s.n).fill(0);
+  if (!s.rules.bonus) return out;
+  const order = [...Array(s.n).keys()].filter((p) => s.solved[p] !== null).sort((a, b) => s.solved[a] - s.solved[b] || a - b);
+  const seen = new Set();
+  for (const p of order) {
+    if (seen.size && !seen.has(s.ways[p])) out[p] = 1;
+    seen.add(s.ways[p]);
+  }
+  return out;
+}
 const doneOf = (s, p) => s.solved[p] !== null;
 const longOf = (Q) => Q.lay.length > 5;
 
@@ -188,9 +248,17 @@ export default {
   realtime: true,
   minPlayers: 2,
   maxPlayers: 10,
+  settings: [
+    { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 10, choices: ROUNDS },
+    { key: 'take', label: '取る・足す', desc: '「1本取る」「1本足す」問題もまぜる', def: false },
+    { key: 'times', label: '×も使う', desc: 'かけ算の式もまぜる（× は動かせない）', def: false },
+    { key: 'bonus', label: 'ちがう直し方でおまけ', desc: '直し方が2通りの問題で、先に解いた人とちがう直し方なら +1点', def: false },
+  ],
 
-  init(n, seed) {
-    return { n, seed, rules: {}, qs: makeQuestions(seed), q: -1, phase: 'ready', solved: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
+  init(n, seed, { rules = {} } = {}) {
+    const r = { rounds: 10, take: false, times: false, bonus: false, ...rules };
+    const qs = makeQuestions(seed, roundsOf(r), { take: !!r.take, times: !!r.times, bonus: !!r.bonus });
+    return { n, seed, rules: r, qs, q: -1, phase: 'ready', solved: Array(n).fill(null), ways: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
   },
 
   turn() { return null; },
@@ -228,6 +296,7 @@ export default {
         s.q += 1;
         s.phase = 'open';
         s.solved = Array(s.n).fill(null);
+        s.ways = Array(s.n).fill(null);
         return s;
       }
       if (m.t === 'close' && s0.phase === 'open') {
@@ -237,10 +306,11 @@ export default {
         const times = s.solved.filter((v) => v !== null);
         const best = times.length ? Math.min(...times) : null;
         const winners = best === null ? [] : s.solved.map((v, p) => (v === best ? p : -1)).filter((p) => p >= 0);
-        const pts = pointsOf(s.solved);
+        const bonus = bonusOf(s);
+        const pts = pointsOf(s.solved).map((v, p) => v + bonus[p]);
         pts.forEach((v, p) => { s.scores[p] += v; });
-        s.last = { winners, pts };
-        s.log = [...s0.log, { solved: s.solved.slice(), winners }];
+        s.last = { winners, pts, bonus };
+        s.log = [...s0.log, { solved: s.solved.slice(), winners, bonus }];
         return s;
       }
       return null;
@@ -249,10 +319,11 @@ export default {
     if (typeof m.ms !== 'number' || !(m.ms >= MIN_MS) || m.ms > LIMIT + 500) return null;
     const Q = s0.qs[s0.q];
     const x = moved(Q.on, m.mv);
-    if (!x || !isTrue(Q.lay, x)) return null;
+    if (!x || typeOfMv(m.mv) !== typeOf(Q) || !isTrue(Q.lay, x)) return null;
     const s = clone(s0);
     s.step += 1;
     s.solved[m.p] = Math.round(m.ms);
+    s.ways[m.p] = x.join('');
     return s;
   },
 
@@ -262,7 +333,10 @@ export default {
     const end = cpuTime(s, s.q, p);
     if (end === null || end >= LIMIT) return null;
     const t = since(qKey(s));
-    return t >= end ? { t: 'done', q: s.q, ms: Math.max(end, Math.round(t)), mv: s.qs[s.q].sol } : null;
+    const Q = s.qs[s.q];
+    // おまけありで2通りの問題は、CPU も半分ほどもう1つの直し方で解く（種・何問目・席から決める）
+    const alt = Q.altMv && mulberry32((s.seed * 7 + s.q * 31 + p * 523 + 77) >>> 0)() < 0.5;
+    return t >= end ? { t: 'done', q: s.q, ms: Math.max(end, Math.round(t)), mv: alt ? Q.altMv : Q.sol } : null;
   },
 
   render(root, s, o) {
@@ -272,7 +346,7 @@ export default {
     const extra = (p) => {
       if (s.phase === 'open') return s.solved[p] !== null ? '<span class="pt-ok">とけた！</span>' : '';
       if (s.phase !== 'shown' || !s.last) return '';
-      if (s.solved[p] !== null) return `<span class="pt-ok">○ ${secText(s.solved[p])} +${s.last.pts[p]}</span>`;
+      if (s.solved[p] !== null) return `<span class="pt-ok">○ ${secText(s.solved[p])} +${s.last.pts[p]}${s.last.bonus?.[p] ? ' 🎁' : ''}</span>`;
       return '<span class="pt-ng">―</span>';
     };
     root.innerHTML = '';
@@ -286,11 +360,15 @@ export default {
     card.className = 'kj-card';
     wrap.append(card);
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">マッチ棒を1本だけ動かして、正しい式にしよう・全${s.qs.length}問・1問 ${LIMIT / 1000}秒まで</div>`;
+      const how = s.rules.take ? 'お題どおりにマッチ棒を1本動かす・取る・足すして' : 'マッチ棒を1本だけ動かして';
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">${how}、正しい式にしよう・全${s.qs.length}問・1問 ${LIMIT / 1000}秒まで${s.rules.bonus ? '・🎁 人とちがう直し方なら +1点' : ''}</div>`;
       return;
     }
     const Q = s.qs[s.q];
+    const type = typeOf(Q);
     card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>`;
+    if (s.rules.take) card.insertAdjacentHTML('beforeend', `<div class="mb-type mb-type-${type}">${TYPE_LABEL[type]}</div>`);
+    if (Q.alt) card.insertAdjacentHTML('beforeend', '<div class="mb-two">🎁 直し方は2通り（先に解いた人とちがう直し方なら +1点）</div>');
     if (s.phase === 'open') {
       since(key);
       if (s.solved.some((v) => v !== null)) {
@@ -314,25 +392,60 @@ export default {
     undo.type = 'button';
     undo.className = 'mb-undo';
     undo.textContent = '↩ もとに戻す';
+    const fixedText = Q.lay.includes('x') ? '＝ と ×' : '＝';
     const paint = () => {
       const shown = s.phase === 'shown';
       const mv = shown ? Q.sol : me === null ? null : loc.mv;
       const on = mv ? moved(Q.on, mv) : Q.on;
       board.replaceChildren(drawEq(Q.lay, on, {
         sel: playing ? loc.sel : null, from: mv?.[0] ?? null, to: mv?.[1] ?? null, answer: shown, live: playing,
-        onTap: playing ? tap : null,
+        dropAll: playing && type === 'add', onTap: playing ? tap : null,
       }));
       board.classList.toggle('bad', playing && loc.bad);
       undo.hidden = !playing;
       undo.disabled = !loc.mv && loc.sel === null;
-      note.textContent = shown ? `正解の一例: ${Q.ans}` : me === null ? '観戦中'
+      note.textContent = shown ? (Q.alt ? `正解: ${Q.ans} ／ ${Q.alt}` : `正解の一例: ${Q.ans}`) : me === null ? '観戦中'
         : doneOf(s, me) || loc.sent ? `とけた！（${doneOf(s, me) ? secText(s.solved[me]) : '…'}）ほかの人を待っています`
-        : loc.bad ? 'ちがう… ほかの棒を押すと、動かした棒は元に戻ります'
+        : loc.bad ? (type === 'take' ? 'ちがう… ほかの棒を押すと、取った棒は元に戻ります' : type === 'add' ? 'ちがう… ほかの点線を押すと、足した棒はそちらへ移ります' : 'ちがう… ほかの棒を押すと、動かした棒は元に戻ります')
         : loc.sel !== null ? '置く場所（点線）を押そう'
-        : '動かす棒を1本押そう（＝ は動かせない）';
+        : type === 'take' ? `取る棒を1本押そう（${fixedText} は取れない）`
+        : type === 'add' ? '棒を足す場所（点線）を1つ押そう'
+        : `動かす棒を1本押そう（${fixedText} は動かせない）`;
+    };
+    // 1本動かした（取った・足した）後の式を確かめ、正しければ送る
+    const check = () => {
+      loc.bad = false;
+      if (loc.mv && isTrue(Q.lay, moved(Q.on, loc.mv))) {
+        const ms = Math.round(since(key));
+        if (ms < LIMIT) {
+          loc.sent = true;
+          o.onMove({ t: 'done', q: s.q, ms: Math.max(ms, MIN_MS), mv: loc.mv });
+        }
+      } else if (loc.mv) {
+        loc.bad = true;
+        play('wrong', 0.5);
+      } else play('chip', 0.15);
     };
     const tap = (i, isOn) => {
       if (!playing || loc.sent) return;
+      if (type === 'take') {
+        // ほかの棒を押したら、前に取った棒は元に戻す。取った跡を押すと元に戻す
+        if (isOn) loc.mv = [i, -1];
+        else if (loc.mv?.[0] === i) loc.mv = null;
+        else return;
+        check();
+        paint();
+        return;
+      }
+      if (type === 'add') {
+        // ほかの点線を押したら、足した棒はそちらへ移る。足した棒を押すと元に戻す
+        if (!isOn) loc.mv = [-1, i];
+        else if (loc.mv?.[1] === i) loc.mv = null;
+        else return;
+        check();
+        paint();
+        return;
+      }
       const home = loc.mv ? moved(Q.on, loc.mv) : Q.on;
       if (isOn) {
         if (loc.sel === i) { loc.sel = null; paint(); return; }
@@ -349,17 +462,7 @@ export default {
       const from = loc.mv && loc.sel === loc.mv[1] ? loc.mv[0] : loc.sel;
       loc.sel = null;
       loc.mv = from === i ? null : [from, i];
-      loc.bad = false;
-      if (loc.mv && isTrue(Q.lay, moved(Q.on, loc.mv))) {
-        const ms = Math.round(since(key));
-        if (ms < LIMIT) {
-          loc.sent = true;
-          o.onMove({ t: 'done', q: s.q, ms: Math.max(ms, MIN_MS), mv: loc.mv });
-        }
-      } else if (loc.mv) {
-        loc.bad = true;
-        play('wrong', 0.5);
-      } else play('chip', 0.15);
+      check();
       paint();
     };
     undo.onclick = () => { if (!playing) return; loc.mv = null; loc.sel = null; loc.bad = false; paint(); };
@@ -379,7 +482,8 @@ export default {
       const fast = x.winners.map((p) => (p === me ? 'あなた' : o.names?.[p] ?? ''));
       const mine = me === null ? '' : x.solved[me] !== null ? `⭕ ${secText(x.solved[me])}` : '❌';
       const Q = s.qs[q];
-      li.innerHTML = `<span class="mk-rv-n">${q + 1}</span><span>${readEq(Q.lay, Q.on).text} → ${Q.ans}</span><span>${mine}</span><span class="mk-rv-who">${fast.length ? '⚡' + esc(fast.join('・')) : '―'}</span>`;
+      const kind = s.rules.take ? `${TYPE_LABEL[typeOf(Q)].split(' ')[0]} ` : '';
+      li.innerHTML = `<span class="mk-rv-n">${q + 1}</span><span>${kind}${readEq(Q.lay, Q.on).text} → ${Q.ans}${Q.alt ? ' ／ ' + Q.alt : ''}</span><span>${mine}${x.bonus?.[me] ? ' 🎁' : ''}</span><span class="mk-rv-who">${fast.length ? '⚡' + esc(fast.join('・')) : '―'}</span>`;
       list.append(li);
     });
     box.append(sum, list);
@@ -409,6 +513,10 @@ function geometry(lay) {
     } else if (ch === 'o') {
       fixed.push([[x + 7, 40], [x + 33, 40]]);
       sticks.push([[x + 20, 27], [x + 20, 53]]);
+      x += OW;
+    } else if (ch === 'x') {
+      // × は2本のななめの棒（左の端を先に書く。頭は左）
+      fixed.push([[x + 10, 30], [x + 30, 50]], [[x + 10, 50], [x + 30, 30]]);
       x += OW;
     } else {
       fixed.push([[x + 7, 33], [x + 33, 33]], [[x + 7, 47], [x + 33, 47]]);
@@ -447,7 +555,7 @@ function drawEq(lay, on, opts) {
     if (has && i === opts.sel) cls += ' sel';
     if (opts.answer && i === opts.to) cls += ' ans-to';
     if (opts.answer && i === opts.from) cls += ' ans-from';
-    if (!has && opts.sel !== null && opts.sel !== undefined && opts.live) cls += ' drop';
+    if (!has && ((opts.sel !== null && opts.sel !== undefined) || opts.dropAll) && opts.live) cls += ' drop';
     let el;
     if (has) el = stickEl(st, cls).g;
     else {

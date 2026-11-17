@@ -3475,6 +3475,10 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .mb-on.sel { transform: translateY(-3px); }
 .mb-on.ans-to .mb-stick { stroke: #3fae5a; filter: drop-shadow(0 0 3px #2f8a4a); }
 .mb-off.ans-from .mb-ghost { stroke: #d9473a; stroke-width: 3; opacity: 1; }
+.mb-type { display: inline-block; margin-top: 4px; padding: 2px 12px; border-radius: 999px; background: var(--soft, #f6efe2); border: 2px solid var(--line); font-weight: 900; }
+.mb-type-take { border-color: #d9473a; }
+.mb-type-add { border-color: #3fae5a; }
+.mb-two { margin-top: 4px; font-size: .85rem; font-weight: 700; color: var(--muted); }
 .board button.mb-undo { display: block; margin: 0 auto; padding: 6px 16px; border-radius: 999px; border: 2px solid var(--line); background: var(--field); color: var(--ink); font-weight: 700; cursor: pointer; }
 .board button.mb-undo[hidden] { display: none; }
 .board button.mb-undo:disabled { opacity: .45; cursor: default; }
@@ -3503,12 +3507,20 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .board .ok-v1000 { background: #8fb4df; }
 .board .ok-v5000 { background: #bda6dd; }
 .board .ok-v10000 { background: #cfab83; }
+.ok-items { list-style: none; margin: 6px auto 2px; padding: 0; width: min(100%, 320px); font-size: 1.05rem; }
+.ok-items li { display: flex; justify-content: space-between; gap: 12px; padding: 3px 4px; border-bottom: 1px dashed var(--line); }
+.ok-items b { font-weight: 900; }
+.ok-sum { margin-top: 4px; font-weight: 900; color: #2f8a4a; }
+.ok-purse { text-align: center; font-size: .85rem; font-weight: 700; color: var(--muted); }
+.ok-purse[hidden] { display: none; }
+.ok-tray .ok-left { background: #2f8a4a; color: #fff; }
 .ok-n { position: absolute; right: -10px; bottom: -8px; min-width: 24px; padding: 1px 5px; border-radius: 999px; background: var(--chip, #2d2a26); color: var(--chip-ink, #fff); font-size: .8rem; font-weight: 800; }
 .board button.ok-pay { display: block; margin: 0 auto; min-width: 160px; padding: 10px 24px; border: none; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 1.15rem; font-weight: 900; cursor: pointer; }
 .board button.ok-pay[hidden] { display: none; }
 .board button.ok-pay:disabled { opacity: .45; cursor: default; }
 /* 展開図あて（2026-11-17。tenkai.js） */
 .tn-name { font-size: 1.3rem; font-weight: 900; margin-top: 2px; }
+.tn-odd { display: inline-block; margin-top: 4px; padding: 2px 12px; border-radius: 999px; border: 2px solid #d9473a; font-weight: 900; }
 .tn-solid { display: block; width: min(46vw, 170px); height: 140px; margin: 6px auto; }
 .tn-solid.small { width: 52px; height: 44px; margin: 0; }
 .tn-pad { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; width: min(100%, 560px); margin: 0 auto; touch-action: manipulation; }

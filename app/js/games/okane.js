@@ -14,6 +14,15 @@
 //   - お金の絵は色と大きさで見分ける丸と四角に金額の数字を書いたもの（本物の図柄はまねない）。
 //   - 制限時間は1問 やさしい20秒・ふつう30秒・むずかしい35秒。最初に払えた人が出てから8秒で締め切る（制限時間のほうが先なら制限時間で）。全員払ったら1.5秒。
 //   - CPU は 1問 やさしい5〜12秒・ふつう8〜18秒・むずかしい10〜22秒で払い、7回に1回ほど払えない。どちらも種から決める。
+// 2026-11-17 の43回目の案（本人が選んだ。分かれ目は Claude が決めた）:
+//   - 「問題の数」5・10（最初）・20問（鍵は rounds）。
+//   - 「さいふの中身に限り」なし（最初）・あり（鍵は wallet）: 問題ごとに、さいふにある枚数が決まっている（全員同じ）。お金のボタンに残りの枚数を出し、0枚は押せない。
+//     さいふは、大きい順に取るいちばん少ない出し方から、どれか1種類（いちばん小さいお金を除く）を1枚足りなくし、ほかは0〜2枚多めに入れる。
+//     払えないときは、足りなくしたお金のすぐ下のお金を払えるまで足す（日本のお金はとなりどうしが割り切れるので必ず払える）。
+//     正解は、さいふの中で払える、いちばん少ない枚数の出し方（同じ枚数の出し方が2つ以上あればどれでもよい）。
+//   - 「お会計」なし（最初）・あり（鍵は shop）: 金額の代わりに、品物2〜3個と値段を出す（合計が問題の金額）。合計は自分で出す。
+//     品物の名前は値段に合うものを一覧から選ぶ。制限時間は10秒長く、CPU は5秒遅くなる。結果では合計を見せる。
+//   - さいふ・お会計を決める乱数は別に持つ（最初の値のときの金額は前と全く同じ。tools/test-logic.mjs が見ている）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（時計あわせと同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'pay', q, ms, c: [お金の種類ごとの枚数（MONEY の順）] }
 
@@ -28,7 +37,8 @@ const GRACE_MS = 1500;
 const AFTER_MS = 8000;
 const LOCK_MS = 1000;
 const MIN_MS = 800;
-const ROUNDS = 10;
+const ROUNDS = [[5, '5問'], [10, '10問'], [20, '20問']];
+export const roundsOf = (r) => (ROUNDS.some(([v]) => v === Number(r?.rounds)) ? Number(r.rounds) : 10);
 const LEVELS = [['easy', 'やさしい（999円まで・硬貨だけ）'], ['normal', 'ふつう（9,999円まで・千円札まで）'], ['hard', 'むずかしい（99,999円まで・一万円札まで）']];
 export const levelOf = (r) => (LEVELS.some(([v]) => v === r?.level) ? r.level : 'normal');
 // 使うお金（大きい順）
@@ -40,13 +50,75 @@ export const MONEY = {
 const RANGE = { easy: [11, 999], normal: [1001, 9999], hard: [10001, 99999] };
 const LIMIT = { easy: 20000, normal: 30000, hard: 35000 };
 const CPU_MS = { easy: [5000, 12000], normal: [8000, 18000], hard: [10000, 22000] };
-const limitOf = (s) => LIMIT[s.level];
+const SHOP_MS = 10000; // お会計の分だけ長くする
+const limitOf = (s) => LIMIT[s.level] + (s.items ? SHOP_MS : 0);
 
 export const yen = (v) => v.toLocaleString('ja-JP') + '円';
 // いちばん少ない枚数の出し方（MONEY の順の枚数）
 export const best = (amount, kinds) => kinds.map((v) => { const k = Math.floor(amount / v); amount -= k * v; return k; });
 export const total = (c, kinds) => c.reduce((a, k, i) => a + k * kinds[i], 0);
 const pieces = (c) => c.reduce((a, k) => a + k, 0);
+// さいふの中（種類ごとの枚数 w）で払える、いちばん少ない枚数の出し方。払えなければ null
+export function payFrom(amount, kinds, w) {
+  let top = null, topN = Infinity;
+  const c = kinds.map(() => 0);
+  const rec = (i, rest, n) => {
+    if (n >= topN) return;
+    if (rest === 0) { topN = n; top = c.slice(); return; }
+    if (i >= kinds.length) return;
+    for (let k = Math.min(w[i], Math.floor(rest / kinds[i])); k >= 0; k--) { c[i] = k; rec(i + 1, rest - k * kinds[i], n + k); }
+    c[i] = 0;
+  };
+  rec(0, amount, 0);
+  return top;
+}
+// さいふを作る: 大きい順に取る出し方のどれか1種類を1枚足りなくし、ほかは0〜2枚多め。払えるまで、すぐ下のお金を足す
+export function makeWallet(amount, kinds, rnd) {
+  const g = best(amount, kinds);
+  const w = g.map((k) => k + Math.floor(rnd() * 3));
+  const can = g.map((k, i) => (k > 0 && i < kinds.length - 1 ? i : -1)).filter((i) => i >= 0);
+  if (!can.length) return w;
+  const i = can[Math.floor(rnd() * can.length)];
+  w[i] = g[i] - 1;
+  for (let k = 0; k < 20 && !payFrom(amount, kinds, w); k++) w[i + 1] += 1;
+  return w;
+}
+// お会計の品物（値段の上限 → 名前の一覧）
+const GOODS = [
+  [200, ['🍬 あめ', '🍫 チョコ', '🥤 ジュース', '🍙 おにぎり', '✏️ えんぴつ', '🧻 ティッシュ', '🥚 たまご', '🍌 バナナ']],
+  [1000, ['🍞 パン', '📓 ノート', '🍱 おべんとう', '🍦 ソフトクリーム', '🧦 くつした', '🥛 ぎゅうにゅう', '🖊️ ボールペン', '🍎 りんごの袋']],
+  [5000, ['📚 本', '🧢 ぼうし', '☂️ かさ', '👕 Tシャツ', '🍰 ケーキ', '🧸 ぬいぐるみ', '🎲 ボードゲーム', '🍉 すいか']],
+  [20000, ['👟 くつ', '🎒 リュック', '🧥 上着', '⌚ うでどけい', '🎮 ゲーム', '🍣 おすし', '🎧 ヘッドホン', '🍳 フライパン']],
+  [Infinity, ['🚲 じてんしゃ', '🎸 ギター', '📺 テレビ', '🏕️ テント', '🛋️ ソファ', '🧳 スーツケース', '💍 ゆびわ', '🔭 ぼうえんきょう']],
+];
+// 金額を品物2〜3個に分ける（どの品物も金額の15%以上）→ [[名前, 値段], …]
+export function makeItems(amount, rnd) {
+  const k = rnd() < 0.5 ? 2 : 3;
+  let cuts = null;
+  for (let t = 0; t < 30 && !cuts; t++) {
+    const c = Array.from({ length: k - 1 }, () => 1 + Math.floor(rnd() * (amount - 1))).sort((a, b) => a - b);
+    const parts = [...c, amount].map((v, i, a) => v - (i ? a[i - 1] : 0));
+    if (parts.every((v) => v >= amount * 0.15)) cuts = parts;
+  }
+  if (!cuts) { const v = Math.floor(amount / k); cuts = [...Array(k - 1).fill(v), amount - v * (k - 1)]; }
+  const used = new Set();
+  return cuts.map((price) => {
+    const names = GOODS.find(([hi]) => price < hi)[1].filter((x) => !used.has(x));
+    const name = names[Math.floor(rnd() * names.length)];
+    used.add(name);
+    return [name, price];
+  });
+}
+// この問題の正解の出し方（さいふありは、さいふの中でいちばん少ない出し方の1つ）
+export const wanted = (s, q) => (s.wallets ? payFrom(s.qs[q], MONEY[s.level], s.wallets[q]) : best(s.qs[q], MONEY[s.level]));
+// 払える出し方か（さいふありは、さいふの中で金額ぴったり・いちばん少ない枚数ならどれでもよい）
+export function canPay(s, q, c) {
+  const kinds = MONEY[s.level];
+  if (!Array.isArray(c) || c.length !== kinds.length || c.some((k) => !Number.isInteger(k) || k < 0)) return false;
+  const want = wanted(s, q);
+  if (!s.wallets) return c.every((k, i) => k === want[i]);
+  return c.every((k, i) => k <= s.wallets[q][i]) && total(c, kinds) === s.qs[q] && pieces(c) === pieces(want);
+}
 
 const qKey = (s, q = s.q) => `okane:${s.seed}:${q}`;
 const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice() });
@@ -56,7 +128,7 @@ export function cpuTime(s, q, p) {
   const rnd = mulberry32((s.seed * 43 + q * 17 + p * 1021 + 3301) >>> 0);
   if (rnd() < 0.15) return null;
   const [lo, hi] = CPU_MS[s.level];
-  return Math.round(lo + rnd() * (hi - lo));
+  return Math.round(lo + rnd() * (hi - lo) + (s.items ? SHOP_MS / 2 : 0));
 }
 
 let loc = null; // この端末で出したお金 { key, c: 枚数, sent, lock: 押せるようになる時刻, msg }
@@ -73,20 +145,28 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'level', label: 'むずかしさ', desc: '金額の大きさと、使えるお金', def: 'normal', choices: LEVELS },
+    { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 10, choices: ROUNDS },
+    { key: 'wallet', label: 'さいふの中身に限り', desc: 'さいふにあるお金の枚数が決まっている。その中でいちばん少ない枚数で払う', def: false },
+    { key: 'shop', label: 'お会計', desc: '品物2〜3個の値段が出る。合計を自分で出して払う', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { level: 'normal', ...rules };
+    const r = { level: 'normal', rounds: 10, wallet: false, shop: false, ...rules };
     const level = levelOf(r);
     const rnd = mulberry32(seed);
     const [lo, hi] = RANGE[level];
     const qs = [];
-    for (let i = 0; i < ROUNDS; i++) {
+    for (let i = 0; i < roundsOf(r); i++) {
       let a = lo + Math.floor(rnd() * (hi - lo + 1));
       for (let k = 0; k < 20 && qs.includes(a); k++) a = lo + Math.floor(rnd() * (hi - lo + 1));
       qs.push(a);
     }
-    return { n, seed, rules: r, level, qs, q: -1, phase: 'ready', solved: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
+    // さいふ・お会計は別の乱数で決める（最初の値のときの金額を前と同じにするため）
+    const rw = mulberry32((seed ^ 0x9e3779b9) >>> 0);
+    const rs = mulberry32((seed ^ 0x85ebca6b) >>> 0);
+    const wallets = r.wallet ? qs.map((a) => makeWallet(a, MONEY[level], rw)) : null;
+    const items = r.shop ? qs.map((a) => makeItems(a, rs)) : null;
+    return { n, seed, rules: r, level, qs, wallets, items, q: -1, phase: 'ready', solved: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0 };
   },
 
   turn() { return null; },
@@ -143,9 +223,7 @@ export default {
     }
     if (m.t !== 'pay' || s0.phase !== 'open' || m.q !== s0.q || !Number.isInteger(m.p) || m.p < 0 || m.p >= s0.n || doneOf(s0, m.p)) return null;
     if (typeof m.ms !== 'number' || !(m.ms >= MIN_MS) || m.ms > limitOf(s0) + 500) return null;
-    const kinds = MONEY[s0.level];
-    const want = best(s0.qs[s0.q], kinds);
-    if (!Array.isArray(m.c) || m.c.length !== kinds.length || m.c.some((k, i) => k !== want[i])) return null;
+    if (!canPay(s0, s0.q, m.c)) return null;
     const s = clone(s0);
     s.step += 1;
     s.solved[m.p] = Math.round(m.ms);
@@ -158,7 +236,7 @@ export default {
     const end = cpuTime(s, s.q, p);
     if (end === null || end >= limitOf(s)) return null;
     const t = since(qKey(s));
-    return t >= end ? { t: 'pay', q: s.q, ms: Math.max(end, Math.round(t)), c: best(s.qs[s.q], MONEY[s.level]) } : null;
+    return t >= end ? { t: 'pay', q: s.q, ms: Math.max(end, Math.round(t)), c: wanted(s, s.q) } : null;
   },
 
   render(root, s, o) {
@@ -183,12 +261,16 @@ export default {
     wrap.append(card);
     const limit = limitOf(s);
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">いちばん少ない枚数で払おう・全${s.qs.length}問・1問 ${limit / 1000}秒まで</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">いちばん少ない枚数で払おう・全${s.qs.length}問・1問 ${limit / 1000}秒まで${s.wallets ? '・👛 さいふのお金には限りがある' : ''}${s.items ? '・🛒 品物の合計を払う' : ''}</div>`;
       return;
     }
     const amount = s.qs[s.q];
     const kinds = MONEY[s.level];
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div><div class="kj-word ok-price">${yen(amount)}</div>`;
+    const items = s.items?.[s.q];
+    const priceHtml = items
+      ? `<ul class="ok-items">${items.map(([name, v]) => `<li><span>${esc(name)}</span><b>${yen(v)}</b></li>`).join('')}</ul>${s.phase === 'shown' ? `<div class="ok-sum">合計 ${yen(amount)}</div>` : ''}`
+      : `<div class="kj-word ok-price">${yen(amount)}</div>`;
+    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>${priceHtml}`;
     if (s.phase === 'open') {
       since(key);
       if (s.solved.some((v) => v !== null)) {
@@ -216,9 +298,13 @@ export default {
     note.className = 'cc-log';
     const locked = () => performance.now() < loc.lock;
     let waitT = 0;
+    const wallet = s.wallets?.[s.q] ?? null;
+    const purse = document.createElement('div');
+    purse.className = 'ok-purse';
+    purse.textContent = '👛 さいふの中（数字は残りの枚数）';
     const paint = () => {
       const shown = s.phase === 'shown';
-      const c = shown ? best(amount, kinds) : me === null ? kinds.map(() => 0) : loc.c;
+      const c = shown ? wanted(s, s.q) : me === null ? kinds.map(() => 0) : loc.c;
       paid.replaceChildren();
       paid.classList.toggle('answer', shown);
       kinds.forEach((v, i) => {
@@ -239,9 +325,15 @@ export default {
       });
       if (!paid.children.length) paid.insertAdjacentHTML('beforeend', `<span class="ok-empty">${shown ? '' : 'ここに出したお金が並びます'}</span>`);
       tray.hidden = !playing;
+      purse.hidden = !playing || !wallet;
       payBtn.hidden = !playing;
       payBtn.disabled = !pieces(loc.c) || locked();
-      tray.querySelectorAll('button').forEach((b) => { b.disabled = locked(); });
+      // さいふありは、残りの枚数を出し、0枚のお金は押せない
+      tray.querySelectorAll('button').forEach((b, i) => {
+        const left = wallet ? wallet[i] - loc.c[i] : 1;
+        b.disabled = locked() || left <= 0;
+        if (wallet) b.querySelector('.ok-left').textContent = left;
+      });
       note.textContent = shown ? `正解: ${pieces(c)}枚` : me === null ? '観戦中'
         : doneOf(s, me) || loc.sent ? `はらった！（${doneOf(s, me) ? secText(s.solved[me]) : '…'}）ほかの人を待っています`
         : loc.msg || 'お金を押して出し、「払う」を押そう（出したお金を押すと1枚戻る）';
@@ -252,8 +344,9 @@ export default {
       kinds.forEach((v, i) => {
         const b = moneyEl(v, 'button');
         b.setAttribute('aria-label', `${yen(v)}を1枚出す`);
+        if (wallet) b.insertAdjacentHTML('beforeend', '<span class="ok-n ok-left"></span>');
         b.onclick = () => {
-          if (!playing || loc.sent || locked()) return;
+          if (!playing || loc.sent || locked() || (wallet && loc.c[i] >= wallet[i])) return;
           loc.c[i] += 1;
           loc.msg = '';
           play('chip', 0.15);
@@ -263,9 +356,8 @@ export default {
       });
       payBtn.onclick = () => {
         if (!playing || loc.sent || locked() || !pieces(loc.c)) return;
-        const want = best(amount, kinds);
         const sum = total(loc.c, kinds);
-        if (sum === amount && loc.c.every((k, i) => k === want[i])) {
+        if (canPay(s, s.q, loc.c)) {
           const ms = Math.round(since(key));
           if (ms >= limit) return;
           loc.sent = true;
@@ -279,7 +371,7 @@ export default {
         paint();
       };
     }
-    wrap.append(paid, payBtn, tray, note);
+    wrap.append(paid, payBtn, purse, tray, note);
     paint();
   },
 
@@ -290,12 +382,11 @@ export default {
     const sum = document.createElement('summary');
     sum.textContent = `📝 ふりかえり（全${s.log.length}問）`;
     const list = document.createElement('ol');
-    const kinds = MONEY[s.level];
     s.log.forEach((x, q) => {
       const li = document.createElement('li');
       const fast = x.winners.map((p) => (p === me ? 'あなた' : o.names?.[p] ?? ''));
       const mine = me === null ? '' : x.solved[me] !== null ? `⭕ ${secText(x.solved[me])}` : '❌';
-      li.innerHTML = `<span class="mk-rv-n">${q + 1}</span><span>${yen(s.qs[q])}（${pieces(best(s.qs[q], kinds))}枚）</span><span>${mine}</span><span class="mk-rv-who">${fast.length ? '⚡' + esc(fast.join('・')) : '―'}</span>`;
+      li.innerHTML = `<span class="mk-rv-n">${q + 1}</span><span>${yen(s.qs[q])}（${pieces(wanted(s, q))}枚）</span><span>${mine}</span><span class="mk-rv-who">${fast.length ? '⚡' + esc(fast.join('・')) : '―'}</span>`;
       list.append(li);
     });
     box.append(sum, list);

@@ -15,6 +15,12 @@
 //     立体の絵だけは三角関数で描く（見た目だけで、選択肢には関わらない）。
 //   - 制限時間は やさしい15秒・ふつう18秒・むずかしい20秒。全員が答えたら0.8秒で締め切る。答えを見せる間は3秒。
 //   - CPU の正解の見込みは やさしい8割・ふつう68%・むずかしい55%。3〜7秒（むずかしいは＋1秒）で答える。
+// 2026-11-17 の43回目の案（本人が選んだ。分かれ目は Claude が決めた）:
+//   - 「問題の数」5・10（最初）・20問（鍵は rounds）。
+//   - 「仲間はずれ」なし（最初）・あり（鍵は odd）: 半分ほどの問題を「正しい展開図3つと、組み立てられない展開図1つ」にして、組み立てられない1つを押す。
+//     問題の上に「🙅 組み立てられないのはどれ？」と出す。正しい3つは、面の中心どうしの距離の組でくらべて形のちがうもの。まちがいの1つはいつもの作り方（はしの面の付け替え）。
+//     正しい形が3つ作れない正四面体（2種類しかない）と、形を決めて作る円柱・円すいは、いつもの問題にする。
+//   - 2つとも最初の値のときの問題は前と全く同じ（仲間はずれにするかは別の乱数で決める。tools/test-logic.mjs が見ている）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（切り紙あてと同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q, c: 選んだ札の番号（0〜3）, ms }
 
@@ -22,7 +28,8 @@ import { mulberry32, shuffle } from './util.js';
 import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
 import { pointsOf } from './make10.js';
 
-const ROUNDS = 10;
+const ROUNDS = [[5, '5問'], [10, '10問'], [20, '20問']];
+export const roundsOf = (r) => (ROUNDS.some(([v]) => v === Number(r?.rounds)) ? Number(r.rounds) : 10);
 const LEVELS = [['easy', 'やさしい（立方体・直方体・三角柱）'], ['normal', 'ふつう（＋四角すい・正四面体・六角柱）'], ['hard', 'むずかしい（＋円柱・円すい・正八面体）']];
 export const levelOf = (r) => (LEVELS.some(([v]) => v === r?.level) ? r.level : 'normal');
 export const KINDS = {
@@ -375,14 +382,40 @@ export function makeQuestion(kind, rnd) {
   }
   throw new Error('展開図が作れない: ' + kind);
 }
+// 仲間はずれの問題: 形のちがう正しい展開図3つと、組み立てられない展開図1つ（作れなければ null）
+export function makeOdd(kind, rnd) {
+  for (let k = 0; k < 10; k++) {
+    const goods = [];
+    const seen = new Set();
+    for (let t = 0; t < 40 && goods.length < 3; t++) {
+      const g = unfold(kind, rnd);
+      if (!g || seen.has(netSig(g))) continue;
+      seen.add(netSig(g));
+      goods.push(g);
+    }
+    if (goods.length < 3) return null;
+    const wrong = shuffle(wrongMoves(kind, goods[0], rnd), rnd)[0];
+    if (!wrong) continue;
+    const side = Math.floor(rnd() * 4);
+    const choices = goods.map((g) => ({ faces: g.faces }));
+    choices.splice(side, 0, { faces: wrong.faces });
+    return { kind, choices, side, odd: true };
+  }
+  return null;
+}
+const NO_ODD = new Set(['tetra', 'cylinder', 'cone']);
 const made = new Map();
-export function makeQuestions(seed, level) {
-  const key = `${seed}:${level}`;
+export function makeQuestions(seed, level, n = 10, odd = false) {
+  const key = `${seed}:${level}:${n}:${odd ? 1 : 0}`;
   if (made.has(key)) return made.get(key);
   const rnd = mulberry32(seed);
+  const pick = mulberry32((seed ^ 0x27d4eb2f) >>> 0); // 仲間はずれにするか（最初の値のときは使わないので、問題は前と同じ）
   const kinds = [];
-  while (kinds.length < ROUNDS) kinds.push(...shuffle(KINDS[level], rnd));
-  const qs = kinds.slice(0, ROUNDS).map((kind) => ({ ...makeQuestion(kind, rnd), color: COLORS[Math.floor(rnd() * COLORS.length)] }));
+  while (kinds.length < n) kinds.push(...shuffle(KINDS[level], rnd));
+  const qs = kinds.slice(0, n).map((kind) => {
+    const x = (odd && !NO_ODD.has(kind) && pick() < 0.5 && makeOdd(kind, rnd)) || makeQuestion(kind, rnd);
+    return { ...x, color: COLORS[Math.floor(rnd() * COLORS.length)] };
+  });
   made.set(key, qs);
   if (made.size > 8) made.delete(made.keys().next().value);
   return qs;
@@ -407,12 +440,14 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'level', label: 'むずかしさ', desc: '出てくる立体の種類', def: 'normal', choices: LEVELS },
+    { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 10, choices: ROUNDS },
+    { key: 'odd', label: '仲間はずれ', desc: '「組み立てられない展開図を1つ選ぶ」問題もまぜる', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
-    const r = { level: 'normal', ...rules };
+    const r = { level: 'normal', rounds: 10, odd: false, ...rules };
     return {
-      n, seed, rules: r, qs: makeQuestions(seed, levelOf(r)), q: -1, phase: 'ready',
+      n, seed, rules: r, qs: makeQuestions(seed, levelOf(r), roundsOf(r), !!r.odd), q: -1, phase: 'ready',
       solved: Array(n).fill(null), miss: Array(n).fill(false), scores: Array(n).fill(0), last: null, log: [], step: 0,
     };
   },
@@ -512,13 +547,13 @@ export default {
     card.className = 'kj-card';
     wrap.append(card);
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">立体を組み立てられる展開図はどれ？・全${s.qs.length}問</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">立体を組み立てられる展開図はどれ？・全${s.qs.length}問${s.rules.odd ? '・🙅 の問題は組み立てられない1つを選ぶ' : ''}</div>`;
       return;
     }
     const x = s.qs[s.q];
     const key = qKey(s);
     const limit = limitOf(s.rules);
-    card.insertAdjacentHTML('beforeend', `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div><div class="tn-name">${NAMES[x.kind]}</div>`);
+    card.insertAdjacentHTML('beforeend', `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div><div class="tn-name">${NAMES[x.kind]}</div>${x.odd ? '<div class="tn-odd">🙅 組み立てられないのはどれ？</div>' : ''}`);
     card.append(solidSvg(x.kind, x.color));
     if (s.phase === 'open') { since(key); card.append(timeBar(key, limit)); }
     else {
@@ -557,7 +592,7 @@ export default {
     if (me === null) note.textContent = '観戦中';
     else if (s.phase === 'open' && s.solved[me] !== null) note.textContent = `⭕ 正解！（${secText(s.solved[me])}）`;
     else if (s.phase === 'open' && s.miss[me]) note.textContent = '❌ ざんねん。次の問題を待とう';
-    else if (s.phase === 'open') note.textContent = '組み立てて、この立体になる展開図を押そう';
+    else if (s.phase === 'open') note.textContent = x.odd ? '組み立てても、この立体にならない展開図を押そう' : '組み立てて、この立体になる展開図を押そう';
     wrap.append(note);
   },
 
@@ -573,7 +608,7 @@ export default {
       const qq = s.qs[q];
       const li = document.createElement('li');
       const name = Object.assign(document.createElement('span'), { className: 'mk-rv-n', textContent: NAMES[qq.kind] });
-      li.append(name, solidSvg(qq.kind, qq.color, 'tn-solid small'), Object.assign(document.createElement('span'), { className: 'kg-rv-arrow', textContent: '➡' }), netSvg(qq.choices[qq.side], qq.color));
+      li.append(name, solidSvg(qq.kind, qq.color, 'tn-solid small'), Object.assign(document.createElement('span'), { className: 'kg-rv-arrow', textContent: qq.odd ? '🙅' : '➡' }), netSvg(qq.choices[qq.side], qq.color));
       const info = document.createElement('span');
       info.className = 'mk-rv-who';
       const fast = x.winners.map((p) => (p === me ? 'あなた' : o.names?.[p] ?? ''));

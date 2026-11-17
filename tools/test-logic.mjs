@@ -8736,7 +8736,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
 // マッチ棒パズル早解き（2026-11-17）: 数字の形・問題はまちがった式で1本で直せる・別の直し方でも正解・弾く手・速い順に点・CPU どうしで最後まで
 {
   const M = GAMES.matchbo;
-  const { DIGITS, readEq, isTrue, moved, solutions, slotsOf } = await import('../app/js/games/matchbo.js');
+  const { DIGITS, readEq, isTrue, moved, solutions, slotsOf, typeOfMv, bonusOf } = await import('../app/js/games/matchbo.js');
   assert.deepEqual(DIGITS.map((m) => m.toString(2).split('').filter((c) => c === '1').length), [6, 2, 5, 5, 4, 5, 6, 3, 7, 6], 'マッチ棒: 数字の棒の数');
   // 6＋4＝4 → 0＋4＝4（6 のまん中の棒を右上へ）
   const bars = (lay, digits, plus) => {
@@ -8800,13 +8800,76 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.deepEqual(s.scores, [0, 2, 3], 'マッチ棒: 速い順に3・2点');
   const end = runCpus(M, 4, 3, {}, 200, 8000);
   assert.ok(M.result(end) && end.scores.some((v) => v > 0), 'マッチ棒: CPU どうしで最後まで');
+  {
+    // 43回目の案（2026-11-17）: 問題の数・取る・足す・×も使う・ちがう直し方でおまけ
+    const { createHash } = await import('node:crypto');
+    const fp = [];
+    for (let seed = 1; seed <= 40; seed++) fp.push(JSON.stringify(M.init(3, seed).qs));
+    assert.equal(createHash('sha256').update(fp.join('|')).digest('hex').slice(0, 16), '0cdbd104d602cfba', 'マッチ棒: 最初の値の問題は設定を足す前と全く同じ');
+    for (const n of [5, 20]) assert.equal(M.init(2, 3, { rules: { rounds: n } }).qs.length, n, `マッチ棒: ${n}問`);
+    assert.equal(M.init(2, 3, { rules: { rounds: 7 } }).qs.length, 10, 'マッチ棒: 知らない問題の数は10問');
+    assert.equal(readEq('dxd=dd', bars('dxd=dd', [3, 4, 1, 2])).text, '3×4＝12');
+    assert.equal(isTrue('dxd=dd', bars('dxd=dd', [3, 4, 1, 2])), true, 'マッチ棒: 3×4＝12 は正しい');
+    assert.equal(slotsOf('dxd=dd').length, 7 * 4, 'マッチ棒: × は動かせない');
+    const types = new Set();
+    let timesN = 0;
+    for (let seed = 1; seed <= 20; seed++) {
+      for (const x of M.init(2, seed, { rules: { take: true, times: true } }).qs) {
+        const type = x.type ?? 'move';
+        types.add(type);
+        if (x.lay.includes('x')) timesN++;
+        assert.ok(readEq(x.lay, x.on).nums && !isTrue(x.lay, x.on), `マッチ棒: 取る・足す・× の問題もまちがった式 ${readEq(x.lay, x.on).text}`);
+        assert.equal(typeOfMv(x.sol), type, 'マッチ棒: 書いてある直し方の種類がお題と同じ');
+        const sol = solutions(x.lay, x.on, type);
+        assert.ok(sol.length >= 1 && sol.length <= 2 && isTrue(x.lay, moved(x.on, x.sol)), 'マッチ棒: 取る・足す・× の問題も1〜2通りで直せる');
+      }
+    }
+    assert.deepEqual([...types].sort(), ['add', 'move', 'take'], 'マッチ棒: 動かす・取る・足すが全部出る');
+    assert.ok(timesN > 0, 'マッチ棒: × の式が出る');
+    // お題とちがう種類の手は、正しい式になっても弾く
+    let hit = 0;
+    for (let seed = 1; seed <= 60 && hit < 2; seed++) {
+      const s0 = M.init(2, seed, { rules: { take: true } });
+      for (let q = 0; q < s0.qs.length; q++) {
+        const x = s0.qs[q];
+        const type = x.type ?? 'move';
+        const other = ['move', 'take', 'add'].find((k) => k !== type && solutions(x.lay, x.on, k).length);
+        if (!other) continue;
+        let s = M.apply(s0, { p: -1, t: 'next' });
+        for (let i = 0; i < q; i++) s = M.apply(M.apply(s, { p: -1, t: 'close' }), { p: -1, t: 'next' });
+        assert.equal(M.apply(s, { p: 0, t: 'done', q, ms: 3000, mv: solutions(x.lay, x.on, other)[0] }), null, `マッチ棒: ${type} の問題に ${other} の手は弾く`);
+        assert.ok(M.apply(s, { p: 0, t: 'done', q, ms: 3000, mv: x.sol }), 'マッチ棒: お題どおりの手は通る');
+        hit++;
+        break;
+      }
+    }
+    assert.ok(hit > 0, 'マッチ棒: 種類のちがう手で直せる問題が見つかる');
+    // ちがう直し方でおまけ: 2通りの問題で、先に解いた人とちがう式に直した人に +1点（いちばん速い人はなし）
+    const sb = M.init(3, 5, { rules: { bonus: true } });
+    const qb = sb.qs.findIndex((x) => x.alt);
+    assert.ok(qb >= 0 && sb.qs.filter((x) => x.alt).length >= 8, 'マッチ棒: おまけありは2通りの問題が多い');
+    for (const bonus of [true, false]) {
+      let s = M.apply({ ...sb, rules: { ...sb.rules, bonus } }, { p: -1, t: 'next' });
+      for (let i = 0; i < qb; i++) s = M.apply(M.apply(s, { p: -1, t: 'close' }), { p: -1, t: 'next' });
+      const x = s.qs[qb];
+      assert.equal(readEq(x.lay, moved(x.on, x.altMv)).text, x.alt);
+      s = M.apply(s, { p: 0, t: 'done', q: qb, ms: 3000, mv: x.sol });
+      s = M.apply(s, { p: 1, t: 'done', q: qb, ms: 4000, mv: x.altMv });
+      s = M.apply(s, { p: 2, t: 'done', q: qb, ms: 5000, mv: x.sol });
+      assert.deepEqual(bonusOf(s), bonus ? [0, 1, 0] : [0, 0, 0], `マッチ棒: おまけ ${bonus}`);
+      s = M.apply(s, { p: -1, t: 'close' });
+      assert.deepEqual(s.last.pts, bonus ? [3, 3, 1] : [3, 2, 1], `マッチ棒: おまけ込みの点 ${bonus}`);
+    }
+    const endB = runCpus(M, 4, 3, { rounds: 5, take: true, times: true, bonus: true }, 200, 8000);
+    assert.ok(M.result(endB) && endB.scores.some((v) => v > 0), 'マッチ棒: 新しい設定を全部ありで CPU どうしで最後まで');
+  }
   console.log('matchbo OK');
 }
 
 // お金ぴったり払い（2026-11-17）: いちばん少ない枚数・金額の範囲・ちがう出し方は弾く・速い順に点・CPU どうしで最後まで
 {
   const K = GAMES.okane;
-  const { MONEY, best, total, yen } = await import('../app/js/games/okane.js');
+  const { MONEY, best, total, yen, payFrom, wanted, canPay } = await import('../app/js/games/okane.js');
   assert.deepEqual(best(3758, MONEY.normal), [3, 1, 2, 1, 0, 1, 3], 'お金: 3,758円 は 千3・五百1・百2・五十1・五1・一3');
   assert.deepEqual(best(15000, MONEY.hard), [1, 1, 0, 0, 0, 0, 0, 0, 0], 'お金: 15,000円 は 一万1・五千1');
   assert.equal(yen(12345), '12,345円');
@@ -8849,13 +8912,78 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     const end = runCpus(K, 4, 5, rules, 200, 8000);
     assert.ok(K.result(end) && end.scores.some((v) => v > 0), `お金: CPU どうしで最後まで ${JSON.stringify(rules)}`);
   }
+  {
+    // 43回目の案（2026-11-17）: 問題の数・さいふの中身に限り・お会計
+    const { createHash } = await import('node:crypto');
+    const fp = [];
+    for (let seed = 1; seed <= 40; seed++) for (const lv of ['easy', 'normal', 'hard']) fp.push(JSON.stringify(K.init(3, seed, { rules: { level: lv } }).qs));
+    assert.equal(createHash('sha256').update(fp.join('|')).digest('hex').slice(0, 16), '46c802c0f0ab9ccb', 'お金: 最初の値の金額は設定を足す前と全く同じ');
+    for (const n of [5, 20]) assert.equal(K.init(2, 3, { rules: { rounds: n } }).qs.length, n, `お金: ${n}問`);
+    // さいふの中で払ういちばん少ない枚数を、全部の出し方を数え上げた結果とくらべる
+    const brute = (a, kinds, w) => {
+      let top = Infinity;
+      const rec = (i, rest, n) => { if (rest === 0) { top = Math.min(top, n); return; } if (i >= kinds.length) return; for (let k = 0; k <= w[i] && k * kinds[i] <= rest; k++) rec(i + 1, rest - k * kinds[i], n + k); };
+      rec(0, a, 0);
+      return top;
+    };
+    for (const lv of ['easy', 'normal']) {
+      for (let seed = 1; seed <= 25; seed++) {
+        const s = K.init(2, seed, { rules: { level: lv, wallet: true, shop: true } });
+        const kinds = MONEY[lv];
+        s.qs.forEach((a, q) => {
+          const w = s.wallets[q];
+          const pay = payFrom(a, kinds, w);
+          assert.ok(pay && total(pay, kinds) === a && pay.every((k, i) => k <= w[i]), 'お金: さいふの中で払える');
+          assert.equal(pay.reduce((x, y) => x + y, 0), brute(a, kinds, w), 'お金: さいふの中でいちばん少ない枚数');
+          assert.ok(best(a, kinds).some((k, i) => k > w[i]), 'お金: 大きい順に取る出し方はさいふでは払えない');
+          const items = s.items[q];
+          assert.ok(items.length >= 2 && items.length <= 3 && items.reduce((x, [, v]) => x + v, 0) === a, 'お金: 品物の合計が金額');
+          assert.equal(new Set(items.map(([name]) => name)).size, items.length, 'お金: 同じ品物は出ない');
+        });
+      }
+    }
+    let s = K.apply(K.init(3, 4, { rules: { wallet: true } }), { p: -1, t: 'next' });
+    assert.equal(K.apply(s, { p: 0, t: 'pay', q: 0, ms: 3000, c: best(s.qs[0], MONEY.normal) }), null, 'お金: さいふにない枚数は弾く');
+    assert.ok(canPay(s, 0, wanted(s, 0)) && K.apply(s, { p: 0, t: 'pay', q: 0, ms: 3000, c: wanted(s, 0) }), 'お金: さいふの中のいちばん少ない出し方は通る');
+    {
+      // 枚数はいちばん少ない出し方と同じでも、さいふにない枚数を使う出し方は弾く
+      let found = 0;
+      for (let seed = 1; seed <= 40 && !found; seed++) {
+        const sw = K.init(2, seed, { rules: { level: 'easy', wallet: true } });
+        const kinds = MONEY.easy;
+        sw.qs.forEach((a, q) => {
+          if (found) return;
+          const w = sw.wallets[q];
+          const n = wanted(sw, q).reduce((x, y) => x + y, 0);
+          const c = kinds.map(() => 0);
+          const rec = (i, rest, left) => {
+            if (found) return;
+            if (rest === 0 && left === 0) { if (c.some((k, j) => k > w[j])) found = { q, c: c.slice() }; return; }
+            if (i >= kinds.length || left <= 0) return;
+            for (let k = Math.min(left, Math.floor(rest / kinds[i])); k >= 0; k--) { c[i] = k; rec(i + 1, rest - k * kinds[i], left - k); }
+            c[i] = 0;
+          };
+          rec(0, a, n);
+          if (found) assert.equal(canPay(sw, found.q, found.c), false, `お金: さいふにない枚数を使う同じ枚数の出し方は弾く ${JSON.stringify(found.c)}`);
+        });
+      }
+      assert.ok(found, 'お金: さいふにない枚数を使う同じ枚数の出し方が見つかる');
+    }
+    s = K.apply(K.init(3, 4, { rules: { shop: true } }), { p: -1, t: 'next' });
+    assert.ok(K.apply(s, { p: 0, t: 'pay', q: 0, ms: 35000, c: wanted(s, 0) }), 'お金: お会計は制限時間が10秒長い');
+    assert.equal(K.apply(s, { p: 0, t: 'pay', q: 0, ms: 41000, c: wanted(s, 0) }), null, 'お金: お会計でも制限時間を過ぎた手は弾く');
+    for (const rules of [{ level: 'hard', wallet: true, shop: true, rounds: 5 }, { level: 'easy', wallet: true }]) {
+      const end = runCpus(K, 4, 5, rules, 200, 8000);
+      assert.ok(K.result(end) && end.scores.some((v) => v > 0), `お金: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+    }
+  }
   console.log('okane OK');
 }
 
 // 展開図あて（2026-11-17）: 組み立ての判定（立方体の展開図は11種類・正四面体は2種類）・正しい展開図は組み立てられ、まちがいは組み立てられない・立体の種類・CPU どうしで最後まで
 {
   const T = GAMES.tenkai;
-  const { tryFold, anyFold, KINDS, makeQuestions } = await import('../app/js/games/tenkai.js');
+  const { tryFold, anyFold, KINDS, makeQuestions, makeOdd } = await import('../app/js/games/tenkai.js');
   // 正方形を6つつないだ形を全部作り、組み立てられる数を数える
   {
     const canon = (cells) => {
@@ -8926,6 +9054,34 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   for (const rules of [{ level: 'easy' }, { level: 'hard' }]) {
     const end = runCpus(T, 4, 6, rules, 200, 8000);
     assert.ok(T.result(end) && end.scores.some((v) => v > 0), `展開図: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  {
+    // 43回目の案（2026-11-17）: 問題の数・仲間はずれ
+    const { createHash } = await import('node:crypto');
+    const fp = [];
+    for (let seed = 1; seed <= 15; seed++) for (const lv of ['easy', 'normal', 'hard']) fp.push(JSON.stringify(T.init(3, seed, { rules: { level: lv } }).qs));
+    assert.equal(createHash('sha256').update(fp.join('|')).digest('hex').slice(0, 16), '9eb8e1642995d789', '展開図: 最初の値の問題は設定を足す前と全く同じ');
+    for (const n of [5, 20]) assert.equal(T.init(2, 3, { rules: { rounds: n } }).qs.length, n, `展開図: ${n}問`);
+    let odd = 0;
+    for (let seed = 1; seed <= 12; seed++) {
+      for (const x of T.init(2, seed, { rules: { level: 'hard', odd: true } }).qs) {
+        if (!x.odd) continue;
+        odd++;
+        assert.ok(!['tetra', 'cylinder', 'cone'].includes(x.kind), '展開図: 正四面体・円柱・円すいは仲間はずれにしない');
+        x.choices.forEach((c, i) => assert.equal(anyFold(x.kind, c.faces), i !== x.side, `展開図: 仲間はずれは組み立てられない1つだけ ${x.kind}`));
+      }
+    }
+    assert.ok(odd >= 20, `展開図: 仲間はずれの問題が出る（${odd}問）`);
+    assert.equal(makeOdd('tetra', (await import('../app/js/games/util.js')).mulberry32(3)), null, '展開図: 正四面体は形のちがう正しい展開図が3つ作れない');
+    let s = T.init(3, 2, { rules: { odd: true } });
+    const qo = s.qs.findIndex((x) => x.odd);
+    s = T.apply(s, { p: -1, t: 'next' });
+    for (let i = 0; i < qo; i++) s = T.apply(T.apply(s, { p: -1, t: 'close' }), { p: -1, t: 'next' });
+    s = T.apply(s, { p: 0, t: 'ans', q: qo, c: s.qs[qo].side, ms: 2000 });
+    s = T.apply(s, { p: 1, t: 'ans', q: qo, c: (s.qs[qo].side + 1) % 4, ms: 2500 });
+    assert.ok(s.solved[0] !== null && s.miss[1], '展開図: 仲間はずれは組み立てられない1つが正解');
+    const end = runCpus(T, 4, 6, { level: 'normal', odd: true, rounds: 5 }, 200, 8000);
+    assert.ok(T.result(end) && end.scores.some((v) => v > 0), '展開図: 仲間はずれありで CPU どうしで最後まで');
   }
   console.log('tenkai OK');
 }
