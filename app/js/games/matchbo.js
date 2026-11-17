@@ -214,15 +214,18 @@ export function makeQuestions(seed, n = 10, opt = {}) {
 const qKey = (s, q = s.q) => `matchbo:${s.seed}:${q}`;
 const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice(), ways: s.ways.slice() });
 const typeOf = (Q) => Q.type ?? 'move';
-// おまけ: 速い順に見て、自分より速いだれともちがう式に直した人に1点（いちばん速い人はなし）
+// おまけ: 速い順に見て、自分より速いだれともちがう式に直した人に1点（いちばん速い人はなし）。
+// 同じ速さの人どうしは「自分より速い」に数えない（点の pointsOf の同着と同じ扱い。2026-11-17 Codex の点検）
 export function bonusOf(s) {
   const out = Array(s.n).fill(0);
   if (!s.rules.bonus) return out;
   const order = [...Array(s.n).keys()].filter((p) => s.solved[p] !== null).sort((a, b) => s.solved[a] - s.solved[b] || a - b);
   const seen = new Set();
-  for (const p of order) {
-    if (seen.size && !seen.has(s.ways[p])) out[p] = 1;
-    seen.add(s.ways[p]);
+  for (let i = 0; i < order.length;) {
+    const group = [];
+    for (const t = s.solved[order[i]]; i < order.length && s.solved[order[i]] === t; i++) group.push(order[i]);
+    for (const p of group) if (seen.size && !seen.has(s.ways[p])) out[p] = 1;
+    for (const p of group) seen.add(s.ways[p]);
   }
   return out;
 }

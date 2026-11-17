@@ -295,7 +295,7 @@ function setBeginner(on) {
   document.body.classList.toggle('beginner', on);
   showBeginnerBtn();
   if (S?.mode === 'online') {
-    if (S.isHost) { setBeg(S.myId, on); sendState(); } else send({ type: 'hello', isHost: false, name: myName(), beg: on, mark: myMark(), dev: myDev() });
+    if (S.isHost) { setBeg(S.myId, on); sendState(); } else send({ type: 'hello', isHost: false, name: myName(), beg: on, mark: myMark(), dev: myDev(), hid: isHidden() });
   }
   if (S) render();
 }
@@ -1238,9 +1238,10 @@ function countResult(res, st, game) {
     if (list.length) best = { ...(best ?? {}), [key]: list };
   }
   S.tally = { games: t.games + 1, wins, ...(old ? {} : { played }), ...(oldPts ? {} : { pts }), ...(best ? { best } : {}) };
-  // 対局の履歴: 新しいものから HISTORY_MAX 個。勝った人はそのときの表示名で覚える（CPU の名前は対局ごとに変わるため）
+  // 対局の履歴: 新しいものから HISTORY_MAX 個。勝った人はそのときの表示名で覚える（CPU の名前は対局ごとに変わるため）。
+  // i は勝った人の id（名前の札で数える。表示名は 🔰・マーク・名前の変更・「この人を隠す」で変わるため。2026-11-17 Codex の点検）
   const names = [...won].map((id) => nameOf(id));
-  S.history = [{ g: S.gameId, w: names }, ...(S.history ?? [])].slice(0, HISTORY_MAX);
+  S.history = [{ g: S.gameId, w: names, i: [...won].filter((id) => !isCpu(id)) }, ...(S.history ?? [])].slice(0, HISTORY_MAX);
   saveRoom();
   sendState();
 }
@@ -2605,7 +2606,7 @@ function addFlame(card, id) {
 /* ---------- 名前を押すと小さな札（2026-11-17 本人の選択。room.md「UI・UX の8回目」）: 順番の帯と待合室で名前を押すと、その人のことが小さく出る ---------- */
 // 中身は、名前（マーク・🔰 込み）・この部屋での勝ち数（○戦）・連勝・この部屋で勝った遊び（多い順に2つ）。どれも部屋の中で今まで持っていた数から作る（新しく送るものは無い）。
 // Claude の判断: 押せるのは人の札だけ（CPU と空席は出さない）。順番の帯の札（data-m）と待合室の人の一覧（.lobby-list・.lobby-faces の data-m）を、document で1か所で受ける。
-// 札は body に置く（描き直しで消えないように）。札の外を押す・Esc・もう一度押す・画面が切り替わると閉じる。勝った遊びは履歴の勝った人の表示名で数える（履歴が名前で覚えているため）
+// 札は body に置く（描き直しで消えないように）。札の外を押す・Esc・もう一度押す・画面が切り替わると閉じる。勝った遊びは履歴の勝った人の id（i）で数える（i の無い古い履歴だけ表示名で）
 let profileFor = null;
 function closeProfile() { document.querySelector('.profile-pop')?.remove(); profileFor = null; }
 function profileLines(id) {
@@ -2620,7 +2621,7 @@ function profileLines(id) {
   if (Number.isInteger(sw) && sw >= 2) out.push(`🔥 ${sw}連勝中`);
   const me = nameOf(id);
   const count = {};
-  for (const h of S.history ?? []) if (Array.isArray(h?.w) && h.w.includes(me) && GAMES[h.g]) count[h.g] = (count[h.g] ?? 0) + 1;
+  for (const h of S.history ?? []) if (GAMES[h?.g] && (Array.isArray(h.i) ? h.i.includes(id) : Array.isArray(h.w) && h.w.includes(me))) count[h.g] = (count[h.g] ?? 0) + 1; // i の無い古い履歴だけ名前で数える
   const top = Object.entries(count).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([g]) => GAMES[g].name);
   if (top.length) out.push(`勝った遊び: ${top.join('・')}`);
   if (!out.length) out.push('この部屋ではまだ勝負していません');
@@ -5985,7 +5986,7 @@ document.addEventListener('visibilitychange', () => {
 const LOOK_QUIET_MS = HEARTBEAT_MS * 2 + 2000;
 const lookOff = {}; // 人の id → 裏にいると知らせてきたか（保存しない。古い版の端末は hid を送らないので、いつも false）
 const isHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
-const offscreen = (id) => !!id && id !== S?.myId && !isCpu(id) && alive(id) && (lookOff[id] === true || Date.now() - (S.seen[id] ?? 0) > LOOK_QUIET_MS);
+const offscreen = (id) => !!id && id !== S?.myId && !isCpu(id) && (S?.members ?? []).includes(id) && alive(id) && (lookOff[id] === true || Date.now() - (S.seen[id] ?? 0) > LOOK_QUIET_MS);
 const offKey = () => (S?.members ?? []).filter(offscreen).join();
 document.addEventListener('visibilitychange', () => {
   if (S?.mode === 'online' && S.conn === 'ready') send({ type: 'look', hid: isHidden() });
@@ -5997,7 +5998,7 @@ function sendState() {
   send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {}, roomName: S.roomName ?? '', cpuAuto: !!S.cpuAuto, ptsMode: !!S.ptsMode, again: S.again ?? null, away: S.away ?? [], bench: S.bench ?? [], draw: S.draw ?? null, colors: S.colors ?? null, colorKeep: S.colorKeep ?? null, locked: !!S.lockPw });
 }
 function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves, u: S.undo ?? 0 }); }
-function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner, mark: myMark(), dev: myDev(), pw: S.pw || undefined }); }
+function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner, mark: myMark(), dev: myDev(), pw: S.pw || undefined, hid: isHidden() }); }
 
 function onConn(status) {
   const back = status === 'ready' && S.everReady && S.conn !== 'ready';
@@ -6006,7 +6007,7 @@ function onConn(status) {
     if (back) toast('通信がもどりました');
     S.everReady = true;
     S.pingAt = null;
-    send({ type: 'hello', isHost: S.isHost, name: myName(), beg: beginner, mark: myMark(), dev: myDev(), pw: S.isHost ? undefined : S.pw || undefined });
+    send({ type: 'hello', isHost: S.isHost, name: myName(), beg: beginner, mark: myMark(), dev: myDev(), pw: S.isHost ? undefined : S.pw || undefined, hid: isHidden() });
     if (S.isHost) { setBeg(S.myId, beginner); setMark(S.myId, myMark()); sendState(); }
     // ゲストは手の一覧も送り直す。裏から戻ってつなぎ方を作り直すと、まだ届いていなかった手は古いつなぎ方と一緒に捨てられるため
     // （ホストが食い違いを見て手を足し直す。ホストのほうが正しければ state が返ってきて合わせる）
@@ -6193,7 +6194,7 @@ function adoptState(msg) {
   S.beg = Array.isArray(msg.beg) ? msg.beg.filter((id) => typeof id === 'string') : [];
   S.streak = msg.streak && typeof msg.streak === 'object' && msg.streak.wins && typeof msg.streak.wins === 'object' ? msg.streak : null;
   S.history = Array.isArray(msg.history)
-    ? msg.history.filter((h) => GAMES[h?.g] && Array.isArray(h.w)).slice(0, HISTORY_MAX).map((h) => ({ g: h.g, w: h.w.filter((x) => typeof x === 'string').map((x) => x.slice(0, 30)) }))
+    ? msg.history.filter((h) => GAMES[h?.g] && Array.isArray(h.w)).slice(0, HISTORY_MAX).map((h) => ({ g: h.g, w: h.w.filter((x) => typeof x === 'string').map((x) => x.slice(0, 30)), ...(Array.isArray(h.i) ? { i: h.i.filter((x) => typeof x === 'string').slice(0, 10) } : {}) }))
     : null;
   S.tally = msg.tally && Number.isInteger(msg.tally.games) && msg.tally.wins && typeof msg.tally.wins === 'object' ? { ...msg.tally, best: cleanBest(msg.tally.best) } : null;
   S.stay = msg.stay === true;

@@ -8860,6 +8860,13 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
       s = M.apply(s, { p: -1, t: 'close' });
       assert.deepEqual(s.last.pts, bonus ? [3, 3, 1] : [3, 2, 1], `マッチ棒: おまけ込みの点 ${bonus}`);
     }
+    // 同じ速さの人どうしは「自分より速い」に数えない（2026-11-17 Codex の点検）
+    {
+      const x = sb.qs[qb];
+      const tie = (ms, mv) => ({ ...sb, n: ms.length, solved: ms, ways: mv.map((m) => moved(x.on, m).join('')) });
+      assert.deepEqual(bonusOf(tie([1000, 1000], [x.sol, x.altMv])), [0, 0], 'マッチ棒: 同着1位どうしはおまけなし');
+      assert.deepEqual(bonusOf(tie([1000, 2000, 2000], [x.sol, x.altMv, x.altMv])), [0, 1, 1], 'マッチ棒: 同着の2人は同じおまけ');
+    }
     const endB = runCpus(M, 4, 3, { rounds: 5, take: true, times: true, bonus: true }, 200, 8000);
     assert.ok(M.result(endB) && endB.scores.some((v) => v > 0), 'マッチ棒: 新しい設定を全部ありで CPU どうしで最後まで');
   }
