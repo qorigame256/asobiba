@@ -209,7 +209,7 @@ export default {
     }
     const face = FACES[s.faces[s.q]];
     const key = qKey(s);
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}回 / ${s.faces.length}</div><div class="fw-name">${esc(face.name)}</div>`;
+    card.innerHTML = `<div class="fw-name">${esc(face.name)}</div>`;
 
     if (s.phase === 'shown') {
       const grid = document.createElement('div');

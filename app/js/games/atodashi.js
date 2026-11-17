@@ -175,8 +175,7 @@ export default {
     const x = s.qs[s.q];
     const key = qKey(s);
     const [word, col] = ORDER[x.o];
-    card.insertAdjacentHTML('beforeend', `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>`
-      + `<div class="aj-hand">${FACE[x.x]}</div><div class="aj-order" style="background:${col}">${word}</div>`);
+    card.insertAdjacentHTML('beforeend', `<div class="aj-hand">${FACE[x.x]}</div><div class="aj-order" style="background:${col}">${word}</div>`);
     if (s.phase === 'open') { since(key); card.append(timeBar(key, LIMIT)); }
     else {
       const t = document.createElement('div');

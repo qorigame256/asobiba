@@ -197,7 +197,6 @@ export default {
     }
     const key = qKey(s);
     const F = flashMs(s);
-    card.insertAdjacentHTML('beforeend', `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>`);
     const big = document.createElement('div');
     big.className = 'az-big';
     card.append(big);

@@ -269,7 +269,8 @@ function draw() {
     ctx.fillStyle = SEAT_COLORS[p % SEAT_COLORS.length];
     ctx.fill();
     if (label) {
-      ctx.font = `${Math.max(10, k * 0.03)}px sans-serif`;
+      ctx.globalAlpha = Math.max(alpha, 0.85); // 名前は機体ほど薄くしない（2026-11-17 見た目の点検。紺の地で読めなかった）
+      ctx.font = `bold ${Math.max(11, k * 0.032)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
       ctx.textAlign = 'center';
       ctx.fillStyle = '#fff';
       ctx.fillText(label, x * k, (y + SHIP_R * 2.6) * k);
@@ -314,13 +315,13 @@ function draw() {
     }
   }
   // 上の文字
-  ctx.font = `bold ${Math.max(13, k * 0.045)}px sans-serif`;
+  ctx.font = `bold ${Math.max(13, k * 0.045)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
   ctx.textAlign = 'center';
   ctx.fillStyle = '#fff';
   let text = '';
   if (s.phase === 'ready') {
     const left = Math.ceil((READY_MS - since(`danmaku:${s.seed}:ready`)) / 1000);
-    ctx.font = `bold ${k * 0.18}px sans-serif`;
+    ctx.font = `bold ${k * 0.18}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
     ctx.fillText(left > 0 ? String(left) : 'スタート！', k / 2, k * H * 0.5);
   } else if (s.phase === 'end') text = 'おしまい！';
   else if (sec >= durOf(s)) text = 'そこまで！';
@@ -330,9 +331,19 @@ function draw() {
     if (livesOf(s) > 1 && ui.me !== null && s.dead[ui.me] === null && !ui.hit) text += `・残機 ${livesOf(s) - ui.hits}`;
     if (ui.me !== null && (s.dead[ui.me] !== null || ui.hit)) text += '（観戦中）';
   }
-  if (text) ctx.fillText(text, k / 2, k * 0.06);
+  if (text) {
+    // 弾が字の下を通っても読めるよう、半透明の下地を敷く（2026-11-17 見た目の点検）
+    const w = ctx.measureText(text).width + 16, h = Math.max(13, k * 0.045) * 1.5;
+    ctx.fillStyle = 'rgba(10, 14, 30, .55)';
+    ctx.beginPath();
+    ctx.roundRect(k / 2 - w / 2, k * 0.06 - h * 0.72, w, h, h / 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillText(text, k / 2, k * 0.06);
+  }
+
   // スロー: 自分が使っている間の残り・ほかの人が使った知らせ
-  ctx.font = `bold ${Math.max(12, k * 0.04)}px sans-serif`;
+  ctx.font = `bold ${Math.max(12, k * 0.04)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
   ctx.fillStyle = '#d7ccff';
   if (slowing) ctx.fillText(`⏱ スロー あと${(slowAt + SLOW_SEC - sec).toFixed(1)}秒`, k / 2, k * 0.115);
   if (ui.slowNote && now - ui.slowNote.at < SLOW_NOTE_MS && s.phase === 'play') {

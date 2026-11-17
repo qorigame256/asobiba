@@ -236,7 +236,7 @@ export default {
     }
     const x = s.qs[s.q];
     const key = qKey(s);
-    card.insertAdjacentHTML('beforeend', `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div><div class="ir-ask${x.rev ? ' rev' : ''}">${x.rev ? '👿 点が「少ない」のは' : '点が多いのは'}${x.counts.length === 3 ? 'どれ' : 'どっち'}？</div>`);
+    card.insertAdjacentHTML('beforeend', `<div class="ir-ask${x.rev ? ' rev' : ''}">${x.rev ? '👿 点が「少ない」のは' : '点が多いのは'}${x.counts.length === 3 ? 'どれ' : 'どっち'}？</div>`);
     if (s.phase === 'open') { since(key); card.append(timeBar(key, LIMIT)); }
     else {
       const t = document.createElement('div');

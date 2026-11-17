@@ -251,7 +251,7 @@ export default {
     }
     const key = qKey(s);
     const limit = limitOf(s);
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>`;
+    card.innerHTML = '';
     if (s.phase === 'open') {
       since(key);
       // だれかがそろえたら、ホストが締め切るまでの20秒（制限時間のほうが先ならそちら）を出す（前は締め切られるまで「残り130秒」などのままだった。2026-10-28 Codex の点検の指摘）

@@ -911,7 +911,7 @@ export default {
       const ownKey = `df:${s.seed}:${M?.no ?? 1}:${me}`;
       const ord = document.createElement('button');
       ord.type = 'button';
-      ord.className = 'btn ghost small df-order';
+      ord.className = 'btn secondary small df-order'; // 枠のあるボタンにする（2026-11-17 見た目の点検。枠の無いボタンは中の余白だけ左がずれて見えた）
       ord.textContent = suitOrder ? '並べ方: マーク順 → 強さ順にする' : '並べ方: 強さ順 → マーク順にする';
       ord.onclick = () => {
         suitOrder = !suitOrder;

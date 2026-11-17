@@ -217,7 +217,6 @@ export default {
       card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">押すたびに1点。割れたらその回は0点。風船はみんな同じ強さ・全${s.total}回${more}</div>`;
       return;
     }
-    card.insertAdjacentHTML('beforeend', `<div class="kj-num">${s.r + 1}回目 / ${s.total}</div>`);
     if (s.phase === 'shown') { card.append(this.reveal(s, me, o)); return; }
 
     const key = rKey(s);
@@ -277,7 +276,8 @@ export default {
       const open = !done() && since(key) < LIMIT;
       pump.disabled = !open;
       stop.disabled = !open;
-      stop.textContent = loc.popped ? '割れた…' : done() ? `${loc.k}点で決めた` : `✋ やめる（${loc.k}点で決める）`;
+      // かっこの中は下の小さい行に分ける（2026-11-17 見た目の点検。ボタンに収まらず「0点／で決める）」と割れていた）。中身は数と決まった言葉だけ
+      stop.innerHTML = loc.popped ? '割れた…' : done() ? `${loc.k}点で決めた` : `✋ やめる<small class="fs-sub">${loc.k}点で決める</small>`;
       note.textContent = done() ? 'ほかの人が決めるのを待っています…' : 'どこでやめるかは自分しだい。割れたら0点';
     };
     const hitPump = (e) => {

@@ -192,7 +192,7 @@ export default {
       return;
     }
     const key = qKey(s);
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}回 / ${s.qs.length}</div><div class="og-topic"></div>`;
+    card.innerHTML = `<div class="og-topic"></div>`;
     card.querySelector('.og-topic').textContent = OOGIRI[s.qs[s.q]];
     if (judge !== null) {
       const j = document.createElement('div');

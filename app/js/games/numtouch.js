@@ -192,7 +192,7 @@ export default {
       card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">1 から ${total} まで順に押そう・全${s.qs.length}回・1回 ${limit / 1000}秒まで</div>`;
       return;
     }
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}回 / ${s.qs.length}</div>`;
+    card.innerHTML = '';
     const head = document.createElement('div');
     head.className = 'nt-next';
     card.append(head);

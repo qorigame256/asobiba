@@ -288,7 +288,7 @@ export default {
     const [words, mean] = s.qs[s.q];
     const key = qKey(s);
     const limit = limitOf(s);
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div><div class="kj-word et-word"></div>`;
+    card.innerHTML = `<div class="kj-word et-word"></div>`;
     // 意味当ては英単語を、スペル打ちと英単語を選ぶは意味を大きく出す
     card.querySelector('.kj-word').textContent = s.opts && !isRev(s) ? words[0] : mean;
     if (s.phase === 'open') {

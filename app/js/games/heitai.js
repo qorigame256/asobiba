@@ -313,7 +313,7 @@ export default {
     const mk = (text, fn) => {
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'btn small';
+      b.className = 'btn secondary small'; // 種類を付ける（2026-11-17 見た目の点検。種類の無い btn は .board button に負けて枠も地も出なかった）
       b.textContent = text;
       b.disabled = !can;
       b.onclick = () => { if (can) { fn(); paint(); } };

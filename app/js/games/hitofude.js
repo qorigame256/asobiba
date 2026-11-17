@@ -285,7 +285,7 @@ export default {
     }
     const key = qKey(s);
     const limit = limitOf(s);
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>`;
+    card.innerHTML = '';
     if (s.phase === 'open') {
       since(key);
       const box = document.createElement('div');

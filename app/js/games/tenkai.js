@@ -553,7 +553,7 @@ export default {
     const x = s.qs[s.q];
     const key = qKey(s);
     const limit = limitOf(s.rules);
-    card.insertAdjacentHTML('beforeend', `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div><div class="tn-name">${NAMES[x.kind]}</div>${x.odd ? '<div class="tn-odd">🙅 組み立てられないのはどれ？</div>' : ''}`);
+    card.insertAdjacentHTML('beforeend', `<div class="tn-name">${NAMES[x.kind]}</div>${x.odd ? '<div class="tn-odd">🙅 組み立てられないのはどれ？</div>' : ''}`);
     card.append(solidSvg(x.kind, x.color));
     if (s.phase === 'open') { since(key); card.append(timeBar(key, limit)); }
     else {

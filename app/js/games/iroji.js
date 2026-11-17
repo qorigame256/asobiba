@@ -163,8 +163,7 @@ export default {
     }
     const x = s.qs[s.q];
     const key = qKey(s);
-    card.insertAdjacentHTML('beforeend', `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>`
-      + `<div class="ir-ask${x.rev ? ' rev' : ''}">${x.rev ? '👿 字の「意味」を答えて！' : '字の「色」はどれ？'}</div>`);
+    card.insertAdjacentHTML('beforeend', `<div class="ir-ask${x.rev ? ' rev' : ''}">${x.rev ? '👿 字の「意味」を答えて！' : '字の「色」はどれ？'}</div>`);
     const word = document.createElement('div');
     word.className = 'ir-word';
     word.textContent = COLORS[x.word][0];
@@ -187,6 +186,7 @@ export default {
       b.type = 'button';
       b.className = 'ir-btn' + (s.phase === 'shown' && c === answerOf(x) ? ' ans' : '');
       b.style.background = col;
+      if (name === '黄') b.classList.add('light'); // 黄色の地は白い字が溶けるので濃い字にする（2026-11-17 見た目の点検）
       b.textContent = name;
       b.disabled = !can;
       const hit = (e) => {

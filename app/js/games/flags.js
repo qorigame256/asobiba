@@ -417,8 +417,8 @@ export default {
     if (s.phase === 'open' && s.rules.voice && spoken !== key) { spoken = key; sayCommand(cmd.text, marked); }
 
     const mul = stageOf(s.q).mul;
-    card.innerHTML = `<div class="fl-num">第${s.q + 1}問 / ${TOTAL}${mul > 1 ? `<span class="fl-stage">点数×${mul}</span>` : ''}`
-      + `${contrary === 'all' ? '<span class="fl-stage ama">👿 逆に</span>' : ''}</div>`
+    const badges = `${mul > 1 ? `<span class="fl-stage">点数×${mul}</span>` : ''}${contrary === 'all' ? '<span class="fl-stage ama">👿 逆に</span>' : ''}`;
+    card.innerHTML = `${badges ? `<div class="fl-num">${badges}</div>` : ''}`
       + `${marked ? '<div class="fl-ama">👿 あまのじゃく！</div>' : ''}<div class="fl-q"></div>`;
     if (marked) card.classList.add('ama');
     if (cmd.long) card.querySelector('.fl-q').classList.add('long');

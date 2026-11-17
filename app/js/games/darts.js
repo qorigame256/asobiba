@@ -194,7 +194,7 @@ export default {
     if (is301) chips.querySelectorAll('.pt-score small').forEach((e) => { e.textContent = 'のこり'; e.parentElement.prepend(e); });
     chips.querySelectorAll('.cc-opp-name').forEach((el, p) => { el.style.borderBottom = `3px solid ${SEAT_COLORS[p % SEAT_COLORS.length]}`; });
     root.innerHTML = '';
-    root.className = 'board kj dt';
+    root.className = 'board kj drt'; // dt は点と線の盤の名前（2026-11-17 見た目の点検。点と線の盤の幅と余白がかかり、右へはみ出していた）
     const wrap = document.createElement('div');
     wrap.className = 'kj-wrap';
     wrap.append(chips);
@@ -207,7 +207,7 @@ export default {
     const key = qKey(s);
     const head = document.createElement('div');
     head.className = 'kj-card dt-head';
-    head.innerHTML = `<div class="kj-num">ラウンド ${s.q + 1} / ${roundsOf(s)}</div>`;
+    head.innerHTML = '';
     wrap.append(head);
     if (s.phase === 'open') { since(key); head.append(timeBar(key, LIMIT)); }
 
@@ -253,7 +253,7 @@ export default {
         ring(R.dblIn, R.dblOut, dark ? '#d2342c' : '#2c8a4a');
         const am = (i * 18 - 90) * Math.PI / 180;
         g.fillStyle = '#fff';
-        g.font = 'bold 22px sans-serif';
+        g.font = 'bold 22px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif';
         g.textAlign = 'center';
         g.textBaseline = 'middle';
         g.fillText(String(ORDER[i]), Math.cos(am) * 196, Math.sin(am) * 196);

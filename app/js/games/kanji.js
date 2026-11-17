@@ -327,7 +327,7 @@ export default {
     const [word, yomis, miss] = s.qs[s.q];
     const key = qKey(s);
     const limit = limitOf(s);
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div><div class="kj-word"></div>`;
+    card.innerHTML = `<div class="kj-word"></div>`;
     card.querySelector('.kj-word').textContent = word;
     if (s.phase === 'open') {
       since(key); // 画面に出た時刻を覚える

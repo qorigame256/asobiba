@@ -180,7 +180,6 @@ export default {
     const right = KANJIPLUS[x.i][1];
     const key = qKey(s);
     const shown = s.phase !== 'open';
-    card.insertAdjacentHTML('beforeend', `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>`);
     // 式: 部品 ＋ 部品 ＝ ？（答えを見せるときは ？ を答えの字に）
     const eq = document.createElement('div');
     eq.className = 'kp-eq';

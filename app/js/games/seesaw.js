@@ -251,13 +251,13 @@ export default {
       plank.classList.add('move');
     }
     plank.style.transform = `rotate(${to}deg)`;
-    plank.append(mk('rect', { x: 12, y: 144, width: 376, height: 10, rx: 4, class: 'ss-board' }));
+    plank.append(mk('rect', { x: 12, y: 144, width: 376, height: 14, rx: 5, class: 'ss-board' })); // 高さ14: 板の上の距離の数字が読める大きさで入るように（2026-11-17 見た目の点検。10 だった）
     const unit = 180 / side;
     const X = (x) => 200 + x * unit;
     for (const x of spots) {
       const v = s.placed.find((e) => e.x === x);
       const g = mk('g', { class: 'ss-spot' + (v ? ' full' : '') + (picked?.x === x ? ' sel' : '') });
-      g.append(mk('text', { x: X(x), y: 152, class: 'ss-dist' })); // 板の上に支点からの距離
+      g.append(mk('text', { x: X(x), y: 155, class: 'ss-dist' })); // 板の上に支点からの距離
       g.lastChild.textContent = Math.abs(x);
       const show = v ?? (picked?.x === x ? { w, p: s.turn, ghost: true } : null);
       if (show) {

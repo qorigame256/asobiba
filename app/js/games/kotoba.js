@@ -294,7 +294,7 @@ export default {
     const x = s.qs[s.q];
     const N = sizeOf(s.rules);
     const limit = limitOf(s.rules);
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}回 / ${s.qs.length}</div><div class="kt-theme">お題: ${esc(KOTOBA[x.theme][0])}</div>`;
+    card.innerHTML = `<div class="kt-theme">お題: ${esc(KOTOBA[x.theme][0])}</div>`;
     if (s.phase === 'open') { since(key); card.append(timeBar(key, limit, { secs: true })); }
     const list = document.createElement('div');
     list.className = 'kt-list';

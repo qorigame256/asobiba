@@ -265,7 +265,7 @@ export default {
         const r = p === base ? 38 : 26;
         face(p, x, y, r);
         g.fillStyle = '#555';
-        g.font = '12px sans-serif';
+        g.font = '12px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif';
         g.textAlign = 'center';
         const nm = p === me ? 'あなた' : String(o.names[p] ?? '');
         g.fillText(nm.length > 7 ? nm.slice(0, 7) + '…' : nm, x, y + r + 15);
@@ -301,7 +301,7 @@ export default {
       }
       if (s.phase === 'drop' && s.dropped !== null) {
         const [x, y] = pos[s.dropped];
-        g.font = 'bold 22px sans-serif';
+        g.font = 'bold 22px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif';
         g.fillStyle = '#c0392b';
         g.textAlign = 'center';
         g.fillText('ポトッ…', x, y - 46);

@@ -270,7 +270,7 @@ export default {
     const priceHtml = items
       ? `<ul class="ok-items">${items.map(([name, v]) => `<li><span>${esc(name)}</span><b>${yen(v)}</b></li>`).join('')}</ul>${s.phase === 'shown' ? `<div class="ok-sum">合計 ${yen(amount)}</div>` : ''}`
       : `<div class="kj-word ok-price">${yen(amount)}</div>`;
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>${priceHtml}`;
+    card.innerHTML = `${priceHtml}`;
     if (s.phase === 'open') {
       since(key);
       if (s.solved.some((v) => v !== null)) {

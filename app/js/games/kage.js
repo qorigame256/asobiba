@@ -177,7 +177,7 @@ export default {
     const [emoji, name, kind] = KAGE[x.i];
     const key = qKey(s);
     const shown = s.phase !== 'open';
-    card.insertAdjacentHTML('beforeend', `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}　仲間: ${esc(KINDS[kind])}</div>`);
+    card.insertAdjacentHTML('beforeend', `<div class="kj-num">仲間: ${esc(KINDS[kind])}</div>`);
     const pic = document.createElement('div');
     pic.className = 'sk-pic' + (shown ? ' show' : '');
     pic.textContent = emoji;

@@ -224,7 +224,7 @@ export default {
       return;
     }
     const topic = TOPICS[s.topics[s.r]];
-    card.innerHTML = `<div class="kj-num">お題 ${s.r + 1} / ${MAX_ROUNDS}</div><div class="kc-topic"></div><div class="kc-scale"><span>1 = </span><span>100 = </span></div>`;
+    card.innerHTML = `<div class="kc-topic"></div><div class="kc-scale"><span>1 = </span><span>100 = </span></div>`;
     card.querySelector('.kc-topic').textContent = topic[0];
     const sc = card.querySelectorAll('.kc-scale span');
     sc[0].textContent = `1 = ${topic[1]}`;

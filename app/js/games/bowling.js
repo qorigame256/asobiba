@@ -269,14 +269,14 @@ function drawLane() {
   ctx.textAlign = 'center';
   const msgOn = performance.now() - ui.msgAt < MSG_MS;
   if (msgOn && ui.msg) {
-    ctx.font = `bold ${k * 0.11}px sans-serif`;
+    ctx.font = `bold ${k * 0.11}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
     ctx.fillStyle = '#fff';
     ctx.strokeStyle = 'rgba(0,0,0,.55)';
     ctx.lineWidth = k * 0.012;
     ctx.strokeText(ui.msg, k / 2, k * 1.05);
     ctx.fillText(ui.msg, k / 2, k * 1.05);
   }
-  ctx.font = `bold ${Math.max(13, k * 0.045)}px sans-serif`;
+  ctx.font = `bold ${Math.max(13, k * 0.045)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
   ctx.fillStyle = '#fff';
   let line = '';
   if (me === null) line = '観戦中';
@@ -285,9 +285,15 @@ function drawLane() {
     const P = s.pl[me];
     line = `${P.f + 1}フレーム目・${P.frames[P.f]?.length ? P.frames[P.f].length + 1 : 1}投目`;
   }
+  // 明るいレーンの上でも読めるよう、白い字に暗い縁を付ける（2026-11-17 見た目の点検）
+  ctx.strokeStyle = 'rgba(60, 40, 20, .6)';
+  ctx.lineWidth = 3;
+  ctx.lineJoin = 'round';
+  ctx.strokeText(line, k / 2, k * 0.08);
   ctx.fillText(line, k / 2, k * 0.08);
   if (me !== null && !s.pl[me].done && !ui.sim && !ui.pending && !ui.aim) {
-    ctx.font = `${Math.max(11, k * 0.035)}px sans-serif`;
+    ctx.font = `bold ${Math.max(12, k * 0.035)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
+    ctx.strokeText('玉を押して、前へなでて離す', k / 2, (H - 0.03) * k);
     ctx.fillText('玉を押して、前へなでて離す', k / 2, (H - 0.03) * k);
   }
 }

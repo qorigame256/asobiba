@@ -188,7 +188,11 @@ function draw() {
     const x0 = Math.min(ax, bx) * k; const y0 = Math.min(ay, by) * k;
     const ww = Math.abs(bx - ax) * k; const hh = Math.abs(by - ay) * k;
     ctx.fillStyle = 'rgba(80, 110, 140, .18)';
-    ctx.fillRect(x0 + 2, y0 + 4, ww, hh);
+    // 影も壁と同じ丸い形にする（2026-11-17 見た目の点検。角ばった影が丸い壁の下からはみ出していた）
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x0 + 2, y0 + 4, ww, hh, hh / 2);
+    else ctx.rect(x0 + 2, y0 + 4, ww, hh);
+    ctx.fill();
     ctx.fillStyle = '#ffffff';
     ctx.strokeStyle = '#a9c2d6';
     ctx.lineWidth = 1.5;
@@ -235,11 +239,11 @@ function draw() {
       ctx.fill();
     }
     // 名前（自分は「あなた」）
-    ctx.font = `${Math.max(10, k * 0.03)}px sans-serif`;
+    ctx.font = `${Math.max(10, k * 0.03)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
     ctx.textAlign = 'center';
     ctx.fillStyle = '#334';
     const nm = p === ui.me ? 'あなた' : String(o.names?.[p] ?? '').slice(0, 6);
-    ctx.fillText(nm, x * k, (y + PR + 0.032) * k);
+    ctx.fillText(nm, x * k, (y + PR + (p === ui.me ? 0.042 : 0.032)) * k); // 自分は雪玉の用意の輪の外側に（2026-11-17 見た目の点検。輪に字が重なっていた）
     // 雪玉の用意（自分だけ。輪が一周したら投げられる）
     if (p === ui.me && playing(s)) {
       const r = clamp((now - ui.lastThrow) / RELOAD_MS, 0, 1);
@@ -280,17 +284,17 @@ function draw() {
   const sums = lifeSums(s);
   const mine = ui.flip ? 1 : 0;
   // チームのライフは左の隅（真ん中の下は自分の始めの立ち位置と重なるため）
-  ctx.font = `bold ${Math.max(13, k * 0.045)}px sans-serif`;
+  ctx.font = `bold ${Math.max(13, k * 0.045)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
   ctx.textAlign = 'left';
   ctx.fillStyle = '#334';
   ctx.fillText(`${TEAM[1 - mine]} ❤${sums[1 - mine]}`, k * 0.025, k * 0.055);
   ctx.fillText(`${TEAM[mine]} ❤${sums[mine]}`, k * 0.025, (H - 0.018) * k);
   ctx.textAlign = 'center';
-  ctx.font = `${Math.max(12, k * 0.038)}px sans-serif`;
+  ctx.font = `${Math.max(12, k * 0.038)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
   let text = '';
   if (s.phase === 'ready') {
     const left = Math.ceil((READY_MS - since(`yuki:${s.seed}:ready`)) / 1000);
-    ctx.font = `bold ${k * 0.16}px sans-serif`;
+    ctx.font = `bold ${k * 0.16}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
     ctx.fillStyle = '#2f6fb3';
     ctx.fillText(left > 0 ? String(left) : 'スタート！', k / 2, (MID + 0.06) * k);
   } else if (s.phase === 'end') text = 'おしまい！';
@@ -300,7 +304,7 @@ function draw() {
   }
   if (text) { ctx.fillStyle = '#556'; ctx.fillText(text, k / 2, (MID - 0.015) * k); }
   if (ui.me !== null && ui.out && s.phase !== 'end') {
-    ctx.font = `bold ${Math.max(13, k * 0.045)}px sans-serif`;
+    ctx.font = `bold ${Math.max(13, k * 0.045)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
     ctx.fillStyle = '#c0392b';
     ctx.fillText('やられた！ 仲間を応援しよう', k / 2, (MID + 0.12) * k);
   }

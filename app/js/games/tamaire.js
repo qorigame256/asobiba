@@ -110,9 +110,10 @@ function drawField() {
   ctx.fillRect(0, 0, k, k * H);
   ctx.fillStyle = '#d8b67a';
   ctx.fillRect(0, (GROUND - 0.02) * k, k, k * H);
-  // 柱
-  ctx.fillStyle = '#8a6a45';
-  ctx.fillRect((rx - 0.008) * k, (RIM.y + RIM.depth) * k, 0.016 * k, (GROUND - RIM.y - RIM.depth) * k);
+  // 柱（見た目だけ。当たりは上の stepBall のまま）: 遠くにある柱として手前のパチンコより淡い色にし、校庭の地面の上の縁で止める
+  // （2026-11-17 見た目の点検。パチンコと同じ茶色で重なって見分けにくく、地面の文字にも柱が刺さっていた）
+  ctx.fillStyle = '#b39a7a';
+  ctx.fillRect((rx - 0.008) * k, (RIM.y + RIM.depth) * k, 0.016 * k, (GROUND - 0.02 - RIM.y - RIM.depth) * k);
   // カゴ（入った玉を少し見せる）
   const L = rx - RIM.half;
   const balls = Math.min(30, teamSum(s.cnt)[team]);
@@ -141,7 +142,7 @@ function drawField() {
   const hot = s.phase === 'play' && isDouble(s, sec) && sec < durOf(s);
   if (hot) {
     const fs = Math.max(14, k * 0.05);
-    ctx.font = `bold ${fs}px sans-serif`;
+    ctx.font = `bold ${fs}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
     const label = '⚡ ラスト10秒！ 1つ2点';
     const w = Math.min(k * 0.94, ctx.measureText(label).width + fs * 1.4);
     const y = k * 0.17; const h = fs * 1.7;
@@ -214,13 +215,13 @@ function drawField() {
   ui.pops = ui.pops.filter((q) => now - q.at < 700);
   ctx.textAlign = 'center';
   for (const q of ui.pops) {
-    ctx.font = `bold ${k * (q.two ? 0.065 : 0.05)}px sans-serif`;
+    ctx.font = `bold ${k * (q.two ? 0.065 : 0.05)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
     ctx.fillStyle = q.two ? '#d9480f' : '#c0392b';
     ctx.fillText(q.two ? '+2' : '+1', q.x * k, (RIM.y - 0.04 - (now - q.at) / 7000) * k);
   }
   // 上の文字: 点数と残り時間
   const sc = teamScores(s);
-  ctx.font = `bold ${Math.max(14, k * 0.055)}px sans-serif`;
+  ctx.font = `bold ${Math.max(14, k * 0.055)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
   ctx.fillStyle = '#c0392b';
   ctx.textAlign = 'right';
   ctx.fillText(`赤 ${sc[0]}`, k * 0.45, k * 0.08);
@@ -230,22 +231,22 @@ function drawField() {
   ctx.textAlign = 'center';
   ctx.fillStyle = '#333';
   ctx.fillText('−', k * 0.5, k * 0.08);
-  ctx.font = `${Math.max(12, k * 0.04)}px sans-serif`;
+  ctx.font = `${Math.max(12, k * 0.04)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
   let text = '';
   if (s.phase === 'ready') {
     const left = Math.ceil((READY_MS - since(`tamaire:${s.seed}:ready`)) / 1000);
-    ctx.font = `bold ${k * 0.18}px sans-serif`;
+    ctx.font = `bold ${k * 0.18}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
     ctx.fillStyle = '#fff';
     ctx.fillText(left > 0 ? String(left) : 'スタート！', k / 2, k * H * 0.62);
   } else if (s.phase === 'end') text = 'おしまい！';
   else {
     const t = since(goKey(s)) / 1000;
     text = t < durOf(s) ? `残り ${Math.ceil(durOf(s) - t)}秒` : 'そこまで！';
-    if (hot) { ctx.font = `bold ${Math.max(13, k * 0.045)}px sans-serif`; ctx.fillStyle = '#d9480f'; }
+    if (hot) { ctx.font = `bold ${Math.max(13, k * 0.045)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`; ctx.fillStyle = '#d9480f'; }
   }
   if (text) ctx.fillText(text, k / 2, k * 0.14);
   if (ui.me !== null && s.phase !== 'end') {
-    ctx.font = `${Math.max(11, k * 0.035)}px sans-serif`;
+    ctx.font = `${Math.max(11, k * 0.035)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
     ctx.fillStyle = '#5a4a30';
     const got = Math.max(ui.count, s.cnt[ui.me]);
     const pts = lastOf(s) ? `（${Math.max(ui.count + ui.bonus, s.cnt[ui.me] + s.bon[ui.me])}点）` : '';

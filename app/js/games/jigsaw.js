@@ -271,7 +271,7 @@ export default {
     const N = s.size;
     const x = s.qs[s.q];
     const url = pictureUrl(x.pic);
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>`;
+    card.innerHTML = '';
     if (s.phase === 'open') {
       since(key);
       if (s.solved.some((v) => v !== null)) {

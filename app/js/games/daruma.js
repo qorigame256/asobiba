@@ -36,6 +36,8 @@ const rKey = (s, k = s.k) => `daruma:${s.seed}:${k}`;
 const clone = (s) => ({ ...s, pos: s.pos.slice(), sub: s.sub.slice(), caught: s.caught.slice() });
 // 順位（1 から）。着いた人が上、あとは進んだ長さの順
 const placeOf = (pos) => pos.map((v) => 1 + pos.filter((w) => w > v).length);
+// 走る人の位置。端から 15px は余白にし、0% でも人形が帯の外へはみ出さないようにする（2026-11-17 見た目の点検。0% で人形の半分が帯の左の外に出ていた）
+const manLeft = (v, L) => `calc(15px + (100% - 30px) * ${Math.min(L, v) / L})`;
 
 let run = null; // この端末の、いまの回の様子 { key, walked, holding, out, sent }
 let live = new Map(); // ほかの人がいまの回で進んだ長さ（見た目だけ）
@@ -222,7 +224,7 @@ export default {
       face.textContent = s.phase === 'end' ? '🧍' : '🧍';
       words.textContent = s.phase === 'end' ? 'おしまい！' : 'よーい…（ボタンを押している間だけ進む）';
       const st = s;
-      runners.forEach((man, p) => { if (man) man.style.left = `${(Math.min(L, st.pos[p]) / L) * 100}%`; });
+      runners.forEach((man, p) => { if (man) man.style.left = manLeft(st.pos[p], L); });
       if (s.phase === 'end' && s.last) note.textContent = s.last.out[me] ? '最後の回で見つかってしまった…' : '';
       wrap.append(note);
       return;
@@ -284,7 +286,7 @@ export default {
         let v = cur.pos[p];
         if (p === me) v += Math.floor((run.walked * SPEED) / 1000);
         else if (live.get(p)?.k === s.k && !live.get(p).out) v += live.get(p).d;
-        man.style.left = `${(Math.min(L, v) / L) * 100}%`;
+        man.style.left = manLeft(v, L);
         man.classList.toggle('out', (p === me && run.out) || (p !== me && live.get(p)?.k === s.k && live.get(p).out));
       });
       btn.classList.toggle('on', !!run.holding);

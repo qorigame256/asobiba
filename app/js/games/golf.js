@@ -251,18 +251,18 @@ function draw() {
   // 文字
   ctx.textAlign = 'center';
   ctx.fillStyle = '#fff';
-  ctx.font = `bold ${Math.max(13, k * 0.042)}px sans-serif`;
+  ctx.font = `bold ${Math.max(13, k * 0.042)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
   let line;
   if (me === null) line = `観戦中・${h + 1}ホール目「${c.name}」`;
   else if (P.done) line = 'おしまい！ ほかの人を待っています';
   else line = `${P.h + 1}/${s.holes}ホール「${c.name}」 パー${c.par} ・ ${P.n + 1}打目`;
   ctx.fillText(line, k / 2, k * 0.07);
   if (now() - ui.msgAt < MSG_MS && ui.msg) {
-    ctx.font = `bold ${k * 0.09}px sans-serif`;
+    ctx.font = `bold ${k * 0.09}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
     ctx.strokeStyle = 'rgba(0,0,0,.55)'; ctx.lineWidth = k * 0.012;
     ctx.strokeText(ui.msg, k / 2, k * 0.78); ctx.fillText(ui.msg, k / 2, k * 0.78);
   } else if (P && !P.done && !ui.sim && !ui.pending && !ui.aim) {
-    ctx.font = `${Math.max(11, k * 0.034)}px sans-serif`;
+    ctx.font = `${Math.max(11, k * 0.034)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
     ctx.fillText('押して引っ張り、離すと反対の向きへ打つ', k / 2, (H - 0.03) * k);
   }
 }

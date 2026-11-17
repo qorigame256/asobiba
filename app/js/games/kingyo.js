@@ -320,7 +320,7 @@ export default {
       if (poi && playing()) { loc.dur -= ((t - lastT) / 1000) * DRAIN; if (loc.dur <= 0) broke(); }
       if (poi && !playing()) poi = null;
       lastT = t;
-      const W = Math.min(560, (root.clientWidth || 360) - 16), H = Math.round(W * TANK_H);
+      const W = Math.min(560, (root.clientWidth || 360) - 20), H = Math.round(W * TANK_H); // 20: カード（kj-card）の左右の余白8と枠1.5を両側ぶん引く（2026-11-17 見た目の点検。引かずに枠の外へはみ出していた）
       const dpr = window.devicePixelRatio || 1;
       if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); cv.style.width = W + 'px'; cv.style.height = H + 'px'; }
       const g = cv.getContext('2d');

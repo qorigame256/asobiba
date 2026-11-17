@@ -224,7 +224,8 @@ function mount(root, opts) {
     } else if (game.phase === 'count') main = rounds === 1 ? `1回勝負　はっけよい…` : `${game.round + 1}回戦（全${rounds}回）　はっけよい…`;
     else if (game.phase === 'show') main = game.last === -1 ? '引き分け！' : `${esc(seatName(game.last))}の勝ち！`;
     else main = rounds === 1 ? `1回勝負` : `${game.round + 1}回戦（全${rounds}回）`;
-    opts.status.innerHTML = `<div class="status-main">${main}</div><div class="status-sub">${tally}<br>オンラインは試作です（ホストの端末が動きを計算しています）。</div>`;
+    // 注意書きは改行（<br>）でなく別の段にする（2026-11-17 見た目の点検。.status の行の長さをならす指定は <br> があると効かず、「す）。」だけが次の行に残っていた）
+    opts.status.innerHTML = `<div class="status-main">${main}</div><div class="status-sub">${tally}</div><div class="status-sub">オンラインは試作です（ホストの端末が動きを計算しています）。</div>`;
   }
 
   function hostAdvance(dt) {
@@ -377,6 +378,7 @@ function mount(root, opts) {
     g.strokeStyle = '#fff'; g.lineWidth = 3;
     for (const sd of [-1, 1]) { g.beginPath(); g.moveTo(SIZE / 2 + sd * 14, SIZE / 2 - 10); g.lineTo(SIZE / 2 + sd * 14, SIZE / 2 + 10); g.stroke(); }
     const ws = host ? ring.w : shown.w;
+    const tags = [];
     ws.forEach((w, p) => {
       const [x, y] = toScreen(w.x, w.y);
       const r = BODY * SIZE * 0.42;
@@ -398,21 +400,30 @@ function mount(root, opts) {
         g.beginPath(); g.moveTo(-r * 0.7, -r * 0.7); g.lineTo(r * 0.7, r * 0.7); g.moveTo(r * 0.7, -r * 0.7); g.lineTo(-r * 0.7, r * 0.7); g.stroke();
       }
       g.restore();
-      g.fillStyle = '#333';
-      g.font = 'bold 12px sans-serif';
-      g.textAlign = 'center';
       const nm = seatName(p);
-      g.fillText(nm.length > 6 ? nm.slice(0, 6) + '…' : nm, x, y + r + 14);
+      tags.push([nm.length > 6 ? nm.slice(0, 6) + '…' : nm, x, y + r + 14]);
     });
+    // 名札は全部の駒を描いてから、白い下地を付けて手前に描く（2026-11-17 見た目の点検。近くの駒の上に名札が重なって読めなかった）
+    g.font = 'bold 12px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif';
+    g.textAlign = 'center';
+    for (const [t, tx, ty] of tags) {
+      const w = g.measureText(t).width + 10;
+      g.fillStyle = 'rgba(255, 255, 255, .82)';
+      g.beginPath();
+      g.roundRect(tx - w / 2, ty - 12, w, 16, 8);
+      g.fill();
+      g.fillStyle = '#333';
+      g.fillText(t, tx, ty);
+    }
     // 回の始めの数え・結果
     g.textAlign = 'center';
     if (game.phase === 'count' && !game.over) {
       g.fillStyle = 'rgba(0,0,0,.55)';
-      g.font = 'bold 34px sans-serif';
+      g.font = 'bold 34px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif';
       g.fillText(game.phaseT < COUNT_SEC / 2 ? 'はっけよい…' : 'のこった！', SIZE / 2, SIZE / 2 - 30);
     } else if (game.phase === 'show' || game.over) {
       g.fillStyle = 'rgba(0,0,0,.6)';
-      g.font = 'bold 28px sans-serif';
+      g.font = 'bold 28px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif';
       const txt = game.over ? 'おしまい' : game.last === -1 ? '引き分け' : `${seatName(game.last)} の勝ち！`;
       g.fillText(txt, SIZE / 2, SIZE / 2 - 30);
     }

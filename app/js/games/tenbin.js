@@ -445,7 +445,7 @@ export default {
       return;
     }
     const fake = s.qs[s.q];
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}回 / ${s.qs.length}</div>`;
+    card.innerHTML = '';
     if (s.phase === 'open') {
       since(key);
       card.insertAdjacentHTML('beforeend', `<div class="kj-sub">${s.size}個のうち${fakeText(s)}を当てよう。はかる回数が少ないほど高い点</div>`);
@@ -604,7 +604,7 @@ export default {
     }
     const fake = s.qs[s.q];
     const myTurn = !over && me !== null && o.canMove && s.turnP === me;
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}回 / ${s.qs.length}</div>`;
+    card.innerHTML = '';
     const sub = document.createElement('div');
     sub.className = 'kj-sub';
     if (s.phase === 'shown') sub.textContent = `偽物は ${fake + 1}番${s.fake === 'any' ? (s.light[s.q] ? '（軽い）' : '（重い）') : ''}。` + (s.win !== null ? `当てたのは ${nameOf(s.win)}` : 'だれも当てられませんでした');

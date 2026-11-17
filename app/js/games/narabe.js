@@ -190,7 +190,7 @@ export default {
     const [word, kind] = NARABE[x.i];
     const key = qKey(s);
     const shown = s.phase !== 'open';
-    card.insertAdjacentHTML('beforeend', `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div><div class="nb-kind">お題: <b>${esc(kind)}</b>（${lenOf(word)}字）</div>`);
+    card.insertAdjacentHTML('beforeend', `<div class="nb-kind">お題: <b>${esc(kind)}</b>（${lenOf(word)}字）</div>`);
     if (loc?.key !== key) loc = { key, picked: [] };
     const can = s.phase === 'open' && me !== null && o.canMove && !doneOf(s, me) && since(key) < LIMIT;
     const solvedMe = me !== null && s.solved[me] !== null;

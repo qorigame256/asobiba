@@ -47,8 +47,8 @@ const GRAB_URGENT = 0.1; // 爆発まで3秒を切った爆弾をつまめる範
 const BOTTOM_AT = 30; // 下の入り口が開くまでの秒数
 export const INC_FUSE = 15; // ほかの人から届いた爆弾の、爆発までのいちばん長い秒数
 export const incFuse = (k) => FUSE + (INC_FUSE - FUSE) * ((k * 0.6180339887) % 1); // k = 届いた何個目か（0から）
-export const H = 1.42;
-const SHELTER = { x0: 0.02, x1: 0.98, y0: 1.255, y1: 1.395, cap: 5 }; // 退避スペース（盤の下）
+export const H = 1.45; // 1.42 から: 「⏸ 退避」の見出しを上の枠と下の点線の間に収めるため、退避スペースを 0.025 下げた（2026-11-17 見た目の点検）
+const SHELTER = { x0: 0.02, x1: 0.98, y0: 1.28, y1: 1.42, cap: 5 }; // 退避スペース（盤の下）
 const RETRY_MS = 500; // 局面に入っていない自分の爆発・送りを送り直す間
 const R = 0.035; // 爆弾の半径
 const COLOR = ['#e74c3c', '#3b7ddd'];
@@ -310,7 +310,7 @@ function drawBomb(ctx, k, b, sec, scale = 1) {
   ctx.lineTo((b.x + R * 0.5) * k, (b.y - R * 1.5 * scale) * k);
   ctx.stroke();
   ctx.fillStyle = blink ? COLOR[b.c] : '#fff';
-  ctx.font = `bold ${R * k * 0.95 * scale}px sans-serif`;
+  ctx.font = `bold ${R * k * 0.95 * scale}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(String(Math.max(0, Math.ceil(left))), b.x * k, b.y * k + 1);
@@ -344,10 +344,10 @@ function draw() {
     ctx.stroke();
     ctx.fillStyle = '#fff';
     ctx.textAlign = 'center';
-    ctx.font = `bold ${k * 0.07}px sans-serif`;
+    ctx.font = `bold ${k * 0.07}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
     const cx = ((b.x0 + b.x1) / 2) * k;
     ctx.fillText(String(b.cap), cx, (b.y0 + 0.09) * k);
-    ctx.font = `${k * 0.04}px sans-serif`;
+    ctx.font = `${k * 0.04}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
     ctx.fillText(`${ui.counts[i]}/${b.cap}`, cx, (b.y0 + 0.15) * k);
     // 入った数を小さな玉で
     for (let j = 0; j < ui.counts[i]; j++) {
@@ -374,7 +374,7 @@ function draw() {
   }
   ctx.fillStyle = '#ffd400';
   ctx.textAlign = 'left';
-  ctx.font = `bold ${k * 0.032}px sans-serif`;
+  ctx.font = `bold ${k * 0.032}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
   ctx.fillText(`⏸ 退避 ${ui.shelter.filter(Boolean).length}/${SHELTER.cap}`, (SHELTER.x0 + 0.015) * k, (SHELTER.y0 - 0.012) * k);
   ctx.textAlign = 'center';
   if (s.phase === 'play') { // 終わったら爆弾は消す（前は残りの秒数がおかしな数で残っていた）
@@ -394,23 +394,23 @@ function draw() {
   // 上の文字: ライフと知らせ
   ctx.textAlign = 'center';
   ctx.fillStyle = '#fff';
-  ctx.font = `bold ${Math.max(13, k * 0.05)}px sans-serif`;
+  ctx.font = `bold ${Math.max(13, k * 0.05)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
   if (ui.me !== null) {
     const life = Math.max(0, livesOf(s) - s.boom[ui.me]);
     ctx.fillText(s.out[ui.me] !== null ? '脱落… ほかの人を待っています' : `ライフ ${'❤'.repeat(life)}${'♡'.repeat(livesOf(s) - life)}`, k / 2, k * 0.06);
   } else ctx.fillText('観戦中', k / 2, k * 0.06);
   if (ui.flash && now - ui.flash.at < 1600) {
-    ctx.font = `bold ${k * 0.055}px sans-serif`;
+    ctx.font = `bold ${k * 0.055}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
     ctx.fillStyle = '#ffd400';
     ctx.fillText(ui.flash.text, k / 2, k * 0.12);
   }
   if (s.phase === 'ready') {
     const left = Math.ceil((READY_MS - since(`bombs:${s.seed}:ready`)) / 1000);
-    ctx.font = `bold ${k * 0.18}px sans-serif`;
+    ctx.font = `bold ${k * 0.18}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
     ctx.fillStyle = '#fff';
     ctx.fillText(left > 0 ? String(left) : 'スタート！', k / 2, k * H * 0.55);
   } else if (s.phase === 'end') {
-    ctx.font = `bold ${k * 0.1}px sans-serif`;
+    ctx.font = `bold ${k * 0.1}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
     ctx.fillStyle = '#fff';
     ctx.fillText('おしまい！', k / 2, k * H * 0.55);
   }

@@ -166,7 +166,6 @@ export default {
       return;
     }
     const key = rKey(s);
-    card.insertAdjacentHTML('beforeend', `<div class="kj-num">${s.r + 1}回目 / ${s.total}</div>`);
     if (s.phase === 'shown') {
       // 一斉に裏返して見せる（2026-11-16 の UI・UX の7回目。本人の選択）: 全員の札を同時に返し、かぶった札は揺らす。数字ごとのまとめはそのあとに出す
       flipTimes(root, key + ':shown', o.fresh);

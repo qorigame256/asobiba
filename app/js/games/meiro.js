@@ -257,7 +257,7 @@ export default {
     }
     const key = qKey(s);
     const limit = limitOf(s);
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>`;
+    card.innerHTML = '';
     if (s.phase === 'open') {
       since(key);
       if (s.solved.some((v) => v !== null)) {
@@ -300,9 +300,13 @@ export default {
         g.fillStyle = SEAT_COLORS[me % SEAT_COLORS.length] + '22';
         for (const c of loc.trail) g.fillRect((c % n) * u, Math.floor(c / n) * u, u, u);
       }
-      g.font = `${Math.floor(u * 0.7)}px sans-serif`;
+      g.font = `${Math.floor(u * 0.7)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
       g.textAlign = 'center';
       g.textBaseline = 'middle';
+      // ゴールのマスは薄い黄色で目立たせ、🏁 は透けない色で描く（2026-11-17 見た目の点検。すぐ上で通った所の薄い色（'22'）を入れたままだったので、🏁 がほとんど透けて見えなかった）
+      g.fillStyle = '#ffe58a';
+      g.fillRect((goal % n) * u, Math.floor(goal / n) * u, u, u);
+      g.fillStyle = '#000';
       g.fillText('🏁', ...at(goal));
       // 壁
       g.strokeStyle = css.getPropertyValue('--ink').trim() || '#333';

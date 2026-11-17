@@ -177,7 +177,6 @@ export default {
     const [top, left, right, bottom] = sidesOf(data);
     const key = qKey(s);
     const shown = s.phase !== 'open';
-    card.insertAdjacentHTML('beforeend', `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>`);
     const cross = document.createElement('div');
     cross.className = 'mn-cross';
     const cell = (t, cls = '') => `<div class="mn-c ${cls}">${t}</div>`;

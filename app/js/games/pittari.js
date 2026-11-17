@@ -173,7 +173,7 @@ export default {
     }
     const q = s.q;
     const target = s.targets[q];
-    card.innerHTML = `<div class="kj-num">${q + 1}回目 / ${s.targets.length}</div><div class="pz-target"><b>${target}</b>秒で止めて！</div><div class="pz-clock"></div>`;
+    card.innerHTML = `<div class="pz-target"><b>${target}</b>秒で止めて！</div><div class="pz-clock"></div>`;
     const clock = card.querySelector('.pz-clock');
     const note = document.createElement('p');
     note.className = 'cc-log';

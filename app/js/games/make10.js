@@ -367,7 +367,7 @@ export default {
     const goal = goalOf(s.qs[s.q]);
     const key = qKey(s);
     const limit = limitOf(s);
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>${s.qs[s.q].goal ? `<div class="mk-goal">${goal} を作れ！</div>` : ''}<div class="mk-nums">${nums.map((n) => `<span class="mk-num">${n}</span>`).join('')}</div>`;
+    card.innerHTML = `${s.qs[s.q].goal ? `<div class="mk-goal">${goal} を作れ！</div>` : ''}<div class="mk-nums">${nums.map((n) => `<span class="mk-num">${n}</span>`).join('')}</div>`;
     if (s.phase === 'open') {
       since(key);
       card.append(timeBar(key, limit, { secs: true }));

@@ -306,7 +306,7 @@ export default {
     };
     const b = REELS.map((_, r) => {
       const btn = document.createElement('button');
-      btn.className = 'btn ms-stop';
+      btn.className = 'btn secondary ms-stop'; // 種類を付ける（2026-11-17 見た目の点検。種類の無い btn は .board button に負けて枠も地も出なかった）
       btn.textContent = 'とめる';
       btn.onpointerdown = (e) => stop(r, e);
       btn.onclick = (e) => { if (e.detail === 0) stop(r, e); };

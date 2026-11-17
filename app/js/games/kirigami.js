@@ -394,7 +394,6 @@ export default {
     const x = s.qs[s.q];
     const key = qKey(s);
     const limit = limitOf(s.rules);
-    card.insertAdjacentHTML('beforeend', `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>`);
     const show = document.createElement('div');
     show.className = 'kg-show';
     show.append(foldedSvg(x));

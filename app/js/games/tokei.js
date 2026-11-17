@@ -233,7 +233,7 @@ export default {
     }
     const Q = s.qs[s.q];
     const qt = questionText(Q);
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>${qt.sub ? `<div class="kj-sub tk-now">${qt.sub}</div>` : ''}<div class="kj-word tk-word">${qt.main}</div>`;
+    card.innerHTML = `${qt.sub ? `<div class="kj-sub tk-now">${qt.sub}</div>` : ''}<div class="kj-word tk-word">${qt.main}</div>`;
     if (s.phase === 'open') {
       since(key);
       if (s.solved.some((v) => v !== null)) {

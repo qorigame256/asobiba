@@ -40,11 +40,12 @@ export const shownSkins = () => SKINS.filter((s) => s.kind !== 'buy' || (IS_APP 
 
 // 解放の条件の文字と、届いたか
 export function needText(s, rec = readRecords()) {
-  if (s.need?.played) return { ok: rec.played >= s.need.played, text: `遊んだ対局 ${s.need.played}局（いま ${Math.min(rec.played, s.need.played)}局）` };
-  if (s.need?.hwins) return { ok: rec.hwins >= s.need.hwins, text: `人がいた対局で ${s.need.hwins}勝（いま ${Math.min(rec.hwins, s.need.hwins)}勝）` };
+  // （いま 0局）の中で折り返さないよう、すき間と数字のあとをつなぐ（2026-11-17 見た目の点検。「0」と「局）」が別の行に分かれていた）
+  if (s.need?.played) return { ok: rec.played >= s.need.played, text: `遊んだ対局 ${s.need.played}局（いま\u00a0${Math.min(rec.played, s.need.played)}\u2060局）` };
+  if (s.need?.hwins) return { ok: rec.hwins >= s.need.hwins, text: `人がいた対局で ${s.need.hwins}勝（いま\u00a0${Math.min(rec.hwins, s.need.hwins)}\u2060勝）` };
   if (s.need?.cpus) {
     const got = Object.keys(rec.cpus ?? {}).length;
-    return { ok: got >= s.need.cpus, text: `CPU 図鑑を ${s.need.cpus}体そろえる（いま ${Math.min(got, s.need.cpus)}体）` };
+    return { ok: got >= s.need.cpus, text: `CPU 図鑑を ${s.need.cpus}体そろえる（いま\u00a0${Math.min(got, s.need.cpus)}\u2060体）` };
   }
   return { ok: true, text: '' };
 }

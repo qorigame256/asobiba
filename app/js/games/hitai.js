@@ -305,7 +305,7 @@ export default {
       const amount = Math.min(BET, s.chips[me]);
       const bet = document.createElement('button');
       bet.type = 'button';
-      bet.className = 'btn';
+      bet.className = 'btn primary'; // 種類を付ける（2026-11-17 見た目の点検。種類の無い btn は .board button に負けて枠も地も出なかった）
       bet.textContent = `勝負する（${amount}点）`;
       bet.onclick = () => o.onMove({ t: 'bet', r: s.round });
       const fold = document.createElement('button');
@@ -330,7 +330,7 @@ export default {
       actions.className = 'cc-actions';
       const next = document.createElement('button');
       next.type = 'button';
-      next.className = 'btn';
+      next.className = 'btn primary';
       next.textContent = '次の回へ';
       next.onclick = () => o.onMove({ t: 'next', r: s.round });
       actions.append(next);

@@ -266,7 +266,7 @@ export default {
     }
     const [word, yomis] = s.qs[s.q];
     const key = qKey(s);
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${TOTAL}</div><div class="ty-word"></div><div class="ty-yomi"></div>`;
+    card.innerHTML = `<div class="ty-word"></div><div class="ty-yomi"></div>`;
     card.querySelector('.ty-word').textContent = word;
     const yomiEl = card.querySelector('.ty-yomi');
     const yomi = yomis[0];

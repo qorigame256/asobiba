@@ -248,7 +248,7 @@ export default {
     const draw = () => {
       if (!cv.isConnected || ui?.wrap !== wrap) return;
       const st = ui.state;
-      const W = Math.min(560, (root.clientWidth || 360) - 4), H = Math.round(W * 0.42);
+      const W = Math.min(560, (root.clientWidth || 360) - 20), H = Math.round(W * 0.42); // 20: カード（kj-card）の左右の余白8と枠1.5を両側ぶん引く（2026-11-17 見た目の点検。引かずに枠の外へはみ出していた）
       const dpr = window.devicePixelRatio || 1;
       if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); cv.style.width = W + 'px'; cv.style.height = H + 'px'; }
       const g = cv.getContext('2d');
@@ -302,7 +302,7 @@ export default {
         g.beginPath(); g.arc(x, y - 44, 9, 0, Math.PI * 2); g.fill();
         g.beginPath(); g.moveTo(x, y - 35); g.lineTo(x, y - 14); g.moveTo(x, y - 14); g.lineTo(x - 7, y); g.moveTo(x, y - 14); g.lineTo(x + 7, y);
         g.moveTo(x - 10, y - 30); g.lineTo(x + 10, y - 30); g.stroke();
-        if (p === me) { g.font = 'bold 12px sans-serif'; g.textAlign = 'center'; g.fillText('あなた', x, y - 58); }
+        if (p === me) { g.font = 'bold 12px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif'; g.textAlign = 'center'; g.fillText('あなた', x, y - 58); }
         g.globalAlpha = 1;
       }
       if (front) rope();

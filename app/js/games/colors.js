@@ -868,7 +868,7 @@ export default {
       const row = document.createElement('div');
       const go = document.createElement('button');
       go.type = 'button';
-      go.className = 'btn';
+      go.className = 'btn primary'; // 種類を付ける（2026-11-17 見た目の点検。種類の無い btn は .board button に負けて枠も地も出なかった）
       go.textContent = picking.multi.length ? `${picking.multi.length + 1}枚まとめて出す` : '1枚だけ出す';
       go.onclick = () => send(picking.i, picking.multi.slice());
       const cancel = document.createElement('button');

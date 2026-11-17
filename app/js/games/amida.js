@@ -75,6 +75,7 @@ const hidCount = (s) => s.hides ?? 1;
 const hidDone = (s, p) => hidList(s.hidden[p]).length >= hidCount(s);
 const signed = (v) => (v < 0 ? `−${-v}` : `+${v}`);
 const pt = (v) => (v < 0 ? `−${-v}` : `${v}`);
+// 「いまの道なら 3点」は数と「点」の間で折り返さない（\u2060 は幅の無いつなぎの字。2026-11-17 見た目の点検）
 const slots = (lines) => {
   const out = [];
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS - 1; c++) if (canDraw(lines, r, c)) out.push([r, c]);
@@ -309,13 +310,13 @@ export default {
     } else if (s.phase === 'hide') {
       const left = self === null ? 0 : H - mine.length;
       msg.textContent = self === null ? head + 'みんなが隠し線を引いています'
-        : !left ? `${head}隠し線を引きました（いまの道なら ${pt(now)}点）。みんなを待っています`
-        : `${head}隠し線を${H > 1 ? `あと${left}本` : '1本'}、好きな所に引こう（ほかの人には見えません・20秒）。いまの道なら ${pt(now)}点`;
+        : !left ? `${head}隠し線を引きました（いまの道なら\u00a0${pt(now)}\u2060点）。みんなを待っています`
+        : `${head}隠し線を${H > 1 ? `あと${left}本` : '1本'}、好きな所に引こう（ほかの人には見えません・20秒）。いまの道なら\u00a0${pt(now)}\u2060点`;
     } else {
       const left = Math.ceil((s.n * 2 - s.k) / s.n); // 見える線の残りの周回（2 → 1）
       msg.textContent = self === null ? head + `${nameP(this.turn(s))}が線を引いています`
-        : canLine ? `${head}あなたのターン。線を引く所を押そう（いまの道なら ${pt(now)}点・見える線はあと${left}本）`
-        : `${head}${nameP(this.turn(s))}が線を引いています（いまの道なら ${pt(now)}点）`;
+        : canLine ? `${head}あなたのターン。線を引く所を押そう（いまの道なら\u00a0${pt(now)}\u2060点・見える線はあと${left}本）`
+        : `${head}${nameP(this.turn(s))}が線を引いています（いまの道なら\u00a0${pt(now)}\u2060点）`;
     }
     root.append(msg);
   },

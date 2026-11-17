@@ -368,7 +368,7 @@ export default {
       }
       const del = document.createElement('button');
       del.type = 'button';
-      del.className = 'btn ghost np-key';
+      del.className = 'btn secondary np-key'; // 数字のボタンと同じ枠に（2026-11-17 見た目の点検。⌫ だけ枠が無かった）
       del.textContent = '⌫';
       del.setAttribute('aria-label', '消す');
       del.onclick = () => put(0);

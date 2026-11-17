@@ -762,7 +762,8 @@ function tableEl(s, o, me, watching) {
     edge.className = 'mj-edge';
     const name = document.createElement('span');
     name.className = 'mj-name';
-    name.textContent = (i === 0 && !watching ? 'あなた' : o.names[p]) + (o.cpu[p] ? '（CPU）' : '') + (o.away[p] ? '（応答なし）' : '');
+    // CPU の名前には 🤖 が付くので「（CPU）」は部屋を出た人の席を CPU が代わりに打つときだけ（2026-11-17 見た目の点検。名札の幅に収まらず「（CP…」と切れていた）
+    name.textContent = (i === 0 && !watching ? 'あなた' : o.names[p]) + (o.cpu[p] && o.sub?.[p] ? '（CPU）' : '') + (o.away[p] ? '（応答なし）' : '');
     if (i > 0 || watching) {
       const hidden = document.createElement('span');
       hidden.className = 'mj-hidden';

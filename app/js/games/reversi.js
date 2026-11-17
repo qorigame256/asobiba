@@ -323,7 +323,7 @@ export default {
     const byColor = [0, 0];
     count(s.board).forEach((v, p) => { byColor[col(p)] = v; });
     const [b, w] = byColor;
-    let html = hidden ? secret : `<span class="rv-score"><span class="rv-mini p0"></span>黒 <span data-roll="rv0" data-v="${b}">${b}</span>　−　<span data-roll="rv1" data-v="${w}">${w}</span> 白<span class="rv-mini p1"></span></span>`;
+    let html = hidden ? secret : `<span class="rv-score"><span class="rv-mini p0"></span>黒 <span data-roll="rv0" data-v="${b}">${b}</span><span class="rv-dash">−</span><span data-roll="rv1" data-v="${w}">${w}</span> 白<span class="rv-mini p1"></span></span>`;
     if (s.again && !over) html += `<br>${this.players[col(s.turn)]}は角を取ったので、もう1回！`;
     if (s.missed != null && !over) html += `<br>${this.players[col(s.missed)]}は角を取りましたが、続けて置ける場所がないので${this.players[col(s.turn)]}の番です`;
     if (s.passed !== null && !over) html += `<br>${this.players[col(s.passed)]}は置ける場所がないのでパスです`;

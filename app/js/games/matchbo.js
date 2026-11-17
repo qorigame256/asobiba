@@ -369,7 +369,7 @@ export default {
     }
     const Q = s.qs[s.q];
     const type = typeOf(Q);
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div>`;
+    card.innerHTML = '';
     if (s.rules.take) card.insertAdjacentHTML('beforeend', `<div class="mb-type mb-type-${type}">${TYPE_LABEL[type]}</div>`);
     if (Q.alt) card.insertAdjacentHTML('beforeend', '<div class="mb-two">🎁 直し方は2通り（先に解いた人とちがう直し方なら +1点）</div>');
     if (s.phase === 'open') {

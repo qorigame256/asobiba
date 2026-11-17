@@ -251,18 +251,23 @@ function draw() {
   // 文字
   ctx.textAlign = 'center';
   ctx.fillStyle = '#fff';
-  ctx.font = `bold ${Math.max(12, k * 0.04)}px sans-serif`;
+  ctx.font = `bold ${Math.max(12, k * 0.04)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
   if (!s.winner && s.winner !== 0) {
     const who = s.turn === ui.me ? 'あなた' : o.names[s.turn];
     ctx.fillText(`${who}の番 ・ ねらうのは ${lowestOf(s)}番`, k / 2, T * k - 8 > 10 ? T * k * 0.7 : 14);
   }
   if (now() - ui.msgAt < 2200 && ui.msg) {
-    ctx.font = `bold ${k * 0.06}px sans-serif`;
+    ctx.font = `bold ${k * 0.06}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
     ctx.strokeStyle = 'rgba(0,0,0,.6)'; ctx.lineWidth = k * 0.01;
     ctx.strokeText(ui.msg, k / 2, k * 0.95); ctx.fillText(ui.msg, k / 2, k * 0.95);
   } else if (ui.mine && !ui.anim && !ui.aim) {
-    ctx.font = `${Math.max(11, k * 0.032)}px sans-serif`;
-    ctx.fillText(ui.canPlace ? '手玉を押して動かせる・ほかを押して引っ張ると打つ' : '押して引っ張り、離すと反対の向きへ打つ', k / 2, (B + (H - B) * 0.65) * k);
+    // 左右の下のポケット（黒い穴）にかからない幅（台の7割）に収まるよう、長いときは字を小さくする（2026-11-17 見た目の点検。両端が穴に重なっていた）
+    const tip = ui.canPlace ? '手玉を押して動かせる・ほかを押して引っ張ると打つ' : '押して引っ張り、離すと反対の向きへ打つ';
+    let fs = Math.max(11, k * 0.032);
+    ctx.font = `${fs}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
+    const tw = ctx.measureText(tip).width;
+    if (tw > k * 0.7) { fs = Math.max(9, fs * (k * 0.7) / tw); ctx.font = `${fs}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`; }
+    ctx.fillText(tip, k / 2, (B + (H - B) * 0.65) * k, k * 0.7);
   }
 }
 
@@ -300,7 +305,7 @@ function drawBall(ctx, k, b) {
   ctx.strokeStyle = 'rgba(0,0,0,.45)'; ctx.lineWidth = 1; ctx.stroke();
   if (b.id > 0) {
     ctx.beginPath(); ctx.arc(x, y, r * 0.52, 0, Math.PI * 2); ctx.fillStyle = '#fff'; ctx.fill();
-    ctx.fillStyle = '#111'; ctx.font = `bold ${Math.max(8, r * 0.85)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#111'; ctx.font = `bold ${Math.max(8, r * 0.85)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(String(b.id), x, y + 0.5);
     ctx.textBaseline = 'alphabetic';
   }

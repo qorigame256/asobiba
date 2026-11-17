@@ -247,7 +247,8 @@ export default {
     const draw = () => {
       if (!cv.isConnected || ui?.wrap !== wrap) return;
       const t = since(tk);
-      const W = Math.min(440, (root.clientWidth || 360) - 4), H = Math.round(Math.min(W * 1.05, Math.max(260, (window.innerHeight || 700) * 0.5))); // 下の「落とす」が画面に入るように
+      // 20: カード（kj-card）の左右の余白8と枠1.5を両側ぶん引く（2026-11-17 見た目の点検。引かずに枠の外へはみ出していた）
+      const W = Math.min(440, (root.clientWidth || 360) - 20), H = Math.round(Math.min(W * 1.05, Math.max(260, (window.innerHeight || 700) * 0.5))); // 下の「落とす」が画面に入るように
       const dpr = window.devicePixelRatio || 1;
       if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); cv.style.width = W + 'px'; cv.style.height = H + 'px'; }
       const g = cv.getContext('2d');
@@ -286,13 +287,13 @@ export default {
         g.fillStyle = '#fff';
         g.strokeStyle = '#c33';
         g.lineWidth = 3;
-        g.font = 'bold 22px sans-serif';
+        g.font = 'bold 22px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif';
         g.textAlign = 'center';
         g.strokeText('ぴったり！', W / 2, 36);
         g.fillText('ぴったり！', W / 2, 36);
       }
       g.fillStyle = '#333';
-      g.font = 'bold 18px sans-serif';
+      g.font = 'bold 18px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif';
       g.textAlign = 'left';
       g.fillText(`${k}段`, 10, 24);
       requestAnimationFrame(draw);

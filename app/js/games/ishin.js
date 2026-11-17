@@ -200,7 +200,7 @@ export default {
     const topic = TOPICS[s.qs[s.q]];
     const key = qKey(s);
     const limit = limitOf(s);
-    card.innerHTML = `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div><div class="is-topic"></div>`;
+    card.innerHTML = `<div class="is-topic"></div>`;
     card.querySelector('.is-topic').textContent = topic[0];
     if (s.phase === 'open') {
       since(key);

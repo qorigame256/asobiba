@@ -196,7 +196,7 @@ export default {
     }
     const key = qKey(s);
     const [top, bottom, yomi] = KOTOWAZA[s.reads[s.q]];
-    card.innerHTML = `<div class="kj-num">${s.q + 1}枚目 / ${s.reads.length}</div>`;
+    card.innerHTML = '';
     const line = document.createElement('div');
     line.className = 'kr-top';
     card.append(line);

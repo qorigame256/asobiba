@@ -195,7 +195,7 @@ export default {
     }
     const [text, right, , note] = NEARPIN[i];
     const key = qKey(s);
-    card.insertAdjacentHTML('beforeend', `<div class="kj-num">第${s.q + 1}問 / ${s.qs.length}</div><div class="nq-q">${esc(text)}</div>`);
+    card.insertAdjacentHTML('beforeend', `<div class="nq-q">${esc(text)}</div>`);
     if (s.phase === 'shown') {
       card.insertAdjacentHTML('beforeend', `<div class="nq-right">答え <b>${esc(withUnit(right, i))}</b></div>` + (note ? `<div class="kj-sub">${esc(note)}</div>` : ''));
       wrap.append(this.line(s, me, o));

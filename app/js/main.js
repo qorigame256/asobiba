@@ -1932,13 +1932,16 @@ function renderRoomBar() {
     cls = 'on'; text = others.length === 1 ? '相手と接続中' : `あなたを入れて${others.length + 1}人が接続中`;
   }
   // 通信の具合（2026-10-07 の18回目の案）: 自分の合図が中継サーバーから戻るまでの時間（遅れ）を添える。遅いときは黄色
+  let note = '';
   if (S.conn === 'ready' && S.rtt != null) {
     const stuck = netStuck();
     if ((stuck || S.rtt > SLOW_MS) && cls === 'on') { cls = 'wait'; text = '通信が遅れています'; }
-    text += stuck ? '（合図が戻ってきません）' : `（遅れ ${(S.rtt / 1000).toFixed(1)}秒）`;
+    note = stuck ? '（合図が戻ってきません）' : `（遅れ ${(S.rtt / 1000).toFixed(1)}秒）`;
   }
   el('presence-dot').className = 'dot ' + cls;
   el('presence-text').textContent = text;
+  if (note) { const n = document.createElement('span'); n.className = 'nowrap'; n.textContent = note; el('presence-text').append(n); } // かっこの中で折り返さない（2026-11-17 見た目の点検）
+  text += note;
   el('btn-room-fold').innerHTML = roomFolded() ? `🔑 部屋 <span class="dot ${cls}" aria-hidden="true"></span>` : '▲ たたむ'; // cls は上の決まった言葉だけ
   el('btn-room-fold').title = roomFolded() ? `部屋コード・${text}` : '';
   renderNetBanner();
@@ -2116,9 +2119,10 @@ function thinkHtml(game) {
   for (const [p, ms] of c.log) if (seat(p)) used[p] += ms;
   const live = !c.res && seat(c.turn) ? Date.now() - c.at : 0;
   if (live) used[c.turn] += live;
-  const tot = used.map((_, p) => p).map((p) => `${seatMark(game, p)} ${clockText(used[p])}`).join(' ／ ');
+  // 1人ぶん（呼び名と時間）は途中で折り返さない（2026-11-17 見た目の点検。はさみ将棋の「後手（と） 0:00」が2行に割れた）
+  const tot = used.map((_, p) => p).map((p) => `<span class="nowrap">${seatMark(game, p)} ${clockText(used[p])}</span>`).join(' ／ ');
   if (c.res) return `考えた時間 ${tot}`;
-  return `⏱ ${seatMark(game, c.turn)}が考え中 <b>${clockText(live)}</b>　合計 ${tot}`;
+  return `<span class="nowrap">⏱ ${seatMark(game, c.turn)}が考え中 <b>${clockText(live)}</b></span>　合計 ${tot}`;
 }
 
 setInterval(() => {
@@ -2143,7 +2147,7 @@ function howtoFigs(figs) {
         const cell = document.createElement('span');
         let t = tok;
         if (t.startsWith('~')) { cell.className = 'hf-text'; t = t.slice(1); }
-        else if (t.startsWith('[') && t.endsWith(']')) { t = t.slice(1, -1); cell.className = 'hf-card' + (/[♥♦]/.test(t) ? ' red' : ''); }
+        else if (t.startsWith('[') && t.endsWith(']')) { t = t.slice(1, -1); cell.className = 'hf-card' + (/[♥♦]/.test(t) ? ' red' : '') + (t === '🃏' ? ' joker' : ''); }
         else {
           cell.className = 'hf-cell';
           if (t.startsWith('!')) { cell.classList.add('hi'); t = t.slice(1); }
@@ -2493,6 +2497,7 @@ function turnBand(game, st, res) {
     const sym = label ? COLOR_DOT[label] ?? ([...label].length <= 1 ? label : null) : null;
     mark.textContent = sym ?? String(i + 1);
     if (sym && COLOR_DOT[label]) mark.dataset.p = col(i); // 色に形を添える（2026-11-11）: 色の丸に ● ▲ ■ ◆ を添える（style.css の .shapes）
+    else if (sym) mark.classList.add('pl', 'p' + col(i)); // ○・× などの印は、状態の行と同じ席の色で出す（2026-11-17 見た目の点検。帯だけ黒と灰色だった）
     const who = document.createElement('span');
     who.className = 'turn-name';
     who.textContent = S.mode === 'online' ? (i === me ? 'あなた' : nameOf(S.order[i])) : label && label !== sym ? label : `${i + 1}番`;
