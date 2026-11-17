@@ -3459,3 +3459,64 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 /* 途中から来た人に、ここまでを早送りで見せる（2026-11-16 の UI・UX の7回目。main.js の ffwdNow） */
 .ffw-bar { height: 4px; margin: 6px auto 0; max-width: 240px; border-radius: 2px; background: var(--line); overflow: hidden; }
 .ffw-bar i { display: block; height: 100%; background: var(--accent); transition: width .12s linear; }
+/* マッチ棒パズル早解き（2026-11-17。matchbo.js） */
+.mb-board { width: min(100%, 560px); margin: 0 auto; border-radius: 14px; background: var(--field); border: 2px solid var(--line); padding: 10px 6px; }
+.mb-board.bad { animation: mb-shake .35s ease; }
+@keyframes mb-shake { 20% { transform: translateX(-6px); } 45% { transform: translateX(5px); } 70% { transform: translateX(-3px); } }
+.mb-eq { display: block; width: 100%; height: auto; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.mb-stick { stroke: #e0b46a; stroke-width: 5.5; stroke-linecap: round; }
+.mb-head { fill: #c8402e; }
+.mb-fixed .mb-stick { stroke: #c9a468; }
+.mb-ghost { stroke: var(--muted); stroke-width: 1.6; stroke-dasharray: 3 3; stroke-linecap: round; opacity: .35; }
+.mb-off.drop .mb-ghost { stroke: var(--accent); stroke-width: 3; opacity: 1; }
+.mb-hit { stroke: transparent; stroke-width: 15; stroke-linecap: round; pointer-events: stroke; }
+.mb-eq.live .mb-on .mb-hit, .mb-eq.live .mb-off.drop .mb-hit { cursor: pointer; }
+.mb-on.sel .mb-stick { stroke: #ffcf33; filter: drop-shadow(0 0 3px #e8a913); }
+.mb-on.sel { transform: translateY(-3px); }
+.mb-on.ans-to .mb-stick { stroke: #3fae5a; filter: drop-shadow(0 0 3px #2f8a4a); }
+.mb-off.ans-from .mb-ghost { stroke: #d9473a; stroke-width: 3; opacity: 1; }
+.board button.mb-undo { display: block; margin: 0 auto; padding: 6px 16px; border-radius: 999px; border: 2px solid var(--line); background: var(--field); color: var(--ink); font-weight: 700; cursor: pointer; }
+.board button.mb-undo[hidden] { display: none; }
+.board button.mb-undo:disabled { opacity: .45; cursor: default; }
+/* お金ぴったり払い（2026-11-17。okane.js）。お金の絵は色と大きさで見分ける丸と四角（本物の図柄はまねない） */
+.okn .ok-price { font-size: clamp(2rem, 9vw, 2.8rem); font-weight: 900; letter-spacing: .02em; }
+.ok-paid { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; min-height: 76px; width: min(100%, 560px); margin: 0 auto; padding: 10px; border: 2px dashed var(--line); border-radius: 14px; background: var(--field); }
+.ok-paid.answer { border-style: solid; border-color: #2f8a4a; }
+.ok-empty { color: var(--muted); font-size: .9rem; }
+.ok-tray { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; width: min(100%, 560px); margin: 0 auto; }
+.ok-tray[hidden] { display: none; }
+.board .ok-m { position: relative; display: inline-grid; place-items: center; padding: 0; border: 2px solid rgba(0, 0, 0, .28); color: #2d2a26; font-weight: 900; cursor: pointer; touch-action: manipulation; box-shadow: 0 2px 0 rgba(0, 0, 0, .2); }
+.board .ok-m:disabled { cursor: default; }
+.ok-tray .ok-m:disabled { opacity: .5; }
+.board .ok-m:active:not(:disabled) { transform: translateY(2px); box-shadow: none; }
+.ok-face { font-size: .9rem; line-height: 1; position: relative; }
+.board .ok-coin { border-radius: 50%; }
+.board .ok-bill { width: 78px; height: 42px; border-radius: 5px; }
+.board .ok-bill .ok-face { font-size: .95rem; }
+.board .ok-v1 { width: 44px; height: 44px; background: #eceef0; }
+.board .ok-v5 { width: 48px; height: 48px; background: radial-gradient(circle, var(--field) 0 5px, #d9b65a 6px); }
+.board .ok-v10 { width: 52px; height: 52px; background: #c27a43; color: #fff; }
+.board .ok-v50 { width: 48px; height: 48px; background: radial-gradient(circle, var(--field) 0 5px, #d3d7da 6px); }
+.board .ok-v100 { width: 52px; height: 52px; background: #cdd1d5; }
+.board .ok-v500 { width: 58px; height: 58px; background: #dcc67e; }
+.board .ok-v5 .ok-face, .board .ok-v50 .ok-face { transform: translateY(13px); font-size: .75rem; }
+.board .ok-v1000 { background: #8fb4df; }
+.board .ok-v5000 { background: #bda6dd; }
+.board .ok-v10000 { background: #cfab83; }
+.ok-n { position: absolute; right: -10px; bottom: -8px; min-width: 24px; padding: 1px 5px; border-radius: 999px; background: var(--chip, #2d2a26); color: var(--chip-ink, #fff); font-size: .8rem; font-weight: 800; }
+.board button.ok-pay { display: block; margin: 0 auto; min-width: 160px; padding: 10px 24px; border: none; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 1.15rem; font-weight: 900; cursor: pointer; }
+.board button.ok-pay[hidden] { display: none; }
+.board button.ok-pay:disabled { opacity: .45; cursor: default; }
+/* 展開図あて（2026-11-17。tenkai.js） */
+.tn-name { font-size: 1.3rem; font-weight: 900; margin-top: 2px; }
+.tn-solid { display: block; width: min(46vw, 170px); height: 140px; margin: 6px auto; }
+.tn-solid.small { width: 52px; height: 44px; margin: 0; }
+.tn-pad { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; width: min(100%, 560px); margin: 0 auto; touch-action: manipulation; }
+.board button.tn-choice { display: grid; place-items: center; height: 130px; padding: 6px; border: 3px solid var(--line); border-radius: 12px; background: var(--field); cursor: pointer; }
+.board button.tn-choice:disabled { cursor: default; }
+.board button.tn-choice.picked { border-color: #e8a913; }
+.board button.tn-choice.ans { border-color: var(--win); box-shadow: 0 0 0 4px var(--win); }
+.board button.tn-choice.dim { opacity: .45; }
+.tn-net { display: block; width: 100%; height: 100%; max-height: 116px; }
+.tn-review li { display: flex; align-items: center; gap: 6px; }
+.tn-review .tn-net { width: 80px; height: 48px; }
