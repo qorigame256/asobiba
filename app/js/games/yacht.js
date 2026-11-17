@@ -147,6 +147,8 @@ export default {
     norm: (r) => (r.short ? { ...r, bonusYacht: false, joker: false } : r),
   },
   maxPlayers: 10,
+  // 点の移り変わりの線（2026-11-17。main.js の appendTrail）: 全員が書き終えた回の切れ目でだけ合計点を返す（途中は null で、線の区切りにしない）
+  trail(s) { return s.pl.every((x) => filled(x) === s.round) ? s.pl.map((x) => totalOfPl(x).total) : null; },
   settings: [
     { key: 'bonusYacht', label: '2回目のヨット', desc: 'ヨットの役に50点を書いたあとで、もう一度5個そろえたら +100点（そのときも、ほかの役を1つ選んで書く）', def: false },
     { key: 'joker', label: 'ジョーカー', desc: 'ヨットの役を書いたあと（0点でも）にまた5個そろえたら、Sストレート・Bストレートにも満点（15点・30点）で書ける', def: false },

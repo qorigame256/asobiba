@@ -17,7 +17,7 @@
 const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
 export const NEUTRAL = -1; // じゃま石
 
-import { CPU_SETTING, TAP_PEEK_SETTING, DANGER_SETTING, boardCpu, boardJudge, dangerMoves, dangerOn, mulberry32, winLine, col as seatCol } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, DANGER_SETTING, boardCpu, boardJudge, dangerMoves, dangerOn, mulberry32, winLine, col as seatCol, footMark } from './util.js';
 
 // 盤（列 w・段 h）の4つ並びの窓の一覧。マスごとに、そのマスを含む窓の番号も持つ
 const WINDOWS = {};
@@ -365,6 +365,7 @@ export default {
         const cell = document.createElement('span');
         cell.className = 'c4-cell' + (danger.has(i) ? ' danger' : '');
         const v = s.grid[i];
+        if (v !== null) footMark(cell, o.feet?.[i]); // 盤の上の足あと（2026-11-17。util.js の footMark）
         if (v !== null) {
           const disc = document.createElement('span');
           disc.className = 'c4-disc ' + (v === NEUTRAL ? 'pn' : 'p' + seatCol(v));

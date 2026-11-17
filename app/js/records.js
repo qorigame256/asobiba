@@ -10,11 +10,13 @@
 //   部屋を出た人の代わりに打った CPU は入らない（席は人のまま）。名前は main.js の CPU_NAMES
 // - ゲームごとの成績（games。2026-10-22 の27回目の案）: ゲームの id → { p: 遊んだ対局（played と同じ数え方）, w: 勝った対局（オンラインで自分が勝ったもの。CPU だけが相手でも数える） }。
 //   ランキングの画面に出すだけ（Game Center には送らない）。同じ画面の対局は、どの席が自分か分からないので p にだけ数える
+// - 最近遊んだゲーム（recent。2026-11-17 本人の選択。room.md「UI・UX の8回目」）: 対局者として決着を見たゲームの id を新しい順に RECENT_MAX 個。ホームの「さっき遊んだ」の列に出す
 // エアホッケーは結果が main.js を通らないので数えない。
 
 import { reportScores, onGcSignedIn } from './native.js';
 
 const KEY = 'bg-records';
+const RECENT_MAX = 5;
 export const LB_PREFIX = 'io.github.qorigame256.asobiba.lb.';
 export const WINS_LB = LB_PREFIX + 'wins';
 
@@ -41,6 +43,7 @@ function load() {
     played: Number.isInteger(a?.played) ? a.played : 0,
     hwins: Number.isInteger(a?.hwins) ? a.hwins : 0,
     best,
+    recent: Array.isArray(a?.recent) ? [...new Set(a.recent.filter((x) => typeof x === 'string'))].slice(0, RECENT_MAX) : [],
     seen: Array.isArray(a?.seen) ? a.seen.filter((x) => typeof x === 'string').slice(-20) : [], // 数えた対局（描き直しで2回数えない）
   };
 }
@@ -48,6 +51,7 @@ function save(a) {
   try { localStorage.setItem(KEY, JSON.stringify(a)); } catch { /* 覚えられなくても遊べる */ }
 }
 export const readRecords = load;
+export const recentGames = () => load().recent; // ホームの「さっき遊んだ」（新しい順）
 
 const val = (v) => (v === true ? 'on' : v === false ? 'off' : String(v));
 const normOf = (rec, rules) => (rec.norm ? rec.norm(rules) : rules);
@@ -117,6 +121,7 @@ export function noteGame(key, { won, withHuman, best, beat = [], hard = false, g
   if (before.seen.includes(key)) return { isNew: false, fresh: [] };
   const a = { ...before, best: { ...before.best }, cpus: { ...before.cpus }, games: { ...before.games }, seen: [...before.seen, key].slice(-20) };
   if (typeof gameId === 'string') {
+    a.recent = [gameId, ...a.recent.filter((x) => x !== gameId)].slice(0, RECENT_MAX);
     const g = a.games[gameId];
     a.games[gameId] = { p: (g?.p ?? 0) + 1, w: (g?.w ?? 0) + (won ? 1 : 0) };
   }

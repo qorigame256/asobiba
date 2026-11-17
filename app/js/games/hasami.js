@@ -18,7 +18,7 @@
 //   3人の CPU は読みをせず、取れる数・動いたあとにほかの人に取られる自分の駒の数で選ぶ（hasami3Cpu）。結果には順位（place）を付ける。
 //   2人のときの局面と手は前と全く同じ形（3人のときだけ np: 3）。
 
-import { CPU_SETTING, PEEK_SETTING, peekMark, boardCpu, boardJudge, mulberry32 } from './util.js';
+import { CPU_SETTING, PEEK_SETTING, peekMark, boardCpu, boardJudge, mulberry32, grabbable, justDragged } from './util.js';
 
 const DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 const MAX_PLY = 300;
@@ -398,7 +398,7 @@ export default {
       if (s.last?.t === i) cell.dataset.last = 'still'; // 決め手のスロー（main.js の slowFinish）: 駒は滑ってくるので寄せるだけ
       if (caught.has(i)) cell.classList.add('caught');
       if (i === ui.from) cell.classList.add('selected');
-      if (isTarget) cell.classList.add('target');
+      if (isTarget) { cell.classList.add('target'); cell.dataset.drop = i; } // data-drop: つまんだ駒を離せる所（2026-11-17）
       peekMark(cell, i, o, isTarget, () => ({ f: ui.from, d: null })); // 相手の迷いが見える（2026-11-11。main.js の o.peek・o.peekIn）: 相手の選び・PC のねらい
       if (v !== null) {
         const piece = document.createElement('span');
@@ -420,10 +420,13 @@ export default {
         cell.type = 'button';
         cell.setAttribute('aria-label', `${Math.floor(i / N) + 1}段目 ${i % N + 1}列目`);
         cell.onclick = () => {
+          if (justDragged()) return;
           if (isTarget) { const f = ui.from; ui = { ...ui, from: null }; o.onMove(f * CELLS + i); return; }
           ui = { ...ui, from: ui.from === i ? null : i };
           draw();
         };
+        // 指でつまんで動かす（2026-11-17。util.js の grabbable）: 自分の駒を行き先まで引っぱって動かせる
+        if (isMovable) grabbable(cell, { piece: () => cell.querySelector('.sg-piece'), pick: () => { ui = { ...ui, from: i }; draw(); }, drop: (t) => { if (t !== null && ui.from === i) { ui = { ...ui, from: null }; o.onMove(i * CELLS + Number(t)); } } });
       }
       grid.append(cell);
     }

@@ -20,7 +20,7 @@
 //   3〜4人と同じ広い盤（大きさは詳細設定「広い盤の大きさ」）で、4つ並べたら勝ち。おまかせは 6×6
 //   （CPU どうしで 5×5 は半分が引き分け、6×6 より広いと引き分けはほぼ無い）。CPU も3〜4人と同じ wideCpu。
 
-import { CPU_SETTING, TAP_PEEK_SETTING, DANGER_SETTING, boardCpu, boardJudge, dangerMoves, dangerOn, winLine, col } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, DANGER_SETTING, boardCpu, boardJudge, dangerMoves, dangerOn, winLine, col, footMark } from './util.js';
 
 const emptyCells = (x) => x.board.map((v, i) => (v === null ? i : -1)).filter((i) => i >= 0); // あぶない所の知らせで調べる手
 
@@ -288,6 +288,7 @@ function renderGob(root, s, o) {
       if (i === s.last && o.fresh) pc.classList.add('pop');
       if (i === s.last) pc.dataset.last = ''; // 決め手のスロー（main.js の slowFinish）が寄せて落とす物
       cell.append(pc);
+      footMark(cell, o.feet?.[i]); // 盤の上の足あと（2026-11-17。util.js の footMark）
       if (st.length > 1) {
         const hid = document.createElement('span');
         hid.className = 'gob-under';
@@ -463,6 +464,7 @@ function cellButton(v, i, s, o, playable) {
     if (i === s.last) cell.classList.add('last');
     if (i === s.last && o.fresh) cell.classList.add('pop');
     if (i === s.last) cell.firstElementChild?.setAttribute('data-last', ''); // 決め手のスロー（main.js の slowFinish）
+    footMark(cell, o.feet?.[i]); // 盤の上の足あと（2026-11-17。util.js の footMark）
   }
   if (playable) {
     cell.classList.add('playable');

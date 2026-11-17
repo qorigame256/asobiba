@@ -16,7 +16,7 @@
 //   q が今の問題と同じで、その人がまだ答えていないときだけ受け付けるので、同じ手が2回届いても2回目は反則になる。
 
 import { mulberry32 } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, secText, speedLine } from './party.js';
 
 export const LEVELS = {
   easy: { label: 'やさしい', lo: 1, hi: 9, k: 5, gap: 1000, cpu: 0.85 },
@@ -298,6 +298,7 @@ export default {
     if (me === null) note.textContent = '観戦中';
     else if (mine) note.textContent = mine.v === right ? `⭕ 正解！（${secText(mine.ms)}）` : '❌ ざんねん。次の問題を待とう';
     wrap.append(note);
+    if (s.phase === 'shown') wrap.append(speedLine(o, s.ans.map((a) => (a && a.v === sum(s.qs[s.q]) ? a.ms : null)), key)); // 早押しの速さの線（2026-11-17。party.js の speedLine）
   },
 
   review(s, me, o) {

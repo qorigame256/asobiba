@@ -24,7 +24,7 @@
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'try', q: 問題番号, text: 答え, ms, n: その問題で何回目の答えか } / { p, t: 'pass', q }
 
 import { mulberry32, shuffle, esc, mayFocus } from './util.js';
-import { since, kana, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
+import { since, kana, scoreChips, leaders, winnersText, timeBar, secText, speedLine } from './party.js';
 import { KANJI } from './kanji-data.js';
 
 const ROUNDS = [[10, '10問'], [15, '15問'], [20, '20問']]; // 問題の数（詳細設定）
@@ -388,6 +388,7 @@ export default {
       }, Math.max(0, limit - since(key)));
     }
     wrap.append(note);
+    if (s.phase === 'shown') wrap.append(speedLine(o, s.solved, key)); // 早押しの速さの線（2026-11-17。party.js の speedLine）
     root.append(wrap);
     this.note(s, me);
     // スマホは勝手にキーボードを出さない。選択欄や小窓（「ゲームを変える」など）を触っているときも取り上げない（util.js の mayFocus）

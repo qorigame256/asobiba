@@ -16,7 +16,7 @@
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q, c: 選んだ札の番号（0〜3）, ms }
 
 import { mulberry32, shuffle } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, secText, speedLine } from './party.js';
 import { pointsOf } from './make10.js';
 
 const ROUNDS = [[5, '5問'], [10, '10問'], [20, '20問']];
@@ -454,6 +454,7 @@ export default {
     else if (s.phase === 'open' && s.miss[me]) note.textContent = '❌ ざんねん。次の問題を待とう';
     else if (s.phase === 'open') note.textContent = '点線が折り目。開くと折り目で写した形になります';
     wrap.append(note);
+    if (s.phase === 'shown') wrap.append(speedLine(o, s.solved, key)); // 早押しの速さの線（2026-11-17。party.js の speedLine）
   },
 
   review(s, me, o) {

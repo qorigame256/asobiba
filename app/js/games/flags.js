@@ -26,7 +26,7 @@
 //   点の付け方は今までどおり（残った人どうしの差に使う）。脱落した問題の番号を s.out に覚える（なしのときは s.out を作らない）。
 
 import { mulberry32 } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, secText, speedLine } from './party.js';
 import { speak, preloadVoice } from '../sound.js';
 
 const TOTAL = 15;
@@ -480,6 +480,7 @@ export default {
       msg.textContent = open ? '旗をタップすると上げ下げできます' : 'そこまで！';
     }
     root.append(msg);
+    if (s.phase === 'shown' && Array.isArray(s.last)) root.append(speedLine(o, s.last.map((r) => (r.ok ? r.ms : null)), key)); // 早押しの速さの線（2026-11-17。party.js の speedLine）
 
     // 制限時間が来たら押せなくする（描き直しが来なくても）
     if (open) {

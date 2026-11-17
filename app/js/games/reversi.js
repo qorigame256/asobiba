@@ -19,7 +19,7 @@
 //   隠している間は「石の数はひみつ（終わったら出ます）」と出す。ふりかえりの途中の局面は終わっていないので隠れたまま。CPU は変えない。
 //   人数・盤の大きさ・四隅封印・穴あき盤・角でもう1手と一緒に使える。
 
-import { CPU_SETTING, TAP_PEEK_SETTING, boardCpu, boardJudge, mulberry32, col } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, boardCpu, boardJudge, mulberry32, col, footMark } from './util.js';
 
 const N8 = 8; // 3〜4人はいつも 8×8
 const DIRS = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
@@ -347,6 +347,7 @@ export default {
         if (i === s.last && o.fresh) disc.classList.add('pop');
         if (i === s.last) disc.dataset.last = ''; // 決め手のスロー（main.js の slowFinish）
         cell.append(disc);
+        footMark(cell, o.feet?.[i]); // 盤の上の足あと（2026-11-17。util.js の footMark）
       }
       if (i === s.last) cell.classList.add('last');
       if (s.closed?.has(i)) cell.classList.add('shut');

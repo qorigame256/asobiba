@@ -12,6 +12,8 @@
 // 最後の1人まで続ける。同じ局面が4回・600手で引き分け。
 // 詳細設定「いつも成る」があり（局面に auto: true）なら、成れる手の成らない方を作らない（shogi.js と同じ）。
 
+import { grabbable, justDragged } from './util.js';
+
 const PAWN = 1;
 const SILVER = 4;
 const GOLD = 5;
@@ -392,9 +394,12 @@ export function render(root, s, o) {
       if (ok) {
         e.type = 'button';
         e.onclick = () => {
+          if (justDragged()) return;
           ui = { ...ui, from: null, promo: null, drop: ui.drop === d ? null : d };
           draw();
         };
+        // 指でつまんで動かす（2026-11-17。util.js の grabbable）: 持ち駒を盤のマスまで引っぱって打てる
+        grabbable(e, { piece: () => e.querySelector('.sg-piece'), pick: () => { ui = { ...ui, from: null, promo: null, drop: d }; draw(); }, drop: (t) => { if (t !== null) pick(Number(t)); } });
       }
       row.append(e);
     }
@@ -447,7 +452,11 @@ export function render(root, s, o) {
         hit.addEventListener('pointerenter', (ev) => { if (ev.pointerType === 'mouse') o.peek({ f: ui.from, d: ui.drop, a: i }); });
         hit.addEventListener('pointerleave', (ev) => { if (ev.pointerType === 'mouse') o.peek({ f: ui.from, d: ui.drop, a: null }); });
       }
+      if (isTarget) hit.dataset.drop = i; // data-drop: つまんだ駒を離せる所（2026-11-17）
+      // 指でつまんで動かす（2026-11-17。util.js の grabbable）: 自分の駒を行き先まで引っぱって指せる。浮かべる駒は HTML で作る
+      if (mineToMove) grabbable(hit, { piece: () => { const n = document.createElement('span'); n.className = 'sg-piece'; n.textContent = KANJI[typeOf(v)]; return { node: n, from: hit }; }, pick: () => { ui = { ...ui, drop: null, promo: null, from: i }; draw(); }, drop: (t) => { if (t !== null) pick(Number(t)); } });
       hit.addEventListener('click', () => {
+        if (justDragged()) return;
         if (isTarget) { pick(i); return; }
         ui = { ...ui, drop: null, promo: null, from: ui.from === i ? null : i };
         draw();

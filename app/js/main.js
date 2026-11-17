@@ -42,7 +42,7 @@ import { isBad, mask, BAD_TEXT_NOTE } from './filter.js';
 import { play, endSound, isMuted, setMuted, isVoice, speak, GREET, getVolume, setVolume } from './sound.js';
 import { initAds, setAdsMuted, setBanner, countFinished, beforeLeaveResult, canBuyNoAds, hasNoAds, onNoAdsChange, noAdsPrice, buyNoAds, restoreNoAds, onOwnedChange, owns, priceOf, buy, restore } from './ads.js';
 import { initNative, haptic, canHaptic, hapticsOn, setHapticsOn, canAchieve, openAchievements, notePlayed, noteResult, noteRoomSize, canShare, shareScreen, canRank, loadBoard } from './native.js';
-import { readRecords, noteGame, recordKey, rulesText, allBoards, initRecords, onRecords } from './records.js';
+import { readRecords, noteGame, recordKey, rulesText, allBoards, initRecords, onRecords, recentGames as playedLately } from './records.js';
 import { SKINS, shownSkins, needText, usable, currentSkin, setSkin, checkSkin, newlyUnlocked, productOf } from './skin.js';
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 見間違えやすい I O 0 1 を除く
@@ -716,6 +716,26 @@ function readyLine() {
     + (ok.length ? `: ${ok.map((id) => esc(nameOf(id))).join('・')}` : '')
     + (wait.length ? `<small>（まだ: ${wait.map((id) => esc(nameOf(id))).join('・')}）</small>` : '');
   return p;
+}
+// 「始める」を画面の下に固定（2026-11-17 本人の選択。room.md「UI・UX の8回目」）: 待合室で、ホストの「始める」・ゲストの「準備OK」を
+// 画面の下に留める（#dock は position: sticky。スマホでは「始める」が詳細設定の下、2画面ほど下にあった）。準備OK の人数も一緒に出す（待つ人がいるときだけ）。
+// Claude の判断: 留めるのはこのボタン1つだけ（CPU を増やす・ゲームを変える などは今の場所のまま。留める段が大きいと盤や一覧が隠れるため）。
+// 準備OK をだれが押したかの名前は、今までどおり待合室の中の「✋ 準備OK 2/3人: …」の行に出す
+function lobbyDock(btn) {
+  const dock = el('dock');
+  const others = readyNeed();
+  const parts = [];
+  if (others.length) {
+    const ok = readyIds().filter((id) => others.includes(id)).length;
+    const p = document.createElement('span');
+    p.className = 'dock-ready' + (ok === others.length ? ' all' : '');
+    p.textContent = `✋ ${ok}/${others.length}人`;
+    p.title = `準備OK ${ok}/${others.length}人`;
+    parts.push(p);
+  }
+  parts.push(btn);
+  dock.replaceChildren(...parts);
+  dock.hidden = false;
 }
 function readyButton() {
   const on = readyIds().includes(S.myId);
@@ -1677,6 +1697,7 @@ function filterGames() {
   const q = toHira(el('game-search')?.value);
   let shown = 0;
   for (const sec of el('game-list').children) {
+    if (sec.dataset.cat === 'recent') { sec.hidden = !!q; continue; } // さっき遊んだ（2026-11-17）は検索している間は出さず、見つかった数にも入れない
     let n = 0;
     for (const t of sec.querySelectorAll('.tile')) {
       const hit = !q || gameHay(t.dataset.id).includes(q);
@@ -1695,6 +1716,7 @@ function filterGames() {
 // 絵と名前だけの小さな札を、仲間（games/index.js の CATEGORIES）ごとの見出しで分けて並べる。お気に入りは一番上にまとめ、仲間の中にも残す。
 // 上の帯（.home-find。検索の欄と仲間へ飛ぶボタン）は、下へ送っても画面の上に残る。札を押すと、説明と「部屋を作る」などのボタンが下から出る（openGameSheet）
 function renderHome() {
+  closeProfile(); // 名前を押すと小さな札（2026-11-17）: ホームへ戻ったら閉じる
   const owner = canHost();
   el('game-find').hidden = !owner;
   el('game-search').oninput = filterGames;
@@ -1709,7 +1731,10 @@ function renderHome() {
   cats.innerHTML = '';
   if (!owner) return;
   const favs = favorites();
-  const groups = [['fav', '★ お気に入り', GAME_ORDER.filter((id) => favs.includes(id))], ...CATEGORIES.map((c) => [c.key, c.name, GAME_ORDER.filter((id) => c.ids.includes(id))])];
+  // ホームに「さっき遊んだ」の列（2026-11-17 本人の選択。room.md「UI・UX の8回目」）: 一番上に、その端末で最近遊んだ5つを横一列に（records.js の recent）。
+  // Claude の判断: 検索の欄に字を打っている間は出さない（同じ札が二重に出るため）。仲間へ飛ぶボタンは付けない（一番上なので）。札が左から順にすべり込む（style.css の .tiles.recent）
+  const recent = playedLately().filter((id) => GAMES[id]);
+  const groups = [['recent', '🕘 さっき遊んだ', recent], ['fav', '★ お気に入り', GAME_ORDER.filter((id) => favs.includes(id))], ...CATEGORIES.map((c) => [c.key, c.name, GAME_ORDER.filter((id) => c.ids.includes(id))])];
   for (const [key, name, ids] of groups) {
     if (!ids.length) continue;
     const sec = document.createElement('section');
@@ -1717,13 +1742,13 @@ function renderHome() {
     sec.dataset.cat = key;
     const hd = document.createElement('h3');
     hd.className = 'cat-h';
-    hd.textContent = `${name}（${ids.length}）`;
+    hd.textContent = key === 'recent' ? name : `${name}（${ids.length}）`;
     const grid = document.createElement('div');
-    grid.className = 'tiles';
+    grid.className = 'tiles' + (key === 'recent' ? ' recent' : '');
     for (const id of ids) grid.append(gameTile(id, favs.includes(id)));
     sec.append(hd, grid);
     list.append(sec);
-    if (key === 'fav') continue; // お気に入りは一番上なので、飛ぶボタンは要らない
+    if (key === 'fav' || key === 'recent') continue; // お気に入り・さっき遊んだは一番上なので、飛ぶボタンは要らない
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'cat-btn';
@@ -2275,6 +2300,7 @@ function closeMenu() {
 }
 
 function renderPage() {
+  if (profileFor && !S?.members?.includes(profileFor)) closeProfile(); // 名前を押すと小さな札: 部屋を出た人の札は閉じる
   menuBox = null; // 前の描き直しが途中で止まっていても、待合室の部品がメニューの入れ物に入らないように
   if (S.mode === 'online') noteMembers(); // 人が入ったら札が飛び込む（memberFx）
   gameChangeFx();
@@ -2289,10 +2315,15 @@ function renderPage() {
   el('play-title').textContent = game ? game.name : '部屋に参加';
   renderHowto(game);
   el('screen-play').dataset.game = S.gameId ?? '';
+  // スマホを横にしたときの並べ方（2026-11-17 本人の選択。room.md「UI・UX の8回目」）: 盤のゲームの対局中だけ、横向きの低い画面で盤を左・ほかを右に並べる（style.css の .land-board）。
+  // Claude の判断: 手札やパーティーのゲーム（multi）・エアホッケー（live）・待合室は今のまま（盤が無いか、縦に読む画面のため）
+  el('screen-play').classList.toggle('land-board', !!game && !game.multi && !game.live && (S.mode === 'local' || !!S.order));
   const status = el('status');
   const board = el('board');
   const controls = ctl();
   controls.innerHTML = '';
+  el('dock').hidden = true; // 「始める」を画面の下に固定（待合室だけ。lobbyDock）
+  el('dock').replaceChildren();
 
   let waiting = null;
   if (S.mode === 'online') {
@@ -2338,11 +2369,12 @@ function renderPage() {
   resultUp = !!res;
   status.innerHTML = statusHtml(game, st, res);
   const band = turnBand(game, st, res);
-  if (band) status.prepend(band);
+  if (band) { status.prepend(band); profileTargets(band); }
   if (res && !game.multi && renderReview(game, st)) return; // ふりかえりで途中の局面を見ている
   if (!game.multi && !(res && S.review?.key === reviewKey())) { const jb = judgeBar(game, st); if (jb) status.append(jb); } // 形勢の帯（2026-11-12）
   if (res && !game.multi && S.review?.key === reviewKey()) { const ch = judgeChart(game, S.moves.length); if (ch) status.append(ch); } // ふりかえりを最後まで見たとき
   if (res) appendScenes(game, st, res, status); // 結果に名場面（2026-11-12）
+  if (res) appendTrail(game, status); // 点の移り変わりの線（2026-11-17）
 
   // 新しく打たれた手だけ動きを付ける（接続表示の更新などで描き直したときは動かさない）
   const key = S.gameId + ':' + S.round;
@@ -2355,6 +2387,7 @@ function renderPage() {
   const opts = { canMove: canMove(game, st, res), onMove: onBoardMove, fresh, me: watchSeat(game), view: boardView(game) };
   if (!game.multi) Object.assign(opts, { peek: opts.canMove ? sendPeek : null, peekIn: peekInNow() }); // 相手の迷いが見える（2026-11-11）
   if (!game.multi) opts.rules = rulesOf(S.gameId, S.rules); // あぶない所の知らせ（2026-11-12）など、描くときに詳細設定を見るゲームのため
+  if (!game.multi) opts.feet = feetNow(game); // 盤の上の足あと（2026-11-17）
   const slow = fresh && res && slowWanted(game, prevLen, res); // 決め手のスロー（2026-11-10）: 線を引くのを盤を描く前に遅らせておく
   if (slow) lineHold.until = Date.now() + SLOW_LINE - 160; // winLine はこの時刻からいつもの 160ms 待って引く
   if (game.multi) {
@@ -2480,7 +2513,16 @@ function turnBand(game, st, res) {
     }
     if (typeof reach?.[i] === 'string') addReach(card, i, reach[i]);
     if (S.mode === 'online') addFlame(card, S.order[i]);
+    if (S.mode === 'online' && S.order[i] && !isCpu(S.order[i])) card.dataset.m = S.order[i]; // 名前を押すと小さな札（2026-11-17）
     if (crowned?.has(i)) addCrown(card);
+    if (S.mode === 'online' && offscreen(S.order[i])) { // よそ見中の印（2026-11-17。上の「よそ見中の印」の節）
+      const z = document.createElement('span');
+      z.className = 'turn-off';
+      z.textContent = '💤';
+      card.classList.add('off');
+      card.title = 'ほかの画面を見ています';
+      card.append(z);
+    }
     band.append(card);
   });
   if (S.mode === 'online') flameSeen = { key: S.streak?.key ?? null, n: { ...(S.streak?.wins ?? {}) } };
@@ -2557,6 +2599,72 @@ function addFlame(card, id) {
     s.setAttribute('aria-hidden', 'true');
     s.textContent = '💨';
     card.append(s);
+  }
+}
+
+/* ---------- 名前を押すと小さな札（2026-11-17 本人の選択。room.md「UI・UX の8回目」）: 順番の帯と待合室で名前を押すと、その人のことが小さく出る ---------- */
+// 中身は、名前（マーク・🔰 込み）・この部屋での勝ち数（○戦）・連勝・この部屋で勝った遊び（多い順に2つ）。どれも部屋の中で今まで持っていた数から作る（新しく送るものは無い）。
+// Claude の判断: 押せるのは人の札だけ（CPU と空席は出さない）。順番の帯の札（data-m）と待合室の人の一覧（.lobby-list・.lobby-faces の data-m）を、document で1か所で受ける。
+// 札は body に置く（描き直しで消えないように）。札の外を押す・Esc・もう一度押す・画面が切り替わると閉じる。勝った遊びは履歴の勝った人の表示名で数える（履歴が名前で覚えているため）
+let profileFor = null;
+function closeProfile() { document.querySelector('.profile-pop')?.remove(); profileFor = null; }
+function profileLines(id) {
+  const out = [];
+  const t = S.tally;
+  if (t?.games) {
+    const w = Number.isInteger(t.wins?.[id]) ? t.wins[id] : 0;
+    const n = Number.isInteger(t.played?.[id]) ? t.played[id] : null;
+    out.push(`この部屋: ${w}勝${n !== null && n >= w ? `（${n}戦）` : ''}`);
+  }
+  const sw = S.streak?.wins?.[id];
+  if (Number.isInteger(sw) && sw >= 2) out.push(`🔥 ${sw}連勝中`);
+  const me = nameOf(id);
+  const count = {};
+  for (const h of S.history ?? []) if (Array.isArray(h?.w) && h.w.includes(me) && GAMES[h.g]) count[h.g] = (count[h.g] ?? 0) + 1;
+  const top = Object.entries(count).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([g]) => GAMES[g].name);
+  if (top.length) out.push(`勝った遊び: ${top.join('・')}`);
+  if (!out.length) out.push('この部屋ではまだ勝負していません');
+  return out;
+}
+function openProfile(anchor, id) {
+  if (profileFor === id) { closeProfile(); return; }
+  closeProfile();
+  const box = document.createElement('div');
+  box.className = 'profile-pop';
+  box.setAttribute('role', 'dialog');
+  const head = document.createElement('b');
+  head.textContent = (id === S.myId ? 'あなた（' + nameOf(id) + '）' : nameOf(id)) + (id === S.members[0] ? ' 👑' : '');
+  box.append(head);
+  for (const line of profileLines(id)) {
+    const p = document.createElement('span');
+    p.textContent = line;
+    box.append(p);
+  }
+  document.body.append(box);
+  // 押した札のすぐ下（はみ出すなら上）に出す。描き直しが終わったあと（押したとき）に測るので、描き直しの途中で測らない決まりには当たらない
+  const r = anchor.getBoundingClientRect();
+  const w = box.offsetWidth, h = box.offsetHeight;
+  const left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), innerWidth - w - 8);
+  const top = r.bottom + 8 + h < innerHeight ? r.bottom + 8 : Math.max(8, r.top - 8 - h);
+  Object.assign(box.style, { left: `${left}px`, top: `${top}px` });
+  profileFor = id;
+}
+document.addEventListener('click', (e) => {
+  const a = e.target.closest?.('.turn-card[data-m], .lobby-list li[data-m], .lobby-faces li[data-m]');
+  if (a && S?.mode === 'online' && !isCpu(a.dataset.m) && S.members?.includes(a.dataset.m)) { openProfile(a, a.dataset.m); return; }
+  if (!e.target.closest?.('.profile-pop')) closeProfile();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closeProfile(); return; }
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches?.('.turn-card[data-m], .lobby-list li[data-m], .lobby-faces li[data-m]')) { e.preventDefault(); e.target.click(); }
+});
+// 押せる札にしるし（指の形・キーボードで選べる）を付ける。turnBand と待合室を描いたあとに呼ぶ
+function profileTargets(root) {
+  for (const e of root.querySelectorAll('.turn-card[data-m], .lobby-list li[data-m], .lobby-faces li[data-m]')) {
+    if (isCpu(e.dataset.m)) continue;
+    e.classList.add('can-profile');
+    e.tabIndex = 0;
+    e.setAttribute('role', 'button');
   }
 }
 
@@ -3316,6 +3424,94 @@ function appendScenes(game, st, res, status) {
   status.append(box);
 }
 
+/* ---------- 盤の上の足あと（2026-11-17 本人の選択。room.md「UI・UX の8回目」）: 3〜4人の盤で、1周ぶんの手のマスに小さな番号を付け、古い手ほど薄くする ---------- */
+// 手の一覧を当て直して、局面の last（置いたマスの番号）が変わった手を集め、最後の「席の数」ぶんを渡す（o.feet[マス] = { n, age }。描くのはゲームの util.js の footMark）。
+// Claude の判断: 置いたマスを局面の last で持つ盤のゲーム（マルバツ・四目並べ・リバーシ・五目並べ）だけ。番号は古い順に1から（いちばん新しい手が席の数）。
+// 決着したあとも出したまま（最後の1周を見返せるように）。手の一覧の長さが同じ間は数え直さない
+let feetMemo = { key: null, feet: null };
+function feetNow(game) {
+  const n = boardSeats(S.gameId, S.rules);
+  if (game.multi || n < 3) return null;
+  const key = `${resultKey()}:${S.undo ?? 0}:${S.moves.length}`;
+  if (feetMemo.key === key) return feetMemo.feet;
+  const list = [];
+  replay(S, (a, b) => { if (Number.isInteger(b?.last) && (b.last !== a?.last || b.n !== a?.n)) list.push(b.last); });
+  const tail = list.slice(-n);
+  const feet = {};
+  tail.forEach((i, k) => { feet[i] = { n: k + 1, age: tail.length - 1 - k }; });
+  feetMemo = { key, feet: tail.length ? feet : null };
+  return feetMemo.feet;
+}
+
+/* ---------- 点の移り変わりの線（2026-11-17 本人の選択。room.md「UI・UX の8回目」）: 点を回ごとに持つゲームの結果の画面に、点の動きを小さな折れ線で出す ---------- */
+// 点はゲームの trail(局面)（席ごとの数の一覧）か、無ければ局面の scores・points・chips のどれか（TRAIL_KEYS。数の一覧のときだけ）。
+// Claude の判断: 手の一覧を最初から当て直し、点が変わった手ごとに1つの区切りにする（回の切れ目をゲームごとに知らなくても、点の入る回ごとに1つずつ並ぶ）。
+// 区切りが3つ以上（はじめ＋2回以上点が動いた）のときだけ出す。手札やパーティーのゲーム（multi）だけ（盤のゲームには形勢の線がある）。対局の途中には出さない。
+// 同じ対局の結果では作り直さない。線を引く動きは最初に出したときだけ（動きを減らす設定の端末では引き終わった形）。席の色は party.js の SEAT_COLORS（点数の札と同じ）
+const TRAIL_KEYS = ['scores', 'points', 'chips'];
+let trailMemo = { key: null, rows: null, shown: false };
+function trailOf(game, st) {
+  const v = game.trail ? game.trail(st) : TRAIL_KEYS.map((k) => st?.[k]).find((a) => Array.isArray(a) && a.length >= 2 && a.every((x) => typeof x === 'number' && Number.isFinite(x)));
+  return Array.isArray(v) ? v.slice() : null;
+}
+function appendTrail(game, status) {
+  if (!game.multi || game.live) return;
+  const key = `${resultKey()}:${S.moves.length}`;
+  if (trailMemo.key !== key) {
+    const rows = [];
+    try {
+      replay(S, (before, after) => {
+        if (!rows.length) { const a = trailOf(game, before); if (a) rows.push(a); }
+        const b = trailOf(game, after);
+        if (b && rows.length && b.length === rows[0].length && b.some((v, i) => v !== rows.at(-1)[i])) rows.push(b);
+      });
+    } catch { rows.length = 0; }
+    trailMemo = { key, rows, shown: false };
+  }
+  const rows = trailMemo.rows;
+  if (!rows || rows.length < 3) return;
+  const n = rows[0].length;
+  const W = 320, H = 120, L = 34, R = 86, T = 10, B = 10;
+  const all = rows.flat();
+  let lo = Math.min(...all), hi = Math.max(...all);
+  if (hi === lo) hi = lo + 1;
+  const X = (k) => L + ((W - L - R) * k) / (rows.length - 1);
+  const Y = (v) => T + ((H - T - B) * (hi - v)) / (hi - lo);
+  const me = myPlayer();
+  const name = (p) => (p === me ? 'あなた' : nameOf(S.order?.[p]) || `${p + 1}番`);
+  // 名前は線の右端に。近い名前は 12px ずつ離す
+  const ends = rows.at(-1).map((v, p) => ({ p, y: Y(v) })).sort((a, b) => a.y - b.y);
+  for (let i = 1; i < ends.length; i++) ends[i].y = Math.max(ends[i].y, ends[i - 1].y + 12);
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${Math.max(H, (ends.at(-1)?.y ?? 0) + 8)}`);
+  svg.setAttribute('class', 'trail-svg' + (trailMemo.shown || lessMotion() ? ' still' : ''));
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', '点の移り変わり');
+  const add = (tag, attrs, text) => {
+    const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, typeof v === 'number' ? v.toFixed(1) : v);
+    if (text !== undefined) e.textContent = text;
+    svg.append(e);
+    return e;
+  };
+  for (const v of lo < 0 && hi > 0 ? [hi, 0, lo] : [hi, lo]) {
+    add('line', { x1: L, x2: W - R, y1: Y(v), y2: Y(v), class: 'tr-grid' });
+    add('text', { x: L - 6, y: Y(v) + 4, 'text-anchor': 'end', class: 'tr-num' }, String(Math.round(v)));
+  }
+  for (let p = 0; p < n; p++) {
+    const d = rows.map((r, k) => `${k ? 'L' : 'M'}${X(k).toFixed(1)},${Y(r[p]).toFixed(1)}`).join(' ');
+    const c = SEAT_COLORS[p % SEAT_COLORS.length];
+    add('path', { d, class: 'tr-line' + (p === me ? ' me' : ''), stroke: c, pathLength: 100 });
+    add('circle', { cx: X(rows.length - 1), cy: Y(rows.at(-1)[p]), r: 3.5, fill: c, class: 'tr-end' });
+  }
+  for (const { p, y } of ends) add('text', { x: W - R + 7, y: y + 4, class: 'tr-name', fill: SEAT_COLORS[p % SEAT_COLORS.length] }, `${[...name(p)].slice(0, 6).join('')} ${rows.at(-1)[p]}`); // 長い名前は6文字で切る
+  const box = document.createElement('div');
+  box.className = 'trail';
+  box.append(svg);
+  trailMemo.shown = true;
+  status.append(box);
+}
+
 /* ---------- 参りました（2026-11-12 本人の選択。room.md「UI・UX の5回目」）: 2人で打つ盤のゲームのオンラインで、自分の番に負けを認めて終われる ---------- */
 // 手は { give: true }（util.js の withGiveUp。index.js の GIVE_UP のゲーム）。押せるのは自分の番だけ（将棋の投了と同じ。Claude の判断）。確かめの窓を1回出す
 function appendGiveUp(game, canMoveNow) {
@@ -4041,6 +4237,7 @@ function renderLobby(game) {
   board.className = 'board lobby';
   board.innerHTML = html;
   memberFx(board.querySelector('.lobby-list'));
+  profileTargets(board); // 名前を押すと小さな札（2026-11-17）
   board.prepend(lobbyGameCard(game));
   if (S.isHost && S.members.length > 1) board.append(benchPanel(game));
   const tally = tallyLine();
@@ -4050,11 +4247,12 @@ function renderLobby(game) {
   appendLobbyExtras(board);
   if (game.settings) board.append(rulesPanel(game));
 
-  if (!S.isHost) { controls.append(readyButton()); return; }
+  if (!S.isHost) { lobbyDock(readyButton()); return; }
   const start = makeButton('始める', () => (readyDone(game) ? startRound() : render()));
   start.disabled = short || !readyDone(game);
   if (allReady(game) && !short) start.classList.add('ready-go');
-  if (game.noCpu || seats) { controls.append(start, gameSelect(), rouletteButton()); return; }
+  lobbyDock(start);
+  if (game.noCpu || seats) { controls.append(gameSelect(), rouletteButton()); return; }
   // 押したボタンが指の下に残るようにする（一覧が1行のびて、下のボタンがずれていた。2026-10-30 本人の依頼）
   const setCpus = (n, key) => keepPlace(key, () => { S.cpus = n; saveRoom(); sendState(); render(); });
   const step = lineup(game).teams || 1; // チームの人数をそろえるゲームはチームの数ずつ（2人ずつ・三つ巴は3人ずつ）
@@ -4064,7 +4262,7 @@ function renderLobby(game) {
   const plus = makeButton('CPU を増やす', () => setCpus(cpus + step, 'cpu-plus'), 'secondary');
   plus.dataset.keep = 'cpu-plus';
   plus.disabled = humans.length + cpus + step > max;
-  controls.append(minus, plus, start, gameSelect(), rouletteButton());
+  controls.append(minus, plus, gameSelect(), rouletteButton());
 }
 
 function renderBoardLobby(game) {
@@ -4092,6 +4290,7 @@ function renderBoardLobby(game) {
   }
   board.append(faces);
   memberFx(faces);
+  profileTargets(faces); // 名前を押すと小さな札（2026-11-17）
   board.prepend(lobbyGameCard(game));
   const pick = boardPick();
   const colsNext = seatColorsFor(S.gameId, pick);
@@ -4152,7 +4351,7 @@ function renderBoardLobby(game) {
   if (cpuLevels(game)) board.append(cpuAutoPanel(game));
   board.append(ptsPanel());
   if (game.settings) board.append(rulesPanel(game));
-  if (!S.isHost) { controls.append(readyButton()); return; }
+  if (!S.isHost) { lobbyDock(readyButton()); return; }
   const start = makeButton('始める', () => (readyDone(game) ? startRound() : render()));
   start.disabled = !readyDone(game);
   if (allReady(game)) start.classList.add('ready-go');
@@ -4161,7 +4360,8 @@ function renderBoardLobby(game) {
     start.disabled = true;
     board.insertAdjacentHTML('beforeend', '<p class="lobby-total">友だちが部屋に入ると始められます</p>');
   }
-  controls.append(start, gameSelect(), rouletteButton());
+  lobbyDock(start);
+  controls.append(gameSelect(), rouletteButton());
 }
 
 /* ---------- 先手をくじで決める（2026-10-08。22回目の案。Claude が出した15の案から本人が推奨どおり選んだ） ---------- */
@@ -4290,6 +4490,26 @@ function stayPanel() {
   return box;
 }
 
+// ホストが変えた設定が光る（2026-11-17 本人の選択。room.md「UI・UX の8回目」）: 待合室でホストが詳細設定を変えると、ゲストの画面でその行が一瞬金色に光ってから戻る。字は足さない。
+// Claude の判断: 前に描いたときの値（rulesSeen）と比べて変わった項目の行を RULE_LIT_MS の間光らせる。待合室は何度も描き直すので、光り始めた時刻を覚えて続きから動かす。
+// 同じゲームのまま変わったときだけ（ゲームが替わったときは名前の帯が出る）。詳細設定を畳んでいるときは見出しの行を光らせる。ホスト自身の画面は光らせない
+const RULE_LIT_MS = 1600;
+let rulesSeen = { gameId: null, vals: null };
+const ruleLitAt = {};
+function ruleLights(game, cur) {
+  if (S.isHost || rulesSeen.gameId !== S.gameId) { rulesSeen = { gameId: S.gameId, vals: { ...cur } }; return {}; }
+  const now = Date.now();
+  for (const x of game.settings) if (rulesSeen.vals[x.key] !== cur[x.key]) ruleLitAt[`${S.gameId}:${x.key}`] = now;
+  rulesSeen.vals = { ...cur };
+  const out = {};
+  for (const x of game.settings) {
+    const at = ruleLitAt[`${S.gameId}:${x.key}`];
+    if (at && now - at < RULE_LIT_MS) out[x.key] = at - now; // animation-delay（負の数で続きから）
+  }
+  return out;
+}
+const litRule = (node, delay) => { node.classList.add('rule-lit'); node.style.animationDelay = `${delay}ms`; };
+
 function rulesPanel(game) {
   const det = document.createElement('details');
   det.className = 'lobby-rules';
@@ -4299,6 +4519,8 @@ function rulesPanel(game) {
   sum.textContent = S.isHost ? '詳細設定（ルールを選ぶ）' : '詳細設定（部屋を作った人が選びます）';
   det.append(sum);
   const cur = rulesOf(S.gameId, S.rules);
+  const seen = ruleLights(game, cur); // 動きを減らす設定の端末でも、前の値は覚えておく（光らせないだけ）
+  const lit = lessMotion() ? {} : seen;
   const set = (key, value) => {
     if (key === 'players') S.playersSet = { ...S.playersSet, [S.gameId]: true }; // もう部屋の人数に合わせない（autoPlayers）
     S.rules = { ...S.rules, [S.gameId]: { ...cur, [key]: value } };
@@ -4365,8 +4587,11 @@ function rulesPanel(game) {
       cb.onchange = () => set(x.key, cb.checked);
       label.append(cb, text);
     }
+    if (lit[x.key] !== undefined) litRule(label, lit[x.key]);
     det.append(label);
   }
+  const first = Object.values(lit);
+  if (first.length && !det.open) litRule(sum, Math.max(...first));
   return det;
 }
 
@@ -5753,6 +5978,19 @@ document.addEventListener('visibilitychange', () => {
   old.close();
 });
 
+/* ---------- よそ見中の印（2026-11-17 本人の選択。room.md「UI・UX の8回目」）: ほかのアプリやタブへ行っている人の、順番の帯の札を薄くして 💤 を付ける ---------- */
+// Claude の判断: 裏に回ったとき・戻ったときに type: 'look' を送り、生存確認の ping とあいさつ（hello）にも hid（裏にいるか）を載せる（届かなかった 'look' を次の ping で直す）。
+// iPhone などは裏に回ると通信を止めるので、'look' が出ていく前に止まることがある。そのため合図が LOOK_QUIET_MS より長く途切れた人も、よそ見中と見る
+// （LOST_MS（40秒）を過ぎたら今までどおり抜けた人の扱いで、印は付けない）。送りっぱなしで、手の一覧に入れない（対局には関わらない）。CPU と自分には付けない
+const LOOK_QUIET_MS = HEARTBEAT_MS * 2 + 2000;
+const lookOff = {}; // 人の id → 裏にいると知らせてきたか（保存しない。古い版の端末は hid を送らないので、いつも false）
+const isHidden = () => typeof document !== 'undefined' && document.visibilityState === 'hidden';
+const offscreen = (id) => !!id && id !== S?.myId && !isCpu(id) && alive(id) && (lookOff[id] === true || Date.now() - (S.seen[id] ?? 0) > LOOK_QUIET_MS);
+const offKey = () => (S?.members ?? []).filter(offscreen).join();
+document.addEventListener('visibilitychange', () => {
+  if (S?.mode === 'online' && S.conn === 'ready') send({ type: 'look', hid: isHidden() });
+});
+
 function send(msg, qos) { S?.net?.send(msg, qos); }
 function sendState() {
   const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, undo, streak, beg } = S;
@@ -5782,7 +6020,10 @@ function onMessage(msg) {
   if (msg.type === 'probe') { if (S.members.includes(S.myId)) send({ type: 'here', to: msg.from }); return; } // さっきの部屋へ戻る（2026-11-13）: 部屋にだれかいるかの問い合わせ
   if (msg.type === 'here') return;
   const wasAlive = alive(msg.from);
+  const wasOff = offKey();
   S.seen[msg.from] = Date.now();
+  if (msg.type === 'look' || msg.type === 'ping' || msg.type === 'hello') lookOff[msg.from] = msg.hid === true; // よそ見中の印（2026-11-17）
+  if (msg.type === 'look') { if (wasOff !== offKey()) render(); return; }
   if (msg.type === 'stream') { // 見た目だけの中身。手の一覧には入れず、描き直しもしない（相手の迷い（peek）だけは描き直す）
     if (msg.d?.peek !== undefined && !GAMES[S.gameId]?.multi) onPeek(msg);
     else if (msg.gameId === S.gameId && msg.round === S.round) GAMES[S.gameId]?.onStream?.(msg.d, S.order?.indexOf(msg.from) ?? -1);
@@ -5893,7 +6134,7 @@ function onMessage(msg) {
       }
       break;
     case 'ping':
-      if (wasAlive) { renderRoomBar(); return; } // 何も変わらないので盤は描き直さない
+      if (wasAlive && wasOff === offKey()) { renderRoomBar(); return; } // 何も変わらないので盤は描き直さない（よそ見中の印が付いた・外れたときは描き直す）
       break;
     default:
       break;
@@ -6187,8 +6428,8 @@ function rebase(msg) {
 setInterval(() => {
   if (S?.mode !== 'online' || S.conn !== 'ready') return;
   if (!S.isHost && !S.members.includes(S.myId) && !S.full) { if (!S.lockWait) askState(); } // 鍵のパスワードを聞いている間は送らない
-  else { send({ type: 'ping', t: Date.now() }); S.pingAt ??= Date.now(); } // t: 戻ってきたら通信の遅れを測る
-  const lostKey = S.members.filter((id) => !alive(id)).join();
+  else { send({ type: 'ping', t: Date.now(), hid: isHidden() || undefined }); S.pingAt ??= Date.now(); } // t: 戻ってきたら通信の遅れを測る。hid: よそ見中の印
+  const lostKey = S.members.filter((id) => !alive(id)).join() + '|' + offKey(); // よそ見中の印も、合図が途切れて付いた・外れたら描き直す
   if (lostKey !== S.lostKey) { S.lostKey = lostKey; render(); } else renderRoomBar();
 }, HEARTBEAT_MS);
 

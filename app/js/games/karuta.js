@@ -13,7 +13,7 @@
 
 import { mulberry32, shuffle, esc } from './util.js';
 import { KOTOWAZA } from './karuta-data.js';
-import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, secText, speedLine } from './party.js';
 import { speak, preloadVoice } from '../sound.js';
 
 const FIELD = 8;
@@ -262,6 +262,7 @@ export default {
       else note.textContent = '前半に合う後半の札を押そう';
     }
     wrap.append(note);
+    if (s.phase === 'shown') wrap.append(speedLine(o, s.got, key)); // 早押しの速さの線（2026-11-17。party.js の speedLine）。お手つきの人は線の外
   },
 
   // ふりかえり: 読んだことわざと、取った人

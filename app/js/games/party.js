@@ -190,6 +190,59 @@ export const afterMs = (key, limit, after, grace) => Math.round(Math.min(after, 
 
 export const secText = (ms) => (ms / 1000).toFixed(2) + '秒';
 
+// 早押しの速さの線（2026-11-17 本人の選択。room.md「UI・UX の8回目」）: 1問ごとの答えを見せる場面で、正解した人の押した速さ（各自の端末で測った ms）を
+// 1本の線の上に点で並べる。正解しなかった人（まちがえた・押さなかった）は線の右の外に点線の丸で並べる（理由の字は出さない）。
+// solved[p] = 正解した人の ms（ほかは null）。key = その問題の since の鍵（描き直しても点が出る動きを続きから見せる）。
+// Claude の判断: 線の長さは「いちばん遅い正解の 1.2倍」を 0.5秒単位で切り上げた長さ（最短1秒。制限時間にすると点が左に固まるため）。
+// 点が出る順は速い順で、出るまでの間は押した速さに比例（最後の点が 0.9秒ごろ）。名前は上下交互に出して重なりを減らす。
+// 置き場所は各ゲームの下の段の一番下（ボタンを押し下げないように）。動きを減らす設定の端末では出た形で出す
+export function speedLine(o, solved, key) {
+  const box = document.createElement('div');
+  box.className = 'speed-line';
+  const hits = solved.map((ms, p) => ({ p, ms })).filter((x) => typeof x.ms === 'number').sort((a, b) => a.ms - b.ms || a.p - b.p);
+  const outs = solved.map((ms, p) => (typeof ms === 'number' ? -1 : p)).filter((p) => p >= 0);
+  const span = Math.max(1000, Math.ceil(((hits.at(-1)?.ms ?? 0) * 1.2) / 500) * 500);
+  const name = (p) => (p === o.me && !o.watching ? 'あなた' : o.names?.[p] ?? `プレイヤー${p + 1}`);
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const t = since(key + ':speed');
+  const axis = document.createElement('div');
+  axis.className = 'sl-axis';
+  for (const v of [0, span / 2, span]) {
+    const tick = document.createElement('span');
+    tick.className = 'sl-tick';
+    tick.style.left = (v / span) * 100 + '%';
+    tick.textContent = (v / 1000).toFixed(1) + '秒';
+    axis.append(tick);
+  }
+  const last = hits.at(-1)?.ms || 1;
+  hits.forEach((x, i) => {
+    const pin = document.createElement('span');
+    pin.className = 'sl-pin ' + (i % 2 ? 'down' : 'up') + (i === 0 ? ' first' : '');
+    pin.style.left = (x.ms / span) * 100 + '%';
+    pin.style.background = SEAT_COLORS[x.p % SEAT_COLORS.length];
+    if (!still) pin.style.animationDelay = `${(x.ms / last) * 900 - t}ms`;
+    const nm = document.createElement('span');
+    nm.className = 'sl-nm';
+    nm.textContent = `${name(x.p)} ${(x.ms / 1000).toFixed(2)}`;
+    pin.append(nm);
+    axis.append(pin);
+  });
+  box.append(axis);
+  if (outs.length) {
+    const rest = document.createElement('div');
+    rest.className = 'sl-outs';
+    for (const p of outs) {
+      const s = document.createElement('span');
+      s.className = 'sl-out';
+      s.style.setProperty('--c', SEAT_COLORS[p % SEAT_COLORS.length]);
+      s.textContent = name(p);
+      rest.append(s);
+    }
+    box.append(rest);
+  }
+  return box;
+}
+
 // 席ごとの色（10人ぶん。最初の4つは --p0〜--p3 と同じ）。迷路早抜け・すごろくのコマ。どのスキンでも変えない
 export const SEAT_COLORS = ['#d9643a', '#2f6fb3', '#2e9a52', '#8a4fc0', '#d4a20c', '#d24a8c', '#1a9aa0', '#7a5a3a', '#5a6470', '#9acd32'];
 export { esc };

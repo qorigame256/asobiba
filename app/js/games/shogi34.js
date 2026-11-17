@@ -10,7 +10,7 @@
 // マスの番号 = 段 * 3 + 列（段0 が一番上、列0 が左）。持ち駒 hands[p][駒の番号] = 枚数（1〜3 だけ使う）。
 // 手: { f: 動かす駒のマス, t: 行き先 } / { d: 打つ駒（1〜3）, t: 打つマス } / { resign: true }（投了。手番の人）
 
-import { peekMark } from './util.js';
+import { peekMark, grabbable, justDragged } from './util.js';
 
 const W = 3;
 const H = 4;
@@ -238,6 +238,11 @@ let ui = { key: null, from: null, drop: null }; // 選んでいる駒（描き�
 
 export function render(root, s, o, players) {
   const draw = () => render(root, s, o, players);
+  // 行き先を押した・つまんだ駒を離したとき（2026-11-17 に押したときの中身をここへ移した）
+  const play = (t) => {
+    const m = legal.find((x) => x.t === t && (ui.drop !== null ? x.d === ui.drop : x.f === ui.from));
+    if (m) o.onMove(m);
+  };
   const last = W * H - 1;
   const bottom = Number.isInteger(o.view) ? o.view : o.me === 1 ? 1 : 0; // 自分の駒が下。観戦と同じ画面の対局では先手が下。盤の向きを変えた（⇅）ときは o.view の人が下
   const key = `${s.ply}:${o.me}`;
@@ -277,7 +282,9 @@ export function render(root, s, o, players) {
       if (s.last && !s.last.resign && !s.last.d) Object.assign(e.dataset, { flyFrom: `at:${s.last.t}`, flySpin: '180' });
       if (ok) {
         e.type = 'button';
-        e.onclick = () => { ui = { ...ui, from: null, drop: ui.drop === d ? null : d }; draw(); };
+        e.onclick = () => { if (justDragged()) return; ui = { ...ui, from: null, drop: ui.drop === d ? null : d }; draw(); };
+        // 指でつまんで動かす（2026-11-17。util.js の grabbable）: 持ち駒を盤のマスまで引っぱって打てる
+        grabbable(e, { piece: () => e.querySelector('.sg-piece'), pick: () => { ui = { ...ui, from: null, drop: d }; draw(); }, drop: (t) => { if (t !== null) play(Number(t)); } });
       }
       row.append(e);
     }
@@ -315,7 +322,7 @@ export function render(root, s, o, players) {
     cell.dataset.flySrc = `at:${i}`; // 取った駒が飛び立つ所（2026-11-06）
     if (s.last && !s.last.resign && s.last.t === i) cell.classList.add('last', ...(o.fresh ? ['pop'] : []));
     if (i === ui.from) cell.classList.add('selected');
-    if (isTarget) cell.classList.add('target');
+    if (isTarget) { cell.classList.add('target'); cell.dataset.drop = i; } // data-drop: つまんだ駒を離せる所（2026-11-17）
     peekMark(cell, i, o, isTarget, () => ({ f: ui.from, d: ui.drop })); // 相手の迷いが見える（2026-11-11。main.js の o.peek・o.peekIn）: 相手の選び・PC のねらい
     if (i === danger) cell.classList.add('checked');
     if (v) {
@@ -335,14 +342,13 @@ export function render(root, s, o, players) {
     if (isTarget || isMovable) {
       cell.type = 'button';
       cell.onclick = () => {
-        if (isTarget) {
-          const m = legal.find((x) => x.t === i && (ui.drop !== null ? x.d === ui.drop : x.f === ui.from));
-          if (m) o.onMove(m);
-          return;
-        }
+        if (justDragged()) return;
+        if (isTarget) { play(i); return; }
         ui = { ...ui, drop: null, from: ui.from === i ? null : i };
         draw();
       };
+      // 指でつまんで動かす（2026-11-17。util.js の grabbable）: 自分の駒を行き先まで引っぱって指せる
+      if (isMovable) grabbable(cell, { piece: () => cell.querySelector('.sg-piece'), pick: () => { ui = { ...ui, drop: null, from: i }; draw(); }, drop: (t) => { if (t !== null) play(Number(t)); } });
     }
     grid.append(cell);
   }

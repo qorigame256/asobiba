@@ -183,6 +183,85 @@ export function reachTag(text) {
 // 触っている間は取り上げない（取り上げると選択欄が閉じ、小窓の欄に打った字がゲームの欄へ行く）。呼ぶのは描き直しのときだけ（Node の自動確認からは呼ばれない）
 export const mayFocus = () => !matchMedia('(pointer: coarse)').matches && !document.activeElement?.closest?.('select, .invite-pop');
 
+// 指でつまんで動かす（2026-11-17 本人の選択。room.md「UI・UX の8回目」。将棋の仲間・はさみ将棋）: 駒を押したまま 8px 以上動かすと「つまんだ」ことにし、
+// ゲームの pick() でその駒を選んだ形に描き直させ（行ける所が光る）、駒の写しを指の下に浮かべて付いてこさせる。指を離した所の data-drop の物を drop(その値) に渡す
+// （行けない所なら null）。いままでの「押して→行き先を押す」はそのまま（動かさずに離せば、今までどおりの click になる）。
+// Claude の判断: 描き直しで元の駒の要素が消えても続くよう、動きは window で受ける。写しは body に置くので、大きさ・字の大きさを元の駒から写す。
+// つまんだあとに来る click は justDragged() で無視させる（つまむ前の選びが外れないように）。つまめる駒は touch-action: none（ページが一緒に動かないように）
+let dragging = false;
+let draggedAt = 0;
+export const justDragged = () => Date.now() - draggedAt < 400;
+export function grabbable(el, { piece, pick, drop }) {
+  el.classList.add('grab');
+  el.addEventListener('pointerdown', (e) => {
+    if (dragging || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    const st = { x: e.clientX, y: e.clientY, id: e.pointerId, on: false, ghost: null, over: null };
+    const place = (ev) => {
+      if (!st.ghost) return;
+      st.ghost.style.left = `${ev.clientX - st.w / 2}px`;
+      st.ghost.style.top = `${ev.clientY - st.h * 0.75}px`;
+    };
+    const target = (ev) => document.elementFromPoint(ev.clientX, ev.clientY)?.closest?.('[data-drop]') ?? null;
+    const move = (ev) => {
+      if (ev.pointerId !== st.id) return;
+      if (!st.on) {
+        if (Math.hypot(ev.clientX - st.x, ev.clientY - st.y) < 8) return;
+        st.on = true;
+        dragging = true;
+        // piece() は、浮かべる駒の要素か、{ node: 浮かべる物, from: 大きさを測る物 }（SVG の盤の駒は HTML の駒を作って浮かべる）
+        const got = piece?.();
+        const src = got?.node ? got.from : got;
+        if (src) {
+          const r = src.getBoundingClientRect();
+          st.w = r.width;
+          st.h = r.height;
+          st.ghost = got.node ?? src.cloneNode(true);
+          st.ghost.classList.add('grab-ghost');
+          const font = got.node ? `${Math.round(r.width * 0.55)}px` : getComputedStyle(src).fontSize;
+          Object.assign(st.ghost.style, { width: `${r.width}px`, height: `${r.height}px`, fontSize: font });
+          document.body.append(st.ghost);
+        }
+        document.documentElement.classList.add('grabbing');
+        pick();
+      }
+      ev.preventDefault();
+      place(ev);
+      const t = target(ev);
+      if (t !== st.over) { st.over?.classList.remove('grab-over'); t?.classList.add('grab-over'); st.over = t; }
+    };
+    const end = (ev) => {
+      if (ev.pointerId !== st.id) return;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+      if (!st.on) return;
+      dragging = false;
+      draggedAt = Date.now();
+      st.ghost?.remove();
+      st.over?.classList.remove('grab-over');
+      document.documentElement.classList.remove('grabbing');
+      const t = ev.type === 'pointerup' ? target(ev) : null;
+      drop(t ? t.dataset.drop : null);
+    };
+    window.addEventListener('pointermove', move, { passive: false });
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+  });
+}
+
+// 盤の上の足あと（2026-11-17 本人の選択。room.md「UI・UX の8回目」）: 3〜4人の盤で、1周ぶんの手のマスに小さな番号を付ける（古い手ほど薄い）。
+// f = main.js が渡す o.feet[マス]（{ n: 番号（古い順に1から）, age: いちばん新しい手から数えていくつ前か }）。マスの右上に重ねる（style.css の .foot）
+export function footMark(cell, f) {
+  if (!cell || !f) return;
+  const b = document.createElement('i');
+  b.className = 'foot';
+  b.setAttribute('aria-hidden', 'true');
+  b.textContent = f.n;
+  b.style.opacity = String(Math.max(0.35, 1 - f.age * 0.22));
+  cell.classList.add('has-foot');
+  cell.append(b);
+}
+
 // 人の名前など、外から来た文字を HTML に埋め込むときに使う
 export const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 

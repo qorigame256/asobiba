@@ -14,7 +14,7 @@
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q, c: 選んだ名前, ms }
 
 import { mulberry32, shuffle, esc } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, secText, speedLine } from './party.js';
 import { pointsOf } from './make10.js';
 import { KAGE, KINDS } from './kage-data.js';
 
@@ -229,6 +229,7 @@ export default {
     else if (s.phase === 'open' && s.miss[me]) note.textContent = '❌ ざんねん。次の問題を待とう';
     else if (s.phase === 'open') note.textContent = `${x.opts.length}つから1つ選んでください（答えられるのは1回だけ）`;
     wrap.append(note);
+    if (s.phase === 'shown') wrap.append(speedLine(o, s.solved, key)); // 早押しの速さの線（2026-11-17。party.js の speedLine）
     if (can) {
       setTimeout(() => {
         if (!grid.isConnected || grid.dataset.sent) return;

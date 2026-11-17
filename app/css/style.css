@@ -182,6 +182,15 @@ p { margin: 0; }
 .cat-h { font-size: .9rem; font-weight: 800; color: var(--muted); margin: 14px 2px 8px; scroll-margin-top: calc(118px + env(safe-area-inset-top)); }
 .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 @media (min-width: 600px) { .tiles { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+/* ホームに「さっき遊んだ」の列（2026-11-17。main.js の renderHome）: 5つまでを横一列に（スマホではあふれた分を横に送る）。開くたびに左から順にすべり込む */
+.tiles.recent { display: flex; overflow-x: auto; scrollbar-width: none; touch-action: pan-x pan-y; padding: 2px 2px 4px; margin: -2px; }
+.tiles.recent::-webkit-scrollbar { display: none; }
+.tiles.recent .tile { flex: 0 0 calc((100% - 16px) / 3.3); animation: recent-in .45s cubic-bezier(.2, 1, .4, 1) backwards; }
+@media (min-width: 600px) { .tiles.recent .tile { flex-basis: calc((100% - 32px) / 5); } }
+.tiles.recent .tile:nth-child(2) { animation-delay: .06s; } .tiles.recent .tile:nth-child(3) { animation-delay: .12s; }
+.tiles.recent .tile:nth-child(4) { animation-delay: .18s; } .tiles.recent .tile:nth-child(5) { animation-delay: .24s; }
+@keyframes recent-in { from { opacity: 0; transform: translateX(-18px); } }
+@media (prefers-reduced-motion: reduce) { .tiles.recent .tile { animation: none; } }
 .tile { position: relative; font: inherit; display: grid; justify-items: center; align-content: start; gap: 3px; min-width: 0; padding: 10px 4px 8px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; text-align: center; transition: transform .1s; }
 .tile:active { transform: scale(.96); }
 .tile:focus-visible, .cat-btn:focus-visible { outline: 3px solid var(--win); outline-offset: 2px; }
@@ -236,6 +245,18 @@ p { margin: 0; }
 .tag { align-self: flex-start; font-size: .8rem; background: var(--line); border-radius: 999px; padding: 2px 10px; }
 
 /* ---------- 対局画面 ---------- */
+/* スマホを横にしたときの並べ方（2026-11-17。main.js の land-board）: 盤のゲームの対局中、横向きの低い画面（高さ560px以下）では盤を左に画面の高さいっぱいで置き、
+   上の段・遊び方・部屋の帯・状態の欄（順番の帯）・下の段を右に縦に並べる。行は右の列の中身で決まり、盤は全部の行にまたがる（最後の 1fr の行が盤の高さを受け持つので、右の列に隙間が空かない） */
+@media (orientation: landscape) and (max-height: 560px) {
+  main:has(> #screen-play.land-board:not([hidden])) { max-width: none; padding-top: calc(8px + env(safe-area-inset-top)); padding-bottom: calc(8px + var(--ad-h, 0px) + env(safe-area-inset-bottom)); }
+  #screen-play.land-board {
+    --board: min(58vw, calc(100dvh - 20px - var(--ad-h, 0px) - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+    display: grid; grid-template-columns: var(--board) minmax(0, 1fr); grid-template-rows: repeat(8, auto) 1fr; column-gap: 16px; align-items: start;
+  }
+  #screen-play.land-board > #board { grid-column: 1; grid-row: 1 / -1; margin: 0; width: var(--board); box-sizing: border-box; } /* 広いマルバツ・スーパーマルバツ・点と線は自分の幅（min(92vw, 460px) など）を持つので、ここで上書きする */
+  #screen-play.land-board > :not(#board) { grid-column: 2; min-width: 0; }
+  #screen-play.land-board > #controls { margin-top: 10px; }
+}
 .play-top { display: flex; align-items: center; gap: 8px; }
 .play-top h2 { margin: 0; min-width: 0; font-size: clamp(.95rem, 4.3vw, 1.15rem); line-height: 1.25; } /* スマホ幅でも名前ができるだけ1行に収まるように */
 .play-top #btn-leave { white-space: nowrap; padding-left: 8px; padding-right: 8px; }
@@ -367,6 +388,21 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .scene .sc-txt { min-width: 0; }
 .scenes.still .scene { animation: none; }
 @keyframes scene-in { from { transform: translateX(-14px); opacity: 0; } }
+/* 盤の上の足あと（2026-11-17。util.js の footMark）: 3〜4人の盤で、1周ぶんの手のマスの右上に小さな番号（古い手ほど薄い。薄さは footMark が入れる） */
+.has-foot { position: relative; }
+.foot { position: absolute; top: 4%; right: 4%; z-index: 3; min-width: 1.35em; height: 1.35em; padding: 0 .2em; box-sizing: border-box; border-radius: 999px; display: grid; place-items: center;
+  background: rgba(30, 24, 18, .78); color: #fff; font: 800 clamp(9px, 2.4vw, 12px)/1 system-ui, sans-serif; font-style: normal; pointer-events: none; }
+/* 点の移り変わりの線（2026-11-17。main.js の appendTrail）: 結果の画面に小さな折れ線。判子のあとに線を左から引く。描き直しでは動かさない（.still） */
+.trail { width: min(100%, 380px); margin: 8px auto 0; }
+.trail-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.trail-svg .tr-grid { stroke: var(--line); stroke-width: 1; }
+.trail-svg .tr-num { fill: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.trail-svg .tr-line { fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 100; stroke-dashoffset: 100; animation: tr-draw 1.2s 1s ease-out forwards; }
+.trail-svg .tr-line.me { stroke-width: 3.4; }
+.trail-svg .tr-name { font-size: 11px; font-weight: 700; }
+.trail-svg.still .tr-line { animation: none; stroke-dashoffset: 0; }
+@keyframes tr-draw { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .trail-svg .tr-line { animation: none; stroke-dashoffset: 0; } }
 @media (prefers-reduced-motion: reduce) { .scene { animation: none; } .judge-bar .jb-fill { transition: none; } }
 .status-sub.beg-hint { color: #b06a00; }
 .howto { margin-top: 8px; background: var(--panel); border-radius: 12px; padding: 8px 14px; font-size: .9rem; line-height: 1.6; }
@@ -990,6 +1026,13 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .draw-line small { color: var(--muted); }
 .lobby-ready small { color: var(--muted); margin-left: 4px; }
 .lobby-ready.all { color: #2e7d32; font-weight: 700; }
+/* 「始める」を画面の下に固定（2026-11-17。main.js の lobbyDock）: 待合室で、画面の下に留める。広告の帯（--ad-h）と iPhone の下の帯の上に出す */
+.dock { position: sticky; bottom: calc(var(--ad-h, 0px) + env(safe-area-inset-bottom)); z-index: 4; display: flex; align-items: center; justify-content: center; gap: 12px;
+  margin: 14px -16px 0; padding: 10px 16px; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(6px); border-top: 1px solid var(--line); }
+.dock[hidden] { display: none; }
+.dock .btn { min-width: 9em; }
+.dock-ready { font-size: .9rem; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dock-ready.all { color: #2e7d32; }
 .btn.ready-go { animation: ready-go 1.2s ease-in-out infinite; } /* 全員の準備ができたら「始める」を目立たせる */
 @keyframes ready-go { 50% { box-shadow: 0 0 0 6px rgba(255, 170, 0, .45); } }
 @media (prefers-reduced-motion: reduce) { .btn.ready-go { animation: none; box-shadow: 0 0 0 3px rgba(255, 170, 0, .6); } }
@@ -1117,6 +1160,21 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .cc-color.c-b { background: #2f6fb3; }
 .cc-dir { color: var(--muted); }
 .cc-log { text-align: center; font-size: .9rem; color: var(--muted); min-height: 1.6em; }
+/* 早押しの速さの線（2026-11-17。party.js の speedLine）: 正解した人の速さを1本の線に点で並べ、名前は上下交互。正解しなかった人は線の外に点線の丸 */
+.speed-line { width: min(100%, 440px); margin: 4px auto 0; padding: 0 28px; box-sizing: border-box; }
+.sl-axis { position: relative; height: 80px; }
+.sl-axis::before { content: ""; position: absolute; left: 0; right: 0; top: 36px; height: 3px; border-radius: 2px; background: var(--line); }
+.sl-tick { position: absolute; top: 64px; transform: translateX(-50%); font-size: .68rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sl-pin { position: absolute; top: 29px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; border: 2px solid var(--panel); box-sizing: border-box; animation: sl-pop .3s cubic-bezier(.3, 1.6, .6, 1) both; }
+.sl-pin.first { box-shadow: 0 0 0 4px color-mix(in srgb, var(--win) 60%, transparent); z-index: 1; }
+.sl-nm { position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: .7rem; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; max-width: 9em; overflow: hidden; text-overflow: ellipsis; }
+.sl-pin.up .sl-nm { bottom: 16px; }
+.sl-pin.down .sl-nm { top: 16px; }
+@keyframes sl-pop { from { transform: scale(0); } to { transform: scale(1); } }
+.sl-outs { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 10px; font-size: .7rem; color: var(--muted); }
+.sl-out { display: inline-flex; align-items: center; gap: 4px; }
+.sl-out::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 2px dashed var(--c, var(--muted)); box-sizing: border-box; }
+@media (prefers-reduced-motion: reduce) { .sl-pin { animation: none; } }
 
 .cc-hand-head { font-weight: 700; font-size: .95rem; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .cc-hand-head small { color: var(--muted); font-weight: 400; }
@@ -1167,6 +1225,9 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .lobby-stay input { margin-top: 3px; width: 18px; height: 18px; flex: none; }
 .lobby-stay small { color: var(--muted); display: block; }
 .lobby-rules label { display: flex; align-items: flex-start; gap: 8px; margin-top: 8px; line-height: 1.4; }
+/* ホストが変えた設定が光る（2026-11-17。main.js の ruleLights）: ゲストの画面で、変わった行（畳んでいれば見出し）が金色に光ってから戻る */
+.rule-lit { border-radius: 8px; animation: rule-lit 1.6s ease-out both; }
+@keyframes rule-lit { 0%, 25% { background: color-mix(in srgb, var(--win) 55%, transparent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--win) 55%, transparent); } 100% { background: transparent; box-shadow: 0 0 0 4px transparent; } }
 .lobby-rules input { margin-top: 3px; width: 18px; height: 18px; flex: none; }
 .lobby-rules small { color: var(--muted); display: block; }
 
@@ -2301,6 +2362,21 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .turn-dots i:nth-child(3) { animation-delay: .3s; }
 @keyframes turn-dot { 0%, 60%, 100% { transform: translateY(0); opacity: .35; } 30% { transform: translateY(-3px); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .turn-card { transition: none; } .turn-card.now { transform: none; } }
+/* 名前を押すと小さな札（2026-11-17。main.js の openProfile）: 押せる名前は指の形にし、札は押した名前のすぐ下に出す */
+.can-profile { cursor: pointer; }
+.can-profile:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.profile-pop { position: fixed; z-index: 70; display: grid; gap: 2px; min-width: 160px; max-width: min(260px, calc(100vw - 16px)); padding: 10px 12px; border-radius: 12px;
+  background: var(--panel); color: var(--ink); border: 1px solid var(--line); box-shadow: 0 8px 24px rgba(0, 0, 0, .18); font-size: .84rem; line-height: 1.5; animation: pp-in .16s ease-out both; }
+.profile-pop b { font-size: .95rem; overflow-wrap: anywhere; }
+@keyframes pp-in { from { opacity: 0; transform: translateY(-4px) scale(.97); } }
+@media (prefers-reduced-motion: reduce) { .profile-pop { animation: none; } }
+/* よそ見中の印（2026-11-17。main.js の offscreen）: 札を薄く灰色にし、右の縁に 💤 を浮かべる（上の縁は王冠・印・炎、下の縁は「…」が使う） */
+.turn-card.off { opacity: .45; }
+.turn-card.off > :not(.turn-off) { filter: grayscale(.85); }
+.turn-off { position: absolute; top: 50%; right: -11px; font-size: 1rem; line-height: 1; pointer-events: none; z-index: 1; animation: toff-in .4s ease-out both, toff-float 2.4s .4s ease-in-out infinite; }
+@keyframes toff-in { from { opacity: 0; transform: translateY(-20%) scale(.6); } to { opacity: 1; transform: translateY(-50%); } }
+@keyframes toff-float { 0%, 100% { transform: translateY(-50%); } 50% { transform: translateY(-80%); } }
+@media (prefers-reduced-motion: reduce) { .turn-off { animation: none; transform: translateY(-50%); } }
 /* あなたの番までに起きたこと（2026-11-11。main.js の saidBySeat）: 札の中の下に短い吹き出し。長い言葉は「…」で切る */
 .turn-band.has-said .turn-card { max-width: 128px; }
 .turn-band.has-said .turn-card.now:has(.turn-dots) { padding-bottom: 12px; }
@@ -3084,6 +3160,21 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .sg .sg-cell.selected .sg-piece.flip { transform: rotate(180deg) translateY(14%) scale(1.12); }
 .sg .sg-cell.selected::before { content: ""; position: absolute; left: 16%; right: 16%; bottom: 3%; height: 18%; border: 0; border-radius: 50%; background: radial-gradient(ellipse at center, rgba(40, 20, 0, .45), transparent 70%); pointer-events: none; }
 @media (prefers-reduced-motion: reduce) { .sg .sg-cell .sg-piece { transition: none; } }
+
+/* 指でつまんで動かす（2026-11-17。util.js の grabbable）: つまめる駒はページを動かさない。つまんでいる間は元の駒を薄くし、駒の写しを指の上に浮かべ、
+   離せる所（data-drop）の上に来たらその所を濃く光らせる。写しは body に置くので、駒の形（.sg-piece）だけで描けるようにしてある */
+.grab { touch-action: none; }
+.grab-ghost { position: fixed; z-index: 60; margin: 0; pointer-events: none; scale: 1.3; filter: drop-shadow(0 8px 8px rgba(0, 0, 0, .35)); }
+.grab-ghost.flip { rotate: 180deg; transform: none; }
+.grab-ghost.sg-piece:is(.p0, .p1) { clip-path: none; border-radius: 14%; padding: 0; font-family: "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif; } /* 3×4（動物の駒）の写し（.sg34 の外に置くため） */
+.grab-ghost.sg-piece.p0 { background: linear-gradient(#e9f7d8, #bfe3a0); }
+.grab-ghost.sg-piece.p1 { background: linear-gradient(#fde2e2, #f3b5b5); }
+html.grabbing, html.grabbing * { cursor: grabbing !important; }
+html.grabbing .sg-cell.selected .sg-piece, html.grabbing .sg-hand-piece.selected .sg-piece { opacity: .3; }
+html.grabbing .sg3-cell.selected { opacity: .5; }
+.sg .sg-cell.grab-over { background: rgba(217, 100, 58, .45); }
+.sg3-hit.grab-over { fill: rgba(217, 100, 58, .4); }
+@media (prefers-reduced-motion: reduce) { .grab-ghost { scale: 1.15; } }
 
 /* 見出しの字体（2026-11-09 本人の選択。場面ごとに変える。room.md「演出・アニメーションの2回目」）: 使う字だけ切り出したファイル（tools/make-fonts.mjs）。
    タイトル・画面の見出し・ゲームの名前は丸ゴシック、判子は筆、あなたのターンの帯・技の名前は極太。入っていない字は後ろの字体で出る。

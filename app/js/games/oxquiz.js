@@ -14,7 +14,7 @@
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q, c: true(⭕) | false(❌), ms }
 
 import { mulberry32, shuffle, esc } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, secText, speedLine } from './party.js';
 import { pointsOf } from './make10.js';
 import { OXQUIZ } from './oxquiz-data.js';
 
@@ -244,6 +244,7 @@ export default {
     else if (s.phase === 'open' && s.said[me] !== null) note.textContent = 'ほかの人を待っています…';
     else if (s.phase === 'open') note.textContent = '答えられるのは1回だけ';
     wrap.append(note);
+    if (s.phase === 'shown') wrap.append(speedLine(o, s.solved, key)); // 早押しの速さの線（2026-11-17。party.js の speedLine）
   },
 
   review(s, me, o) {

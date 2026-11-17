@@ -23,7 +23,7 @@
 //   4つ並べだけでは CPU どうし60局のうち54〜60局が盤が埋まって引き分けになった（3人がかりで止められるため）。はさみ取りありでは0局・1局 60〜80手。結果を見せて本人が決めた。
 //   2人のときの局面は前と全く同じ形（3人・4人のときだけ np）。CPU は2人と同じ考え方で、守りは次の番の人を重く見る。
 
-import { CPU_SETTING, TAP_PEEK_SETTING, DANGER_SETTING, dangerMoves, dangerOn, mulberry32, winLine, col } from './util.js';
+import { CPU_SETTING, TAP_PEEK_SETTING, DANGER_SETTING, dangerMoves, dangerOn, mulberry32, winLine, col, footMark } from './util.js';
 
 const DIRS = [[0, 1], [1, 0], [1, 1], [1, -1]];
 const DIRS8 = [...DIRS, ...DIRS.map(([r, c]) => [-r, -c])];
@@ -409,6 +409,7 @@ export default {
         stone.className = 'gm-stone p' + col(v) + (win.has(i) ? ' win' : '') + (i === s.last ? ' last' : '') + (i === s.last && o.fresh ? ' pop' : '');
         if (i === s.last) stone.dataset.last = ''; // 決め手のスロー（main.js の slowFinish）
         cell.append(stone);
+        footMark(cell, o.feet?.[i]); // 盤の上の足あと（2026-11-17。util.js の footMark）
         cell.tabIndex = -1;
       } else if (ban && forbidden(s.grid, n, i)) {
         cell.append(Object.assign(document.createElement('span'), { className: 'gm-ban', textContent: '×' }));

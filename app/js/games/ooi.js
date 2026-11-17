@@ -22,7 +22,7 @@
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q, c: 箱の番号（左から 0・1・(2)）, ms }
 
 import { mulberry32, shuffle } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, secText, speedLine } from './party.js';
 import { pointsOf } from './make10.js';
 
 const ROUNDS = [[5, '5問'], [10, '10問'], [20, '20問']];
@@ -295,6 +295,7 @@ export default {
     else if (s.phase === 'open' && s.miss[me]) note.textContent = '❌ ざんねん。次の問題を待とう';
     else if (s.phase === 'open') note.textContent = x.counts.length === 3 ? 'PC は ← ↓ → キーでも押せます' : 'PC は ← → キーでも押せます';
     wrap.append(note);
+    if (s.phase === 'shown') wrap.append(speedLine(o, s.solved, key)); // 早押しの速さの線（2026-11-17。party.js の speedLine）
   },
 
   review(s, me, o) {

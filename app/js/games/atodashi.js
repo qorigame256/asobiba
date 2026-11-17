@@ -12,7 +12,7 @@
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q, h: 'g' | 'c' | 'p', ms }
 
 import { mulberry32 } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, secText, speedLine } from './party.js';
 import { pointsOf } from './make10.js';
 
 export const HANDS = ['g', 'c', 'p'];
@@ -213,6 +213,7 @@ export default {
     else if (s.phase === 'open' && s.solved[me] !== null) note.textContent = `⭕ 正解！（${secText(s.solved[me])}）`;
     else if (s.phase === 'open' && s.miss[me]) note.textContent = '❌ ざんねん。次の問題を待とう';
     wrap.append(note);
+    if (s.phase === 'shown') wrap.append(speedLine(o, s.solved, key)); // 早押しの速さの線（2026-11-17。party.js の speedLine）
   },
 
   review(s, me, o) {

@@ -33,7 +33,7 @@
 //   詰み（決着）の手では出さない。本将棋・5五将棋・3人将棋（指した人の駒がほかの人の玉に利いた）・3×4（ライオンに利いた）のどれでも効く。
 //   なしのときだけ局面に quiet: true を持つ（ありのときは今までと全く同じ形）。CPU の読みと apply の結果は変えない。
 
-import { CPU_SETTING, PEEK_SETTING, peekMark, mulberry32, judgeOf } from './util.js';
+import { CPU_SETTING, PEEK_SETTING, peekMark, mulberry32, judgeOf, grabbable, justDragged } from './util.js';
 import * as three from './shogi3.js';
 import * as four from './shogi4.js';
 
@@ -612,9 +612,12 @@ export default {
         if (ok) {
           e.type = 'button';
           e.onclick = () => {
+            if (justDragged()) return;
             ui = { ...ui, from: null, promo: null, drop: ui.drop === d ? null : d };
             draw();
           };
+          // 指でつまんで動かす（2026-11-17。util.js の grabbable）: 持ち駒を盤のマスまで引っぱって打てる
+          grabbable(e, { piece: () => e.querySelector('.sg-piece'), pick: () => { ui = { ...ui, from: null, promo: null, drop: d }; draw(); }, drop: (t) => { if (t !== null) pick(Number(t)); } });
         }
         row.append(e);
       }
@@ -653,7 +656,7 @@ export default {
       if (s.last && !s.last.resign && s.last.t === i) cell.classList.add('last', ...(o.fresh ? ['pop'] : []));
       if (s.last && !s.last.resign && s.last.t === i) cell.dataset.last = 'still'; // 決め手のスロー（main.js の slowFinish）: 駒は滑ってくるので寄せるだけ
       if (i === ui.from) cell.classList.add('selected');
-      if (isTarget) cell.classList.add('target');
+      if (isTarget) { cell.classList.add('target'); cell.dataset.drop = i; } // data-drop: つまんだ駒を離せる所（2026-11-17）
       peekMark(cell, i, o, isTarget, () => ({ f: ui.from, d: ui.drop })); // 相手の迷いが見える（2026-11-11。main.js の o.peek・o.peekIn）: 相手の選び・PC のねらい
       if (i === checkedKing) cell.classList.add('checked');
       if (blockSq.has(i)) cell.classList.add('sg-block');
@@ -675,10 +678,13 @@ export default {
       if (isTarget || isMovable) {
         cell.type = 'button';
         cell.onclick = () => {
+          if (justDragged()) return;
           if (isTarget) { pick(i); return; }
           ui = { ...ui, drop: null, promo: null, from: ui.from === i ? null : i };
           draw();
         };
+        // 指でつまんで動かす（2026-11-17。util.js の grabbable）: 自分の駒を行き先まで引っぱって指せる
+        if (isMovable) grabbable(cell, { piece: () => cell.querySelector('.sg-piece'), pick: () => { ui = { ...ui, drop: null, promo: null, from: i }; draw(); }, drop: (t) => { if (t !== null) pick(Number(t)); } });
       }
       grid.append(cell);
     }
