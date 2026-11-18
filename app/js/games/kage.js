@@ -185,7 +185,8 @@ export default {
     card.append(pic);
     if (s.phase === 'open') {
       since(key);
-      if (s.solved.some((v) => v !== null)) card.insertAdjacentHTML('beforeend', '<div class="kj-sub">だれかが正解！ 4秒で締め切り</div>');
+      const anySolved = s.solved.some((v) => v !== null);
+      card.insertAdjacentHTML('beforeend', `<div class="kj-sub"${anySolved ? '' : ' style="visibility:hidden"'}>だれかが正解！ 4秒で締め切り</div>`); // 行の場所はいつも空けておく（出たときに下の札がずれて押しまちがえないように。2026-11-18 の Codex の点検）
       card.append(timeBar(key, LIMIT, { secs: true }));
     } else {
       const t = document.createElement('div');

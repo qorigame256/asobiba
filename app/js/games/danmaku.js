@@ -336,7 +336,8 @@ function draw() {
     const w = ctx.measureText(text).width + 16, h = Math.max(13, k * 0.045) * 1.5;
     ctx.fillStyle = 'rgba(10, 14, 30, .55)';
     ctx.beginPath();
-    ctx.roundRect(k / 2 - w / 2, k * 0.06 - h * 0.72, w, h, h / 2);
+    if (ctx.roundRect) ctx.roundRect(k / 2 - w / 2, k * 0.06 - h * 0.72, w, h, h / 2);
+    else ctx.rect(k / 2 - w / 2, k * 0.06 - h * 0.72, w, h); // roundRect の無い古いブラウザ（iOS 15 以前など）
     ctx.fill();
     ctx.fillStyle = '#fff';
     ctx.fillText(text, k / 2, k * 0.06);

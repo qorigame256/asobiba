@@ -1619,8 +1619,9 @@ function mergeBubble(b, who) {
   x.textContent = `×${b.count}`;
   if (!lessMotion()) {
     x.classList.remove('bump'); void x.offsetWidth; x.classList.add('bump');
-    b.style.animation = 'none'; void b.offsetWidth; b.style.animation = `react-out .4s ease-in ${BUBBLE_MS - 400}ms forwards`; // 消える動きも数え直す
   }
+  // 消える動き（CSS の react-out）は動きを減らす設定でも動くので、いつも数え直す（2026-11-18 の Codex の点検）
+  b.style.animation = 'none'; void b.offsetWidth; b.style.animation = `react-out .4s ease-in ${BUBBLE_MS - 400}ms forwards`;
   clearTimeout(b.timer);
   b.timer = setTimeout(() => b.remove(), BUBBLE_MS);
 }
@@ -2061,7 +2062,7 @@ function watchHtml() {
 // Claude の判断: 見出しの書き方は各ゲームの phaseText のままにし、ここで頭の形だけ見て言い換える（ゲームごとに直さない）。全部が1つだけのときは言い換えない。
 // 言い換えた見出しが初めて出たときだけ少しふくらませる（描き直しのたびに動かないよう、出した見出しを覚える）
 const FINAL_WORDS = [
-  [/^第(\d+)問 \/ (\d+)/, '最終問題'], [/^(\d+)問目 \/ (\d+)/, '最終問題'], [/^(\d+)回目 \/ (\d+)/, '最終回'],
+  [/^第(\d+)問 \/ (\d+)/, '最終問題'], [/^(\d+)問目 \/ (\d+)/, '最終問題'], [/^(\d+)回目 \/ (\d+)/, '最終回'], [/^第(\d+)回 \/ (\d+)/, '最終回'],
   [/^(\d+)回戦 \/ (\d+)/, '最終戦'], [/^ラウンド (\d+) \/ (\d+)/, '最終ラウンド'], [/^(\d+)枚目 \/ (\d+)/, '最後の1枚'],
 ];
 let finalSeen = '';
@@ -2092,6 +2093,9 @@ function statusHtml(game, st, res) {
       if (t === null) main = finalMark(game.phaseText?.(st, me, pn) ?? '');
       else if (t === me) main = 'あなたのターン';
       else main = `${pn(t)}のターン…`;
+      // 手番があるあいだも「2回戦 / 3」などを頭に添える（ゲームの turnHead。シーソー・てんびん当ての1台。2026-11-18 の Codex の点検で、回数がどこにも出ていなかった）
+      const head = t !== null ? game.turnHead?.(st) : '';
+      if (head) main = `${finalMark(head)}・${main}`;
     }
     if (me === SPECTATOR) sub = vacantSeats().length && !res ? '観戦中です（部屋を出た人の席に、下のボタンで途中から入れます）' : '観戦中です（次の対局から参加できます）';
   } else {
@@ -2500,7 +2504,7 @@ function renderPage() {
       hidden: S.order.map((id) => !!S.hidden?.includes(id)), // 「この人を隠す」を押した人の席（その人の言葉と絵を出さない）
       watching: myPlayer() === SPECTATOR && opts.me !== SPECTATOR, // 観戦の人がほかの人の画面を見ている（me はその人の番号）
       // 見た目だけの中身（ほかの人の位置など）を送りっぱなしにする。届いた側ではゲームの onStream が受け取る
-      stream: (d) => { if (S.mode === 'online') send({ type: 'stream', gameId: S.gameId, round: S.round, d }, 0); },
+      stream: (d) => { if (S?.mode === 'online') send({ type: 'stream', gameId: S.gameId, round: S.round, d }, 0); },
     });
   }
   game.render(board, st, opts);
@@ -3889,7 +3893,7 @@ function backToBoard() {
   if (!S?.myTurnNow || el('screen-play').hidden) return;
   const idle = Date.now() - scrolledAt;
   if (touching || idle < BOARD_IDLE_MS) { boardWait = setTimeout(backToBoard, touching ? 4000 : BOARD_IDLE_MS - idle + 50); return; }
-  if (document.activeElement?.closest?.('input, textarea, select') || document.querySelector('.invite-pop')) return;
+  if (document.activeElement?.closest?.('input, textarea, select') || document.querySelector('.invite-pop, .profile-pop')) return;
   const status = el('status');
   const board = el('board');
   const b = board.getBoundingClientRect();
@@ -4893,6 +4897,7 @@ function replaceMember(old, neu, name) {
   if (S.line) S.line = S.line.map(swap);
   if (S.bench) S.bench = S.bench.map(swap); // 観戦に回した人が入り直しても観戦のまま（2026-11-03 本人の依頼）
   if (S.away) S.away = S.away.map(swap);
+  if (S.history) S.history = S.history.map((h) => (Array.isArray(h?.i) && h.i.includes(old) ? { ...h, i: h.i.map(swap) } : h)); // 名前の札の「勝った遊び」が入り直しで消えないように（2026-11-18 の Codex の点検）
   if (S.tally) {
     S.tally = { ...S.tally, wins: rekey(S.tally.wins), played: rekey(S.tally.played), pts: rekey(S.tally.pts) };
     if (S.tally.best) S.tally.best = Object.fromEntries(Object.entries(S.tally.best).map(([k, list]) => [k, list.map((b) => (b.id === old ? { ...b, id: neu } : b))]));

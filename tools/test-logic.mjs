@@ -12002,6 +12002,15 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.equal(pairsOf(5, seed, 3).flat().length, 4, 'たたいて: 奇数なら1人休み');
   }
   assert.notDeepEqual(pairsOf(6, 1, 0), pairsOf(6, 1, 1), 'たたいて: 組は回ごとに変わる');
+  { // 4人以上なら前の回と同じ相手の組を作らない（2026-11-18 本人の決定）
+    const key = ([a, b]) => Math.min(a, b) + '-' + Math.max(a, b);
+    for (const n of [4, 6, 10]) for (let seed = 0; seed < 30; seed++) for (let r = 1; r < 15; r++) {
+      const prev = new Set(pairsOf(n, seed, r - 1).map(key));
+      const ps = pairsOf(n, seed, r);
+      assert.deepEqual(ps.flat().sort((x, y) => x - y), [...Array(n).keys()], 'たたいて: まぜ直しても全員がちょうど1つの組');
+      assert.ok(!ps.some((p) => prev.has(key(p))), `たたいて: ${n}人で前の回と同じ相手（seed ${seed} 回 ${r}）`);
+    }
+  }
   const H = ['g', 'c']; // 0 が勝ち・1 が負け
   const J = (acts) => judgePair(H, acts, [0, 1]);
   assert.deepEqual(J([{ a: 'hit', ms: 300 }, { a: 'cover', ms: 400 }]), { kind: 'hit', by: 0, pts: { 0: 1 } }, 'たたいて: 先にたたけたら1点');

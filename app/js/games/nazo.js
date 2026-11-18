@@ -15,7 +15,7 @@
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q, c: 選んだ答えの文字, ms }
 
 import { mulberry32, shuffle, esc } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, secText, speedLine } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText, speedLine } from './party.js';
 import { pointsOf } from './make10.js';
 import { NAZO } from './nazo-data.js';
 
@@ -83,7 +83,7 @@ export default {
     if (s.phase === 'ready') return { key: 'ready', ms: READY_MS, move: { t: 'next' } };
     if (s.phase === 'open') {
       if ([...Array(s.n).keys()].every((p) => doneOf(s, p))) return { key: 'all' + s.q, ms: GRACE_MS, move: { t: 'close' } };
-      if (s.solved.some((v) => v !== null)) return { key: 'solved' + s.q, ms: AFTER_MS, move: { t: 'close' } };
+      if (s.solved.some((v) => v !== null)) return { key: 'solved' + s.q, ms: afterMs(qKey(s), limitOf(s), AFTER_MS, GRACE_MS), move: { t: 'close' } }; // 1問の残りより長く待たない（一筆書きと同じ）
       return { key: 'open' + s.q, ms: limitOf(s) + GRACE_MS, move: { t: 'close' } };
     }
     if (s.phase === 'shown') return { key: 'shown' + s.q, ms: SHOWN_MS, move: { t: 'next' } };
@@ -197,8 +197,9 @@ export default {
     card.append(q);
     if (!shown) {
       since(key);
-      if (s.solved.some((v) => v !== null)) card.insertAdjacentHTML('beforeend', '<div class="kj-sub">だれかが正解！ 5秒で締め切り</div>');
-      card.append(timeBar(key, limitOf(s), { secs: true }));
+      const anySolved = s.solved.some((v) => v !== null);
+      card.insertAdjacentHTML('beforeend', `<div class="kj-sub"${anySolved ? '' : ' style="visibility:hidden"'}>だれかが正解！ もうすぐ締め切り</div>`); // 行の場所はいつも空けておく（出たときに下の札がずれて押しまちがえないように。2026-11-18 の Codex の点検）
+      card.append(anySolved ? afterBar(key, limitOf(s), AFTER_MS) : timeBar(key, limitOf(s), { secs: true }));
     } else {
       const a = document.createElement('div');
       a.className = 'ox-ans';

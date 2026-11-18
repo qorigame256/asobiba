@@ -207,9 +207,7 @@ export default {
     const key = qKey(s);
     const head = document.createElement('div');
     head.className = 'kj-card dt-head';
-    head.innerHTML = '';
-    wrap.append(head);
-    if (s.phase === 'open') { since(key); head.append(timeBar(key, LIMIT)); }
+    if (s.phase === 'open') { since(key); head.append(timeBar(key, LIMIT)); wrap.append(head); } // 投げている間だけ（答え合わせで空の枠が残らないように）
 
     if (loc?.key !== key) loc = { key, thrown: 0 };
     const mine = me !== null ? s.darts[me] : [];

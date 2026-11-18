@@ -24,6 +24,7 @@
 //     names は外から来た文字なので textContent で出すか esc() を通す。
 //   任意: settings（詳細設定 [{ key, label, desc, def, choices?: [[値, 表示名]…] }]。choices が無ければ はい/いいえ）, carry(局面, p)（次の対局へ持ち越す値。終局後に呼ばれる）,
 //     resultText(result, 自分の番号, 名前→HTML) / phaseText(局面, 自分の番号, 名前→HTML)（手番が null のときの状態表示）,
+//     turnHead(局面)（手番があるときも状態表示の頭に添える短い字。「2回戦 / 3」など。無ければ「○○のターン」だけ）,
 //     cpuDelay(局面, p)（CPU が打つまでの待ち時間 ms。結果を見せたいときに長くする）,
 //     seats(rules) → 人数（詳細設定で人数が決まるゲーム。待合室の足りない席はすべて CPU）,
 //     quietCpu: true（対局の途中の CPU のひとことを出さない。CPU が動いたことを結果の前に知られたくないゲーム。見切り）,

@@ -1,6 +1,7 @@
 // たたいてかぶってじゃんけん。2人ずつ組になってじゃんけんをし、勝った人は「たたく」、負けた人は「かぶる」を早く押す。2〜10人（偶数）・足りない分は CPU（弱め）。
 // 2026-11-18 本人の決定（Claude が出した案から本人が選んだ。分かれ目はすべて Claude の推奨を本人が承認「推奨どおりで」）:
-//   - 毎回、全員を2人ずつの組に分けて同時に戦う。人数が奇数のときは CPU が入る（evenTeams で全員の数を偶数にそろえる）。組は毎回変える。
+//   - 毎回、全員を2人ずつの組に分けて同時に戦う。人数が奇数のときは CPU が入る（evenTeams で全員の数を偶数にそろえる）。組は毎回変える
+//     （4人以上なら前の回と同じ相手にしない。2026-11-18 本人の決定。pairsOf）。
 //     10回戦って、勝った回数（点）の多い人の勝ち。
 //   - 流れ: 手を選ぶ（3秒）→ 手が一斉に出る → 勝った人は 🔨、負けた人は ⛑️ を押す。勝った人が先にたたけたら1点、負けた人が先にかぶれたらどちらも0点。
 //     手を選ばなかったときは、おまかせの手になる。
@@ -41,12 +42,30 @@ const actKey = (s, r = s.r) => `tataite:${s.seed}:${r}:act`;
 const pickKey = (s, r = s.r) => `tataite:${s.seed}:${r}:pick`;
 const clone = (s) => ({ ...s, scores: s.scores.slice(), hands: s.hands.slice(), acts: s.acts.slice() });
 
-// その回の組（種と何回目かでまぜる。全員同じ）
+// その回の組（種と何回目かでまぜる。全員同じ）。
+// 2026-11-18 本人の決定（Codex の点検の問いに推奨どおり）: 4人以上なら、前の回と同じ相手の組を作らない。
+// Claude の判断: 同じ乱数でまぜ直し、前の回と重なる組が無いものを使う（1回目のまぜ方は前と同じなので、重ならない回は前の版と同じ組）。
+// 30回まぜても見つからなければ、重なりのいちばん少ないもの。2〜3人は相手を替えられないのでそのまま。前の回の組は同じ決め方で順にさかのぼって作る（memo に覚える）。
+const pairMemo = new Map();
 export function pairsOf(n, seed, r) {
-  const order = shuffle([...Array(n).keys()], mulberry32((seed * 151 + r * 43 + 9) >>> 0));
-  const out = [];
-  for (let i = 0; i + 1 < order.length; i += 2) out.push([order[i], order[i + 1]]);
-  return out;
+  const key = `${n}:${seed}:${r}`;
+  if (pairMemo.has(key)) return pairMemo.get(key);
+  const rnd = mulberry32((seed * 151 + r * 43 + 9) >>> 0);
+  const cut = (order) => { const out = []; for (let i = 0; i + 1 < order.length; i += 2) out.push([order[i], order[i + 1]]); return out; };
+  let best = cut(shuffle([...Array(n).keys()], rnd));
+  if (r > 0 && n >= 4) {
+    const seen = new Set(pairsOf(n, seed, r - 1).map(([a, b]) => Math.min(a, b) + '-' + Math.max(a, b)));
+    const dup = (ps) => ps.filter(([a, b]) => seen.has(Math.min(a, b) + '-' + Math.max(a, b))).length;
+    let bestDup = dup(best);
+    for (let t = 0; t < 30 && bestDup > 0; t++) {
+      const ps = cut(shuffle([...Array(n).keys()], rnd));
+      const d = dup(ps);
+      if (d < bestDup) { best = ps; bestDup = d; }
+    }
+  }
+  pairMemo.set(key, best);
+  if (pairMemo.size > 500) pairMemo.delete(pairMemo.keys().next().value);
+  return best;
 }
 // 手を選ばなかった人のおまかせの手（種・回・席から決まる）
 // 「ばらばら」のとき、手が出る合図から手を見せるまでの間（ms）。いつも同じなら0

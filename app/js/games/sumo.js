@@ -410,7 +410,8 @@ function mount(root, opts) {
       const w = g.measureText(t).width + 10;
       g.fillStyle = 'rgba(255, 255, 255, .82)';
       g.beginPath();
-      g.roundRect(tx - w / 2, ty - 12, w, 16, 8);
+      if (g.roundRect) g.roundRect(tx - w / 2, ty - 12, w, 16, 8);
+      else g.rect(tx - w / 2, ty - 12, w, 16); // roundRect の無い古いブラウザ（iOS 15 以前など）
       g.fill();
       g.fillStyle = '#333';
       g.fillText(t, tx, ty);

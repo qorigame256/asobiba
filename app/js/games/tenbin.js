@@ -247,6 +247,7 @@ export default {
     if (s.phase === 'open') return `第${s.q + 1}回 / ${s.qs.length}`;
     return `第${s.q + 1}回の結果`;
   },
+  turnHead(s) { return s.phase === 'open' ? `第${s.q + 1}回 / ${s.qs.length}` : ''; }, // 「みんなで1台」で番のあるあいだも回数を見出しに添える（main.js の statusHtml）
 
   referee(s) {
     if (s.phase === 'ready') return { key: 'ready', ms: READY_MS, move: { t: 'next' } };

@@ -103,6 +103,7 @@ export default {
     return `💥 ${pn(res.loser)}がシーソーを落とした！${me !== null && me >= 0 ? 'セーフ！あなたの勝ち🎉' : ''}`;
   },
   phaseText(s) { return s.rules.games > 1 ? `${s.game + 1}回戦 / ${s.rules.games}` : ''; },
+  turnHead(s) { return this.phaseText(s); }, // 番のあるあいだも「2回戦 / 3」を見出しに添える（main.js の statusHtml）
   sound(a, b, m) {
     if (m.t === 'pass') return 'chip';
     if (m.t === 'next') return 'card';

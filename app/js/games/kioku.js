@@ -227,9 +227,6 @@ export default {
       return;
     }
     const len = lenOf(s);
-    const head = document.createElement('div');
-    head.className = 'kj-num';
-    head.textContent = `${s.round + 1}回目（${len}個）`;
     const rev = revOf(s);
     // 逆から押す回の印（見せている間も押す間もはっきり出す。見た目は style.css に入れず、ここで付ける）
     const revTag = document.createElement('div');
@@ -251,7 +248,6 @@ export default {
       pad.append(b);
       return b;
     });
-    card.append(head);
     if (revTag.className) card.append(revTag);
     card.append(pad, msg);
     const flash = (k, ms = 220) => { btns[k].classList.add('lit'); setTimeout(() => btns[k].classList.remove('lit'), ms); };
