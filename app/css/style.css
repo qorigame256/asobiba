@@ -3645,6 +3645,70 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .tn-review li { display: flex; align-items: center; gap: 6px; }
 .tn-review .tn-net { width: 80px; height: 48px; }
 
+/* ---------- 2026-11-18 に足した5つ（なぞなぞ早押し・まちがい字さがし・数のきまり当て・水はかり・たたいてかぶってじゃんけん） ---------- */
+:is([data-game="nazo"], [data-game="goji"], [data-game="suretsu"], [data-game="mizu"], [data-game="tataite"]) .board { width: min(100%, 560px); }
+/* 4つから選ぶ札（なぞなぞ・数のきまり当て）。押したあとの色はまんなかの漢字と同じ */
+.nz-choices, .sq-choices { display: grid; gap: 10px; touch-action: manipulation; }
+.nz-choices { grid-template-columns: repeat(2, 1fr); }
+.sq-choices { grid-template-columns: repeat(4, 1fr); }
+.board button.btn.nz-choice { min-height: 60px; padding: 6px 8px; border-radius: 12px; font-size: 1.1rem; font-weight: 800; line-height: 1.3; overflow-wrap: anywhere; }
+.board button.btn.sq-choice { min-height: 64px; padding: 6px; border-radius: 12px; font-size: clamp(1.3rem, 6vw, 1.8rem); font-weight: 800; font-variant-numeric: tabular-nums; }
+.board button.btn:is(.nz-choice, .sq-choice).ok { background: #2f8a4a; border-color: #2f8a4a; color: #fff; }
+.board button.btn:is(.nz-choice, .sq-choice).ng { background: #d9534f; border-color: #d9534f; color: #fff; }
+.board button.btn:is(.nz-choice, .sq-choice).off { opacity: .55; }
+.nz-q { text-align: center; }
+/* まちがい字さがし: 文の字を1つずつボタンにする。答えを見せるときは、まちがいの字の上に正しい字を小さく出す */
+.gj-line { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 2px; margin: 18px 0 8px; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.board button.gj-ch { position: relative; min-width: 1.9em; padding: 4px 2px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--field); color: var(--ink); font: inherit; font-size: clamp(1.3rem, 6vw, 1.7rem); font-weight: 700; line-height: 1.2; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.board button.gj-ch:disabled { cursor: default; }
+.board button.gj-ch.pn { min-width: 1.1em; }
+.board button.gj-ch.picked { border-color: #e8a913; }
+.board button.gj-ch.ok { background: #2f8a4a; border-color: #2f8a4a; color: #fff; }
+.board button.gj-ch.ng { background: #d9534f; border-color: #d9534f; color: #fff; }
+.board button.gj-ch[data-fix]::before { content: attr(data-fix); position: absolute; left: 50%; bottom: 100%; transform: translate(-50%, -2px); padding: 0 5px; border-radius: 6px; background: var(--panel); color: #2f8a4a; border: 1.5px solid #2f8a4a; font-size: 1rem; }
+/* 数のきまり当て */
+.sq-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 8px 0; }
+.sq-n { min-width: 2.4em; padding: 6px 4px; border: 2px solid var(--line); border-radius: 10px; background: var(--field); font-size: clamp(1.2rem, 5.5vw, 1.6rem); font-weight: 800; font-variant-numeric: tabular-nums; }
+.sq-n.q { border-color: var(--accent); border-width: 3px; color: var(--muted); }
+.sq-n.q.ans { border-color: #2f8a4a; color: #2f8a4a; }
+/* 水はかり: 入れ物の高さは大きさに比べて決め（mizu.js が style で渡す）、水の高さは量の割合 */
+.wq-goal { font-size: 1.2rem; }
+.wq-goal b { font-size: 2rem; color: var(--accent); }
+.wq-row { display: flex; justify-content: center; align-items: flex-end; gap: 14px; margin: 12px 0 4px; }
+.wq-col { display: flex; flex-direction: column; align-items: center; gap: 4px; width: min(30%, 140px); }
+.board button.wq-jar { position: relative; width: 72px; padding: 0; overflow: hidden; border: 3px solid var(--line); border-top-width: 0; border-radius: 0 0 14px 14px; background: var(--field); color: var(--ink); cursor: default; -webkit-tap-highlight-color: transparent; }
+.board button.wq-jar.pick { border-color: #e8a913; cursor: pointer; }
+.board button.wq-jar.from { border-color: var(--accent); }
+.board button.wq-jar.hit { border-color: #2f8a4a; box-shadow: 0 0 0 3px #2f8a4a; }
+.wq-water { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(#7cc4f0, #3a8fd0); transition: height .25s ease; }
+.wq-amt { position: relative; display: block; margin-top: 4px; font-size: 1.1rem; font-weight: 800; }
+.wq-cap { font-weight: 800; color: var(--muted); }
+.wq-btns { display: flex; flex-direction: column; gap: 4px; width: 100%; }
+.board button.btn.wq-btn { padding: 6px 4px; font-size: .9rem; }
+.wq-count { font-weight: 700; color: var(--muted); min-height: 1.4em; }
+/* たたいてかぶってじゃんけん */
+.tt-hands { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: min(100%, 420px); margin: 0 auto; touch-action: manipulation; }
+.board button.tt-hand { height: 84px; border: 3px solid var(--line); border-radius: 14px; background: var(--field); font-size: 2.6rem; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.board button.tt-hand:disabled { cursor: default; }
+.board button.tt-hand.mine { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent); }
+.tt-vs { display: flex; justify-content: center; align-items: center; gap: 14px; margin: 6px 0; }
+.tt-side { display: flex; flex-direction: column; align-items: center; min-width: 5em; }
+.tt-face { font-size: clamp(2.6rem, 14vw, 3.6rem); line-height: 1.1; }
+.tt-name { font-size: .85rem; color: var(--muted); max-width: 8em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tt-x { font-weight: 900; color: var(--muted); }
+.tt-pad { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: min(100%, 420px); margin: 0 auto; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.board button.tt-act { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 110px; border: 3px solid var(--line); border-radius: 16px; color: #fff; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.board button.tt-act span { font-size: 2.8rem; line-height: 1.1; }
+.board button.tt-act small { font-size: 1rem; font-weight: 800; }
+.board button.tt-act.hit { background: #d9643a; border-color: #b84f29; }
+.board button.tt-act.cover { background: #2f6fb3; border-color: #245a93; }
+.board button.tt-act:disabled { opacity: .5; cursor: default; }
+.board button.tt-act.mine { opacity: 1; box-shadow: 0 0 0 4px var(--win); }
+.tt-results { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; text-align: left; }
+.tt-res { padding: 4px 8px; border-radius: 8px; font-size: .9rem; }
+.tt-res.me { background: var(--soft, #fff3e6); font-weight: 800; font-size: 1rem; }
+.tt-res small { display: block; color: var(--muted); font-weight: 400; }
+
 /* 押せないボタン（2026-11-17 見た目の点検）: どこに置いても押せないと分かるように。待合室の下に留めた「始める」（.dock）には効いていなかった。
    橙のボタンは薄くすると白い字が地に溶けて読めなかった（ダウトの「札をえらんでください」など）ので、薄い橙の地に濃い字にする。
    ファイルの最後に置くのは、同じ強さの「.○○ .cc-actions .btn:disabled { opacity: .4 }」より後に効かせるため */
