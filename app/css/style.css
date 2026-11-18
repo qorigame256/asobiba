@@ -442,6 +442,12 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .board.sending .last, .board.sending [data-last] { outline: 2px dashed var(--accent); outline-offset: 1px; opacity: .7; }
 .status-main { font-size: 1.25rem; font-weight: 700; }
 .status-main.small { font-size: 1rem; font-weight: 400; }
+/* 最後の問題・最後の回（2026-11-18。main.js の finalMark）: 字を朱色にして下線を引く。初めて出たときだけ少しふくらむ */
+.final-q { color: #d23f2c; border-bottom: 3px solid currentColor; padding: 0 3px; }
+:root[data-skin="yoru"] .final-q, :root[data-skin="sumi"] .final-q, :root[data-skin="hoshi"] .final-q { color: #ff7a66; }
+.final-q.new { display: inline-block; animation: final-q .45s ease-out both; }
+@keyframes final-q { from { transform: scale(.8); opacity: .2; } }
+@media (prefers-reduced-motion: reduce) { .final-q.new { animation: none; } }
 .status-sub { color: var(--muted); font-size: .92rem; }
 .status-sub.think { font-size: .85rem; font-variant-numeric: tabular-nums; }
 .pl.p0 { color: var(--p0); }
@@ -1234,6 +1240,12 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .rule-lit { border-radius: 8px; animation: rule-lit 1.6s ease-out both; }
 @keyframes rule-lit { 0%, 25% { background: color-mix(in srgb, var(--win) 55%, transparent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--win) 55%, transparent); } 100% { background: transparent; box-shadow: 0 0 0 4px transparent; } }
 .lobby-rules input { margin-top: 3px; width: 18px; height: 18px; flex: none; }
+/* ゲストの「この設定にしたい」（2026-11-18。main.js の wantPart）: ゲストは行の右に ✋ のボタン、ホストは ✋ の数と希望した人の名前 */
+.lobby-rules .want-btn { margin-left: auto; flex: none; align-self: center; font: inherit; font-size: .85rem; padding: 3px 10px; border-radius: 999px; border: 1.5px solid var(--line); background: var(--field); color: var(--muted); cursor: pointer; }
+.lobby-rules .want-btn.on { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.lobby-rules label.want-on { border-radius: 8px; box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent); }
+.want-badge { flex: none; align-self: center; font-size: .8rem; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); }
+.lobby-rules .want-who { color: var(--accent); font-weight: 700; }
 .lobby-rules small { color: var(--muted); display: block; }
 
 /* ---------- トランプ ---------- */
@@ -1431,6 +1443,11 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .react-bubble { background: var(--chip); color: var(--chip-ink); border-radius: 999px; padding: 6px 14px; display: flex; gap: 8px; align-items: baseline; box-shadow: 0 3px 10px rgba(0, 0, 0, .2); animation: react-in .25s ease-out, react-out .4s ease-in 2.2s forwards; }
 .react-bubble small { opacity: .75; max-width: 9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .react-bubble b { font-size: 1.1rem; }
+/* 同じリアクションをまとめる（2026-11-18。main.js の mergeBubble）: 「×4」を太字で（地の色が暗い色の組で明るくなるので、字の色は吹き出しのまま）。増えたら一瞬ふくらむ */
+.react-x { font-weight: 800; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.react-x.bump { display: inline-block; animation: react-x .3s ease-out; }
+@keyframes react-x { 50% { transform: scale(1.5); } }
+.react-bubble small { max-width: 14em; }
 @keyframes react-in { from { transform: translateY(-10px) scale(.8); opacity: 0; } }
 @keyframes react-out { to { opacity: 0; transform: translateY(-6px); } }
 .react-bar { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; width: 100%; }
@@ -3516,6 +3533,14 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 @keyframes va-head { to { opacity: .85; } }
 .va-cnt { position: absolute; right: -7px; top: -8px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; background: #d24a3a; color: #fff; font-size: .78rem; font-weight: 700; line-height: 20px; text-align: center; font-variant-numeric: tabular-nums; z-index: 3; }
 .va-cnt[hidden] { display: none; }
+/* 話し合いの間の指さし（2026-11-18。party.js の pointTalk）: 投票の赤い矢印と見分けるため、点線で地の字の色。自分の矢印だけ朱色。押せる札は指の形 */
+.pt-line { stroke: var(--ink); stroke-dasharray: 5 4; opacity: .55; }
+.pt-head { fill: var(--ink); opacity: .55; }
+.pt-line.mine { stroke: var(--accent); opacity: .9; }
+.pt-head.mine { fill: var(--accent); opacity: .9; }
+.pt-can { cursor: pointer; }
+.pt-can:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.pt-cnt { position: absolute; left: -6px; top: -9px; padding: 0 6px; height: 20px; line-height: 20px; border-radius: 10px; background: var(--chip); color: var(--chip-ink); font-size: .75rem; font-weight: 700; z-index: 3; pointer-events: none; }
 .va-cnt.bump { animation: va-bump .25s ease-out; }
 @keyframes va-bump { 40% { transform: scale(1.35); } }
 @media (prefers-reduced-motion: reduce) { .va-line.va-anim, .va-head.va-anim, .va-cnt.bump { animation: none; stroke-dashoffset: 0; opacity: .85; } }

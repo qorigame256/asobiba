@@ -253,6 +253,141 @@ export { esc };
 // 盤は描き直しのたびに作り直されるので、引き始めた時刻を key ごとに覚え、引いている間に描き直したら続きから引く（cards.js の turnUp と同じ考え）。
 // fresh = 新しく届いた手で開票になった（読み込み直し・あとから見た人には引き終わった形で出す）。矢印は開票の結果を見せている間ずっと残す。
 // 札に当たらない票（ワードウルフの「ウルフはいない」）は呼ぶ側で除く。動きを減らす設定の端末では引き終わった形で出す
+// 名前の札から札への矢印の形（開票の矢印と、話し合いの間の指さしで使う）。r0 は矢印を描く入れ物の場所。線と頭の2つの path を返す（札が無ければ null）
+function arrowShape(r0, from, to) {
+  const a = from?.getBoundingClientRect(), z = to?.getBoundingClientRect();
+  if (!a || !z) return null;
+  const x1 = a.left + a.width / 2 - r0.left, y1 = a.top + a.height / 2 - r0.top;
+  const x2 = z.left + z.width / 2 - r0.left, y2 = z.top + z.height / 2 - r0.top;
+  const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L;
+  // 札の真ん中からでなく、ふちのあたりから出してふちのあたりで止める（横に並んだ札が多いので、横は札の幅の半分ほど）
+  const cut = (r) => Math.min(Math.abs(ux) > 0.01 ? r.width / 2 / Math.abs(ux) : Infinity, Math.abs(uy) > 0.01 ? r.height / 2 / Math.abs(uy) : Infinity) * 0.8;
+  const sx = x1 + ux * cut(a), sy = y1 + uy * cut(a), ex = x2 - ux * (cut(z) + 2), ey = y2 - uy * (cut(z) + 2);
+  const bend = Math.min(60, L * 0.28); // 右へ向かう矢印は上へ、左へ向かう矢印は下へふくらむ（行き違いの2本が重ならない）
+  const mx = (sx + ex) / 2 + uy * bend, my = (sy + ey) / 2 - ux * bend;
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  p.setAttribute('d', `M${sx.toFixed(1)} ${sy.toFixed(1)} Q${mx.toFixed(1)} ${my.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}`);
+  const g = Math.atan2(ey - my, ex - mx), s = 8;
+  const h = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  h.setAttribute('d', `M${ex.toFixed(1)} ${ey.toFixed(1)} L${(ex - s * Math.cos(g - 0.45)).toFixed(1)} ${(ey - s * Math.sin(g - 0.45)).toFixed(1)} L${(ex - s * Math.cos(g + 0.45)).toFixed(1)} ${(ey - s * Math.sin(g + 0.45)).toFixed(1)}Z`);
+  return [p, h];
+}
+
+// 話し合いの間の指さし（2026-11-18 本人の選択。room.md「UI・UX の9回目」・party-games.md の「UI・UX の9回目」）: ワードウルフ・人狼の話し合いの間、
+// ほかの人の名前の札を押すと「この人が怪しい」の矢印がみんなの画面に出る。投票には数えない。何度でも向け直せて、同じ札をもう一度押すと下ろす。
+// 手の一覧に入れず、送りっぱなし（o.stream）で { pt: key, to }（to = -1 は下ろした）を送る。届かないことがあるので、話し合いを初めて描いた端末は
+// { pt: key, ask: 1 } を送り、受け取った人は自分の向きをもう一度送る。key（どの話し合いか）が替わったら全部消す（投票が始まると呼ばれなくなり、矢印も消える）。
+// Claude の判断: 矢印は投票の赤と見分けるため点線で、指した人ごとの色にしない（人の色を持たないゲームのため）。入れられた人の札に 👉 と数。
+// 動きを減らす設定の端末でも矢印は出す（引く動きだけ止める）
+const point = { key: null, to: new Map(), draw: null, asked: null, me: null, o: null, can: null };
+// 指さしの矢印の形: 札の上のふちから出て、札の上を越える弧で相手の札の上のふちに下りる（名前の札は横に並んでとなりどうしが多く、
+// 開票の矢印のように横のふちから出すと、すき間が狭くてほとんど見えないため）。右へ向かう矢印と左へ向かう矢印は高さと出る位置をずらす
+function pointShape(r0, from, to) {
+  const a = from?.getBoundingClientRect(), z = to?.getBoundingClientRect();
+  if (!a || !z) return null;
+  const right = z.left > a.left;
+  const shift = right ? 6 : -6;
+  const sx = a.left + a.width / 2 + shift - r0.left, sy = a.top - r0.top + 2;
+  const ex = z.left + z.width / 2 - shift - r0.left, ey = z.top - r0.top - 1;
+  const lift = 18 + Math.min(40, Math.abs(ex - sx) * 0.12) + (right ? 0 : 10);
+  const mx = (sx + ex) / 2, my = Math.min(sy, ey) - lift;
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  p.setAttribute('d', `M${sx.toFixed(1)} ${sy.toFixed(1)} Q${mx.toFixed(1)} ${my.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}`);
+  const g = Math.atan2(ey - my, ex - mx), s = 8;
+  const h = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  h.setAttribute('d', `M${ex.toFixed(1)} ${ey.toFixed(1)} L${(ex - s * Math.cos(g - 0.45)).toFixed(1)} ${(ey - s * Math.sin(g - 0.45)).toFixed(1)} L${(ex - s * Math.cos(g + 0.45)).toFixed(1)} ${(ey - s * Math.sin(g + 0.45)).toFixed(1)}Z`);
+  return [p, h];
+}
+export function pointTalk(key, me, o, box, chips, canPoint) {
+  if (point.key !== key) Object.assign(point, { key, to: new Map(), draw: null });
+  Object.assign(point, { me, o, can: canPoint });
+  for (const [p, to] of point.to) if (!canPoint(p) || !canPoint(to)) point.to.delete(p); // 部屋を出た・やられた人の矢印は外す
+  box.classList.add('va-box');
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'va-svg pt-svg');
+  svg.setAttribute('aria-hidden', 'true');
+  box.append(svg);
+  const drawn = new Map(); // 前に描いた矢印（向きが変わった矢印だけ引く動きを付ける）
+  const draw = () => {
+    if (!svg.isConnected) return;
+    const r0 = box.getBoundingClientRect();
+    if (!r0.width) return;
+    svg.setAttribute('viewBox', `0 0 ${r0.width} ${r0.height}`);
+    svg.innerHTML = '';
+    const count = new Map();
+    for (const [from, to] of point.to) {
+      count.set(to, (count.get(to) ?? 0) + 1);
+      const shape = pointShape(r0, chips[from], chips[to]);
+      if (!shape) continue;
+      const [p, h] = shape;
+      p.setAttribute('class', 'va-line pt-line' + (from === me ? ' mine' : ''));
+      h.setAttribute('class', 'va-head pt-head' + (from === me ? ' mine' : ''));
+      svg.append(p, h);
+      if (drawn.get(from) !== to && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        p.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 220, easing: 'ease-out' });
+        h.animate([{ opacity: 0, transform: 'scale(.4)' }, { opacity: 1, transform: 'none' }], { duration: 220, easing: 'ease-out' });
+      }
+    }
+    drawn.clear();
+    for (const [from, to] of point.to) drawn.set(from, to);
+    chips.forEach((c, p) => {
+      c.querySelector('.pt-cnt')?.remove();
+      const n = count.get(p);
+      if (!n) return;
+      const b = document.createElement('span');
+      b.className = 'pt-cnt';
+      b.textContent = `👉${n}`;
+      c.append(b);
+    });
+  };
+  point.draw = draw;
+  for (const [p, c] of chips.entries()) {
+    if (p === me || me === null || !canPoint(me) || !canPoint(p)) continue;
+    c.classList.add('pt-can');
+    c.tabIndex = 0;
+    c.setAttribute('role', 'button');
+    c.setAttribute('aria-label', `${c.querySelector('.cc-opp-name')?.textContent ?? ''}を指さす（投票には数えない）`);
+    const go = (e) => {
+      if (e.target.closest('button')) return; // 札の中のボタン（人狼の推理のメモ）は今までどおり
+      const on = point.to.get(me) !== p;
+      if (on) point.to.set(me, p); else point.to.delete(me);
+      o.stream?.({ pt: key, to: on ? p : -1 });
+      draw();
+    };
+    c.addEventListener('click', go);
+    c.addEventListener('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === c) { e.preventDefault(); go(e); } });
+  }
+  draw();
+  requestAnimationFrame(draw);
+  let w = box.clientWidth;
+  const ro = new ResizeObserver(() => { if (!svg.isConnected) { ro.disconnect(); return; } if (box.clientWidth !== w) { w = box.clientWidth; draw(); } });
+  ro.observe(box);
+  // あとから来た・読み込み直した人は、いまの向きを聞く（読み込み直した直後はまだ中継サーバーにつながっていないことがあるので、少しあとに2回聞き直す）
+  if (point.asked !== key) {
+    point.asked = key;
+    for (const ms of [0, 1500, 4000]) setTimeout(() => { if (point.key === key) point.o?.stream?.({ pt: key, ask: 1 }); }, ms);
+  }
+}
+// 届いた指さし（ゲームの onStream から呼ぶ）。指さしの知らせなら true
+export function pointStream(d, from) {
+  if (typeof d?.pt !== 'string') return false;
+  if (d.pt !== point.key || !point.can) return true;
+  const ok = (p) => Number.isInteger(p) && p >= 0 && point.can(p);
+  if (d.ask) { // 聞かれたら（観戦の人からでも）、知っている矢印を全部送る（聞いた人が読み込み直す前に指していた矢印も、それで戻る）
+    if (point.to.size) point.o?.stream?.({ pt: point.key, all: [...point.to] });
+    return true;
+  }
+  if (Array.isArray(d.all)) { // 聞いた答え: まだ知らない人の矢印だけ足す（自分で知っている新しい向きを古い答えで上書きしない）
+    for (const x of d.all.slice(0, 20)) if (Array.isArray(x) && ok(x[0]) && ok(x[1]) && x[0] !== x[1] && !point.to.has(x[0])) point.to.set(x[0], x[1]);
+    point.draw?.();
+    return true;
+  }
+  if (!ok(from) || !Number.isInteger(d.to) || d.to === from || (d.to >= 0 && !ok(d.to))) return true;
+  if (d.to < 0) point.to.delete(from); else point.to.set(from, d.to);
+  point.draw?.();
+  return true;
+}
+
 const VOTE_STEP = 330; // 1票ごとの間（見本は 800ms。本人の「もっとはやく」から Claude が決めた）
 const VOTE_DRAW = 260; // 1本の矢印を引く長さ
 const voteAt = new Map();
@@ -297,22 +432,10 @@ export function voteArrows(box, chips, votes, key, fresh) {
     svg.setAttribute('viewBox', `0 0 ${r0.width} ${r0.height}`);
     svg.innerHTML = '';
     votes.forEach(([from, to], i) => {
-      const a = chips[from]?.getBoundingClientRect(), z = chips[to]?.getBoundingClientRect();
-      if (!a || !z) return;
-      const x1 = a.left + a.width / 2 - r0.left, y1 = a.top + a.height / 2 - r0.top;
-      const x2 = z.left + z.width / 2 - r0.left, y2 = z.top + z.height / 2 - r0.top;
-      const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L;
-      // 札の真ん中からでなく、ふちのあたりから出してふちのあたりで止める（横に並んだ札が多いので、横は札の幅の半分ほど）
-      const cut = (r) => Math.min(Math.abs(ux) > 0.01 ? r.width / 2 / Math.abs(ux) : Infinity, Math.abs(uy) > 0.01 ? r.height / 2 / Math.abs(uy) : Infinity) * 0.8;
-      const sx = x1 + ux * cut(a), sy = y1 + uy * cut(a), ex = x2 - ux * (cut(z) + 2), ey = y2 - uy * (cut(z) + 2);
-      const bend = Math.min(60, L * 0.28); // 右へ向かう矢印は上へ、左へ向かう矢印は下へふくらむ（行き違いの2本が重ならない）
-      const mx = (sx + ex) / 2 + uy * bend, my = (sy + ey) / 2 - ux * bend;
-      const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      p.setAttribute('d', `M${sx.toFixed(1)} ${sy.toFixed(1)} Q${mx.toFixed(1)} ${my.toFixed(1)} ${ex.toFixed(1)} ${ey.toFixed(1)}`);
+      const shape = arrowShape(r0, chips[from], chips[to]);
+      if (!shape) return;
+      const [p, h] = shape;
       p.setAttribute('class', 'va-line');
-      const g = Math.atan2(ey - my, ex - mx), s = 8;
-      const h = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      h.setAttribute('d', `M${ex.toFixed(1)} ${ey.toFixed(1)} L${(ex - s * Math.cos(g - 0.45)).toFixed(1)} ${(ey - s * Math.sin(g - 0.45)).toFixed(1)} L${(ex - s * Math.cos(g + 0.45)).toFixed(1)} ${(ey - s * Math.sin(g + 0.45)).toFixed(1)}Z`);
       h.setAttribute('class', 'va-head');
       svg.append(p, h);
       const d = i * VOTE_STEP - t; // この矢印を引き始めるまで（負なら引き始めてからの時間）

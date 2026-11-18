@@ -22,7 +22,7 @@
 //   k・v・d で、同じ手が2回届いても2回目は反則になる（realtime。main.js の rebase）。
 
 import { mulberry32, shuffle, esc } from './util.js';
-import { timeBar, voteArrows } from './party.js';
+import { timeBar, voteArrows, pointTalk, pointStream } from './party.js';
 import { shown } from '../filter.js';
 
 const MAX_TEXT = 60;
@@ -291,6 +291,7 @@ export default {
     return null;
   },
 
+  onStream(d, from) { pointStream(d, from); }, // 話し合いの間の指さし（2026-11-18）
   render(root, s, o) {
     const me = o.me >= 0 ? o.me : null;
     const nameP = (p) => (p === me ? 'あなた' : o.names[p]);
@@ -434,6 +435,8 @@ export default {
     if (lv && lv.d === s.day && (s.phase === 'night' || over || (s.phase === 'vote' && s.vote === 2))) {
       voteArrows(chips, chipOf, Object.entries(lv.votes).map(([p, to]) => [Number(p), to]), `jr:${s.seed}:${lv.d}:${lv.v}`, o.fresh);
     }
+    // 話し合いの間の指さし（2026-11-18。party.js の pointTalk）: 昼の間だけ、生きている人どうし。観戦の人はほかの人の画面を見ていても指させない
+    if (s.phase === 'day') pointTalk(`jr:${s.seed}:day${s.day}`, o.watching ? null : me, o, chips, chipOf, (p) => Number.isInteger(p) && p >= 0 && p < s.n && s.alive[p]);
     if (s.phase === 'day') chat.lastElementChild?.lastElementChild?.scrollIntoView?.({ block: 'nearest' });
 
     // 話す欄は、昼に生きている人にだけ出す（隠すだけで作り直さない）
