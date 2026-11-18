@@ -9,6 +9,13 @@
 //   - まちがいの3つは、答えの近くの数（±1・±2・±いまの増え方）と、「最後の2つの差でそのまま進めた数」から選ぶ（0より小さい数は出さない）。
 //   - 1問の制限時間は15秒。だれかが正解したら5秒で締め切る。全員が答えたら1.5秒。答えときまりを見せる間は3.5秒。
 //   - CPU は3〜10秒で答え、6割当てる。
+// 2026-11-18 の44回目の案（本人が選んだ。分かれ目は Claude が決めた）:
+//   - 答え方: 4つから選ぶ（最初）・数を打つ（鍵は type）。数を打つでは、数字のボタン（PC はキーボードでも）で打って「答える」。1問に1回だけ（打ち直しは「答える」の前まで）。
+//     4つの札から逆算して当てられないようにするための設定。CPU は答え方によらず同じ腕前。
+//   - ？の場所: いつも最後（最初）・ときどき途中（鍵は where）。ときどき途中では、半分ほどの問題で「2・4・？・16・32・64」のように6つの数の
+//     2〜5番目を？にする（並びは6つのまま。最後の？の問題は、いつも最後のときと同じ問題）。途中の？のまちがいの3つは、答えの近くの数と
+//     「両どなりのまん中の数」（たし算のきまりだと思ったときの数）から選ぶ。ふりかえりでは？だった数を［ ］で囲む。
+//     どこを？にするかは別の乱数で決め、いつも最後のときの問題の作り方（乱数の進み方）は変えていない。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（なぞなぞ早押しと同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q, c: 選んだ数, ms }
 
@@ -74,12 +81,26 @@ const KINDS = {
 };
 const KINDS_OF = { easy: ['add'], normal: ['mul', 'grow'], hard: ['fib', 'zigzag', 'mix'] };
 
-// 1問を作る（種・何問目か・むずかしさから決まるので全員同じ）
-export function makeQuestion(seed, q, level) {
+// 1問を作る（種・何問目か・むずかしさ・？の場所の設定から決まるので全員同じ）
+export function makeQuestion(seed, q, level, where = false) {
   const rnd = mulberry32((seed * 173 + q * 29 + 5) >>> 0);
   const kinds = KINDS_OF[level] ?? KINDS_OF.normal;
   const kind = kinds[Math.floor(rnd() * kinds.length)];
   const { nums, rule } = KINDS[kind](rnd);
+  if (where) {
+    const r2 = mulberry32((seed * 233 + q * 41 + 7) >>> 0); // ？の場所は別の乱数で決める（いつも最後のときの問題を変えないため）
+    if (r2() < 0.5) {
+      const h = 1 + Math.floor(r2() * (SHOW - 1)); // 2〜5番目（0から数えて1〜4）
+      const ans = nums[h];
+      const mid = Math.round((nums[h - 1] + nums[h + 1]) / 2); // 両どなりのまん中
+      const step = Math.max(1, Math.round(Math.abs(nums[h + 1] - nums[h - 1]) / 2));
+      const near = shuffle([ans + 1, ans - 1, ans + 2, ans - 2, ans + step, ans - step], rnd);
+      const wrong = [];
+      for (const v of [mid, ...near]) if (v >= 0 && v !== ans && !wrong.includes(v) && wrong.length < 3) wrong.push(v);
+      for (let v = ans + 3; wrong.length < 3; v++) if (!wrong.includes(v)) wrong.push(v);
+      return { kind, shown: nums.filter((_, k) => k !== h), ans, rule, opts: shuffle([ans, ...wrong], rnd), hole: h };
+    }
+  }
   const shown = nums.slice(0, SHOW);
   const ans = nums[SHOW];
   const step = Math.abs(shown[SHOW - 1] - shown[SHOW - 2]) || 1;
@@ -91,7 +112,15 @@ export function makeQuestion(seed, q, level) {
   return { kind, shown, ans, rule, opts: shuffle([ans, ...wrong], rnd) };
 }
 
-const qKey = (s, q = s.q) => `suretsu:${s.seed}:${levelOf(s.rules)}:${q}`; // むずかしさも入れる（同じ種でむずかしさだけ変えたとき、CPU が前の問題の答えを押さないように）
+// 6つの数の並び（？の所に答えを入れたもの）と、？の場所
+export const holeOf = (x) => x.hole ?? SHOW;
+export const seqOf = (x) => { const a = x.shown.slice(); a.splice(holeOf(x), 0, x.ans); return a; };
+const MAXLEN = 4; // 数を打つときの桁数の上限（答えは3桁まで）
+const typed = new Map(); // 数を打つときの打ちかけ（qKey + 席 → 文字）。送らない
+let keyHandler = null;
+let keysHooked = false;
+
+const qKey = (s, q = s.q) => `suretsu:${s.seed}:${levelOf(s.rules)}${s.rules.where ? ':w' : ''}:${q}`; // むずかしさも入れる（同じ種でむずかしさだけ変えたとき、CPU が前の問題の答えを押さないように）
 const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice(), miss: s.miss.slice(), said: s.said.slice() });
 const doneOf = (s, p) => s.solved[p] !== null || s.miss[p];
 const cpuPlan = new Map();
@@ -109,11 +138,13 @@ export default {
   settings: [
     { key: 'level', label: 'むずかしさ', desc: 'やさしい: 同じ数ずつ増える・減る／ふつう: かけ算・増え方が増える／むずかしい: 前の2つをたす・交互', def: 'normal', choices: LEVELS },
     { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 10, choices: ROUNDS },
+    { key: 'type', label: '答え方', desc: '数を打つ: 4つから選ばず、数字のボタンで打って答える（1問に1回だけ）', def: false, choices: [[false, '4つから選ぶ'], [true, '数を打つ']] },
+    { key: 'where', label: '？の場所', desc: 'ときどき途中: 「2・4・？・16・32・64」のように、途中の数を当てる問題もまぜる', def: false, choices: [[false, 'いつも最後'], [true, 'ときどき途中']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const r = { rounds: 10, level: 'normal', ...rules };
-    const qs = Array.from({ length: roundsOf(r) }, (_, q) => makeQuestion(seed, q, levelOf(r)));
+    const qs = Array.from({ length: roundsOf(r) }, (_, q) => makeQuestion(seed, q, levelOf(r), !!r.where));
     return {
       n, seed, rules: r, qs, q: -1, phase: 'ready',
       solved: Array(n).fill(null), miss: Array(n).fill(false), said: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0,
@@ -176,7 +207,8 @@ export default {
     }
     if (m.t !== 'ans' || s0.phase !== 'open' || m.q !== s0.q || !Number.isInteger(m.p) || m.p < 0 || m.p >= s0.n || doneOf(s0, m.p)) return null;
     const x = s0.qs[s0.q];
-    if (!x.opts.includes(m.c) || typeof m.ms !== 'number' || !(m.ms >= 0) || m.ms > LIMIT + 300) return null;
+    const okC = s0.rules.type ? Number.isInteger(m.c) && m.c >= 0 && m.c < 10 ** MAXLEN : x.opts.includes(m.c);
+    if (!okC || typeof m.ms !== 'number' || !(m.ms >= 0) || m.ms > LIMIT + 300) return null;
     const s = clone(s0);
     s.step += 1;
     s.said[m.p] = m.c;
@@ -229,16 +261,20 @@ export default {
     const shown = s.phase !== 'open';
     const row = document.createElement('div');
     row.className = 'sq-row';
-    for (const v of x.shown) {
+    const hole = holeOf(x);
+    let last = null;
+    seqOf(x).forEach((v, k) => {
       const c = document.createElement('span');
-      c.className = 'sq-n';
-      c.textContent = v;
+      if (k === hole) {
+        c.className = 'sq-n q' + (shown ? ' ans' : '');
+        c.textContent = shown ? v : '？';
+        last = c;
+      } else {
+        c.className = 'sq-n';
+        c.textContent = v;
+      }
       row.append(c);
-    }
-    const last = document.createElement('span');
-    last.className = 'sq-n q' + (shown ? ' ans' : '');
-    last.textContent = shown ? x.ans : '？';
-    row.append(last);
+    });
     card.append(row);
     if (!shown) {
       since(key);
@@ -257,6 +293,7 @@ export default {
     }
     if (document.activeElement?.classList?.contains('kj-choice')) document.activeElement.blur(); // 前の問題で押した札に残った focus を外す（難読漢字と同じ）
     const can = s.phase === 'open' && me !== null && o.canMove && !doneOf(s, me) && since(key) < LIMIT;
+    if (s.rules.type) { this.typePad(wrap, s, o, me, x, key, last, can); return; }
     const grid = document.createElement('div');
     grid.className = 'kj-choices sq-choices';
     const mine = me !== null ? s.said[me] : null;
@@ -300,6 +337,92 @@ export default {
     }
   },
 
+  // 答え方「数を打つ」: 数字のボタンで打って「答える」。打ちかけは？の所に出す（ニアピンクイズの数字のボタンと同じ作り）
+  typePad(wrap, s, o, me, x, key, cell, can0) {
+    const shown = s.phase !== 'open';
+    const tk = key + ':' + me;
+    const mine = me !== null ? s.said[me] : null;
+    const pad = document.createElement('div');
+    pad.className = 'az-pad sq-pad';
+    const canNow = () => can0 && !pad.dataset.sent && since(key) < LIMIT;
+    const show = () => {
+      if (!shown) {
+        const v = mine !== null ? String(mine) : typed.get(tk) || '';
+        cell.textContent = v || '？';
+        cell.classList.toggle('typed', !!v);
+        if (mine !== null) cell.classList.add(s.solved[me] !== null ? 'ok' : 'ng');
+      }
+      pad.querySelectorAll('button').forEach((b) => { b.disabled = !canNow(); });
+    };
+    const send = () => {
+      const t = typed.get(tk);
+      if (!canNow() || !t) return;
+      const ms = Math.round(since(key));
+      if (ms >= LIMIT) return;
+      pad.dataset.sent = '1';
+      show();
+      o.onMove({ t: 'ans', q: s.q, c: Number(t), ms });
+    };
+    const press = (k) => {
+      if (!canNow()) return;
+      const t = typed.get(tk) || '';
+      if (k === 'del') typed.set(tk, t.slice(0, -1));
+      else if (k === 'ok') { send(); return; }
+      else if (t.length < MAXLEN) typed.set(tk, t === '0' ? k : t + k);
+      if (typed.size > 100) typed.delete(typed.keys().next().value);
+      show();
+    };
+    if (!shown) {
+      for (const k of ['7', '8', '9', '4', '5', '6', '1', '2', '3', 'del', '0', 'ok']) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'az-key' + (k === 'ok' ? ' ok' : k === 'del' ? ' del' : '');
+        b.textContent = k === 'ok' ? '答える' : k === 'del' ? '⌫' : k;
+        // 指が触れた瞬間に押したことにし、click はキーボードで押したとき（detail が 0）だけ使う（フラッシュ暗算と同じ。両方で数えると1回で2つ入る）
+        b.onpointerdown = (e) => { if (e.button !== 0) return; e.preventDefault(); press(k); };
+        b.onclick = (e) => { e.preventDefault(); if (e.detail === 0) press(k); };
+        pad.append(b);
+      }
+      if (can0) {
+        keyHandler = (e) => {
+          if (!pad.isConnected) return;
+          if (e.key >= '0' && e.key <= '9') press(e.key);
+          else if (e.key === 'Backspace') press('del');
+          else if (e.key === 'Enter') press('ok');
+          else return;
+          e.preventDefault();
+        };
+        // 読み込んだときでなく最初に描くときに1回だけ付ける（tools/test-logic.mjs は Node で読むので window が無い）
+        if (!keysHooked) {
+          keysHooked = true;
+          window.addEventListener('keydown', (e) => {
+            if (!keyHandler || e.ctrlKey || e.metaKey || e.altKey) return;
+            if (e.target instanceof HTMLElement && e.target.closest('input, textarea, select')) return;
+            keyHandler(e);
+          });
+        }
+      }
+      show();
+      wrap.append(pad);
+    }
+    const note = document.createElement('p');
+    note.className = 'cc-log';
+    if (me === null) note.textContent = '観戦中';
+    else if (shown) note.textContent = mine !== null ? `あなたの答え ${mine}${s.solved[me] !== null ? ' ⭕' : ' ❌'}` : '';
+    else if (s.solved[me] !== null) note.textContent = `⭕ 正解！（${secText(s.solved[me])}）`;
+    else if (s.miss[me]) note.textContent = '❌ ざんねん。次の問題を待とう';
+    else note.textContent = '数を打って「答える」（答えられるのは1回だけ）';
+    wrap.append(note);
+    if (shown) wrap.append(speedLine(o, s.solved, key));
+    if (canNow()) {
+      setTimeout(() => {
+        if (!pad.isConnected || pad.dataset.sent) return;
+        pad.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+        note.textContent = '時間切れ！';
+      }, Math.max(0, LIMIT - since(key)));
+    }
+  },
+
   review(s, me, o) {
     const box = document.createElement('details');
     box.className = 'kj-review mk-review';
@@ -314,7 +437,7 @@ export default {
       const mine = me === null ? '' : x.solved[me] !== null ? `⭕ ${secText(x.solved[me])}` : '❌';
       const sp = (t) => { const e = document.createElement('span'); e.textContent = t; return e; };
       const n = sp(String(q + 1)); n.className = 'mk-rv-n';
-      const nums = sp(`${g.shown.join('・')}・${g.ans}`); nums.className = 'ox-rv';
+      const nums = sp(g.hole === undefined ? `${g.shown.join('・')}・${g.ans}` : seqOf(g).map((v, k) => (k === g.hole ? `［${v}］` : v)).join('・')); nums.className = 'ox-rv';
       const rule = sp(g.rule); rule.className = 'mk-rv-ex';
       const who = sp(fast.length ? '⚡' + fast.join('・') : '―'); who.className = 'mk-rv-who';
       li.append(n, nums, rule, sp(mine), who);

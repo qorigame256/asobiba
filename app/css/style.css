@@ -3657,6 +3657,7 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .board button.btn:is(.nz-choice, .sq-choice).ng { background: #d9534f; border-color: #d9534f; color: #fff; }
 .board button.btn:is(.nz-choice, .sq-choice).off { opacity: .55; }
 .nz-q { text-align: center; }
+.nz-rest { visibility: hidden; } /* なぞなぞ早押しの「1文字ずつ」: まだ出ていない字（場所だけ取って、折り返しを変えない） */
 /* まちがい字さがし: 文の字を1つずつボタンにする。答えを見せるときは、まちがいの字の上に正しい字を小さく出す */
 .gj-line { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 2px; margin: 18px 0 8px; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
 .board button.gj-ch { position: relative; min-width: 1.9em; padding: 4px 2px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--field); color: var(--ink); font: inherit; font-size: clamp(1.3rem, 6vw, 1.7rem); font-weight: 700; line-height: 1.2; cursor: pointer; -webkit-tap-highlight-color: transparent; }
@@ -3671,6 +3672,11 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .sq-n { min-width: 2.4em; padding: 6px 4px; border: 2px solid var(--line); border-radius: 10px; background: var(--field); font-size: clamp(1.2rem, 5.5vw, 1.6rem); font-weight: 800; font-variant-numeric: tabular-nums; }
 .sq-n.q { border-color: var(--accent); border-width: 3px; color: var(--muted); }
 .sq-n.q.ans { border-color: #2f8a4a; color: #2f8a4a; }
+/* 数のきまり当ての「数を打つ」: 打ちかけの数・答えたあとの正誤 */
+.sq-n.q.typed { color: var(--ink); }
+.sq-n.q.typed.ok { border-color: #2f8a4a; background: #2f8a4a; color: #fff; }
+.sq-n.q.typed.ng { border-color: #d9534f; background: #d9534f; color: #fff; }
+.sq-pad { margin-top: 6px; }
 /* 水はかり: 入れ物の高さは大きさに比べて決め（mizu.js が style で渡す）、水の高さは量の割合 */
 .wq-goal { font-size: 1.2rem; }
 .wq-goal b { font-size: 2rem; color: var(--accent); }

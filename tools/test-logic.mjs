@@ -12036,4 +12036,139 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('tataite OK');
 }
 
+// 2026-11-18 の44回目の案（CPU どうしの対局は前の確認と別の種にする。同じ種だと、前の対局で記録した「画面に出た時刻」が残り、CPU が動けなくなる）: なぞなぞ早押しの「問題の出し方」・たたいてかぶってじゃんけんの「回数」「手が出るまでの間」・
+// 数のきまり当ての「答え方」「？の場所」・水はかりの「問題の数」「順位の決め方」
+{
+  const N = GAMES.nazo;
+  const { NAZO } = await import('../app/js/games/nazo-data.js');
+  // 1文字ずつ: 制限時間に問題文が出きるまでの時間を足す。いっぺんにのときは前と同じ
+  let s = N.apply(N.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  let d = N.apply(N.init(3, 4, { rules: { drip: true } }), { p: -1, t: 'next' });
+  assert.deepEqual(d.qs, s.qs, 'なぞなぞ 1文字ずつ: 問題は同じ');
+  const full = [...NAZO[d.qs[0].i][0]].length * 180;
+  assert.equal(N.referee(s).ms, 15000 + 1500, 'なぞなぞ: いっぺんにの締め切りは前と同じ');
+  assert.equal(N.referee(d).ms, 15000 + full + 1500, 'なぞなぞ 1文字ずつ: 出きるまでの時間を足す');
+  const right = NAZO[d.qs[0].i][1];
+  assert.equal(N.apply(s, { p: 0, t: 'ans', q: 0, c: right, ms: 15000 + full }), null, 'なぞなぞ: いっぺんにでは15秒を過ぎた答えを弾く');
+  assert.ok(N.apply(d, { p: 0, t: 'ans', q: 0, c: right, ms: 15000 + full }), 'なぞなぞ 1文字ずつ: 足した時間の中の答えは通す');
+  const end = runCpus(N, 4, 18, { drip: true }, 200, 8000);
+  assert.ok(N.result(end) && end.scores.some((v) => v > 0), 'なぞなぞ 1文字ずつ: CPU どうしで最後まで');
+  console.log('nazo 44 OK');
+}
+{
+  const T = GAMES.tataite;
+  const { waitOf } = await import('../app/js/games/tataite.js');
+  for (const [rounds, last] of [[5, 4], [15, 14]]) {
+    const end = runCpus(T, 4, 20 + rounds, { rounds }, 100, 12000);
+    assert.ok(T.result(end) && end.r === last, `たたいて: ${rounds}回`);
+  }
+  assert.equal(T.init(2, 1, { rules: {} }).rounds, 10, 'たたいて: 回数の最初は10回');
+  // 手が出るまでの間: いつも同じなら0。ばらばらなら 0.5〜2秒で、種と回から決まり、回ごとに変わる
+  const waits = new Set();
+  for (let r = 0; r < 30; r++) {
+    assert.equal(waitOf({ seed: 3, r, rules: {} }), 0, 'たたいて: いつも同じなら待たない');
+    const w = waitOf({ seed: 3, r, rules: { wait: true } });
+    assert.ok(w >= 500 && w < 2000, `たたいて ばらばら: 0.5〜2秒 ${w}`);
+    assert.equal(w, waitOf({ seed: 3, r, rules: { wait: true } }), 'たたいて ばらばら: 種と回から決まる');
+    waits.add(w);
+  }
+  assert.ok(waits.size > 10, 'たたいて ばらばら: 回ごとに変わる');
+  let s = T.apply(T.init(2, 3, { rules: { wait: true } }), { p: -1, t: 'next' });
+  s = T.apply(T.apply(T.apply(s, { p: 0, t: 'hand', r: 0, h: 'g' }), { p: 1, t: 'hand', r: 0, h: 'c' }), { p: -1, t: 'reveal' });
+  const w = waitOf(s);
+  assert.equal(T.referee(s).ms, w + 2500 + 500, 'たたいて ばらばら: 締め切りは待つ時間のぶん遅い');
+  // CPU は手が見えるまで押さない（押すのは見えてから0.5秒より後）
+  const realNow = performance.now.bind(performance);
+  let fake = 1e9;
+  performance.now = () => fake;
+  try {
+    assert.equal(T.cpu(s, 0), null); // 手が出た時刻をここで記録する
+    fake += w + 450;
+    assert.equal(T.cpu(s, 0) ?? T.cpu(s, 1), null, 'たたいて ばらばら: 手が見えて0.5秒までは CPU も押さない');
+    fake += 700;
+    const m = T.cpu(s, 0) ?? T.cpu(s, 1);
+    assert.ok(m && m.ms >= 500 && m.ms < 1200, 'たたいて ばらばら: CPU の ms は手が見えてから測る');
+  } finally {
+    performance.now = realNow;
+  }
+  for (const n of [2, 6]) {
+    const end = runCpus(T, n, 40 + n, { wait: true }, 100, 12000);
+    assert.ok(T.result(end) && end.r === 9 && end.log.flat().some((x) => x.kind === 'hit'), `たたいて ばらばら: CPU どうしで最後まで ${n}人`);
+  }
+  console.log('tataite 44 OK');
+}
+{
+  const Q = GAMES.suretsu;
+  const { makeQuestion, seqOf, holeOf } = await import('../app/js/games/suretsu.js');
+  const diffs = (a) => a.slice(1).map((v, k) => v - a[k]);
+  const ruleOk = (kind, a) => {
+    const d = diffs(a);
+    if (kind === 'add') return d.every((v) => v === d[0] && v !== 0);
+    if (kind === 'mul') return a.every((v, k) => k === 0 || v === a[k - 1] * (a[1] / a[0]));
+    if (kind === 'grow') { const dd = diffs(d); return dd.every((v) => v === dd[0] && v > 0); }
+    if (kind === 'fib') return a.every((v, k) => k < 2 || v === a[k - 1] + a[k - 2]);
+    if (kind === 'zigzag') return [a.filter((_, k) => k % 2 === 0), a.filter((_, k) => k % 2 === 1)].every((b) => diffs(b).every((v) => v === diffs(b)[0]));
+    if (kind === 'mix') { const k0 = a[1] - a[0]; return a.every((v, k) => k === 0 || v === (k % 2 ? a[k - 1] + k0 : a[k - 1] * 2)); }
+    return false;
+  };
+  const holes = new Set();
+  for (const level of ['easy', 'normal', 'hard']) {
+    for (let seed = 0; seed < 40; seed++) {
+      for (let q = 0; q < 20; q++) {
+        const x0 = makeQuestion(seed, q, level);
+        assert.deepEqual(makeQuestion(seed, q, level, false), x0, '数のきまり当て: いつも最後のときの問題は前と同じ');
+        const x = makeQuestion(seed, q, level, true);
+        holes.add(holeOf(x));
+        if (x.hole === undefined) { assert.deepEqual(x, x0, '数のきまり当て ときどき途中: 最後の？の問題はいつも最後と同じ'); continue; }
+        assert.ok(x.hole >= 1 && x.hole <= 4, '数のきまり当て: 途中の？は2〜5番目');
+        assert.equal(x.shown.length, 5);
+        const a = seqOf(x);
+        assert.equal(a[x.hole], x.ans);
+        assert.ok(ruleOk(x.kind, a), `数のきまり当て ときどき途中: きまりどおり ${a}`);
+        assert.equal(new Set(x.opts).size, 4, '数のきまり当て ときどき途中: 札は4つともちがう');
+        assert.ok(x.opts.every((v) => Number.isInteger(v) && v >= 0), '数のきまり当て ときどき途中: 札は0以上の整数');
+        assert.equal(x.opts.filter((v) => v === x.ans).length, 1, '数のきまり当て ときどき途中: 答えは1つ');
+      }
+    }
+  }
+  assert.deepEqual([...holes].sort(), [1, 2, 3, 4, 5], '数のきまり当て ときどき途中: ？はどの場所にも来る');
+  // 数を打つ: 札にない数でも0以上の整数なら受け取る（答えでなければまちがい）。整数でない・大きすぎる数は弾く
+  let s = Q.apply(Q.init(3, 4, { rules: { type: true } }), { p: -1, t: 'next' });
+  const x = s.qs[0];
+  const off = [9999, 0, 1, 2, 3].find((v) => !x.opts.includes(v));
+  assert.equal(Q.apply(s, { p: 0, t: 'ans', q: 0, c: -1, ms: 300 }), null, '数のきまり当て 数を打つ: 負の数は弾く');
+  assert.equal(Q.apply(s, { p: 0, t: 'ans', q: 0, c: 1.5, ms: 300 }), null, '数のきまり当て 数を打つ: 整数でない数は弾く');
+  assert.equal(Q.apply(s, { p: 0, t: 'ans', q: 0, c: 10000, ms: 300 }), null, '数のきまり当て 数を打つ: 5桁は弾く');
+  assert.equal(Q.apply(Q.apply(Q.init(3, 4, { rules: {} }), { p: -1, t: 'next' }), { p: 0, t: 'ans', q: 0, c: off, ms: 300 }), null, '数のきまり当て 4つから選ぶ: 札にない数は弾く');
+  s = Q.apply(s, { p: 0, t: 'ans', q: 0, c: off, ms: 300 });
+  assert.equal(s.miss[0], true, '数のきまり当て 数を打つ: 札にない数も受け取り、まちがいになる');
+  s = Q.apply(s, { p: 1, t: 'ans', q: 0, c: x.ans, ms: 800 });
+  s = Q.apply(Q.apply(s, { p: -1, t: 'close' }), { p: -1, t: 'next' });
+  assert.deepEqual(s.scores, [0, 3, 0], '数のきまり当て 数を打つ: 正解に点');
+  for (const [k, rules] of [{ type: true }, { where: true, level: 'hard' }, { type: true, where: true, rounds: 20 }].entries()) {
+    const end = runCpus(Q, 5, 50 + k, rules, 200, 6000);
+    assert.ok(Q.result(end) && end.scores.some((v) => v > 0), `数のきまり当て: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('suretsu 44 OK');
+}
+{
+  const W = GAMES.mizu;
+  for (const [rounds, k] of [[3, 3], [8, 8], [undefined, 5], [4, 5]]) assert.equal(W.init(2, 1, { rules: rounds === undefined ? {} : { rounds } }).qs.length, k, `水はかり: 問題の数 ${rounds}`);
+  assert.deepEqual(W.init(2, 1, { rules: { rounds: 8 } }).qs.slice(0, 5), W.init(2, 1, { rules: {} }).qs, '水はかり: 問題の数を変えても前の問題は同じ');
+  // 早さ: 手数が多くても早く作った人が上
+  let s = W.apply(W.init(3, 4, { rules: { race: true } }), { p: -1, t: 'next' });
+  const x = s.qs[0];
+  const i = x.path[0][1];
+  s = W.apply(s, { p: 0, t: 'done', q: 0, ops: [`f${i}`, `e${i}`, ...x.path], ms: 3000 }); // 速いが2手多い
+  s = W.apply(s, { p: 1, t: 'done', q: 0, ops: x.path, ms: 20000 }); // 遅いがいちばん少ない
+  assert.deepEqual(s.moves.slice(0, 2), [x.path.length + 2, x.path.length], '水はかり 早さ: 手数は数えておく');
+  s = W.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [3, 2, 0], '水はかり 早さ: 早く作った人が上（手数は見ない）');
+  for (const [k, rules] of [{ race: true }, { rounds: 3, level: 'hard', race: true }].entries()) {
+    const end = runCpus(W, 4, 60 + k, rules, 500, 6000);
+    assert.ok(W.result(end) && end.scores.some((v) => v > 0), `水はかり: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('mizu 44 OK');
+}
+
 console.log('ALL OK');

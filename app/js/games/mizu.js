@@ -12,6 +12,10 @@
 //   - 操作は自分の画面だけで進め、完成したときに操作の一覧をまとめて送る（apply が一覧を最初から当て直して、本当に完成しているか確かめる）。
 //   - ほかの人には、完成したかどうかと手数だけを見せる（途中の水の量は見せない）。全員が完成したら1.5秒で締め切る。
 //   - CPU は12〜40秒で完成させ、2割は時間内に作れない。手数はいちばん少ない手数に 0・2・4 手のむだを足す。
+// 2026-11-18 の44回目の案（本人が選んだ。分かれ目は Claude が決めた）:
+//   - 問題の数: 3・5（最初）・8問（鍵は rounds）。
+//   - 順位の決め方: 手数（最初）・早さ（鍵は race）。早さでは、作れた人のうち早く作れた順に 3点・2点・それ以降は1点（手数は見せるが順位に使わない）。
+//     ほかの作り（1問60秒・全員が作れたら締め切り・むだな手も数える）は手数のときと同じ。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, ops: ['f0' | 'e1' | 'p01' …], ms }
 //   f = 入れる・e = 捨てる・p = 移す（p01 は 0 番から 1 番へ）。数字は入れ物の番号（左から 0）
@@ -22,12 +26,13 @@ import { pointsOf } from './make10.js';
 
 const LEVELS = [['easy', 'やさしい'], ['normal', 'ふつう'], ['hard', 'むずかしい']];
 const levelOf = (r) => (LEVELS.some(([v]) => v === r.level) ? r.level : 'normal');
-const ROUNDS = 5;
+const ROUNDS = [[3, '3問'], [5, '5問'], [8, '8問']];
+const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 5);
 const LIMIT = 60000;
 const READY_MS = 3000;
 const SHOWN_MS = 4000;
 const GRACE_MS = 1500;
-const MOVE_W = 1e6; // 速さの比べ方: 手数 × 1e6 + ms（ms は LIMIT より小さいので、手数が先に効く）
+const MOVE_W = 1e6; // 速さの比べ方: 手数 × 1e6 + ms（ms は LIMIT より小さいので、手数が先に効く）。順位の決め方が「早さ」なら ms だけ
 
 const int = (rnd, a, b) => a + Math.floor(rnd() * (b - a + 1));
 
@@ -136,11 +141,13 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'level', label: 'むずかしさ', desc: 'やさしい: 入れ物2つで短い手順／ふつう: 入れ物2つで長めの手順／むずかしい: 入れ物3つ', def: 'normal', choices: LEVELS },
+    { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 5, choices: ROUNDS },
+    { key: 'race', label: '順位の決め方', desc: '手数: 少ない手数で作れた人が上／早さ: 早く作れた人が上', def: false, choices: [[false, '手数'], [true, '早さ']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const r = { level: 'normal', ...rules };
-    const qs = Array.from({ length: ROUNDS }, (_, q) => makeMizu(seed, q, levelOf(r)));
+    const qs = Array.from({ length: roundsOf(r) }, (_, q) => makeMizu(seed, q, levelOf(r)));
     return {
       n, seed, rules: r, qs, q: -1, phase: 'ready',
       solved: Array(n).fill(null), moves: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0,
@@ -203,7 +210,7 @@ export default {
     const s = clone(s0);
     s.step += 1;
     s.moves[m.p] = m.ops.length;
-    s.solved[m.p] = m.ops.length * MOVE_W + Math.min(Math.round(m.ms), LIMIT);
+    s.solved[m.p] = (s0.rules.race ? 0 : m.ops.length * MOVE_W) + Math.min(Math.round(m.ms), LIMIT);
     return s;
   },
 
@@ -245,7 +252,7 @@ export default {
     card.className = 'kj-card';
     wrap.append(card);
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">入れる・捨てる・移すだけで、言われた量をちょうど作ろう。少ない手数ほど高い点・全${s.qs.length}問</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">入れる・捨てる・移すだけで、言われた量をちょうど作ろう。${s.rules.race ? '早く作れた人ほど' : '少ない手数ほど'}高い点・全${s.qs.length}問</div>`;
       return;
     }
     const x = s.qs[s.q];

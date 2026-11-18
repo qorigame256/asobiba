@@ -14,13 +14,19 @@
 //   - 画面には「たたけ」「かぶれ」の指示は出さない（自分と相手の手を見て、どちらを押すか決めるのが遊びの中身のため）。
 //   - CPU は手を0.5〜2秒で選ぶ。押すのは0.5〜1.1秒で、9割は正しいボタン。あいこでは1割お手つきする。
 //   - 人数が奇数になってしまったとき（自動確認などで直に始めたとき）は、組に入れなかった1人がその回は休み。
+// 2026-11-18 の44回目の案（本人が選んだ。分かれ目は Claude が決めた）:
+//   - 回数: 5・10（最初）・15回（鍵は rounds）。
+//   - 手が出るまでの間: いつも同じ（最初）・ばらばら（鍵は wait）。ばらばらでは、手が一斉に出る合図（reveal）のあと、手を ❔ で伏せたまま
+//     0.5〜2秒待ってから見せる（待つ長さは種と何回目かから決まるので全員同じ。waitOf）。待っている間はボタンを押せない（何を押すか分からないため）。
+//     速さ（ms）は、各自の画面で手が見えてから測る（showKey）。手を選ぶ3秒の帯で「そろそろ」と読めてしまうのを崩すための設定。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → pick → reveal → act → close → shown → next …
 // 手: { p: -1, t: 'next' | 'reveal' | 'close' } / { p, t: 'hand', r, h: 'g' | 'c' | 'p' } / { p, t: 'act', r, a: 'hit' | 'cover', ms }
 
 import { mulberry32, shuffle, esc } from './util.js';
 import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
 
-const ROUNDS = 10;
+const ROUNDS = [[5, '5回'], [10, '10回'], [15, '15回']];
+const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 10);
 const PICK_MS = 3000;
 const ACT_MS = 2500;
 const READY_MS = 3000;
@@ -43,6 +49,9 @@ export function pairsOf(n, seed, r) {
   return out;
 }
 // 手を選ばなかった人のおまかせの手（種・回・席から決まる）
+// 「ばらばら」のとき、手が出る合図から手を見せるまでの間（ms）。いつも同じなら0
+export const waitOf = (s) => (s.rules?.wait ? 500 + Math.floor(mulberry32((s.seed * 97 + s.r * 61 + 5) >>> 0)() * 1500) : 0);
+const showKey = (s) => (waitOf(s) ? actKey(s) + ':show' : actKey(s)); // 手が見えた時刻の鍵（いつも同じなら合図の時刻と同じ）
 const autoHand = (seed, r, p) => HANDS[Math.floor(mulberry32((seed * 89 + r * 13 + p * 7 + 1) >>> 0)() * 3)];
 // 組の勝ち負け: { win: 勝った席 | null（あいこ）, lose }
 export function duelOf(hands, [x, y]) {
@@ -77,11 +86,14 @@ export default {
   evenTeams: true,
   minPlayers: 2,
   maxPlayers: 10,
-  settings: [],
+  settings: [
+    { key: 'rounds', label: '回数', desc: '1回の対局でじゃんけんをする回数', def: 10, choices: ROUNDS },
+    { key: 'wait', label: '手が出るまでの間', desc: '手が出るまでの間を毎回変える（0.5〜2秒）。待ち構えて押せなくなる', def: false, choices: [[false, 'いつも同じ'], [true, 'ばらばら']] },
+  ],
 
   init(n, seed, { rules = {} } = {}) {
     return {
-      n, seed, rules: { ...rules }, r: -1, rounds: ROUNDS, phase: 'ready', pairs: [],
+      n, seed, rules: { ...rules }, r: -1, rounds: roundsOf(rules), phase: 'ready', pairs: [],
       hands: Array(n).fill(null), acts: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0,
     };
   },
@@ -119,7 +131,7 @@ export default {
     }
     if (s.phase === 'act') {
       if (ins.every((p) => s.acts[p] !== null)) return { key: 'actall' + s.r, ms: ALL_MS, move: { t: 'close' } };
-      return { key: 'act' + s.r, ms: ACT_MS + GRACE_MS, move: { t: 'close' } };
+      return { key: 'act' + s.r, ms: waitOf(s) + ACT_MS + GRACE_MS, move: { t: 'close' } };
     }
     if (s.phase === 'shown') return { key: 'shown' + s.r, ms: SHOWN_MS, move: { t: 'next' } };
     return null;
@@ -203,7 +215,7 @@ export default {
         cpuPlan.set(key, plan);
       }
       if (cpuPlan.size > 400) cpuPlan.delete(cpuPlan.keys().next().value);
-      const t = since(actKey(s));
+      const t = since(actKey(s)) - waitOf(s); // 手が見えてからの時間
       return t >= plan.at && t < ACT_MS ? { t: 'act', r: s.r, a: plan.a, ms: Math.round(t) } : null;
     }
     return null;
@@ -274,15 +286,20 @@ export default {
       return;
     }
     // 手が出たあと（act と shown）
-    const key = actKey(s);
-    if (s.phase === 'act') since(key);
+    const wait = s.phase === 'act' ? waitOf(s) : 0;
+    if (s.phase === 'act') since(actKey(s));
+    const hidden = s.phase === 'act' && since(actKey(s)) < wait; // 「ばらばら」で、まだ手を伏せている間
+    const key = s.phase === 'act' && !hidden ? showKey(s) : actKey(s);
+    if (s.phase === 'act' && !hidden) since(key);
+    if (hidden) setTimeout(() => { if (wrap.isConnected) this.render(root, s, o); }, Math.max(0, wait - since(actKey(s))) + 5);
+    const face = (p) => (hidden ? '❔' : FACE[s.hands[p]]);
     const vs = (x) => {
       const box = document.createElement('div');
       box.className = 'tt-vs';
       const [a, b] = me !== null && x.includes(me) ? [me, x.find((p) => p !== me)] : x;
-      box.innerHTML = `<div class="tt-side"><span class="tt-face">${FACE[s.hands[a]]}</span><span class="tt-name">${esc(name(a))}</span></div>`
+      box.innerHTML = `<div class="tt-side"><span class="tt-face">${face(a)}</span><span class="tt-name">${esc(name(a))}</span></div>`
         + '<span class="tt-x">vs</span>'
-        + `<div class="tt-side"><span class="tt-face">${FACE[s.hands[b]]}</span><span class="tt-name">${esc(name(b))}</span></div>`;
+        + `<div class="tt-side"><span class="tt-face">${face(b)}</span><span class="tt-name">${esc(name(b))}</span></div>`;
       return box;
     };
     const resText = (x) => {
@@ -297,7 +314,8 @@ export default {
     else if (me !== null) card.insertAdjacentHTML('beforeend', '<div class="kj-word small">この回はお休み</div>');
     if (s.phase === 'act') {
       if (!pair) for (const x of s.pairs) card.append(vs(x));
-      card.append(timeBar(key, ACT_MS));
+      if (hidden) card.insertAdjacentHTML('beforeend', '<div class="kj-word small">ぽん…</div>');
+      else card.append(timeBar(key, ACT_MS));
     } else {
       const list = document.createElement('div');
       list.className = 'tt-results';
@@ -313,7 +331,7 @@ export default {
       card.append(list);
     }
     if (pair) {
-      const can = s.phase === 'act' && o.canMove && s.acts[me] === null && since(key) < ACT_MS;
+      const can = s.phase === 'act' && !hidden && o.canMove && s.acts[me] === null && since(key) < ACT_MS;
       const pad = document.createElement('div');
       pad.className = 'tt-pad';
       const mine = s.acts[me];
