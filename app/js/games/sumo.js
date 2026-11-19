@@ -462,6 +462,8 @@ function mount(root, opts) {
     if (frames.length < 4 || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
     const fell = frames[0].w.some((a, p) => a[2] && !frames.at(-1).w[p][2]);
     if (!fell) return;
+    // 2人以上残ったまま決まった＝時間切れの決着。その直前にだれかが倒れていても流さない（3〜4人で起きた。2026-11-19 の Codex の点検）
+    if (frames.at(-1).w.filter((a) => a[2]).length > 1) return;
     replay = { frames, t0: now, dur: REPLAY_SPAN * 2000 };
   }
   canvas.addEventListener('pointerdown', () => { replay = null; });

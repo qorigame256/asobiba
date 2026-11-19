@@ -299,6 +299,12 @@ if (!TESTDATA || !fs.existsSync(TESTDATA)) {
     s.h.phase = 'claim';
     s.h.claim = { from: 0, id: 4 * 4, src: 'discard', options: { 1: ['ron'] }, responses: {} };
     check('ロンを選べる間はフリテンと出さない', T.waitView(s, 1).furiten === false);
+    // 見送ったあとは、ほかの人の返事待ちの間もフリテンと出す（2026-11-19 の Codex の点検）
+    s.h.claim.responses = { 1: { a: 'pass' } };
+    check('ロンを見送ったあとは返事待ちの間もフリテン', T.waitView(s, 1).furiten === true);
+    s.h.claim.responses = { 1: { a: 'ron' } };
+    check('ロンと答えたあとはフリテンと出さない', T.waitView(s, 1).furiten === false);
+    s.h.claim.responses = {};
     s.h.claim.options = { 1: ['pon'] };
     check('ロンを選べない（役なしなど）ならフリテン', T.waitView(s, 1).furiten === true);
     s.h.phase = 'play';

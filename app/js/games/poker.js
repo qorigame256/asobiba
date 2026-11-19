@@ -451,8 +451,13 @@ export default {
       if (m.t !== 'draw' || !Array.isArray(idx) || idx.length > 5 || new Set(idx).size !== idx.length
         || !idx.every((i) => Number.isInteger(i) && i >= 0 && i < 5)) return null;
       const keep = h.cards[p].filter((_, i) => !idx.includes(i));
-      h.muck.push(...h.cards[p].filter((_, i) => idx.includes(i)));
-      h.cards[p] = sortCards([...keep, ...drawCards(s, idx.length)]);
+      // 先に引いてから、捨てた札を捨て札へ入れる（山が尽きて捨て札をまぜ直すとき、いま捨てた札を引き直さないように。2026-11-19 の Codex の点検）。
+      // それでも足りないとき（ほかの捨て札も無い）だけ、いま捨てた札もまぜて残りを引く（手札を5枚に保つ）
+      const gone = h.cards[p].filter((_, i) => idx.includes(i));
+      const got = drawCards(s, idx.length);
+      h.muck.push(...gone);
+      if (got.length < idx.length) got.push(...drawCards(s, idx.length - got.length));
+      h.cards[p] = sortCards([...keep, ...got]);
       h.drew[p] = idx.length;
       s.last = { p, t: 'draw', n: idx.length };
       h.toAct = nextDrawer(s, p);

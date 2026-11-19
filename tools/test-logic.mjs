@@ -653,6 +653,20 @@ console.log('colors stack OK');
   assert.deepEqual([c.last.got, c.drawn, c.turn], [1, null, 1], '設定なしなら1枚だけ引いて次へ');
   c = U.apply({ ...base(['b9', 'y7'], { untilPlay: true }), discard: ['r5'] }, { p: 0, t: 'draw' });
   assert.deepEqual([c.last.got, c.drawn, c.turn], [2, null, 1], '山と捨て札が尽きたらやめて次へ');
+  // 手札の上限と併用: 上限を超えた所で引くのをやめる（2026-11-19 の Codex の点検。前は出せる札が来るまで引き続けた）
+  c = U.apply({ ...U.init(3, 1, { rules: { untilPlay: true, cap: true } }), deck: ['g8', 'g7', 'b9', 'y7', 'y6'], discard: ['r5'], hands: [Array(25).fill('y1'), ['g2', 'g3'], ['g4']], color: 'r', turn: 0, drawn: null }, { p: 0, t: 'draw' });
+  assert.deepEqual([c.last.got, c.out?.[0], c.deck.length], [1, true, 4 + 26], '上限を超えたら、その先は引かずに脱落（手札は山へ戻る）');
+  // CPU の宣言: 7で交換したあとの枚数で決める（3枚から出しても、交換で1枚になるなら宣言する）
+  {
+    const rnd = Math.random;
+    Math.random = () => 0.99;
+    try {
+      const st = { ...U.init(2, 1, { rules: { call: true, sevenZero: true } }), deck: ['g8', 'g7', 'b9'], discard: ['r5'], hands: [['r7', 'b1', 'b2'], ['g2']], color: 'r', turn: 0, drawn: null };
+      assert.equal(U.cpu(st, 0).call, true, 'CPU は 7 で交換して1枚になるときも宣言する');
+      const st2 = { ...st, hands: [['r7', 'b1'], ['g2', 'g3', 'g4']] };
+      assert.ok(!U.cpu(st2, 0).call, 'CPU は 7 で交換して1枚にならないなら宣言しない');
+    } finally { Math.random = rnd; }
+  }
 }
 
 // いろあわせの最後の1枚の宣言: 宣言せずに1枚になったら2枚引く・宣言していれば引かない・1枚にならなければ何も起きない・上がりは要らない
@@ -5734,6 +5748,13 @@ assert.ok(sonarUsed >= 40, 'CPU もソナーを使う: ' + sonarUsed);
   assert.ok([0, 1, 2, 3, 4].every((i) => a.shots[0][i]), '選んだマスは全部撃ったことになる');
   assert.equal(KS.apply(a, m1), null, '同じ手が2回届いても2回目は反則');
   assert.ok(KS.info(a).includes('サルボ（5発）') && KS.info(a).includes('5マスの船を沈めた'), '結果をまとめて書ける');
+  // 音: 当たったが沈めていないサルボは「当たり」の音（2026-11-19 の Codex の点検。前は外れの音だった）
+  {
+    const h = sv(s, [0, 1, 91, 92, 93]);
+    assert.deepEqual([h.last.hits, h.last.sunks], [2, []], 'サルボ: 2発当たって沈めていない');
+    assert.equal(KS.sound(s, h), 'hit', 'サルボ: 当たって沈めていなければ当たりの音');
+    assert.equal(KS.sound(s, a), 'punch', 'サルボ: 沈めたら沈めた音');
+  }
   // 沈めると、沈められた側の次の番の数が減る
   assert.deepEqual([KM.salvoCount(a, 1), KM.salvoCount(a, 0)], [4, 5], '沈められた後手は次の番 4発');
   assert.equal(sv(a, [91, 92, 93, 94, 95]), null, '後手は5発撃てない');
@@ -7260,6 +7281,8 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.deepEqual([t.hits, t.got], [[0, 1, 0, 0], [1, 0, 0, 0]], '雪合戦: 当たりと当てた数');
   assert.equal(G.apply(t, { p: 1, t: 'hit', k: 0, by: 0, b: '0:a0' }), null, '雪合戦: 同じ当たりは2回数えない');
   assert.equal(G.apply(t, { p: 1, t: 'hit', k: 1, by: 3, b: '3:a0' }), null, '雪合戦: 味方の雪玉には当たらない');
+  assert.equal(G.apply(t, { p: 3, t: 'hit', k: 0, by: 0, b: '0:a0' }), null, '雪合戦: 雪玉1個で減るライフは1人分だけ（同じ印の2人目は弾く）');
+  assert.ok(G.apply(t, { p: 3, t: 'hit', k: 0, by: 0, b: '0:b0' }), '雪合戦: 別の雪玉なら同じチームの2人目にも当たる');
   assert.equal(G.apply(t, { p: 1, t: 'hit', k: 1, by: 9, b: '9:a0' }), null, '雪合戦: いない席は弾く');
   t = run(t, [{ p: 1, t: 'hit', k: 1, by: 2, b: '2:a0' }, { p: 1, t: 'hit', k: 2, by: 0, b: '0:a1' }]);
   assert.equal(t.dead[1], true, '雪合戦: ライフ3で3回当たったら脱落');
@@ -7349,6 +7372,10 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.equal(c.hits, 1, '雪合戦: また CPU が代わったら今の当たりの数から');
     c.hits += 1; c.hitList.push({ by: 2, b: '2:z1' }); // ホストの画面で当たった
     assert.deepEqual(G.cpu(s1, 1), { t: 'hit', k: 1, by: 2, b: '2:z1' }, '雪合戦: 作り直した CPU の当たりが手になる');
+    // 先にほかの人に当たったと決まった雪玉の当たりは捨て、次の当たりを手にする（残すと、そのあとの当たりが全部送れなくなる）
+    c.hits += 1; c.hitList.push({ by: 0, b: '0:z2' });
+    assert.deepEqual(G.cpu({ ...s1, used: ['2:z1'] }, 1), { t: 'hit', k: 1, by: 0, b: '0:z2' }, '雪合戦: ほかの人に当たった雪玉の当たりを捨てる');
+    assert.equal(c.hits, 2, '雪合戦: 捨てた分は CPU の当たりの数からも引く');
     Y.sims.clear();
   }
   console.log('yuki OK');
@@ -11835,6 +11862,11 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   const dm = { p: s0.turn, t: 'draw', i: 0, k: s0.step };
   const d1 = BB.apply(s1, dm);
   assert.ok(d1, '引く手: 並べ替えのあとに足し直しても引ける');
+  // 並びの版（2026-11-19 の Codex の点検）: 引く人が見ていた並び（o）と違えば弾く（見ていたのと別の札を引かない）。合っていれば引ける
+  assert.equal(BB.apply(s1, { ...dm, o: 0 }), null, '引く手: 並べ替える前の並びを見て引いた手は弾く');
+  assert.ok(BB.apply(s1, { ...dm, o: 1 }), '引く手: いまの並びを見て引いた手は通る');
+  assert.ok(BB.apply(s0, { ...dm, o: 0 }), '引く手: 並べ替えが無ければ版は0');
+  assert.equal(BB.cpu(s2).o, 2, '引く手: CPU もいまの版を添える');
   assert.equal(BB.cpu(s0).k, s0.step, '引く手: CPU の手にも k');
   let back = d1;
   for (let i = 0; i < 3 && back.turn !== dm.p; i++) back = BB.apply(back, { ...BB.cpu(back), p: back.turn }); // 一回りして同じ人の番に戻す

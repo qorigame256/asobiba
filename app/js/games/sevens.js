@@ -364,5 +364,5 @@ function logText(s, nameP) {
   if (l.t === 'joker') return `${nameP(l.p)}が ${cardLabel(l.c)} の所にジョーカーを置いた${l.up ? '。上がり！' : `（${nameP(l.owner)}は次にその札を出す）`}`;
   if (l.t === 'swap') return `${nameP(l.p)}が ${cardLabel(l.c)} を出してジョーカーを受け取った`;
   if (l.t === 'pass') return `${nameP(l.p)}がパス（${s.passes[l.p]}回目）`;
-  return `${nameP(l.p)}がパスしすぎて失格。手札${l.cards.length}枚を場に並べた`;
+  return `${nameP(l.p)}がパスしすぎて失格。手札${l.cards.filter((c) => c !== JOKER).length}枚を場に並べた`; // ジョーカーは場に並べず捨てるので数えない（2026-11-19 の Codex の点検）
 }

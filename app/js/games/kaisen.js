@@ -283,7 +283,12 @@ function apply3(s, m) {
     const before = sunk3(s, q);
     const after = sunk3(t, q);
     for (const k of after) if (!before.includes(k)) sunks.push([q, k]);
-    if (after.length === fleetOf(N).length) { t.out[q] = true; t.outAt[q] = t.count; outs.push(q); }
+    if (after.length === fleetOf(N).length) {
+      t.out[q] = true; t.outAt[q] = t.count; outs.push(q);
+      // 脱落したときに撃たれていたマスを覚える（見た目だけに使う。脱落した人の海に、そのあとの弾のあとを付けないため。2026-11-19 の Codex の点検）
+      t.sealed = (t.sealed ?? []).slice();
+      t.sealed[q] = s.grid[q].map((_, i) => shotOn(t, q, i));
+    }
   }
   t.last = { p, cell: m, hits, sunks, outs };
   const left = aliveList(t);
@@ -343,14 +348,14 @@ function sea3(s, owner, { title, showShips, onShoot = null, small = false, mine 
   const ships = s.grid[owner];
   const sunk = ships ? new Set(sunk3(s, owner)) : new Set();
   for (let i = 0; i < N * N; i++) {
-    const shot = ships ? shotOn(s, owner, i) : false;
+    const shot = ships ? (s.sealed?.[owner] ? s.sealed[owner][i] : shotOn(s, owner, i)) : false;
     const k = ships ? ships[i] : -1;
     const can = onShoot && !s.shots[mine][i];
     const cell = document.createElement(can ? 'button' : 'div');
     let cls = 'ks-cell';
     if (k >= 0 && (showShips || sunk.has(k))) cls += ' ship' + (sunk.has(k) ? ' sunk' : '');
     if (shot) cls += k >= 0 ? ' hit' : ' miss';
-    else if (mine !== null && s.shots[mine][i]) cls += ' miss'; // 自分が撃ったマス（この海にはまだだれも撃っていない形でも、もう撃てない）
+    else if (mine !== null && mine !== owner && !s.out[owner] && s.shots[mine][i]) cls += ' miss'; // 自分の海と脱落した人の海には付けない（2026-11-19 の Codex の点検）。 自分が撃ったマス（この海にはまだだれも撃っていない形でも、もう撃てない）
     if (s.last && !s.last.placed && s.last.cell === i && s.last.p !== owner) cls += ' last';
     if (can) {
       cell.type = 'button';
@@ -499,7 +504,7 @@ const game = {
     const l = b.last;
     if (!l || l.placed) return 'place';
     if (l.sonar !== undefined) return 'question';
-    if (l.hits) return l.sunks.length ? 'punch' : l.hits.length ? 'hit' : 'pop'; // 3人
+    if (Array.isArray(l.hits)) return l.sunks.length ? 'punch' : l.hits.length ? 'hit' : 'pop'; // 3人（サルボの hits は当たった数なので、ここに入れない。入れると当たっても外れの音になる）
     return l.sunk !== null ? 'punch' : l.hit ? 'hit' : 'pop';
   },
 

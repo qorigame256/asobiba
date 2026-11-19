@@ -148,6 +148,9 @@ function boom(x, y, sec) {
   const { s, o } = ui.cur;
   if (ui.me === null || s.out[ui.me] !== null || ui.lost >= livesOf(s)) return;
   ui.lost += 1;
+  // 脱落になる爆発は、まだ局面に入っていない送りがあれば先に送らない（脱落すると送りの手は弾かれるので、直前にいっぱいにした分が消えた。2026-11-19 の Codex の点検）。
+  // 送りが入ってから resend が爆発を送る
+  if (ui.lost >= livesOf(s) && s.sent[ui.me] < ui.sends) return;
   o.onMove({ t: 'boom', n: ui.lost });
   void sec;
 }
@@ -158,9 +161,11 @@ function resend() {
   if (ui.me === null || s.phase !== 'play' || s.out[ui.me] !== null) return;
   const now = performance.now();
   if (now - ui.retryAt < RETRY_MS) return;
-  if (s.boom[ui.me] < Math.min(ui.lost, livesOf(s))) { ui.retryAt = now; o.onMove({ t: 'boom', n: s.boom[ui.me] + 1 }); return; }
   const j = s.sent[ui.me];
-  if (j < ui.sends && ui.sendList[j]) { ui.retryAt = now; o.onMove({ t: 'send', n: j + 1, ...ui.sendList[j] }); }
+  const sendWaits = j < ui.sends && !!ui.sendList[j];
+  // 次の爆発で脱落するなら、届いていない送りを先に（上の boom と同じわけ）
+  if (s.boom[ui.me] < Math.min(ui.lost, livesOf(s)) && !(sendWaits && s.boom[ui.me] + 1 >= livesOf(s))) { ui.retryAt = now; o.onMove({ t: 'boom', n: s.boom[ui.me] + 1 }); return; }
+  if (sendWaits) { ui.retryAt = now; o.onMove({ t: 'send', n: j + 1, ...ui.sendList[j] }); }
 }
 
 function step() {
@@ -435,6 +440,7 @@ if (typeof window !== 'undefined') window.addEventListener('resize', resize);
 // 盤の上の爆弾を「出た時刻の列」で持ち、1.0〜1.4秒に1個ずつ古い順に片付ける。2.5% は違う色の枠へ入れてしまう。
 // 片付けが追いつかずに FUSE 秒たった爆弾は爆発する（だんだん忙しくなり、送られるとあふれる）。出方は人と同じ（c.start は速さの差）。
 const sims = new Map();
+const SIM_STALE = 3;
 export function cpuAdvance(c, upto, incTotal, rnd) {
   while (c.t < upto) {
     const t = Math.min(upto, c.t + 0.1);
@@ -561,6 +567,10 @@ export default {
     const key = `${s.seed}:${p}`;
     const now = since(goKey(s)) / 1000;
     let c = sims.get(key);
+    // CPU → 人 → CPU と替わった席（途中から空いた席に入った人がまた出た など）は、前の CPU の盤を使い回さず今から作り直す。使い回すと、人が遊んでいた間の分を
+    // まとめて進めて、その間の爆発と送りが一気に出る（2026-11-19 の Codex の点検）。cpu() は 0.15秒おきに呼ばれるので、SIM_STALE 秒あいたら替わっていたと見る
+    //（Claude の判断: ホストのタブが裏に回って呼ばれる間が延びても、ふつうは1秒おきなので作り直さない）
+    if (c && now - c.t > SIM_STALE) { sims.delete(key); c = null; }
     if (!c) {
       c = { t: now, nextSpawn: now, start: levelOf(s, 0), q: [], consumed: s.inc[p], handleAt: now + 1, box: [[0, 0], [0, 0]], events: [] };
       sims.set(key, c);
@@ -622,6 +632,8 @@ export default {
     let drag = null;
     canvas.addEventListener('pointerdown', (e) => {
       const { s: cur } = ui.cur;
+      // 爆弾をつまんでいる間の2本目の指は受けない（受けると、1本目の爆弾が置かれないまま宙に残った。2026-11-19 の Codex の点検）
+      if (drag) { e.preventDefault(); return; }
       if (ui.me === null || cur.phase !== 'play' || cur.out[ui.me] !== null) return;
       const p = toBoard(canvas, e);
       // つまむ爆弾: 範囲の中でいちばん近いもの。爆発まで3秒を切った爆弾は範囲が広く、少し選ばれやすい

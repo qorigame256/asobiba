@@ -1340,11 +1340,14 @@ function seatsFilled() {
   return o.length === boardSeats(S.gameId, S.rules) && o.every(Boolean);
 }
 
+// 自分の席をまだ CPU が代わりに打っている（待合室から戻った直後、ホストが代打をやめた返事が届くまで）。この間は打たせない（本人と CPU が同じ番に打たないように。2026-11-19 の Codex の点検）
+const awayMe = () => S.mode === 'online' && !!S.away?.includes(S.myId);
 function canMove(game, st, res) {
   if (res || S.full) return false;
   if (S.mode === 'local') return true;
   const me = myPlayer();
   if (me === SPECTATOR) return false;
+  if (awayMe()) return false;
   if (game.multi) return game.canAct(st, me);
   return seatsFilled() && game.turn(st) === me;
 }
@@ -2431,6 +2434,8 @@ function renderPage() {
   el('screen-play').classList.toggle('land-board', !!game && !game.multi && !game.live && (S.mode === 'local' || !!S.order));
   const status = el('status');
   const board = el('board');
+  // 観戦の「みんなの手札を開く」の欄（appendPeek）は盤の外に置くので、ここで片付ける（待合室・待ち画面・ふりかえり・別のゲームへ移っても残らないように。対局の描画が出し直す）
+  board.parentElement?.querySelectorAll(':scope > .peek-hands').forEach((x) => x.remove());
   const controls = ctl();
   controls.innerHTML = '';
   el('dock').hidden = true; // 「始める」を画面の下に固定（待合室だけ。lobbyDock）
@@ -2841,7 +2846,8 @@ function goAwayLobby(game, st, res) {
 }
 function backFromLobby() {
   S.lobbyView = false;
-  if (S.away?.includes(S.myId)) send({ type: 'away', on: false, round: S.round });
+  // 「行った」の知らせがまだホストから返っていなくても送る（すぐ戻ったときに代打が残らないように。届く順は送った順）
+  if (S.order?.includes(S.myId)) send({ type: 'away', on: false, round: S.round });
   render();
 }
 function renderAwayLobby(game, st) {
@@ -4977,6 +4983,7 @@ function onKicked(ban = true) {
   const net = S.net;
   setTimeout(() => net?.close(), 300);
   dropBack();
+  stopLive(); // エアホッケー・紙相撲の時計と resize の登録を片付ける（2026-11-19 の Codex の点検）
   S = null;
   setTurnTitle(false);
   setUrlRoom(null);
@@ -5231,7 +5238,7 @@ function onBoardMove(move) {
   const game = GAMES[S.gameId];
   const st = replay(S);
   // 番でなくても送れる手（ゲームの anytime。ババ抜きの手札の並べ替え。2026-11-16）
-  const any = !!st && game.multi && !S.full && !game.result(st) && myPlayer() !== SPECTATOR && !!game.anytime?.(st, myPlayer(), move);
+  const any = !!st && game.multi && !S.full && !game.result(st) && myPlayer() !== SPECTATOR && !awayMe() && !!game.anytime?.(st, myPlayer(), move);
   if (!st || (!any && !canMove(game, st, game.result(st)))) return;
   if (game.multi) move = { ...move, p: myPlayer() };
   if (!game.apply(st, move)) return;
@@ -5243,6 +5250,7 @@ function onBoardMove(move) {
 }
 
 // ホストの端末だけが CPU（と部屋を出た人の席）の手を考える
+let cpuSeq = 0;
 function scheduleCpu(game, st, res) {
   if (!S.isHost || S.mode !== 'online' || !S.order || res) return;
   const canAct = (s, i) => (game.multi ? game.canAct(s, i) : game.turn(s) === i);
@@ -5256,13 +5264,17 @@ function scheduleCpu(game, st, res) {
     const key = game.realtime ? `${S.gameId}:${S.round}:rt:${p}` : `${S.gameId}:${S.round}:${S.undo ?? 0}:${S.moves.length}:${p}`;
     if (S.cpuKeys[p] === key) continue; // もう予約してある
     S.cpuKeys[p] = key;
+    // 予約ごとの番号: 取り消された予約（席に人が入って cpuKeys が消えた）のタイマーが、同じ鍵で予約し直したあと（その人がまた出て席が空き直した）に効かないように、
+    // 鍵のほかに「いちばん新しい予約か」も見る（鍵だけだと古いタイマーと新しいタイマーの両方が打った。2026-11-19 の Codex の点検）
+    const tok = ++cpuSeq;
+    (S.cpuToks ??= [])[p] = tok;
     const session = S;
     const len = S.moves.length;
     const gid = S.gameId, round = S.round;
     setTimeout(() => {
       // 予約のあとでゲームか対局が替わったら何もしない（前のゲームの CPU が新しいゲームの局面で考えて例外になっていた。2026-10-30 に見つけた）
       if (S !== session || S.gameId !== gid || S.round !== round) { if (S === session && S.cpuKeys[p] === key) S.cpuKeys[p] = null; return; }
-      if (S.cpuKeys[p] !== key || (!game.realtime && S.moves.length !== len)) return;
+      if (S.cpuKeys[p] !== key || S.cpuToks?.[p] !== tok || (!game.realtime && S.moves.length !== len)) return;
       S.cpuKeys[p] = null;
       if (!cpuControlled(S.order?.[p])) { render(); return; } // 予約のあとで、観戦の人がこの席に入った（途中から空いた席に入る）
       const now = replay(S);
@@ -6461,6 +6473,8 @@ function adoptState(msg) {
     : null;
   againRuleNote(oldRules, oldVer);
   S.away = Array.isArray(msg.away) ? msg.away.filter((id) => typeof id === 'string') : [];
+  // 盤を見ているのに代打が続いている（待合室で再読み込みした など。lobbyView は覚えないので盤に戻る）なら、代打をやめてもらう（2026-11-19 の Codex の点検）
+  if (!S.isHost && !S.lobbyView && S.away.includes(S.myId)) send({ type: 'away', on: false, round: msg.round });
   S.bench = Array.isArray(msg.bench) ? msg.bench.filter((id) => typeof id === 'string') : [];
   const dr = msg.draw; // 遊びの抽選
   S.draw = dr && Number.isInteger(dr.n) && Array.isArray(dr.opts) && dr.opts.length && dr.opts.length <= DRAW_PICK && dr.opts.every((g) => typeof g === 'string' && GAMES[g]?.ready) && dr.votes && typeof dr.votes === 'object'

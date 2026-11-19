@@ -564,7 +564,7 @@ export default {
         if (!one.length) break;
         got++;
         if (canPlay(s, p, one[0])) card = one[0];
-      } while (s.rules?.untilPlay && card === null);
+      } while (s.rules?.untilPlay && card === null && !(s.rules?.cap && s.hands[p].length > capOf(s))); // 手札の上限（詳細設定）を超えたらそこで止める（その先は引かずに脱落。2026-11-19 の Codex の点検）
       s.last = { p, t: 'draw', got, drew: card !== null };
       checkCap(s, p);
       if (card !== null && !isOut(s, p)) s.drawn = card;
@@ -607,7 +607,8 @@ export default {
     if (s.match?.gap) return { t: 'next' };
     const m = this.cpuMove(s, p);
     // 最後の1枚の宣言（詳細設定）: 出したら1枚になりそうなら宣言する（1割5分は忘れる）
-    if (m.t === 'play' && s.rules?.call && s.hands[p].length - 1 - (m.more?.length ?? 0) === 1 && Math.random() >= 0.15) m.call = true;
+    // 出したあとの枚数は実際に当てて見る（7で交換・0で回すで手札が入れ替わったあとの枚数で罰が決まるため。2026-11-19 の Codex の点検）
+    if (m.t === 'play' && s.rules?.call && this.apply(s, { ...m, p, call: true })?.last?.call && Math.random() >= 0.15) m.call = true;
     return m;
   },
 

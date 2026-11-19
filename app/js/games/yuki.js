@@ -13,7 +13,7 @@
 // 作り（通信。弾幕回避・2色爆弾と同じ考え方で、ホストが有利にならないようにした）:
 //   - 自分の位置と投げた雪玉は見た目だけの中身として送りっぱなしにする（o.stream / onStream。位置は0.1秒ごと、雪玉は投げた瞬間）。
 //   - 当たったかは「当てられた人の端末」が自分の画面で決め、手 { t: 'hit', k, by, b } で送る（自分の画面でよけたら当たらない）。
-//     k は何回目の当たりか（局面の hits[p] と違う手は弾く。同じ当たりが2回届いても1回だけ数える）、by は投げた人、b は雪玉の印（ほかの画面でその雪玉を消す）。
+//     k は何回目の当たりか（局面の hits[p] と違う手は弾く。同じ当たりが2回届いても1回だけ数える）、by は投げた人、b は雪玉の印（ほかの画面でその雪玉を消す。同じ印の当たりは1人分だけ数える＝局面の used）。
 //     局面の当たりの数が端末の数より少ないあいだは0.5秒ごとに送り直す（2色爆弾・金魚すくいと同じわけ。ゲストの手がすれ違って消えることがある）。
 //   - 雪玉の通り道と壁は全員同じなので、壁で消えるのはどの画面でも同じ。投げた人の画面と当てられた人の画面で、人の位置は通信の分だけずれる。
 //   - CPU（と部屋を出た人の席）はホストの端末が動かし、当たりもホストの画面で決める（cpu() が当たりを手にする）。CPU の位置と雪玉はホストが送る。
@@ -62,7 +62,7 @@ export const useWalls = (rules) => { walls = wallsOf(rules); return walls; };
 const livesOf = (s) => ([1, 3, 5].includes(Number(s.rules.lives)) ? Number(s.rules.lives) : 3);
 const durOf = (s) => ([60, 90, 120].includes(Number(s.rules.time)) ? Number(s.rules.time) : 90);
 const goKey = (s) => `yuki:${s.seed}:go`;
-const clone = (s) => ({ ...s, hits: s.hits.slice(), got: s.got.slice(), dead: s.dead.slice(), hitB: s.hitB.slice() });
+const clone = (s) => ({ ...s, hits: s.hits.slice(), got: s.got.slice(), dead: s.dead.slice(), hitB: s.hitB.slice(), used: (s.used ?? []).slice() });
 export const aliveOf = (s, t) => s.dead.map((d, p) => (!d && teamOf(p) === t ? p : -1)).filter((p) => p >= 0);
 // チームごとの残りのライフの合計
 export const lifeSums = (s) => [0, 1].map((t) => s.hits.reduce((a, h, p) => a + (teamOf(p) === t ? Math.max(0, livesOf(s) - h) : 0), 0));
@@ -435,6 +435,10 @@ function sendHit(force) {
   const { s, o } = ui.cur;
   if (ui.me === null || s.phase !== 'play' || !o.canMove) return;
   const k = s.hits[ui.me];
+  // 先にほかの人に当たったと決まった雪玉（局面の used）の当たりは、送っても弾かれるので捨てる（残すと、そのあとの当たりが全部送れなくなる）
+  let dropped = false;
+  while (ui.hits[k] && s.used?.includes(ui.hits[k].b)) { ui.hits.splice(k, 1); dropped = true; }
+  if (dropped && !s.dead[ui.me]) ui.out = ui.hits.length >= livesOf(s);
   const h = ui.hits[k];
   if (!h) return;
   if (!force && performance.now() - ui.lastHitSend < RESEND_MS) return;
@@ -478,7 +482,7 @@ export default {
 
   init(n, seed, { rules = {} } = {}) {
     const r = { lives: '3', time: '90', walls: '3', ...rules };
-    return { n, seed, rules: r, phase: 'ready', hits: Array(n).fill(0), got: Array(n).fill(0), dead: Array(n).fill(false), hitB: Array(n).fill(null), step: 0 };
+    return { n, seed, rules: r, phase: 'ready', hits: Array(n).fill(0), got: Array(n).fill(0), dead: Array(n).fill(false), hitB: Array(n).fill(null), used: [], step: 0 };
   },
 
   turn() { return null; },
@@ -525,11 +529,13 @@ export default {
     if (s0.phase !== 'play' || m.t !== 'hit' || !okSeat(m.p, s0.n) || s0.dead[m.p]) return null;
     if (m.k !== s0.hits[m.p] || !okSeat(m.by, s0.n) || teamOf(m.by) === teamOf(m.p)) return null;
     if (typeof m.b !== 'string' || m.b.length > 24) return null;
+    if (s0.used?.includes(m.b)) return null; // 雪玉1個で減るライフは1人分だけ（別々の端末で同じ雪玉が2人に当たっても、先に届いた方だけ数える。2026-11-19 の Codex の点検）
     const s = clone(s0);
     s.step += 1;
     s.hits[m.p] += 1;
     s.got[m.by] += 1;
     s.hitB[m.p] = m.b;
+    s.used.push(m.b);
     if (s.hits[m.p] >= livesOf(s)) s.dead[m.p] = true;
     if (!aliveOf(s, 0).length || !aliveOf(s, 1).length) s.phase = 'end';
     return s;
@@ -552,6 +558,7 @@ export default {
       if (sims.size > 40) sims.delete(sims.keys().next().value);
     }
     const k = s.hits[p];
+    while (c.hitList[k] && s.used?.includes(c.hitList[k].b)) { c.hitList.splice(k, 1); c.hits -= 1; } // 上の sendHit と同じ（先にほかの人に当たった雪玉の分は捨てる）
     const h = c.hitList[k];
     return h ? { t: 'hit', k, by: h.by, b: h.b } : null;
   },
@@ -605,8 +612,11 @@ export default {
       chips.scrollLeft = ui.chips.scrollLeft;
       ui.chips.replaceWith(chips);
       ui.chips = chips;
+      const more = me !== null && s.hits[me] > ui.cur.s.hits[me];
       ui.cur = { s, o };
       if (me !== null && s.dead[me]) ui.out = true;
+      // 自分の当たりが1つ局面に入ったら、まだ送っていない次の当たりをすぐ送る（0.5秒の送り直しを待つと、締め切り直前に続けて当たった分が締め切りに間に合わず消えた。2026-11-19 の Codex の点検）
+      if (more) sendHit(true);
       if (s.phase !== 'ready') since(goKey(s));
       return;
     }
@@ -625,6 +635,9 @@ export default {
     since(`yuki:${s.seed}:ready`);
     if (s.phase !== 'ready') since(goKey(s));
     const team = me === null ? 0 : teamOf(me);
+    // 同じ対局・同じ席で画面を作り直したとき（待合室を見て戻った など）は、前の画面の位置・当たらない時間・まだ送っていない当たり・雪玉を引き継ぐ
+    //（前は始めの位置へ飛び、当たった直後でもまた当たった。2026-11-19 の Codex の点検。ページを読み込み直したときは覚えが無いので始めの位置から）
+    const prev = ui?.key === key ? ui : null;
     ui = {
       key, canvas, ctx: canvas.getContext('2d'), chips, wrap, me, cur: { s, o }, scale: 300, team, flip: team === 1,
       self: me === null ? null : { ...spawnOf(me, s.n) }, out: me !== null && s.dead[me],
@@ -633,7 +646,12 @@ export default {
       last: performance.now(), lastSend: 0, lastHitSend: 0,
       calm: !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
     };
-    for (let p = 0; p < s.n; p++) if (p !== me) ui.ghosts.set(p, { ...spawnOf(p, s.n) });
+    if (prev) {
+      for (const k of ['self', 'safeUntil', 'lastThrow', 'thrown', 'tag', 'balls', 'ids', 'ghosts', 'blink']) ui[k] = prev[k];
+      if (prev.hits.length >= ui.hits.length) ui.hits = prev.hits;
+      ui.out = ui.out || ui.hits.length >= livesOf(s);
+    }
+    for (let p = 0; p < s.n; p++) if (p !== me && !ui.ghosts.has(p)) ui.ghosts.set(p, { ...spawnOf(p, s.n) });
     resize();
     canvas.addEventListener('pointerdown', (e) => {
       e.preventDefault();

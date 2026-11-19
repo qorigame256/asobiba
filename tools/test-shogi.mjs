@@ -70,8 +70,10 @@ function perft(board, hands, side, d) {
   check('打ち歩詰めは打てない', !has(legalMoves(mate.board, mate.hands, 0), (m) => m.d === 1 && m.t === sq(1, 0)));
   const notMate = position([[8, 8, 8], [0, 0, -8], [2, 0, 5]], { hands });
   check('詰まない歩の王手は打てる', has(legalMoves(notMate.board, notMate.hands, 0), (m) => m.d === 1 && m.t === sq(1, 0)));
-  const s = play(mate, [{ f: sq(5, 1), t: sq(5, 2) }]);
-  check('歩を突いての詰みは反則ではない（打つ時だけ）', !!s);
+  // 突き歩詰め: 9三の歩を 9二へ突いて詰ます（歩は 8三の金が守り、8一・8二は 7二の金が押さえている）。前は飛を動かすだけで、詰みを見ていなかった（2026-11-19 の Codex の点検）
+  const push = position([[8, 8, 8], [0, 0, -8], [2, 0, 1], [2, 1, 5], [1, 2, 5]]);
+  const s = play(push, [{ f: sq(2, 0), t: sq(1, 0) }]);
+  check('歩を突いての詰みは反則ではない（打つ時だけ）', s?.result?.winner === 0 && s.result.reason === '詰み', JSON.stringify(s?.result));
 }
 
 // 4. 成り

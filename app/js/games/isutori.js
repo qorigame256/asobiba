@@ -368,6 +368,8 @@ export default {
     // 止まった時刻は、席が変わっても（観戦から空いた席に入った）その回のあいだ覚えておく（見切りと同じ）
     const rk = keyOf(s);
     const stopAt = ui?.rk === rk && s.phase === 'wait' ? ui.stopAt : null;
+    // Tab で選んでいた椅子（描き直しで椅子を作り直すと focus が外れ、Enter が「光の止まった椅子」になってしまう。同じ回の描き直しなら同じ椅子へ戻す。2026-11-19 の Codex の点検）
+    const focused = fresh ? -1 : ui.chairs.indexOf(document.activeElement);
 
     root.innerHTML = '';
     root.className = 'board mq it';
@@ -416,6 +418,7 @@ export default {
     msg.className = 'mq-msg';
     field.append(ring, msg);
     root.append(field);
+    if (focused >= 0) chairs[focused]?.focus({ preventScroll: true });
     const same = ui?.rk === rk;
     ui = { mount, rk, field, ring, sign, msg, chairs, stopAt, lockUntil, sent, lastStep: same ? ui.lastStep : -1, stopLit: same ? ui.stopLit : null, bumped: !fresh ? ui.bumped : '', cur: { s, o } };
 

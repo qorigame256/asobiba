@@ -3,7 +3,7 @@
 // 最初に、手札の同じ数字の2枚を全部捨てる。自分の番に、次の人（手札が残っている人）の札を裏のまま1枚引き、
 // 同じ数字がそろえば2枚捨てる。手札がなくなった人から上がり。最後まで札を持っていた1人の負け。
 // 引いた札は手札の中の決まらない位置に入る（ほかの人がどこにジョーカーが入ったか追えないように。位置は種から作るので全員同じ）。
-// 手: { p, t: 'draw', i: 引く相手の手札の何枚目か, k: 引いたときの s.step }。番の決まったゲームなので、位置で表してよい。
+// 手: { p, t: 'draw', i: 引く相手の手札の何枚目か, k: 引いたときの s.step, o: 引かれる人の並びの版（下の ovOf） }。番の決まったゲームなので、位置で表してよい。
 //   並べ替え（下）と引く手がぶつかるとホストが手を足し直す（main.js の rebase）ので、同じ引く手が2回当たらないよう k の違う手は弾く
 //   （2026-11-16 の Codex の点検。k の無い古い端末の手はそのまま受ける）。
 // 手札を並べ替える（2026-11-16 の UI・UX の7回目。本人の選択。card-games.md）: { p, t: 'order', h: 札の名前の並び }。自分の番でなくても、手札が2枚以上あればいつでも送れる（anytime）。
@@ -21,13 +21,16 @@
 import { mulberry32, shuffle } from './util.js';
 import { makeDeck, rankOf, suitOf, cardEl, backEl, cardLabel, JOKER, fanHand, dragSort, peekBox } from './cards.js';
 
-const clone = (s) => ({ ...s, hands: s.hands.map((h) => h.slice()), out: s.out.slice() });
+const clone = (s) => ({ ...s, hands: s.hands.map((h) => h.slice()), out: s.out.slice(), ...(s.ov ? { ov: s.ov.slice() } : {}) });
+// 並びの版（2026-11-19 の Codex の点検）: 席ごとに、手札を並べ替えた回数（s.ov。並べ替えが1度も無い対局では局面に持たない）。引く手に引かれる人の版（o）を添え、
+// 引く人が見ていた並びと違えば弾く（並べ替えと行き違って、見ていたのと別の札を引かないように。o の無い古い端末の手はそのまま受ける）
+const ovOf = (s, p) => s.ov?.[p] ?? 0;
 
 // 引く札を見せる: いまつまんでいる札（{ key: 対局の種と何手目か, i: 引く相手の手札の何枚目か }）と、描き直し用の最後の画面
 let peek = null;
 let view = null;
 let popped = null; // 引いた札をふくらませた手（並べ替えの手が届いたときに、もう一度ふくらませない）
-const peekKey = (s) => `${s.seed}:${s.step}`;
+const peekKey = (s) => `${s.seed}:${s.step}:${ovOf(s, nextActive(s, s.turn))}`;
 
 const isRed = (c) => suitOf(c) === 'h' || suitOf(c) === 'd';
 // a と b がそろうか（ジョーカーはそろわない。color なら色も同じでないとそろわない）
@@ -129,11 +132,14 @@ export default {
       if (next.join() === s0.hands[m.p].join()) return null;
       const s = clone(s0);
       s.hands[m.p] = next;
+      s.ov = s.ov ?? Array(s.n).fill(0);
+      s.ov[m.p] += 1;
       return s;
     }
     if (!m || m.t !== 'draw' || !this.canAct(s0, m.p)) return null;
     if (m.k !== undefined && m.k !== s0.step) return null;
     const from = this.victim(s0);
+    if (from >= 0 && m.o !== undefined && m.o !== ovOf(s0, from)) return null;
     if (from < 0 || !Number.isInteger(m.i) || m.i < 0 || m.i >= s0.hands[from].length) return null;
     const s = clone(s0);
     s.step += 1;
@@ -154,12 +160,12 @@ export default {
     return s;
   },
 
-  cpu(s) { return { t: 'draw', i: Math.floor(Math.random() * s.hands[this.victim(s)].length), k: s.step }; },
+  cpu(s) { return { t: 'draw', i: Math.floor(Math.random() * s.hands[this.victim(s)].length), k: s.step, o: ovOf(s, this.victim(s)) }; },
 
   // 引く札を見せる: 引く人がつまんだ位置が届いたら、ゲームの画面だけ描き直す
   onStream(d, from) {
     const s = view?.s;
-    if (!s?.peek || this.done(s) || from !== s.turn || d?.k !== s.step) return;
+    if (!s?.peek || this.done(s) || from !== s.turn || d?.k !== s.step || (d.o !== undefined && d.o !== ovOf(s, this.victim(s)))) return;
     const n = s.hands[this.victim(s)]?.length ?? 0;
     const i = d.i === null ? null : Number(d.i);
     if (i !== null && !(Number.isInteger(i) && i >= 0 && i < n)) return;
@@ -228,9 +234,9 @@ export default {
           e.className = 'pcard back usable';
           e.setAttribute('aria-label', s.peek && held !== i ? `${i + 1}枚目をつまむ` : `${i + 1}枚目を引く`);
           e.onclick = () => {
-            if (!s.peek || held === i) { peek = null; o.onMove({ t: 'draw', i, k: s.step }); return; }
+            if (!s.peek || held === i) { peek = null; o.onMove({ t: 'draw', i, k: s.step, o: ovOf(s, from) }); return; }
             peek = { key: peekKey(s), i };
-            o.stream?.({ k: s.step, i });
+            o.stream?.({ k: s.step, i, o: ovOf(s, from) });
             this.render(root, s, { ...o, fresh: false });
           };
         } else {

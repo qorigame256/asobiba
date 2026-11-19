@@ -1024,7 +1024,7 @@ function mount(root, opts) {
     const ev = { hit: 0, wall: 0 };
     for (let i = 0; i < steps; i++) {
       const h = dt / steps;
-      for (let p = 0; p < n; p++) moveMallet(st.mallets[p], p, targets[p], bots.includes(p) ? level.speed : MALLET_V, h, T.clamp, T.keep);
+      if (!st.over) for (let p = 0; p < n; p++) moveMallet(st.mallets[p], p, targets[p], bots.includes(p) ? level.speed : MALLET_V, h, T.clamp, T.keep); // 決着したあとは動かさない（2026-11-19 の Codex の点検）
       if (!playing || st.pause > 0) continue;
       bumpPucks(ev); // パックどうしを先に、壁を後に見る（押し離したパックが壁へめり込まないように）
       for (let k = 0; k < st.pucks.length && playing; k++) {
@@ -1190,6 +1190,10 @@ function mount(root, opts) {
     st.played = 0;
     st.timeUp = false;
     st.pucks = startPucks();
+    // マレットも始めの位置から（前の試合の終わりの位置のままにしない。2026-11-19 の Codex の点検）
+    st.mallets = seats().map(T.home);
+    targets = seats().map((p) => ({ ...T.home(p) }));
+    cpuGoal = seats().map((p) => ({ ...T.home(p) }));
     st.banner = '';
     st.bannerT = 0;
     st.pause = 0.8;
@@ -1385,7 +1389,7 @@ function mount(root, opts) {
     for (let s = 0; s < steps; s++) {
       const h = dt / steps;
       // ほかの端末のマレットは届いた位置へなめらかに
-      for (let p = 0; p < n; p++) moveMallet(st.mallets[p], p, targets[p], !dv.includes(p) ? MALLET_V * 2 : bots.includes(p) ? level.speed : MALLET_V, h, T.clamp, T.keep);
+      if (!st.over) for (let p = 0; p < n; p++) moveMallet(st.mallets[p], p, targets[p], !dv.includes(p) ? MALLET_V * 2 : bots.includes(p) ? level.speed : MALLET_V, h, T.clamp, T.keep); // 決着したあとは動かさない
       if (!net.started || st.over || st.pause > 0) continue;
       // パックどうしは、両方ともこの端末が動かしているときだけぶつける（片方がほかの端末のときは、すり抜ける）。壁より先に見る
       bumpPucks(ev, st.pucks.map((_, i) => i).filter((i) => dv.includes(net.owners[i])));
@@ -1465,7 +1469,8 @@ function mount(root, opts) {
   const trail = []; // { t, p: [[x, y] | null …] }
   let replay = null; // { frames, t0, dur, dim }
   function keepTrail(now) {
-    if (replay || st.over || st.pause > 0) return;
+    // パック2つは止めずに続けるので、流している間も覚える（流している間に次のゴールが決まったら、そのゴールの分を流し直す。2026-11-19 の Codex の点検）
+    if ((replay && replay.dim) || st.over || st.pause > 0) return;
     trail.push({ t: now, p: st.pucks.map((q) => (q ? [q.x, q.y] : null)) });
     while (trail.length && now - trail[0].t > 1000) trail.shift();
   }
@@ -1473,6 +1478,7 @@ function mount(root, opts) {
     const now = performance.now();
     const frames = trail.filter((f) => now - f.t <= REPLAY_SPAN * 1000);
     trail.length = 0;
+    replay = null; // 前のゴールの分が流れている途中なら、やめる（下で作れなければ何も流さない）
     if (frames.length < 4 || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
     replay = { frames, t0: now, dur: GOAL_PAUSE * 1000, dim: pucks === 1 };
   }

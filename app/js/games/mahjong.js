@@ -207,7 +207,9 @@ function waitView(s, p, sel = null) {
   if (h.hands[p].length % 3 === 1 || h.riichi[p]) {
     const kinds = h.waits[p].slice();
     // ロンするか選んでいる間は、見送る前なのでフリテンと出さない（openClaim が先に furitenTemp を立てている）
-    const canRon = h.phase === 'claim' && !!h.claim?.options?.[p]?.includes('ron');
+    // 見送った（ロンのほかを返事した）あとは、ほかの人の返事待ちの間もフリテンと出す（2026-11-19 の Codex の点検）
+    const ans = h.claim?.responses?.[p];
+    const canRon = h.phase === 'claim' && !!h.claim?.options?.[p]?.includes('ron') && (!ans || ans.a === 'ron');
     return { kinds, furiten: kinds.length > 0 && !canRon && furiten(s, p), after: false };
   }
   if (sel === null || !h.hands[p].includes(sel)) return { kinds: [], furiten: false, after: false };
@@ -614,7 +616,8 @@ function cpuTurn(s) {
   if (o.nuki && countsOf(h.hands[p])[E.NORTH] === 1) return { a: 'nuki', n };
   if (h.riichi[p]) return { a: 'd', t: h.drawn, n };
   const fixed = h.melds[p].length;
-  const visible = countsOf([...h.hands[p], ...h.rivers.flat().map((x) => x.id), ...h.melds.flat().flatMap((m) => m.tiles), doraInd(h, 0)]);
+  // 鳴かれた牌（taken）は副露の牌にも入っているので、河の分は数えない（二重に数えると、残っている牌を無いと見てしまう。2026-11-19 の Codex の点検）
+  const visible = countsOf([...h.hands[p], ...h.rivers.flat().filter((x) => !x.taken).map((x) => x.id), ...h.melds.flat().flatMap((m) => m.tiles), doraInd(h, 0)]);
   const choices = [];
   const seen = new Set();
   for (const id of h.hands[p]) {

@@ -356,7 +356,12 @@ export default {
 };
 
 // 答え合わせの欄（先頭のコメント）
+// 行と判の動きは、始めた時刻を対局ごとに覚えて、描き直しても続きから動かす（札の裏返し（turnUp）と同じ。前は描き直すと行と判だけすぐ出て、札が開く前に「うそ」の判が見えた。2026-11-19 の Codex の点検）
+let ansAt = { key: null, t0: 0 };
 function answerBox(s, nameP, fresh) {
+  const aKey = `${s.seed}:${s.log.length}`;
+  if (fresh && ansAt.key !== aKey) ansAt = { key: aKey, t0: Date.now() };
+  const ago = ansAt.key === aKey ? Date.now() - ansAt.t0 : Infinity;
   const box = document.createElement('details');
   box.className = 'mk-review db-answer';
   box.open = true;
@@ -368,7 +373,8 @@ function answerBox(s, nameP, fresh) {
   s.log.forEach((x, i) => {
     const li = document.createElement('li');
     const d = Math.round(i * gap);
-    if (fresh) { li.className = 'db-rv-in'; li.style.setProperty('--d', `${d}ms`); }
+    const moving = ago < d + 380 + 250; // この行の判まで出終わっていなければ、続きから動かす（遅れが負なら途中から）
+    if (moving) { li.className = 'db-rv-in'; li.style.setProperty('--d', `${d - ago}ms`); }
     li.innerHTML = `<span class="mk-rv-n">${i + 1}</span><b class="db-rv-who">${esc(nameP(x.p))}</b><span class="db-rv-say">「${rankLabel(x.num)}」</span>`;
     const cards = document.createElement('span');
     cards.className = 'db-rv-cards';
@@ -383,7 +389,7 @@ function answerBox(s, nameP, fresh) {
       const t = document.createElement('span');
       t.className = 'db-rv-mark ' + (x.lie ? (x.by === null ? 'slip' : 'lie') : 'true');
       t.textContent = x.lie ? (x.by === null ? 'うそ（通った）' : 'うそ（ダウト）') : '本当（ダウト）';
-      if (fresh) t.style.setProperty('--d', `${d + 380}ms`);
+      if (moving) t.style.setProperty('--d', `${d + 380 - ago}ms`);
       li.append(t);
     }
     list.append(li);

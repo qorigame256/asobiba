@@ -227,6 +227,8 @@ const game = {
       if (can) {
         e.type = 'button';
         e.onclick = () => {
+          // 石をまく動きの途中で、まだ石が着いていない（見た目が空の）穴は押せない（本当の数では石があるので押せてしまっていた。2026-11-19 の Codex の点検）
+          if (e.querySelector('.mc-num')?.textContent === '0' || (hide && !e.querySelector('.mc-stones')?.childElementCount)) return;
           if (pick.k === k) { pick = { key: null, k: null }; o.onMove(k); return; }
           pick = { key: sKey, k };
           redraw();
@@ -358,6 +360,7 @@ let sowing = { key: null, t0: 0 };
 let sowGen = 0; // 描き直すたびに進め、前の描き方で予約した動きを止める（描き直した盤で続きを予約し直す）
 function sowFx(root, s, fresh) {
   const gen = ++sowGen;
+  if (typeof document !== 'undefined') document.querySelectorAll('.mc-fly').forEach((x) => x.remove()); // 前の描き方で飛ばした石（描き直した盤では行き先がずれるので残さない）
   const L = s.last;
   if (!L?.sown?.length || s.over || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
   const key = `${s.count}:${L.p}:${L.from}:${s.pits.join()}`;

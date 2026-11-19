@@ -280,14 +280,17 @@ let drag = null; // つかんでいる札 { id, card, x0, y0, dx, dy, moved }
 // 届いた手の一覧では札が手元に戻る。そのとき、戻った札を台札の所から手元へはね返して見せる。
 // 見分け方（Claude の判断）: 出した札を sent に覚え、台札に乗ったのを見たあとで（landed）、3秒以内にその札が手元にまた現れたら弾かれたとみなす（出した札が手元に戻ることはほかに無い）
 const BOUNCE_WAIT = 3000;
-let sent = null; // 最後に出した札 { card, pile, at, landed }
+// 返事を待つ間に次の札を出しても1枚目を見失わないよう、出した札は1枚ずつ別に覚える（2026-11-19 の Codex の点検。前は最後の1枚だけだった）
+let sent = []; // 出した札 { card, pile, at, landed }
 function bounceBack(root, s, me) {
-  if (!sent || me === null) return;
-  if (Date.now() - sent.at > BOUNCE_WAIT) { sent = null; return; }
-  if (s.piles[sent.pile]?.at(-1) === sent.card) { sent.landed = true; return; }
-  if (!sent.landed || !s.fields[me]?.includes(sent.card)) return;
-  const { card, pile } = sent;
-  sent = null;
+  if (me === null) { sent = []; return; }
+  sent = sent.filter((x) => Date.now() - x.at <= BOUNCE_WAIT);
+  for (const x of sent) if (s.piles[x.pile]?.includes(x.card)) x.landed = true;
+  const back = sent.filter((x) => x.landed && s.fields[me]?.includes(x.card));
+  sent = sent.filter((x) => !back.includes(x));
+  for (const x of back) bounceOne(root, x.card, x.pile);
+}
+function bounceOne(root, card, pile) {
   const e = root.querySelector(`.sp-side.mine [data-card="${card}"]`);
   const p = root.querySelector(`.sp-pile[data-pile="${pile}"]`);
   if (!e || !p || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
@@ -335,7 +338,7 @@ if (typeof window !== 'undefined') {
     const pile = moved ? pileAt(ev.clientX, ev.clientY) : -1; // 出せる台札の上で離したときだけ出す
     endDrag();
     if (pile >= 0 && cur.o.canMove) {
-      sent = { card, pile, at: Date.now(), landed: false };
+      sent.push({ card, pile, at: Date.now(), landed: false });
       cur.o.onMove({ t: 'play', card, pile });
     }
   });
