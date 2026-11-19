@@ -406,7 +406,7 @@ export default {
     }
     if (x.carry?.some((v) => v > 0)) {
       const n = document.createElement('div');
-      n.className = 'kj-sub ht-carry-note';
+      n.className = 'kj-sub ht-carry-note' + (big ? ' flip-after' : ''); // 表が返ってから出す（返る前に見えると結果が分かる。2026-11-19 Codex の点検）
       n.textContent = '次の回へ持ち越し: ' + x.carry.map((v, f) => (v ? `${FIELD_NAMES[f]} +${v}点` : '')).filter(Boolean).join('・');
       box.append(n);
     }

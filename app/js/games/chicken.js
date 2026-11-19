@@ -44,8 +44,9 @@ export const slideOf = (x) => (vOf(x) ** 2) / (2 * ACC);
 // ブレーキの時刻から止まる位置: { pos, fell }
 export function finalOf(x, tb) {
   if (tb === null || tb === undefined || tb >= x.T) return { pos: null, fell: true };
-  const pos = r1(vOf(x) * tb + slideOf(x));
-  return { pos, fell: pos > D };
+  const raw = vOf(x) * tb + slideOf(x);
+  // 落ちたかは丸める前の位置で決める（丸めてから比べると、崖を 0.05m 未満越えた車が生き残る。画面の車は越えて見える。2026-11-19 Codex の点検）
+  return { pos: r1(raw), fell: raw > D };
 }
 // 走り出してから t ms のときの位置（tb = ブレーキの時刻 | null）
 export function posAt(x, tb, t) {

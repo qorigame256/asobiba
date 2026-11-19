@@ -1435,6 +1435,9 @@ function showScreen(name) {
   if (name !== 'play') renderNetBanner();
   resultUp = false;
   if (name === 'home') { setBanner(true); resetGameFx(); } // 対局の画面（待合室を含む）は render が決める
+  // ホームへ戻ったら盤を空にする（隠れた対局の画面に盤が残ると、ゲームのスペース・Enter の処理が残った盤を見て手を送ろうとし、
+  // 部屋が無いので例外になる・ホームのボタンの Enter を横取りする。2026-11-19 Codex の点検）
+  if (name === 'home') { el('board').replaceChildren(); el('board').className = 'board'; }
   checkLastRoom(); // さっきの部屋へ戻る（ホームのときだけ問い合わせる。ほかの画面では閉じる）
   updateSeason();
 }
@@ -5223,6 +5226,7 @@ const FREE_TEXT = { umigame: [['text', 'sentence'], ['q', 'sentence'], ['a', 'se
 const badText = (move) => (FREE_TEXT[S.gameId] ?? []).some(([k, kind]) => typeof move?.[k] === 'string' && isBad(move[k], kind));
 
 function onBoardMove(move) {
+  if (!S) return; // 部屋を出たあとに、ゲームの時計やキーの処理から届いた手（2026-11-19 Codex の点検）
   if (badText(move)) { toast(BAD_TEXT_NOTE); return; }
   const game = GAMES[S.gameId];
   const st = replay(S);
@@ -5354,6 +5358,7 @@ function newRound(gameId, { lobby = false } = {}) {
   }
   if (gameId !== S.gameId) {
     S.carry = null;
+    S.streak = null; // 連勝は同じゲームを続けている間だけ（替えてから戻したとき、前の連勝が復活しないように。2026-11-19 Codex の点検）
     if (S.votes) S.votes = Object.fromEntries(Object.entries(S.votes).filter(([, g]) => g !== gameId)); // 投票がかなった
   }
   else if (prevGame?.carry && S.order) {
@@ -5378,10 +5383,18 @@ function newRound(gameId, { lobby = false } = {}) {
   S.order = null;
   S.seed = 0;
   S.prev = null;
-  if (!lobby && S.mode === 'online') { startRound(); return; }
+  // もう一回でも、人が抜けて最低人数を割っていたら（CPU を入れられないゲーム）始めずに待合室へ（始めると対局が作れず止まる。2026-11-19 Codex の点検）
+  if (!lobby && S.mode === 'online' && enoughPlayers(GAMES[gameId])) { startRound(); return; }
   saveRoom();
   if (S.mode === 'online') sendState();
   render();
+}
+
+// 今の顔ぶれでこのゲームを始められるか（カードの仲間だけ見る。盤のゲームは足りない席を CPU が埋める）
+function enoughPlayers(game) {
+  if (!game?.multi) return true;
+  const { humans, cpus } = lineup(game);
+  return humans.length + cpus >= game.minPlayers;
 }
 
 function startRound() {

@@ -7791,6 +7791,12 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     w = I.apply(w, { p: 1, t: 'sit', r: 1, ms: 400, c: 1 });
     assert.equal(I.referee(w).key, 'close1', '椅子取り: 全部ふさがっても、まだ一度も押していない人がいれば今までの締め切り');
   }
+  {
+    // 同じ ms の同着は、届いた順によらず席の番号の小さい人（2026-11-19 Codex の点検）
+    const sit = (st, p) => I.apply(st, { p, t: 'sit', r: 1, ms: 400, c: 0 });
+    const t0 = I.init(3, 5, { rules: { chair: true } });
+    assert.deepEqual([sit(sit(t0, 2), 1).seat[1], sit(sit(t0, 1), 2).seat[1]], [0, 0], '椅子取り: 同じ ms なら届いた順によらず席の番号の小さい人');
+  }
   c = I.apply(c, { p: -1, t: 'close', r: 1 });
   assert.deepEqual([c.last.out, c.r, c.seat.every((x) => x === null)], [[2], 2, true], '椅子取り: 座れなかった人が抜け、椅子は空に戻る');
   c = I.apply(c, { p: -1, t: 'close', r: 2 });
@@ -12451,6 +12457,18 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
       const tb = Math.floor(ideal * 0.7);
       assert.ok(Math.abs(posAt(x, tb, tb + vOf(x) / ACC + 500) - finalOf(x, tb).pos) < 0.06, 'チキンレース: 画面の動きと止まる位置が同じ');
     }
+  }
+  {
+    // 崖をわずかに（0.05m 未満）越えた車も落ちる（丸める前の位置で決める。2026-11-19 Codex の点検）
+    let found = 0;
+    for (let seed = 0; seed < 400 && found < 3; seed++) {
+      for (const x of makeRounds(seed, 10)) {
+        const tb = Math.ceil((D - slideOf(x)) / vOf(x));
+        const raw = vOf(x) * tb + slideOf(x);
+        if (raw > D && raw < D + 0.05) { assert.equal(finalOf(x, tb).fell, true, `チキンレース: 崖を ${(raw - D).toFixed(3)}m 越えたら落ちる`); found++; }
+      }
+    }
+    assert.ok(found > 0, 'チキンレース: 崖をわずかに越える場面が見つかる');
   }
   assert.deepEqual(racePoints([{ pos: 99, fell: false }, { pos: 95, fell: false }, { pos: null, fell: true }, { pos: 99, fell: false }, { pos: 80, fell: false }]), [3, 1, 0, 3, 0], 'チキンレース: 同じ残りは同じ点・落ちたら0点');
   let s = G.apply(G.init(3, 4, { rules: {} }), { p: -1, t: 'next' });

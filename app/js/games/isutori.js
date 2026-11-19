@@ -19,7 +19,7 @@
 // 手: { p, t: 'sit', r: 何回目か, ms } / { p: -1, t: 'close', r }（ホストの締め切り）
 //   r と「その回はもう押したか」で、同じ手が2回届いても2回目は反則になる。
 // 詳細設定「椅子の取り合い」（chair。2026-11-19 の45回目の案。本人が選んだ。上の「取り合いはしない」を設定で外すものだと伝えて選ばれた。分かれ目は Claude の判断）:
-//   - 押した椅子の番号も送る（手に c。椅子は 0〜残りの人数−2）。1つの椅子には1人だけ座れ、同じ椅子を押した人どうしは ms の小さい（速かった）人のもの。
+//   - 押した椅子の番号も送る（手に c。椅子は 0〜残りの人数−2）。1つの椅子には1人だけ座れ、同じ椅子を押した人どうしは ms の小さい（速かった）人のもの（同じ ms なら席の番号の小さい人）。
 //     届いた順では決めない（通信の遅れで不利にならないように）。先に座っていた人より速い手が後から届いたら、座っていた人ははじき出される。
 //   - はじき出された人・取られた椅子を押した人は、その回のうちに別の椅子を押し直せる（ms はその人の画面で止まってから押し直すまで）。
 //     押し直しの ms は、その人が前に押した ms より大きくないと受け付けない（tried。同じ手が2回届いても2回目は反則になる）。
@@ -150,9 +150,11 @@ if (typeof window !== 'undefined') {
     if (ev.repeat || (ev.key !== ' ' && ev.key !== 'Enter')) return;
     if (!ui?.field.isConnected || ui.cur.s.phase !== 'wait') return;
     if (ev.target instanceof HTMLElement && ev.target.closest('input, textarea, select')) return;
-    if (ev.target instanceof HTMLElement && ev.target.closest('button')) ev.target.blur();
+    // キーボードで椅子を選んで（Tab で focus して）押したら、その椅子（取り合いのとき。2026-11-19 Codex の点検）。椅子の focus は外さない（押し直しで続けて選べるように）
+    const c = ev.target instanceof Element ? ui.chairs.indexOf(ev.target.closest('.it-chair')) : -1;
+    if (c < 0 && ev.target instanceof HTMLElement && ev.target.closest('button')) ev.target.blur();
     ev.preventDefault();
-    press();
+    press(c >= 0 ? c : null);
   });
 }
 
@@ -323,7 +325,8 @@ export default {
       s.tried[p] = ms;
       const q = s.seat.indexOf(c); // その椅子に座っている人
       const bump = (x, by) => { s.bump[x] = { c, by, k: (s.bump[x]?.k ?? 0) + 1 }; };
-      if (q >= 0 && s.acts[q] <= ms) bump(p, q); // 先に（速く）座っていた人のもの
+      // 先に（速く）座っていた人のもの。同じ ms なら席の番号の小さい人（届いた順で決めない。2026-11-19 Codex の点検）
+      if (q >= 0 && (s.acts[q] < ms || (s.acts[q] === ms && q < p))) bump(p, q);
       else {
         if (q >= 0) { s.acts[q] = null; s.seat[q] = null; bump(q, p); } // 後から届いた速い手が、座っていた人をはじき出す
         s.acts[p] = ms;
