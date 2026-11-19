@@ -593,7 +593,7 @@ export default {
         s.last = { p, t: 'bomb', r: m.r };
         bomb(s, p, m.r, s.last);
         s.pend = s.pend.slice(1);
-        if (finishIfOver(s)) return s;
+        if (finishIfOver(s)) { s.pend = null; s.after = null; return s; } // 空の [] を残すと描画の s.pend[0].t で止まる
       } else {
         const k = Math.min(pd.k, s.hands[p].length);
         if (m.t !== pd.t || !validCards(m.cards, s.hands[p]) || m.cards.length !== k) return null;
@@ -608,7 +608,7 @@ export default {
         if (!s.hands[p].length) {
           s.pend = [];
           goOut(s, p, last);
-          if (finishIfOver(s)) return s;
+          if (finishIfOver(s)) { s.pend = null; s.after = null; return s; } // 空の [] を残すと描画の s.pend[0].t で止まる
         }
       }
       if (s.pend.length) return s;

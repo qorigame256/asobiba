@@ -562,7 +562,7 @@ export default {
       const tags = [];
       if (h.result?.got[p]) tags.push(['rank', simple(s) ? '勝ち！' : `+${h.result.got[p]}`]);
       if (h.phase === 'end' && !s.over && h.ok?.[p]) tags.push(['ok', 'OK✓']);
-      if (shown && !h.folded[p]) tags.push(['prev', handName(h.result.ev[p])]);
+      if (shown && !h.folded[p] && h.result.ev[p]) tags.push(['prev', handName(h.result.ev[p])]); // 脱落した席は札が無く（cards が null・folded は false）役も無い
       if (h.folded[p]) tags.push(['away', '降りた']);
       else if (h.cards[p] && s.chips[p] === 0 && h.phase !== 'end') tags.push(['last', 'オールイン']);
       if (h.drew[p] !== null && h.phase !== 'end') tags.push(['away', `${h.drew[p]}枚交換`]);

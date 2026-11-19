@@ -1349,12 +1349,14 @@ console.log('daifugo games', dgames);
             const p = st.phase === 'exchange' ? st.gives[0].from : D.turn(st);
             st = D.apply(st, { ...D.cpu(st, p), p });
             put(st);
+            assert.ok(!(Array.isArray(st.pend) && !st.pend.length), '7渡し・10捨て・12ボンバーのあとに空の pend を残さない（描画の s.pend[0].t で止まる）');
           }
           prev = Array.from({ length: n }, (_, p) => D.carry(st, p));
         }
       }
     } finally { Math.random = orig; }
-    assert.equal(h.digest('hex').slice(0, 16), '5273288f537b5003', '1回では今までと全く同じ局面');
+    // 2026-11-19: 7渡し・10捨て・12ボンバーで回が終わったとき pend を [] でなく null に片付けるようにした（[] だと描画が止まった）。前の版で [] を null にそろえるとこの指紋になる
+    assert.equal(h.digest('hex').slice(0, 16), 'd31724b96b348763', '1回では今までと全く同じ局面');
   }
   // 回が終わると点を足して回の間（gap）。回の間は札を出せず、だれでも「次の回へ」を押せる。次の回は前の回の順位でカード交換
   const RM = { ...ALL, five: false, seven: false, ten: false, bomber: false, match: 3 };

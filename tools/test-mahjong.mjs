@@ -321,6 +321,33 @@ if (!TESTDATA || !fs.existsSync(TESTDATA)) {
     check('リーチ中は切る前でも今の待ち', T.waitView(s, 0).kinds.join() === String(k('5s')) && !T.waitView(s, 0).after);
     check('待ちを数えても手牌は変わらない', s.h.hands[0].length === 14);
   }
+  // 自分の手牌で4枚とも使っている牌（5枚目）は待ちに数えない。リーチもできない（2026-11-19 の Codex 点検）
+  {
+    const s = table(['6666s345m678m123p7z', '1111m234p567p789s', '', '']);
+    check('5枚目の一萬だけを待つ形は聴牌でない', T.waitsOf(s, 1).length === 0, JSON.stringify(T.waitsOf(s, 1)));
+    check('5枚目の六索だけを待つ形（中を切る）ではリーチできない', !T.turnOptions(s).riichi.includes(E.kindOf('7z')), JSON.stringify(T.turnOptions(s).riichi));
+    const t = table(['6665s345m678m123p7z', '', '', '']);
+    check('4枚目までの待ちがあればリーチできる（比べる形）', T.turnOptions(t).riichi.includes(E.kindOf('7z')), JSON.stringify(T.turnOptions(t).riichi));
+  }
+  // 槍槓でも一発が付く。ロンされた牌は加槓から外す。だれもロンしなければ一発が消える（2026-11-19 の Codex 点検）
+  {
+    const mk = () => {
+      const s = table(['2m111z222z333z4z', tenpai25m, '', '']);
+      s.h.melds[0] = [{ type: 'pon', tiles: [4, 6, 7], called: 4, from: 2 }];
+      s.h.noCalls = false;
+      s.h.riichi[1] = 1;
+      s.h.ippatsu[1] = true;
+      return act(s, { a: 'kakan', k: E.kindOf('2m'), p: 0 });
+    };
+    const x = mk();
+    check('加槓で確認が開き、一発が残っている', x?.h.phase === 'claim' && x.h.claim.options[1]?.includes('ron') && x.h.ippatsu[1] === true, `phase=${x?.h.phase}`);
+    const end = act(x, { a: 'ron', p: 1 });
+    const names = end?.h.end?.yaku.map((y) => y.name) ?? [];
+    check('槍槓のロンに一発が付く', names.includes('一発') && names.includes('槍槓'), names.join());
+    check('ロンされた牌は加槓から外れてポンに戻る', end?.h.melds[0][0].type === 'pon' && end.h.melds[0][0].tiles.length === 3 && !end.h.melds[0][0].tiles.includes(end.h.end.win));
+    const pass = act(mk(), { a: 'pass', p: 1 });
+    check('だれもロンしなければ一発が消える', pass?.h.ippatsu[1] === false && pass.h.melds[0][0].type === 'kakan');
+  }
 
   // 3. 役の早見表（2026-10-07）。表の役の名前と翻数が、エンジンで実際に数えた翻数と食い違わないか
   section('役の早見表');

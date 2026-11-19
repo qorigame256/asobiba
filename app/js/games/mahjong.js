@@ -115,14 +115,17 @@ function engineMelds(melds) {
 const isMenzen = (h, p) => h.melds[p].every((m) => m.type === 'ankan');
 
 // 13枚（と副露）の待ちの種類。聴牌でなければ []
-function waitsOf(s, p) {
-  const h = s.h;
-  const c = countsOf(h.hands[p]);
-  if (E.shanten(c, h.melds[p].length) !== 0) return [];
-  const fixed = engineMelds(h.melds[p]);
+const waitsOf = (s, p) => waitsIn(s, s.h.hands[p], s.h.melds[p]);
+// 自分の手牌と副露で4枚とも使っている牌（5枚目）は待ちに数えない（2026-11-19 の Codex 点検。前はリーチ・流局の聴牌料・親の連荘が通っていた）
+function waitsIn(s, hand, melds) {
+  const c = countsOf(hand);
+  if (E.shanten(c, melds.length) !== 0) return [];
+  const fixed = engineMelds(melds);
+  const own = countsOf([...hand, ...melds.flatMap((m) => m.tiles)]);
   const out = [];
   for (let k = 0; k < E.KINDS; k++) {
     if (s.n === 3 && k >= 1 && k <= 7) continue;
+    if (own[k] >= 4) continue;
     c[k]++;
     if (E.decompose(c, fixed).length) out.push(k);
     c[k]--;
@@ -254,7 +257,7 @@ function canRiichi(s, id) {
   const h = s.h;
   const p = h.turn;
   if (h.riichi[p] || !isMenzen(h, p) || liveLeft(h) <= 0 || !canDiscard(s, id)) return false;
-  return E.shanten(countsOf(h.hands[p].filter((x) => x !== id)), h.melds[p].length) === 0;
+  return waitsIn(s, h.hands[p].filter((x) => x !== id), h.melds[p]).length > 0; // 5枚目だけを待つ形は聴牌にしない
 }
 
 // 局面の写し。山は変えないので共有する。ほかの配列は手を受け付けるたびに書き換えるので写す
@@ -383,8 +386,8 @@ function afterClaim(s, from, id, src) {
   const h = s.h;
   h.claim = null;
   finishRiichi(s);
-  if (src === 'kakan') { h.kans++; beginTurn(s, from, true); return; }
-  if (src === 'nuki') { beginTurn(s, from, true); return; }
+  if (src === 'kakan') { callMade(h); h.kans++; beginTurn(s, from, true); return; }
+  if (src === 'nuki') { callMade(h); beginTurn(s, from, true); return; }
   if (liveLeft(h) <= 0) { exhaustiveDraw(s); return; }
   beginTurn(s, (from + 1) % s.n, false);
 }
@@ -395,6 +398,11 @@ function resolveClaim(s) {
   for (let i = 1; i < s.n; i++) { // ロンは打った人に近い1人だけ（ダブロンなし）
     const q = (from + i) % s.n;
     if (responses[q]?.a === 'ron') {
+      if (src === 'kakan') {
+        const mi = h.melds[from].findIndex((x) => x.type === 'kakan' && x.tiles.includes(id));
+        h.melds[from][mi] = { ...h.melds[from][mi], type: 'pon', tiles: h.melds[from][mi].tiles.filter((x) => x !== id) };
+      }
+      if (src === 'nuki') h.nuki[from] = h.nuki[from].filter((x) => x !== id);
       settleWin(s, q, from, winResult(s, q, id, { chankan: src === 'kakan' }));
       return;
     }
@@ -460,7 +468,7 @@ function settleWin(s, w, from, r) {
 function exhaustiveDraw(s) {
   const h = s.h;
   finishRiichi(s);
-  const tenpai = Array.from({ length: s.n }, (_, p) => E.shanten(countsOf(h.hands[p]), h.melds[p].length) <= 0);
+  const tenpai = Array.from({ length: s.n }, (_, p) => waitsOf(s, p).length > 0); // 5枚目だけを待つ形は聴牌にしない
   const k = tenpai.filter(Boolean).length;
   const deltas = Array(s.n).fill(0);
   const pot = s.n === 3 ? 2000 : 3000;
@@ -575,8 +583,7 @@ function applyMove(s0, m) {
     h.hands[me] = h.hands[me].filter((x) => x !== id);
     const mi = h.melds[me].findIndex((x) => x.type === 'pon' && kindOf(x.tiles[0]) === m.k);
     h.melds[me][mi] = { ...h.melds[me][mi], type: 'kakan', tiles: [...h.melds[me][mi].tiles, id] };
-    callMade(h);
-    h.drawn = null;
+    h.drawn = null; // 一発を消すのは afterClaim（だれもロンしなかったとき）
     h.waits[me] = waitsOf(s, me);
     openClaim(s, me, id, 'kakan');
     return s;
@@ -586,8 +593,7 @@ function applyMove(s0, m) {
     const id = h.riichi[me] ? h.drawn : h.hands[me].find((x) => kindOf(x) === E.NORTH);
     h.hands[me] = h.hands[me].filter((x) => x !== id);
     h.nuki[me].push(id);
-    callMade(h);
-    h.drawn = null;
+    h.drawn = null; // 一発を消すのは afterClaim（だれもロンしなかったとき）
     h.waits[me] = waitsOf(s, me);
     openClaim(s, me, id, 'nuki');
     return s;
