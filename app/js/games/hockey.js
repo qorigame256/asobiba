@@ -1489,7 +1489,8 @@ function mount(root, opts) {
     if (frames.length < 4 || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
     replay = { frames, t0: now, dur: GOAL_PAUSE * 1000, dim: pucks === 1 };
   }
-  canvas.addEventListener('pointerdown', () => { replay = null; });  function drawReplay(now) {
+  canvas.addEventListener('pointerdown', () => { replay = null; });
+  function drawReplay(now) {
     if (!replay) return;
     const k = Math.max(0, (now - replay.t0) / replay.dur); // now はその描き替えの始めの時刻で、ゴール（t0）より少し前のことがある
     if (k >= 1 || st.over) { replay = null; return; }
