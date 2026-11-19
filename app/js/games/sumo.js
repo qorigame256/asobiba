@@ -279,6 +279,7 @@ function mount(root, opts) {
   }
   function finish() {
     const rk = ranksOf(game.wins);
+    opts.onOver?.(rk, ep); // 決着を main.js へ知らせる（自分の記録に数える。エアホッケーと同じ。2026-11-19 本人の決定）。ep =「もう一回」の回数
     if (me >= 0) play(rk[me] === 1 ? 'win' : 'lose');
     showOver();
   }

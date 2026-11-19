@@ -3129,7 +3129,7 @@ function noteAchievements(game, res, st) {
   if (fresh.length) lateToast(`📖 CPU 図鑑に ${fresh.join('・')} が載った！（${Object.keys(readRecords().cpus).length}/${CPU_NAMES.length}）`);
 }
 
-// 毎フレーム動くゲーム（エアホッケー）の決着を、自分の記録の「遊んだ対局」と「人がいた対局の勝ち」に数える（2026-11-19 本人の決定。色の解放のため）。
+// 毎フレーム動くゲーム（エアホッケー・紙相撲）の決着を、自分の記録の「遊んだ対局」と「人がいた対局の勝ち」に数える（2026-11-19 本人の決定。色の解放のため）。
 // 結果が main.js を通らないので、ゲームが決着のたびに mount の onOver(席ごとの順位, 何試合目か) で知らせる。同じ試合は noteGame が鍵で1回だけ数える。
 // CPU 図鑑・実績・ゲームの自己ベストは今までどおり数えない（Claude の判断）。
 function noteLiveOver(rank, no, mountAt) {
@@ -5501,7 +5501,7 @@ function renderLive(game) {
       names: online ? S.order.map(nameOf) : null, rules: rulesOf(S.gameId, S.rules), isHost: online && S.isHost,
       // CPU が動かす席（部屋を出た人の席も）。ホストの端末が動かし、ほかの端末はその席を待たない
       cpuSeats: () => (S.order ?? []).flatMap((id, i) => (cpuControlled(id) ? [i] : [])),
-      onOver: (rank, no) => noteLiveOver(rank, no, mountAt), // 決着を自分の記録に数える（2026-11-19 本人の決定。エアホッケー）
+      onOver: (rank, no) => noteLiveOver(rank, no, mountAt), // 決着を自分の記録に数える（2026-11-19 本人の決定。エアホッケー・紙相撲）
       send: (d, important) => send({ type: 'live', gameId: S.gameId, round: S.round, d }, important ? 1 : 0),
     });
   }
