@@ -17,6 +17,11 @@
 //     使わなかった兵は次の回へ残り、最後の回で残った兵は使われない。時間内に決めなかった人は「のこり ÷ 残りの回の数」（切り捨て）を均等に配ったことにする。
 //     のこりの人数は全員に見える（前の回の配り方から誰でも数えられるので）。CPU は、その回の点の合計が平均（15点）より高いほど多めに使う。
 //     ありのときだけ局面に pool・left を持つ（なしでは今までと全く同じ局面）。
+// 2026-11-19 の45回目の案（本人が選んだ。分かれ目は Claude の判断。extra-games.md の「兵の振り分け」）:
+//   - 詳細設定「並んだ戦場は持ち越し」（carry）: だれも取れなかった戦場（一番多い人が並んだ・だれも置かなかった）の点を、次の回の同じ戦場の点に足す。
+//     持ち越しは何回でも重なる。最後の回で取られなかった点はなくなる。
+//     ありのときだけ局面に carry（次の回へ持ち越す点）・bonus（いまの回の点に入っている持ち越しの点）を持つ（なしでは今までと全く同じ局面）。
+//     values は持ち越しを足した点なので、点の数え方も CPU（点の高い戦場を選びやすい）もそのまま持ち越しを見る。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next … → end
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'pick', r: 何回目（0 から）, a: [5つの戦場の人数] }
 //   r が今の回と同じで、その人がまだ決めていないときだけ受け付けるので、同じ手が2回届いても2回目は反則になる。
@@ -72,7 +77,7 @@ export function scoreRound(allocs, values) {
 }
 
 const rKey = (s, r = s.r) => `heitai:${s.seed}:${r}`;
-const clone = (s) => ({ ...s, scores: s.scores.slice(), picks: s.picks.slice(), ...(s.pool ? { left: s.left.slice() } : {}) });
+const clone = (s) => ({ ...s, scores: s.scores.slice(), picks: s.picks.slice(), ...(s.pool ? { left: s.left.slice() } : {}), ...(s.carry ? { carry: s.carry.slice(), bonus: s.bonus.slice() } : {}) });
 const okPick = (s, p, a) => (s.pool ? okSpend(a, s.left[p]) : okAlloc(a));
 const lateAlloc = (s, p) => (s.pool ? evenSpend(s.left[p], s.total - s.r) : EVEN.slice());
 const cpuPlan = new Map();
@@ -112,6 +117,7 @@ export default {
   settings: [
     { key: 'rounds', label: '回数', desc: 'この回数をくり返して、合計点で勝負', def: 5, choices: [[3, '3回'], [5, '5回'], [7, '7回']] },
     { key: 'pool', label: '兵を回をまたいで使う', desc: `毎回100人ではなく、全部の回で合わせて「回数×${POOL_PER}人」（5回なら400人）を持ち、どの回に何人使うかも決める。使わなかった兵は次の回へ残る`, def: false },
+    { key: 'carry', label: '並んだ戦場は持ち越し', desc: 'だれも取れなかった戦場（一番多い人が並んだ・だれも置かなかった）の点が、次の回の同じ戦場の点に足される。最後の回の分はなくなる', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -121,6 +127,7 @@ export default {
       picks: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0,
     };
     if (rules.pool === true) { s.pool = true; s.left = Array(n).fill(POOL_PER * total); }
+    if (rules.carry === true) { s.carry = Array(FIELDS).fill(0); s.bonus = Array(FIELDS).fill(0); }
     return s;
   },
 
@@ -160,6 +167,11 @@ export default {
         s.r += 1;
         s.phase = 'open';
         s.values = valuesOf(s.seed, s.r);
+        if (s.carry) {
+          s.bonus = s.carry;
+          s.values = s.values.map((v, f) => v + s.bonus[f]);
+          s.carry = Array(FIELDS).fill(0);
+        }
         s.picks = Array(s.n).fill(null);
         return s;
       }
@@ -175,6 +187,11 @@ export default {
         s.last = { owner, pts, late };
         const x = { values: s.values.slice(), picks: allocs, owner, pts, late };
         if (s.pool) { allocs.forEach((a, p) => { s.left[p] -= sum(a); }); x.left = s.left.slice(); }
+        if (s.carry) {
+          s.carry = owner.map((o, f) => (o === null ? s.values[f] : 0));
+          x.bonus = s.bonus.slice();
+          x.carry = s.r + 1 < s.total ? s.carry.slice() : Array(FIELDS).fill(0); // 最後の回の分は持ち越さない
+        }
         s.log = [...s0.log, x];
         return s;
       }
@@ -221,7 +238,7 @@ export default {
     if (s.phase === 'ready') {
       const card = document.createElement('div');
       card.className = 'kj-card';
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">${s.pool ? `全部で${POOL_PER * s.total}人の兵を、${s.total}回に分けて5つの戦場に配ろう` : '100人の兵を5つの戦場に配ろう'}。一番多く置いた人がその戦場の点を取る・全${s.total}回</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">${s.pool ? `全部で${POOL_PER * s.total}人の兵を、${s.total}回に分けて5つの戦場に配ろう` : '100人の兵を5つの戦場に配ろう'}。一番多く置いた人がその戦場の点を取る・全${s.total}回${s.carry ? '。だれも取れなかった戦場の点は次の回へ持ち越し' : ''}</div>`;
       wrap.append(card);
       return;
     }
@@ -279,7 +296,8 @@ export default {
       row.className = 'ht-row';
       const lab = document.createElement('div');
       lab.className = 'ht-lab';
-      lab.innerHTML = `<span class="ht-name">${FIELD_NAMES[f]}</span><span class="ht-val">${'★'.repeat(v)}<small>${v}点</small></span>`;
+      const bonus = s.bonus?.[f] ?? 0; // 前の回から持ち越した点（並んだ戦場は持ち越し）
+      lab.innerHTML = `<span class="ht-name">${FIELD_NAMES[f]}</span><span class="ht-val">${'★'.repeat(v - bonus)}${bonus ? `<b class="ht-carry">+${bonus}</b>` : ''}<small>${v}点</small></span>`;
       const meter = document.createElement('div');
       meter.className = 'ht-meter';
       const bar = document.createElement('div');
@@ -355,7 +373,7 @@ export default {
     const t = document.createElement('table');
     t.className = 'ht-table' + (big ? ' big' : '');
     const head = document.createElement('tr');
-    head.innerHTML = '<th></th>' + x.values.map((v, f) => `<th><span class="ht-tn">${FIELD_NAMES[f]}</span><span class="ht-tv">${v}点</span></th>`).join('') + '<th>点</th>' + (x.left ? '<th>のこり</th>' : '');
+    head.innerHTML = '<th></th>' + x.values.map((v, f) => `<th><span class="ht-tn">${FIELD_NAMES[f]}</span><span class="ht-tv">${v}点${x.bonus?.[f] ? `<small class="ht-carry" title="前の回から持ち越した点">+${x.bonus[f]}</small>` : ''}</span></th>`).join('') + '<th>点</th>' + (x.left ? '<th>のこり</th>' : '');
     t.append(head);
     x.picks.forEach((a, p) => {
       const tr = document.createElement('tr');
@@ -384,6 +402,12 @@ export default {
       const n = document.createElement('div');
       n.className = 'kj-sub';
       n.textContent = x.left ? '⏰ = 時間内に決めず、のこりを均等に配った' : '⏰ = 時間内に決めず、20人ずつ配った';
+      box.append(n);
+    }
+    if (x.carry?.some((v) => v > 0)) {
+      const n = document.createElement('div');
+      n.className = 'kj-sub ht-carry-note';
+      n.textContent = '次の回へ持ち越し: ' + x.carry.map((v, f) => (v ? `${FIELD_NAMES[f]} +${v}点` : '')).filter(Boolean).join('・');
       box.append(n);
     }
     return box;

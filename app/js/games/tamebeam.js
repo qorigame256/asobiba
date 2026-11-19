@@ -13,6 +13,10 @@
 //   まだ選んでいない人を「ため」にして開く（いちばん無難な技なので。Claude の判断）。なしのときは rules に time を入れず、前と同じ形。
 // 当たって lives が0になることを画面では「やられた」と言う（2026-10-26 本人の依頼で「抜けた」から替えた）。
 //   r と「この回はもう選んだか」で、同じ手が2回来ても2回目は反則になる。
+// 詳細設定「ためを隠す」（hide。2026-11-19 の45回目の案。本人が選んだ。分かれ目は Claude の判断。extra-games.md の「ためてビーム」）:
+//   ほかの人のためが画面に出ない（「ため ？」。撃つ相手を選ぶボタンにも出さない）。自分のためは見える。
+//   前の回にだれが何を出したかの帯と札はいつもどおり出す（数えれば分かる。覚えて読むのが遊びの中身）。観戦の人と、決着したあとは全員のためを見せる。
+//   見せ方だけで、局面は rules に hide: true が入るだけ（なしでは今までと全く同じ局面）。CPU は今までどおり全員のためを見て選ぶ（弱めの CPU なので変えない）。
 
 import { timeBar } from './party.js';
 
@@ -82,12 +86,15 @@ export default {
   settings: [
     { key: 'lives', label: 'ライフ', desc: '何回当たったらやられるか', def: 1, choices: [[1, '1（当たったら負け）'], [3, '3']] },
     { key: 'time', label: '選ぶ時間', desc: '時間内に選ばなかった人は自動で「ため」になる', def: 0, choices: [[0, 'なし'], [5, '5秒'], [10, '10秒'], [20, '20秒']] },
+    { key: 'hide', label: 'ためを隠す', desc: 'ほかの人がいくつためているかが見えない（自分のためだけ見える）。前の回にだれが何を出したかは見えるので、覚えて読む', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const lives = rules.lives === 3 ? 3 : 1;
     const time = TIMES.includes(rules.time) ? rules.time : 0;
-    return { n, ...(time ? { seed } : {}), rules: time ? { lives, time } : { lives }, life: Array(n).fill(lives), charge: Array(n).fill(0), round: 1, picks: Array(n).fill(null), outAt: Array(n).fill(0), draw: false, last: null, step: 0 };
+    const r = time ? { lives, time } : { lives };
+    if (rules.hide === true) r.hide = true;
+    return { n, ...(time ? { seed } : {}), rules: r, life: Array(n).fill(lives), charge: Array(n).fill(0), round: 1, picks: Array(n).fill(null), outAt: Array(n).fill(0), draw: false, last: null, step: 0 };
   },
 
   turn() { return null; },
@@ -182,6 +189,8 @@ export default {
     const lives = s.rules.lives;
     // 動き（開いた回の帯・揺れ）は、一斉に開いた直後だけ。だれかが選んだだけの描き直しでは動かさない（2026-10-26 本人の声）
     const anim = o.fresh && s.picks.every((x) => x === null);
+    // ためを隠す: 対局している人の画面では、ほかの人のためを「？」にする（観戦の人と決着後は見せる）
+    const chargeText = (p) => (s.rules.hide && me !== null && p !== me && !res ? '？' : String(s.charge[p]));
 
     root.innerHTML = '';
     root.className = 'board tb';
@@ -247,7 +256,7 @@ export default {
       box.append(act);
       const st = document.createElement('div');
       st.className = 'tb-stat';
-      st.textContent = `ため ${s.charge[p]}` + (lives > 1 ? `　❤️ ${s.life[p]}` : '');
+      st.textContent = `ため ${chargeText(p)}` + (lives > 1 ? `　❤️ ${s.life[p]}` : '');
       box.append(st);
       grid.append(box);
     }
@@ -299,7 +308,7 @@ export default {
       row.append(b);
     };
     if (sel.a) {
-      for (const q of foes) btn(nameP(q), false, () => send(sel.a, q), false, `ため ${s.charge[q]}`);
+      for (const q of foes) btn(nameP(q), false, () => send(sel.a, q), false, `ため ${chargeText(q)}`);
       btn('やめる', false, () => { sel.a = null; draw(); });
     } else {
       const pick = (a) => () => {

@@ -2719,6 +2719,9 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .board button.it-chair { position: absolute; transform: translate(-50%, -50%); width: 3.4rem; height: 3.4rem; border-radius: 50%; border: 3px solid transparent; background: rgba(255, 255, 255, .55); font-size: 1.9rem; line-height: 1; cursor: inherit; padding: 0; transition: box-shadow .08s; }
 .board button.it-chair.lit { border-color: #ffe14d; box-shadow: 0 0 0 4px rgba(255, 225, 77, .55), 0 0 18px #ffd200; background: #fffbe0; }
 .it-field.stopped .it-chair { border-color: #2e9a52; }
+/* 椅子の取り合い: 自分の椅子・ほかの人が座った椅子 */
+.board button.it-chair.mine { border-color: #2e7bd6; box-shadow: 0 0 0 4px rgba(46, 123, 214, .35); background: #e6f1ff; }
+.it-field.stopped .it-chair.taken { border-color: #b33; background: rgba(200, 200, 200, .7); opacity: .75; }
 .it-sign { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: clamp(1.8rem, 9vw, 3rem); font-weight: 900; color: #7a4a10; white-space: nowrap; }
 .it-sign.stop { color: #d02020; animation: pop .1s ease-out; }
 .it-sign.lock { color: #555; }
@@ -3236,6 +3239,8 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .ht-name { font-weight: 800; font-size: .85rem; }
 .ht-val { color: #c88a12; font-size: .8rem; letter-spacing: -1px; }
 .ht-val small { color: var(--muted); margin-left: 4px; letter-spacing: 0; }
+.ht-carry { color: #c0392b; font-weight: 900; letter-spacing: 0; margin-left: 2px; } /* 並んだ戦場は持ち越し: 前の回から足された点 */
+.ht-carry-note { color: #c0392b; }
 .ht-meter { position: relative; height: 26px; border-radius: 7px; background: var(--line); overflow: hidden; }
 .ht-bar { position: absolute; inset: 0 auto 0 0; background: var(--accent); opacity: .55; transition: width .12s; }
 .ht-num { position: relative; display: block; text-align: center; line-height: 26px; font-weight: 900; font-variant-numeric: tabular-nums; }

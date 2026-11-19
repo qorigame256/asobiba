@@ -2157,6 +2157,17 @@ for (let k = 0; k < 300; k++) {
   tbRounds += st.round;
 }
 console.log('tamebeam games 300, avg rounds', (tbRounds / 300).toFixed(1));
+// ためを隠す（2026-11-19 の45回目の案）: 見せ方だけ。なしなら今までと全く同じ局面・ありでも最後まで遊べる
+assert.deepEqual(TB.init(3, 5, { rules: { lives: 1, time: 0, hide: false } }), TB.init(3, 5, { rules: {} }), 'ためを隠すなしは今までと同じ局面');
+assert.deepEqual(TB.init(3, 5, { rules: { hide: true } }).rules, { lives: 1, hide: true }, 'ためを隠すは rules に入るだけ');
+for (let k = 0; k < 20; k++) {
+  let st = TB.init(4, 0, { rules: { hide: true, lives: 3 } });
+  while (!TB.result(st)) {
+    const p = Array.from({ length: 4 }, (_, q) => q).find((q) => TB.canAct(st, q));
+    st = TB.apply(st, { ...TB.cpu(st, p), p });
+    assert.ok(st, 'ためを隠すでも CPU が反則の手を出さない');
+  }
+}
 
 // ---------- 神経衰弱 ----------
 const MM = GAMES.memory;
@@ -7752,6 +7763,39 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     const st = runCpus(I, 6, seed, {}, 50, 20000);
     assert.ok(I.result(st) && I.result(st).winners.length === 1, '椅子取り: CPU どうしで最後まで');
   }
+  // 椅子の取り合い（2026-11-19 の45回目の案）
+  assert.deepEqual(I.init(4, 3, { rules: { chair: false } }), I.init(4, 3), '椅子取り: 取り合いなしは今までと全く同じ局面');
+  let c = I.init(4, 3, { rules: { chair: true } }); // 椅子は3つ（0〜2）
+  assert.equal(I.apply(c, { p: 0, t: 'sit', r: 1, ms: 500 }), null, '椅子取り: 取り合いでは椅子の番号が要る');
+  assert.equal(I.apply(c, { p: 0, t: 'sit', r: 1, ms: 500, c: 3 }), null, '椅子取り: ない椅子は押せない');
+  c = I.apply(c, { p: 0, t: 'sit', r: 1, ms: 500, c: 0 });
+  assert.deepEqual([c.acts[0], c.seat[0]], [500, 0]);
+  c = I.apply(c, { p: 1, t: 'sit', r: 1, ms: 300, c: 0 });
+  assert.deepEqual([c.acts[0], c.seat[0], c.seat[1], c.bump[0].by], [null, null, 0, 1], '椅子取り: 後から届いても速い手が座り、遅かった人ははじき出される');
+  assert.equal(I.canAct(c, 0), true, '椅子取り: はじき出された人は押し直せる');
+  assert.equal(I.apply(c, { p: 0, t: 'sit', r: 1, ms: 500, c: 1 }), null, '椅子取り: 押し直しは前より後の時刻だけ（同じ手が2回届いたら弾く）');
+  c = I.apply(c, { p: 0, t: 'sit', r: 1, ms: 900, c: 1 });
+  c = I.apply(c, { p: 2, t: 'sit', r: 1, ms: 950, c: 1 });
+  assert.deepEqual([c.seat[0], c.seat[2], c.bump[2].by], [1, null, 0], '椅子取り: 先に速く座っていた人のもの');
+  assert.equal(I.referee(c).key, 'close1', '椅子取り: 椅子が空いているうちは今までの締め切り');
+  c = I.apply(c, { p: 3, t: 'sit', r: 1, ms: 600, c: 2 });
+  assert.deepEqual([I.referee(c).key, I.referee(c).ms], ['full1:1,0,,2', 1500], '椅子取り: 全部ふさがり、全員押したら少し待って締める');
+  c = I.apply(c, { p: 2, t: 'sit', r: 1, ms: 1200, c: 2 });
+  assert.deepEqual([c.seat[3], c.bump[2].k], [2, 2], '椅子取り: 押し直しても遅ければ座れない');
+  {
+    let w = I.init(3, 5, { rules: { chair: true } }); // 椅子2つ
+    w = I.apply(w, { p: 0, t: 'sit', r: 1, ms: 300, c: 0 });
+    w = I.apply(w, { p: 1, t: 'sit', r: 1, ms: 400, c: 1 });
+    assert.equal(I.referee(w).key, 'close1', '椅子取り: 全部ふさがっても、まだ一度も押していない人がいれば今までの締め切り');
+  }
+  c = I.apply(c, { p: -1, t: 'close', r: 1 });
+  assert.deepEqual([c.last.out, c.r, c.seat.every((x) => x === null)], [[2], 2, true], '椅子取り: 座れなかった人が抜け、椅子は空に戻る');
+  c = I.apply(c, { p: -1, t: 'close', r: 2 });
+  assert.ok(c.last.redo, '椅子取り: だれも座らなければやり直し');
+  for (let seed = 0; seed < 4; seed++) {
+    const st = runCpus(I, 6, seed, { chair: true }, 50, 30000);
+    assert.ok(I.result(st) && I.result(st).winners.length === 1, '椅子取り: 取り合いでも CPU どうしで最後まで');
+  }
   console.log('isutori OK');
 }
 
@@ -10686,6 +10730,28 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
       }
     }
   }
+  // 45回目の案（2026-11-19）: 並んだ戦場は持ち越し
+  {
+    assert.deepEqual(G.init(3, 9, { rules: { rounds: 5, pool: false, carry: false } }), G.init(3, 9), '兵: 持ち越しなしは今までと全く同じ局面');
+    const v0 = valuesOf(9, 0), v1 = valuesOf(9, 1);
+    let c = G.apply(G.init(2, 9, { rules: { carry: true } }), { p: -1, t: 'next' });
+    assert.deepEqual(c.values, v0, '兵: 1回目は持ち越しなし');
+    c = G.apply(c, { p: 0, t: 'pick', r: 0, a: [50, 50, 0, 0, 0] });
+    c = G.apply(c, { p: 1, t: 'pick', r: 0, a: [50, 0, 50, 0, 0] });
+    c = G.apply(c, { p: -1, t: 'close' });
+    const c0 = [v0[0], 0, 0, v0[3], v0[4]];
+    assert.deepEqual(c.log[0].carry, c0, '兵: 並んだ戦場とだれも置かなかった戦場の点を持ち越す');
+    c = G.apply(c, { p: -1, t: 'next' });
+    assert.deepEqual(c.values, v1.map((v, f) => v + c0[f]), '兵: 次の回の同じ戦場の点に足す');
+    c = G.apply(c, { p: 0, t: 'pick', r: 1, a: [100, 0, 0, 0, 0] });
+    c = G.apply(c, { p: 1, t: 'pick', r: 1, a: [0, 0, 0, 0, 100] });
+    c = G.apply(c, { p: -1, t: 'close' });
+    assert.deepEqual(c.scores, [v0[1] + v1[0] + v0[0], v0[2] + v1[4] + v0[4]], '兵: 持ち越した点も取れる');
+    assert.deepEqual(c.log[1].carry, [0, v1[1], v1[2], v1[3] + v0[3], 0], '兵: 持ち越しは重なる');
+    const st = runCpus(G, 4, 13, { carry: true, rounds: 3 }, 300, 8000);
+    assert.ok(G.result(st) && st.log.length === 3, '兵: 持ち越しでも CPU どうしで最後まで');
+    assert.ok(st.log[2].carry.every((v) => v === 0), '兵: 最後の回の分は持ち越さない');
+  }
   console.log('heitai OK');
 }
 
@@ -12401,6 +12467,16 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     fell += end.log.flatMap((r) => r.res).filter((r) => r.fell).length;
   }
   assert.ok(fell > 0, 'チキンレース: CPU もときどき落ちる');
+  // 落ちたらマイナス（2026-11-19 の45回目の案）
+  assert.deepEqual(racePoints([{ pos: 99, fell: false }, { pos: null, fell: true }], -2), [3, -2], 'チキンレース: 落ちたらマイナスの点');
+  {
+    let m = G.apply(G.init(3, 4, { rules: { minus: true } }), { p: -1, t: 'next' });
+    m = G.apply(m, { p: 0, t: 'brake', q: 0, ms: 100 });
+    m = G.apply(m, { p: 1, t: 'brake', q: 0, ms: Math.floor((D - slideOf(x)) / vOf(x)) - 50 });
+    m = G.apply(m, { p: 2, t: 'brake', q: 0, ms: x.T + 10 });
+    m = G.apply(m, { p: -1, t: 'close' });
+    assert.deepEqual(m.scores, [2, 3, -2], 'チキンレース: 落ちたらマイナスなら −2点');
+  }
   console.log('chicken OK');
 }
 

@@ -10,6 +10,9 @@
 //     止まる位置は時刻から計算する（全員の端末で同じ）。ブレーキを押さないまま崖に着いた車は落ちる。
 //   - 崖までの残りが同じ人どうしは同じ順位で、同じ点（ほとんど起きない。残りは 0.1m 単位で比べる）。
 //   - CPU は崖の手前1〜10mを狙い、押す時刻が±160msほどぶれる（4回に1回ほど落ちる）。
+// 2026-11-19 の45回目の案（本人が選んだ。分かれ目は Claude の判断。action-games.md の「チキンレース」）:
+//   - 詳細設定「落ちたらマイナス」（minus）: 落ちた回は −2点（FALL_PTS。なしは今までどおり0点）。合計がマイナスになってもよい。
+//     落ちなかった人の 3・2・1点はそのまま。CPU の狙い方は変えない（弱めのまま。4回に1回ほど落ちる）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open →（全員押した / 崖に着いて止まるまで）→ close → shown → next … → end
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'brake', q: 何回目, ms: 走り出してからブレーキを押すまで }
 
@@ -26,6 +29,7 @@ const XMAX = 112; // 画面に描く幅（m）
 const READY_MS = 3000;
 const SHOWN_MS = 4000;
 const PTS = [3, 2, 1];
+export const FALL_PTS = -2; // 落ちたらマイナス（minus）のときの、落ちた回の点
 const r1 = (v) => Math.round(v * 10) / 10;
 // 車線の上の位置（m）→ 画面の left。左の 48px は出発の場所（車の前の端を合わせるので、0m の車がはみ出さないように）
 const laneX = (m) => `calc(48px + (100% - 48px) * ${(m / XMAX).toFixed(4)})`;
@@ -51,11 +55,11 @@ export function posAt(x, tb, t) {
   const dt = Math.min(t - tb, v / ACC);
   return v * tb + v * dt - (ACC * dt * dt) / 2;
 }
-// 1回ぶんの点。res[p] = { pos, fell }
-export function racePoints(res) {
+// 1回ぶんの点。res[p] = { pos, fell }。fall = 落ちた人の点（ふつうは0、落ちたらマイナスでは FALL_PTS）
+export function racePoints(res, fall = 0) {
   const left = res.map((r) => (r.fell ? null : r1(D - r.pos)));
   return left.map((d) => {
-    if (d === null) return 0;
+    if (d === null) return fall;
     const rank = left.filter((e) => e !== null && e < d).length;
     return PTS[rank] ?? 0;
   });
@@ -83,6 +87,7 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'rounds', label: '回数', desc: '1回の対局で走る回数', def: 5, choices: ROUND_CHOICES },
+    { key: 'minus', label: '落ちたらマイナス', desc: `崖から落ちたら ${FALL_PTS}点（なしは0点）。攻めるか守るかの勝負になる`, def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -98,7 +103,7 @@ export default {
       if (m.t === 'next') return b.phase === 'end' ? null : 'question';
       if (m.t === 'close' && me !== null && me >= 0 && me < b.n) {
         const pt = b.last?.pts[me] ?? 0;
-        return pt >= 3 ? 'correct' : pt ? 'pop' : 'wrong';
+        return pt >= 3 ? 'correct' : pt > 0 ? 'pop' : 'wrong';
       }
       return null;
     }
@@ -140,7 +145,7 @@ export default {
         s.phase = 'shown';
         const x = s.rs[s.q];
         const res = s.brakes.map((tb) => finalOf(x, tb));
-        const pts = racePoints(res);
+        const pts = racePoints(res, s.rules.minus === true ? FALL_PTS : 0);
         pts.forEach((v, p) => { s.scores[p] += v; });
         s.last = { pts, res };
         s.log = [...s0.log, { res, pts }];
@@ -179,7 +184,7 @@ export default {
       if (s.phase === 'open') return s.brakes[p] !== null ? '<span class="pt-ok">✔</span>' : '';
       if (s.phase !== 'shown' || !s.last) return '';
       const r = s.last.res[p];
-      if (r.fell) return '<span class="pt-ng">落ちた</span>';
+      if (r.fell) return `<span class="pt-ng">落ちた${s.last.pts[p] < 0 ? ' ' + s.last.pts[p] : ''}</span>`;
       const pt = s.last.pts[p];
       return `<span class="${pt ? 'pt-ok' : 'pt-ng'}">あと ${r1(D - r.pos)}m${pt ? ' +' + pt : ''}</span>`;
     };
@@ -201,7 +206,7 @@ export default {
     if (s.phase === 'ready') {
       const head = document.createElement('p');
       head.className = 'cp-head';
-      head.textContent = `よーい… 崖のふちのぎりぎりで止めよう。落ちたら0点（全${s.rs.length}回）`;
+      head.textContent = `よーい… 崖のふちのぎりぎりで止めよう。落ちたら${s.rules.minus === true ? FALL_PTS : 0}点（全${s.rs.length}回）`;
       root.append(head);
       return;
     }
@@ -265,7 +270,7 @@ export default {
     if (shown) {
       place(0);
       const r = me !== null ? s.last.res[me] : null;
-      note.textContent = me === null ? '' : r.fell ? '💥 落ちてしまった…' : `あと ${r1(D - r.pos)}m で止まった${s.last.pts[me] ? `！ +${s.last.pts[me]}点` : ''}`;
+      note.textContent = me === null ? '' : r.fell ? `💥 落ちてしまった…${s.last.pts[me] < 0 ? ` ${s.last.pts[me]}点` : ''}` :`あと ${r1(D - r.pos)}m で止まった${s.last.pts[me] ? `！ +${s.last.pts[me]}点` : ''}`;
       return;
     }
     const btn = document.createElement('button');
@@ -319,7 +324,7 @@ export default {
     s.log.forEach((x, q) => {
       const li = document.createElement('li');
       const r = me === null ? null : x.res[me];
-      const mine = r === null ? '' : r.fell ? '💥 落ちた' : `あと ${r1(D - r.pos)}m${x.pts[me] ? ` +${x.pts[me]}` : ''}`;
+      const mine = r === null ? '' : r.fell ? `💥 落ちた${x.pts[me] < 0 ? ` ${x.pts[me]}` : ''}` :`あと ${r1(D - r.pos)}m${x.pts[me] ? ` +${x.pts[me]}` : ''}`;
       const best = x.res.filter((e) => !e.fell).map((e) => r1(D - e.pos));
       li.innerHTML = `<span class="mk-rv-n">${q + 1}</span><span>時速 ${kmh(s.rs[q])}km</span><span>${mine}</span><span class="mk-rv-who">${best.length ? `いちばん あと ${Math.min(...best)}m` : '全員落ちた'}</span>`;
       list.append(li);
