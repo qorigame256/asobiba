@@ -242,7 +242,7 @@ export default {
 
     const log = document.createElement('p');
     log.className = 'cc-log';
-    log.textContent = logText(s, nameP);
+    log.textContent = logText(s, nameP, me);
     root.append(log);
 
     // 場（マークごとに A〜K の13マス）
@@ -357,11 +357,12 @@ function tag(cls, text) {
   return t;
 }
 
-function logText(s, nameP) {
+// me = 見ている人の席。ジョーカーを置かれた所の札の持ち主は、本人の画面にだけ出す（2026-11-19 本人の決定。前は全員に「○○は次にその札を出す」と出て、持ち主が分かった）
+export function logText(s, nameP, me) {
   const l = s.last;
   if (!l) return `7の札を並べました。${nameP(s.turn)}から始めます`;
   if (l.t === 'play') return `${nameP(l.p)}が ${cardLabel(l.c)} を出した${l.up ? '。上がり！' : ''}`;
-  if (l.t === 'joker') return `${nameP(l.p)}が ${cardLabel(l.c)} の所にジョーカーを置いた${l.up ? '。上がり！' : `（${nameP(l.owner)}は次にその札を出す）`}`;
+  if (l.t === 'joker') return `${nameP(l.p)}が ${cardLabel(l.c)} の所にジョーカーを置いた${l.up ? '。上がり！' : l.owner === me ? '（あなたは次にその札を出す）' : ''}`;
   if (l.t === 'swap') return `${nameP(l.p)}が ${cardLabel(l.c)} を出してジョーカーを受け取った`;
   if (l.t === 'pass') return `${nameP(l.p)}がパス（${s.passes[l.p]}回目）`;
   return `${nameP(l.p)}がパスしすぎて失格。手札${l.cards.filter((c) => c !== JOKER).length}枚を場に並べた`; // ジョーカーは場に並べず捨てるので数えない（2026-11-19 の Codex の点検）

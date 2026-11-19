@@ -495,7 +495,7 @@ export function lateLost(lost, l) {
 }
 // 決着したあとに失点 l が届いたとき: 増えていなければ null。増えていれば { lost: 合わせた失点, over: 合わせた点での決着 }。
 // over が null なら決着を取り消して続ける（制限時間の延長で、2台がほぼ同時に自分の陣地で決められて同点に戻ったとき。2026-11-16 の Codex の点検）。
-// 点数で終わる遊び方は失点が増えるだけなので、一度決着したら null にはならない
+// 点数で終わる遊び方の2人も、合わせて両方が先取点に届いた同点（7対7）なら null（延長。overOf。2026-11-19 本人の決定）
 export function lateOver(n, lost, l, limit, target) {
   const more = lateLost(lost, l);
   if (!more) return null;
@@ -505,10 +505,13 @@ export function lateOver(n, lost, l, limit, target) {
 // 席ごとの失点（lost）から点数を作る。2人は相手の失点が自分の点、3人は失点そのもの
 export const scoreOf = (n, lost) => (n === 2 ? [lost[1], lost[0]] : lost.slice());
 // 決着していれば { rank: 席ごとの順位（1から。同点は同じ順位） }
+// 2人で両方が同時に target に届いて同点（オンラインで別々の端末がほぼ同時に失点した 7対7）なら、決着にせず次の1点まで続ける（延長。2026-11-19 本人の決定。
+// 前は席0の勝ちにしていた）。そのあとは点の多い方の勝ち
 export function overOf(n, score, target) {
   if (n === 2) {
-    const w = score.findIndex((x) => x >= target);
-    return w < 0 ? null : { rank: [w === 0 ? 1 : 2, w === 1 ? 1 : 2] };
+    if (Math.max(score[0], score[1]) < target || score[0] === score[1]) return null;
+    const w = score[0] > score[1] ? 0 : 1;
+    return { rank: [w === 0 ? 1 : 2, w === 1 ? 1 : 2] };
   }
   if (!score.some((x) => x >= target)) return null;
   return { rank: score.map((x) => 1 + score.filter((y) => y < x).length) };
@@ -951,7 +954,11 @@ function mount(root, opts) {
     }
     return me === c ? 'あなたが失点…' : `${PLAYERS[c]}が失点`;
   }
+  // 決着を main.js へ知らせる（自分の記録に数える。2026-11-19 本人の決定）。何試合目か = オンラインは「もう一回」の回数（全員同じ）、同じ画面は開いてからの数。
+  // 行き違った失点で順位が直ったときも呼ばれるが、同じ試合は main.js が1回だけ数える
+  let localNo = 0;
   function finish() {
+    opts.onOver?.(st.over.rank.slice(), online ? net.ep : ++localNo);
     st.banner = overBanner();
     play(overSound(st.over.rank, perspective()));
     showOver();

@@ -1021,6 +1021,20 @@ console.log('colors stack OK');
     assert.equal(st.match.pts.reduce((a, x) => a + x, 0), gains, '点の合計は、もらった点の合計');
     assert.ok(st.match.final);
   }
+  { // 最後の1枚がドロー2・ドロー4なら、次の人に引かせてから決着・採点（2026-11-19 本人の決定）
+    const base = (rules, hand, more = {}) => ({ ...U.init(3, 1, { rules }), discard: ['r5'], color: 'r', turn: 0, hands: [hand, ['y5'], ['b9']], ...more });
+    const d = U.apply(base({ match: 3 }, ['rD']), { p: 0, t: 'play', i: 0 });
+    assert.deepEqual([d.match.gap.w, d.match.gap.left[1].length, d.match.gap.left[2].length, d.last.victim, d.last.got], [0, 3, 1, 1, 2], '最後の1枚がドロー2: 次の人が2枚引いてから採点');
+    assert.equal(total(d), total(base({ match: 3 }, ['rD'])), '最後のドロー2で引かせても札の数は変わらない');
+    const w = U.apply(base({ match: 3 }, ['W4']), { p: 0, t: 'play', i: 0, c: 'g' });
+    assert.deepEqual([w.match.gap.left[1].length, w.last.got], [5, 4], '最後の1枚がドロー4: 次の人が4枚引いてから採点');
+    const st2 = U.apply(base({ match: 3, stack: true }, ['rD'], { pend: { k: 'D', n: 2 } }), { p: 0, t: 'play', i: 0 });
+    assert.deepEqual([st2.match.gap.left[1].length, st2.pend], [5, null], '重ねて返すの最後の1枚: たまった分も一緒に引く');
+    const plain = U.apply(base({}, ['rD']), { p: 0, t: 'play', i: 0 });
+    assert.deepEqual([plain.winner, plain.hands[1].length], [0, 3], '点数で勝負でなくても、引かせてから決着');
+    const num = U.apply(base({ match: 3 }, ['r1']), { p: 0, t: 'play', i: 0 });
+    assert.equal(num.match.gap.left[1].length, 1, '数字の札で上がったら引かせない');
+  }
   console.log('colors match OK');
 }
 
@@ -1637,6 +1651,19 @@ for (let k = 0; k < 30; k++) {
 }
 assert.ok(jkSeen > 10, `CPU がジョーカーを持って交換する場面がある: ${jkSeen}`);
 console.log('poker joker games', pjGames, 'joker draws', jkSeen);
+
+{ // ポーカーの回数制: 最後に持ち点が同じなら同点優勝（2026-11-19 本人の決定。前は席の番号が小さい人）
+  const { seatPoints } = await import('../app/js/games/index.js');
+  const end = (chips, outAt, ranking) => P.result({ ...P.init(3, 1, { rules: { mode: 'chips', end: 'hands' } }), over: true, chips, outAt, ranking });
+  const tie = end([50, 50, 20], [null, null, null], [0, 1, 2]);
+  assert.deepEqual([tie.winner, tie.winners], [null, [0, 1]], 'ポーカー: 持ち点が同じ2人は同点優勝');
+  assert.deepEqual(seatPoints(tie, 3), [1, 1, 0], 'ポーカー: 同点優勝の2人は順位で点も同じ');
+  assert.match(P.resultText(tie, 1, (p) => 'P' + p), /同点/, 'ポーカー: 同点優勝の文');
+  const one = end([60, 50, 10], [null, null, null], [0, 1, 2]);
+  assert.deepEqual([one.winner, one.winners], [0, undefined], 'ポーカー: 持ち点が違えば1人が優勝');
+  const last = end([0, 120, 0], [3, null, 2], [1, 0, 2]);
+  assert.deepEqual([last.winner, last.winners], [1, undefined], 'ポーカー: 1人だけ残ったらその人（持ち点0で抜けた人どうしは同点にしない）');
+}
 
 // ---------- スピード ----------
 const SP = GAMES.speed;
@@ -4855,6 +4882,13 @@ for (let g = 0; g < 30; g++) {
   }
   assert.ok(used >= 10, 'CPU もジョーカーを使う');
   console.log('sevens joker uses', used);
+  { // ジョーカーを置かれた所の札の持ち主は、本人の画面にだけ出す（2026-11-19 本人の決定）
+    const { logText } = await import('../app/js/games/sevens.js');
+    const st = { last: { t: 'joker', p: 0, c: 's8', owner: 2 } };
+    const nm = (me) => (p) => (p === me ? 'あなた' : 'P' + p);
+    assert.match(logText(st, nm(2), 2), /あなたは次にその札を出す/, '七並べ: 持ち主の画面には「あなたは次にその札を出す」');
+    for (const me of [0, 1, 3, null]) assert.ok(!/P2|次にその札/.test(logText(st, nm(me), me)), '七並べ: ほかの人の画面には持ち主を出さない');
+  }
 }
 // パスは出せないときだけ（詳細設定）
 {
@@ -12299,6 +12333,8 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     for (const k of [5, 10, 20]) {
       const qs = makeQuestions(k, seed);
       assert.equal(qs.length, k);
+      // 対局ごとに「同じ」が半分（2026-11-19 本人の決定。5問なら2か3問）
+      assert.ok(Math.abs(qs.filter((x) => x.ans === SAME).length - k / 2) <= 0.5, `錯覚クイズ: 「同じ」は対局ごとに半分 ${k}問 種${seed}`);
       for (let i = 0; i + 6 <= k; i += 6) assert.deepEqual(qs.slice(i, i + 6).map((x) => x.kind).sort(), KINDS.slice().sort(), '錯覚クイズ: 6種類が1巡ずつ');
       qs.forEach((x, q) => {
         total += 1;

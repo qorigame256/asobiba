@@ -394,7 +394,12 @@ export default {
   referee(s) { return !s.over && s.h.phase === 'end' ? { key: 'next' + s.handNo, ms: NEXT_MS, move: { t: 'next' } } : null; },
   result(s) {
     if (!s.over) return null;
-    if (!simple(s)) return { winner: s.ranking[0], ranking: s.ranking };
+    if (!simple(s)) {
+      // 回数制で最後に持ち点が同じなら同点優勝（2026-11-19 本人の決定。前は席の番号が小さい人）。1人だけ残って終わったときは必ず1人
+      const most = s.chips[s.ranking[0]];
+      const tied = s.ranking.filter((p) => s.outAt[p] === null && s.chips[p] === most);
+      return tied.length > 1 ? { winner: null, winners: tied, ranking: s.ranking } : { winner: s.ranking[0], ranking: s.ranking };
+    }
     const top = Math.max(...s.wins);
     const winners = s.ranking.filter((p) => s.wins[p] === top);
     return { winner: winners.length === 1 ? winners[0] : null, winners, ranking: s.ranking, pts: s.wins.slice() };

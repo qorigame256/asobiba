@@ -250,9 +250,15 @@ function match3(lvs, seed, target = 7, goal = GOAL3) {
     const ta = lateOver(2, [3, 2], [2, 3], 60, 7), tb = lateOver(2, [2, 3], [3, 2], 60, 7);
     check('決着のあと: 延長で同点に戻ったら2台とも決着を取り消す', JSON.stringify(ta?.lost) === '[3,3]' && ta.over === null && JSON.stringify(tb?.lost) === '[3,3]' && tb.over === null);
     const t3 = lateOver(3, [3, 2, 2], [2, 3, 2], 60, 7);
-    check('決着のあと: 3人の延長で、合わせても失点の少ない人が1人なら決着のまま', JSON.stringify(t3?.over?.rank) === '[2,2,1]' && lateOver(2, [7, 6], [6, 7], 0, 7)?.over !== null);
+    check('決着のあと: 3人の延長で、合わせても失点の少ない人が1人なら決着のまま', JSON.stringify(t3?.over?.rank) === '[2,2,1]');
+    // 点数で終わる遊び方でも、合わせて 7対7 になったら決着を取り消して延長（2026-11-19 本人の決定。前は席0の勝ちで決着のまま）
+    const p7 = lateOver(2, [7, 6], [6, 7], 0, 7), q7 = lateOver(2, [6, 7], [7, 6], 0, 7);
+    check('決着のあと: 点数で終わる遊び方で 7対7 に戻ったら2台とも決着を取り消す', JSON.stringify(p7?.lost) === '[7,7]' && p7.over === null && JSON.stringify(q7?.lost) === '[7,7]' && q7.over === null);
     check('決着のあと: 増えていなければ何もしない', lateLost([7, 6], [7, 6]) === null && lateLost([7, 6], [5, 6]) === null && lateLost([7, 6], [7]) === null);
   }
+  // 両方が同時に先取点に届いたら延長（2026-11-19 本人の決定。前は席0の勝ち）
+  check('2人: 7対7は決着にせず、次の1点で決まる', overOf(2, [7, 7], 7) === null && JSON.stringify(overOf(2, [8, 7], 7)?.rank) === '[1,2]' && JSON.stringify(overOf(2, [7, 8], 7)?.rank) === '[2,1]'
+    && JSON.stringify(overOf(2, [3, 7], 7)?.rank) === '[2,1]' && overOf(2, [6, 6], 7) === null);
   check('2人: 取った点で数える（入れられた側の相手に1点）', JSON.stringify(addGoal(2, [0, 0], 1)) === '[1,0]' && JSON.stringify(overOf(2, [7, 3], 7)?.rank) === '[1,2]');
   // 制限時間が来たあと（同点なら次の1点まで続ける）
   check('時間切れ: 2人は点の多い方の勝ち・同点なら続ける', JSON.stringify(overTime(2, [2, 3])?.rank) === '[2,1]' && overTime(2, [2, 2]) === null && overTime(2, [0, 0]) === null);

@@ -505,7 +505,7 @@ function proceed(s) {
     s.over = true;
     // 順位: 持ち点の高い順。同点なら最後の局の親から数えた席順が前の人が上
     const dealer = dealerOf(s);
-    s.ranking = [...Array(s.n).keys()].sort((a, b) => s.scores[b] - s.scores[a] || ((a - dealer + s.n) % s.n) - ((b - dealer + s.n) % s.n));
+    s.ranking = [...Array(s.n).keys()].sort((a, b) => s.scores[b] - s.scores[a] || ((a - dealer + s.n) % s.n) - ((b - dealer + s.n) % s.n)); if (s.kyotaku) { s.scores[s.ranking[0]] += s.kyotaku * 1000; s.kyotakuTop = s.kyotaku; s.kyotaku = 0; } // 流局のまま終わって残った供託は1位に渡す（2026-11-19 本人の決定。前は誰にも入らず点の合計が減った。順位は渡す前の点で決める）
     s.seq++;
     return;
   }
@@ -1439,7 +1439,7 @@ export default {
     return !h.acks.includes(p);
   },
   apply: applyMove,
-  result(s) { return s.over ? { winner: s.ranking[0], ranking: s.ranking, scores: s.scores.slice() } : null; },
+  result(s) { return s.over ? { winner: s.ranking[0], ranking: s.ranking, scores: s.scores.slice(), kyotaku: s.kyotakuTop ?? 0 } : null; },
   // 効果音（sound.js の名前）。a = 前の局面、b = 今の局面、m = 打たれた手、me = 自分の番号
   // 技の名前（2026-11-06 の UI・演出・アニメーションの案。mahjong.md の「演出」）: リーチ・ポン・チー・カン・ロン・ツモで大きな字（main.js の cutInFx）。
   // ロン・ツモの字のあとに結果の欄を一つずつ出す（endPanel の REVEAL_LEAD）
@@ -1488,7 +1488,7 @@ export default {
   },
   resultText(res, me, pn) {
     const rows = res.ranking.map((p, i) => `${i + 1}位 ${pn(p)} ${res.scores[p].toLocaleString()}点`).join('<br>');
-    return `${res.winner === me ? 'あなたの勝ち！🎉' : `${pn(res.winner)}の勝ち！`}<div class="status-sub">${rows}</div>`;
+    return `${res.winner === me ? 'あなたの勝ち！🎉' : `${pn(res.winner)}の勝ち！`}<div class="status-sub">${rows}${res.kyotaku ? `<br>（残った供託${res.kyotaku}本は1位へ）` : ''}</div>`;
   },
   render,
 };

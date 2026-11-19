@@ -44,10 +44,14 @@ const r1 = (v) => Math.round(v * 10) / 10;
 export function makeQuestions(k, seed) {
   const rnd = mulberry32((seed * 131 + 17) >>> 0);
   let order = [];
+  // 「同じ」が正解の問題は、対局ごとに半分（奇数なら切り上げか切り捨てを種で決める）にそろえる（2026-11-19 本人の決定。
+  // 前は1問ずつのくじで、5問だと全部「同じ」の回が 1/32 で出て「同じ」を押すだけで勝てた）。どの問題が「同じ」かは種でまぜる
+  const half = k % 2 ? (k + (rnd() < 0.5 ? 1 : -1)) / 2 : k / 2;
+  const sames = shuffle(Array.from({ length: k }, (_, i) => i < half), rnd);
   return Array.from({ length: k }, (_, q) => {
     if (!order.length) order = shuffle(KINDS, rnd);
     const kind = order.pop();
-    const same = rnd() < 0.5;
+    const same = sames[q];
     const fool = rnd() < 0.5;
     const flip = rnd() < 0.5;
     const [lo, hi] = BASE[kind];

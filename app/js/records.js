@@ -11,7 +11,7 @@
 // - ゲームごとの成績（games。2026-10-22 の27回目の案）: ゲームの id → { p: 遊んだ対局（played と同じ数え方）, w: 勝った対局（オンラインで自分が勝ったもの。CPU だけが相手でも数える） }。
 //   ランキングの画面に出すだけ（Game Center には送らない）。同じ画面の対局は、どの席が自分か分からないので p にだけ数える
 // - 最近遊んだゲーム（recent。2026-11-17 本人の選択。room.md「UI・UX の8回目」）: 対局者として決着を見たゲームの id を新しい順に RECENT_MAX 個。ホームの「さっき遊んだ」の列に出す
-// エアホッケーは結果が main.js を通らないので数えない。
+// エアホッケーは結果が main.js を通らないので、決着のたびに main.js の noteLiveOver へ知らせて played・hwins・games・recent にだけ数える（2026-11-19 本人の決定）。紙相撲は数えない。
 
 import { reportScores, onGcSignedIn } from './native.js';
 

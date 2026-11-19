@@ -16,6 +16,8 @@ function invariant(s, start) {
   const total = s.scores.reduce((a, b) => a + b, 0) + s.kyotaku * 1000;
   if (total !== start * s.n) return `点数の合計が合わない ${total}`;
   const all = [...h.hands.flat(), ...h.melds.flat().flatMap((m) => m.tiles), ...h.rivers.flat().filter((x) => !x.taken).map((x) => x.id), ...h.nuki.flat()];
+  // 槍槓・抜いた北へのロンで取られた牌は、打った人の副露・抜いた北から外れて和了の牌（end.win）にだけ残る（mahjong.js の resolveClaim。2026-11-19 の 91842b0 から）
+  if (h.phase === 'end' && h.end?.type === 'ron' && !all.includes(h.end.win)) all.push(h.end.win);
   if (new Set(all).size !== all.length) return '同じ牌が2か所にある';
   const used = h.draw + h.rinshan + 0;
   if (all.length !== used + 13 * s.n - 13 * s.n + 13 * s.n - (0)) { /* 配牌も draw に数えている */ }

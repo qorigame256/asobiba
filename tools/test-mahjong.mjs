@@ -453,6 +453,19 @@ if (!TESTDATA || !fs.existsSync(TESTDATA)) {
     const tan = (g) => g.find((r) => r.names.includes('断幺九'));
     check('喰いタンありなら断幺九は鳴いても1翻、なしなら「鳴くと付かない」', tan(g4).open === undefined && tan(T.yakuGuide({ kuitan: false })).open === 0);
     check('表を作っても元の表は変わらない', tan(T.yakuGuide({ kuitan: true })).open === undefined);
+    { // 流局のまま終わって残った供託は1位に渡す（2026-11-19 本人の決定）
+      const s = mj.init(4, 5, { rules: { length: 'one' } });
+      const start = s.scores[0];
+      s.scores[1] -= 1000; s.scores[2] -= 1000; s.kyotaku = 2; // 2人がリーチして流局した形
+      s.scores[3] += 3000; s.scores[0] -= 3000;
+      s.h.phase = 'end';
+      s.h.acks = [];
+      s.h.end = { type: 'draw', over: true, next: { kyoku: 1, honba: 1 }, deltas: [0, 0, 0, 0], tenpai: [false, false, false, true], hands: [null, null, null, null], title: '' };
+      const r = mj.apply(s, { p: -1, a: 'next', n: s.seq });
+      const res = r && mj.result(r);
+      check('流局で終わったとき、残った供託は1位に入り、点の合計が減らない', !!res && r.kyotaku === 0 && res.kyotaku === 2 && res.ranking[0] === 3
+        && res.scores[3] === start + 3000 + 2000 && res.scores.reduce((a, b) => a + b, 0) === start * 4, JSON.stringify(res));
+    }
   }
 }
 

@@ -48,7 +48,7 @@ import { SKINS, shownSkins, needText, usable, currentSkin, setSkin, checkSkin, n
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 見間違えやすい I O 0 1 を除く
 const CODE_LEN = 5;
 const HEARTBEAT_MS = 5000;
-const LOST_MS = 40000; // 合図がこれより長く途切れたら抜けたと見る（2026-10-30 に20秒から延ばした。スマホで少し裏に回っただけで席が CPU に替わらないように）
+const LOST_MS = 40000; // 合図がこれより長く途切れたら抜けたと見る（2026-10-30 に20秒から延ばした。スマホで少し裏に回っただけで「応答なし」にならないように。ホストの端末は同じ長さだけ合図が無い人の番を CPU に打たせる＝下の gone）
 const MAX_MEMBERS = 10; // 部屋に入れる人数の上限（観戦を含む）
 const CPU_DELAY_MS = 600; // CPU が手を打つまでの間（速すぎると何が起きたか追えない）
 const NAME_KEY = 'bg-name';
@@ -1332,6 +1332,15 @@ function myPlayer() {
 
 const alive = (id) => id === S.myId || Date.now() - (S.seen[id] ?? 0) < LOST_MS;
 const cpuControlled = (id) => isCpu(id) || !S.members.includes(id) || !!S.away?.includes(id); // away = 対局の途中で待合室へ行った人（2026-10-26）
+// 合図が途切れた人の番を CPU が代わりに打つ（2026-11-19 本人の決定。前はその人の番で対局が止まっていた）。戻ってきたら（合図が1つでも届いたら）本人に戻す。
+// 見るのはホストの端末だけ（CPU の手を考えるのはホストだけなので）。alive（最後に届いた時刻）でなく、ホストが中継サーバーとつながっていた間に
+// 合図が来なかった回数（S.quiet。生存確認のたびに1つ足し、何か届いたら0）で見る。ホストの側が裏に回っていた・切れていた間を「相手が抜けた」と数えると、
+// 戻った直後（相手の合図が届く前）に全員の番を CPU が打ってしまうため。ホストの合図が戻っていない間は数え直す（生存確認の所）。
+// 席は人のまま（cpuControlled には入れない。記録・待った・毎フレーム動くゲームの席は今までどおり）。
+const QUIET_TICKS = Math.ceil(LOST_MS / HEARTBEAT_MS);
+const SELF_FRESH_MS = HEARTBEAT_MS * 2 + 2000; // ホストの合図がこれより新しく戻っていれば「ホストはつながっている」と見る
+const gone = (id) => !!S.isHost && !isCpu(id) && id !== S.myId && S.members.includes(id) && (S.quiet?.[id] ?? 0) >= QUIET_TICKS;
+const cpuPlays = (id) => cpuControlled(id) || gone(id);
 // 待合室で CPU を選べるか。毎フレーム動くゲーム（エアホッケー）は、liveCpu が認めたとき（3人）だけ
 const cpuPickable = (game) => !game?.live || !!game.liveCpu?.(rulesOf(S.gameId, S.rules));
 
@@ -2002,6 +2011,7 @@ const netStuck = () => S.pingAt != null && Date.now() - S.pingAt > STUCK_MS;
 function onSelf(msg) {
   if (msg.type === 'move' || msg.type === 'state') { sendBack(msg); return; }
   if (msg.type !== 'ping' || !Number.isFinite(msg.t)) return;
+  S.selfAt = Date.now(); // ホストがつながっている印（gone）
   S.rtt = Math.max(0, Date.now() - msg.t);
   S.pingAt = null;
   renderRoomBar();
@@ -2510,7 +2520,7 @@ function renderPage() {
     Object.assign(opts, {
       names: S.order.map(nameOf),
       cpu: S.order.map(cpuControlled),
-      sub: S.order.map((id) => !isCpu(id) && cpuControlled(id)), // 部屋を出た人の席を CPU が代わりに打っている
+      sub: S.order.map((id) => !isCpu(id) && cpuPlays(id)), // 部屋を出た人・合図が途切れた人（ホストの端末だけが知る）の席を CPU が代わりに打っている
       away: S.order.map((id) => !isCpu(id) && S.members.includes(id) && !alive(id)),
       hidden: S.order.map((id) => !!S.hidden?.includes(id)), // 「この人を隠す」を押した人の席（その人の言葉と絵を出さない）
       watching: myPlayer() === SPECTATOR && opts.me !== SPECTATOR, // 観戦の人がほかの人の画面を見ている（me はその人の番号）
@@ -3117,6 +3127,19 @@ function noteAchievements(game, res, st) {
   const { isNew, fresh } = noteGame(`${S.code}:${resultKey()}`, { won, withHuman, best, beat, hard, gameId: S.gameId });
   if (isNew) lateToast(`🎉 自己ベスト更新！ ${game.name} ${game.record.fmt(value)}`);
   if (fresh.length) lateToast(`📖 CPU 図鑑に ${fresh.join('・')} が載った！（${Object.keys(readRecords().cpus).length}/${CPU_NAMES.length}）`);
+}
+
+// 毎フレーム動くゲーム（エアホッケー）の決着を、自分の記録の「遊んだ対局」と「人がいた対局の勝ち」に数える（2026-11-19 本人の決定。色の解放のため）。
+// 結果が main.js を通らないので、ゲームが決着のたびに mount の onOver(席ごとの順位, 何試合目か) で知らせる。同じ試合は noteGame が鍵で1回だけ数える。
+// CPU 図鑑・実績・ゲームの自己ベストは今までどおり数えない（Claude の判断）。
+function noteLiveOver(rank, no, mountAt) {
+  if (!S || !Array.isArray(rank)) return;
+  if (S.mode !== 'online') { noteGame(`local:${S.gameId}:${mountAt}:${no}`, { won: false, withHuman: false, best: null, gameId: S.gameId }); return; }
+  const me = myPlayer();
+  if (!(me >= 0)) return;
+  const won = rank[me] === 1 && rank.some((v) => v !== 1);
+  const withHuman = S.order.some((id) => id && id !== S.myId && !isCpu(id));
+  noteGame(`${S.code}:${S.gameId}:${S.round}:live${no}`, { won, withHuman, best: null, gameId: S.gameId });
 }
 
 // 決着したときの記録の知らせ（自己ベスト・CPU 図鑑・色の解放）は、決着のあいさつ（greet。最大1.9秒後に出て2.2秒見える）に上書きされないよう、
@@ -5256,7 +5279,7 @@ function scheduleCpu(game, st, res) {
   const canAct = (s, i) => (game.multi ? game.canAct(s, i) : game.turn(s) === i);
   // 同時に動くゲーム（realtime）は CPU ごとに別々に予約し、相手が動いても取り消さない
   // （取り消すと相手が速いと CPU が永久に動けない。1人ずつだと、待っている CPU の後ろの CPU が動けない）
-  const ps = S.order.map((id, i) => i).filter((i) => cpuControlled(S.order[i]) && canAct(st, i));
+  const ps = S.order.map((id, i) => i).filter((i) => cpuPlays(S.order[i]) && canAct(st, i));
   // みんなが同時に押す場面（concurrent）も CPU ごとに予約する。1人ずつだと、何もしない CPU（null を返す）が前にいると後ろの CPU が動けない
   // （ウミガメの「答えを見る？」で、言い出した人と返事をしていない人が部屋を出ると返事待ちが終わらなかった。2026-11-04 Codex の点検の指摘）
   for (const p of game.realtime || game.concurrent?.(st) ? ps : ps.slice(0, 1)) {
@@ -5276,7 +5299,7 @@ function scheduleCpu(game, st, res) {
       if (S !== session || S.gameId !== gid || S.round !== round) { if (S === session && S.cpuKeys[p] === key) S.cpuKeys[p] = null; return; }
       if (S.cpuKeys[p] !== key || S.cpuToks?.[p] !== tok || (!game.realtime && S.moves.length !== len)) return;
       S.cpuKeys[p] = null;
-      if (!cpuControlled(S.order?.[p])) { render(); return; } // 予約のあとで、観戦の人がこの席に入った（途中から空いた席に入る）
+      if (!cpuPlays(S.order?.[p])) { render(); return; } // 予約のあとで、観戦の人がこの席に入った（途中から空いた席に入る）・合図が途切れていた人が戻った
       const now = replay(S);
       const m = now && !game.result(now) && canAct(now, p) ? game.cpu(now, p, rulesOf(S.gameId, S.rules)) : null; // null = いまは何もしない
       const move = game.multi && m ? { ...m, p } : m; // 盤のゲームの手には p を付けない（手が 0 のこともある）
@@ -5472,11 +5495,13 @@ function renderLive(game) {
     const board = el('board');
     el('status').innerHTML = '';
     S.liveKey = key;
+    const mountAt = Date.now(); // 同じ画面の対局の記録の鍵（同じ試合を2回数えないため。開き直したら別の試合）
     S.liveHandle = game.mount(board, {
       mode: online ? 'online' : S.live, status: el('status'), me: online ? myPlayer() : null,
       names: online ? S.order.map(nameOf) : null, rules: rulesOf(S.gameId, S.rules), isHost: online && S.isHost,
       // CPU が動かす席（部屋を出た人の席も）。ホストの端末が動かし、ほかの端末はその席を待たない
       cpuSeats: () => (S.order ?? []).flatMap((id, i) => (cpuControlled(id) ? [i] : [])),
+      onOver: (rank, no) => noteLiveOver(rank, no, mountAt), // 決着を自分の記録に数える（2026-11-19 本人の決定。エアホッケー）
       send: (d, important) => send({ type: 'live', gameId: S.gameId, round: S.round, d }, important ? 1 : 0),
     });
   }
@@ -6277,6 +6302,7 @@ function onMessage(msg) {
   const wasAlive = alive(msg.from);
   const wasOff = offKey();
   S.seen[msg.from] = Date.now();
+  if (S.quiet) S.quiet[msg.from] = 0; // 合図が途切れた人の番を CPU が打つ（gone）: 何か届いたら数え直す
   if (msg.type === 'look' || msg.type === 'ping' || msg.type === 'hello') lookOff[msg.from] = msg.hid === true; // よそ見中の印（2026-11-17）
   if (msg.type === 'look') { if (wasOff !== offKey()) render(); return; }
   if (msg.type === 'stream') { // 見た目だけの中身。手の一覧には入れず、描き直しもしない（相手の迷い（peek）だけは描き直す）
@@ -6691,7 +6717,11 @@ setInterval(() => {
   if (S?.mode !== 'online' || S.conn !== 'ready') return;
   if (!S.isHost && !S.members.includes(S.myId) && !S.full) { if (!S.lockWait) askState(); } // 鍵のパスワードを聞いている間は送らない
   else { send({ type: 'ping', t: Date.now(), hid: isHidden() || undefined }); S.pingAt ??= Date.now(); } // t: 戻ってきたら通信の遅れを測る。hid: よそ見中の印
-  const lostKey = S.members.filter((id) => !alive(id)).join() + '|' + offKey(); // よそ見中の印も、合図が途切れて付いた・外れたら描き直す
+  if (S.isHost) { // 合図が途切れた人の番を CPU が打つ（gone）: ホストの合図が戻っている間だけ数える
+    if (Date.now() - (S.selfAt ?? 0) < SELF_FRESH_MS) { S.quiet ??= {}; for (const id of S.members) if (id !== S.myId) S.quiet[id] = (S.quiet[id] ?? 0) + 1; }
+    else S.quiet = {};
+  }
+  const lostKey = S.members.filter((id) => !alive(id)).join() + '|' + S.members.filter(gone).join() + '|' + offKey(); // よそ見中の印も、合図が途切れて付いた・外れたら描き直す
   if (lostKey !== S.lostKey) { S.lostKey = lostKey; render(); } else renderRoomBar();
 }, HEARTBEAT_MS);
 

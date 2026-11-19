@@ -48,7 +48,8 @@ function perft(board, hands, side, d) {
     && count({ handicap: 'rook' }) === 19 && count({ handicap: 'two' }) === 18);
   const two = shogi.init({ rules: { handicap: 'two' } }).board;
   check('二枚落ちで落ちるのは先手の角と飛', two[sq(7, 1)] === 0 && two[sq(7, 7)] === 0 && two[sq(1, 1)] === -7 && two[sq(1, 7)] === -6);
-  check('香落ちで落ちるのは先手の1筋の香', shogi.init({ rules: { handicap: 'lance' } }).board[sq(8, 8)] === 0);
+  // 上手（先手・下側）の左の香 = 9九（2026-11-19 本人の決定。日本将棋連盟の「上手の左の香」）
+  check('香落ちで落ちるのは上手の左の香（9九）。1九の香は残る', (() => { const b = shogi.init({ rules: { handicap: 'lance' } }).board; return b[sq(8, 0)] === 0 && b[sq(8, 8)] === 2; })());
 }
 
 // 3. 打つ手の反則

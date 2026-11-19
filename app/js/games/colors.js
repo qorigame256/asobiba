@@ -502,7 +502,18 @@ export default {
       s.drawn = null;
       const last = { p, t: 'play', card: topCard, color: s.color, n: 1 + more.length };
       s.last = last;
-      if (!s.hands[p].length) { s.winner = p; return s; }
+      if (!s.hands[p].length) {
+        // 最後の1枚がドロー2・ドロー4なら、次の人に引かせてから決着にする（2026-11-19 本人の決定。前は引かせず、「点数で勝負」の点が少なくなった）。
+        // 重ねて返すでたまっていた分も一緒に引く。チャレンジはできない（もう上がっているため）。手札の上限では脱落させない（点は手札で数えるので同じ）
+        const fk = kindOf(card);
+        if (fk === 'D' || fk === 'W4') {
+          last.victim = next(1);
+          last.got = drawInto(s, last.victim, (s0.pend?.n ?? 0) + (fk === 'D' ? 2 : 4)).length;
+          s.pend = null;
+        }
+        s.winner = p;
+        return s;
+      }
       const k = kindOf(card);
       if (swap) {
         const to = aliveCount(s) > 2 ? m.to : next(1);
