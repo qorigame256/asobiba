@@ -356,7 +356,8 @@ function sea3(s, owner, { title, showShips, onShoot = null, small = false, mine 
     if (k >= 0 && (showShips || sunk.has(k))) cls += ' ship' + (sunk.has(k) ? ' sunk' : '');
     if (shot) cls += k >= 0 ? ' hit' : ' miss';
     else if (mine !== null && mine !== owner && !s.out[owner] && s.shots[mine][i]) cls += ' miss'; // 自分の海と脱落した人の海には付けない（2026-11-19 の Codex の点検）。 自分が撃ったマス（この海にはまだだれも撃っていない形でも、もう撃てない）
-    if (s.last && !s.last.placed && s.last.cell === i && s.last.p !== owner) cls += ' last';
+    // いちばん新しい弾の枠も、脱落した人の海には付けない（脱落させた弾だけは付ける。前は、脱落のあとの弾の枠だけが印の無いマスに出ていた。2026-11-19）
+    if (s.last && !s.last.placed && s.last.cell === i && s.last.p !== owner && (!s.out[owner] || s.last.outs?.includes(owner))) cls += ' last';
     if (can) {
       cell.type = 'button';
       cls += ' playable';

@@ -24,21 +24,17 @@
 //
 // 続きの操作で使える目印: 盤は #board、下の段は #controls、「始める」「もう一回」などの大きなボタンは #dock、上の知らせは #status。
 //   ゲームの中の部品の名前は app/js/games/<ゲーム>.js の render を見る。局面を数で確かめるときは {"eval": "…", "as": "名前"}（結果は result.json の evals）。
-// 中継サーバー（公開の MQTT）につながる。部屋にいるのは自分1人と CPU だけ（2人目の人は入れられない）。
+// 中継サーバー（公開の MQTT）につながる。部屋にいるのは自分1人と CPU だけ（2人目の人は入れられない。人が2人以上要る確認は tools/play-two.mjs）。
 // 持ち主の印は app/js/owner.js の STORE_KEY・OWNER_KEY をその場で読む（ここには写さない）。
 // 終了コード: headless-shot.js のものをそのまま返す（0＝全部できた / 2＝操作の失敗か時間切れ）。使い方の誤りは 1。
 
 import fs from 'node:fs';
 import os from 'node:os';
-import net from 'node:net';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { ROOT, GAMES, fail, findGame, showSettings, ruleEvals, ownerMark, startServer } from './play-common.mjs'; // 2人で動かす play-two.mjs と共に使う部品
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HS = process.env.HEADLESS_SHOT || path.resolve(ROOT, '..', 'Claudeの使い道', 'tools', 'headless-shot.js');
-
-function fail(msg) { console.error(msg); process.exit(1); }
 
 // ---------- 引数 ----------
 const argv = process.argv.slice(2);
@@ -63,23 +59,6 @@ for (let i = 0; i < argv.length; i++) {
 if (!Number.isInteger(opt.cpus) || opt.cpus < 0) fail('--cpus は 0 以上の整数で書きます');
 
 // ---------- ゲームと詳細設定 ----------
-const { GAMES } = await import(pathToFileURL(path.join(ROOT, 'app', 'js', 'games', 'index.js')).href);
-const findGame = (word) => {
-  if (GAMES[word]) return word;
-  const byName = Object.keys(GAMES).filter((id) => GAMES[id].name === word);
-  if (byName.length === 1) return byName[0];
-  const near = Object.keys(GAMES).filter((id) => id.includes(word) || String(GAMES[id].name).includes(word));
-  fail(`ゲームが見つかりません: ${word}${near.length ? `\n近いもの: ${near.map((id) => `${id}（${GAMES[id].name}）`).join('・')}` : '\n一覧は node tools/play-shot.mjs --list'}`);
-};
-const showSettings = (id) => {
-  const g = GAMES[id];
-  console.log(`${id}（${g.name}）`);
-  for (const x of g.settings ?? []) {
-    const vals = x.choices ? x.choices.map(([v, n]) => `${JSON.stringify(v)}＝${n}`).join(' / ') : 'true / false';
-    console.log(`  --rule ${x.key}=…  ${x.label}（最初は ${JSON.stringify(x.def)}）: ${vals}`);
-  }
-  if (!g.settings?.length) console.log('  詳細設定はありません');
-};
 if (opt.list) {
   if (rest[0]) showSettings(findGame(rest[0]));
   else console.log(Object.keys(GAMES).filter((id) => GAMES[id].ready).map((id) => `${id}（${GAMES[id].name}）`).join('\n'));
@@ -92,65 +71,16 @@ if (opt.local && (opt.rules.length || opt.cpus)) fail('--local では --rule と
 // ホームの小窓に出るボタンは main.js の「部屋を作る」の所と同じ分け方（live＝毎フレーム動くゲーム。エアホッケー・紙相撲）
 if (opt.local && game.live && game.onlineOnly) fail(`${game.name} はオンラインだけのゲームです（--local は使えません。待合室までなら --no-start）`);
 if (opt.local && !game.live && (game.multi || game.noLocal)) fail(`${game.name} には「この画面で2人で」がありません（--local を外して部屋を作ります）`);
-if (!opt.local && game.live && opt.start) fail(`${game.name} の部屋は、人が2人そろうまで始められません。1人で確かめるなら --local（CPU と対戦）、待合室までなら --no-start を付けます`);
+if (!opt.local && game.live && opt.start) fail(`${game.name} の部屋は、人が2人そろうまで始められません。1人で確かめるなら --local（CPU と対戦。エアホッケーだけ）、人が2人の部屋で始めるなら tools/play-two.mjs、待合室までなら --no-start を付けます`);
 const localButton = game.live ? 'CPU と対戦' : 'この画面で2人で';
 
-// --rule 鍵=値 を「欄の見出し・選ぶ番号（選択肢）か はい/いいえ」に直す
-const parseValue = (s) => (s === 'true' ? true : s === 'false' ? false : /^-?\d+(\.\d+)?$/.test(s) ? Number(s) : s);
-const ruleSteps = opt.rules.map((pair) => {
-  const eq = pair.indexOf('=');
-  if (eq < 1) fail(`--rule は 鍵=値 で書きます: ${pair}`);
-  const key = pair.slice(0, eq); const raw = pair.slice(eq + 1);
-  const x = (game.settings ?? []).find((s) => s.key === key);
-  if (!x) { showSettings(gameId); fail(`${game.name} に詳細設定「${key}」はありません`); }
-  let want;
-  if (x.choices) {
-    const idx = x.choices.findIndex(([v]) => v === parseValue(raw) || String(v) === raw);
-    if (idx < 0) { showSettings(gameId); fail(`${x.label}（${key}）に「${raw}」はありません`); }
-    want = { idx };
-  } else {
-    const v = parseValue(raw);
-    if (typeof v !== 'boolean') fail(`${x.label}（${key}）は true か false です: ${raw}`);
-    want = { on: v };
-  }
-  // 待合室は設定を1つ変えるたびに描き直すので、毎回 欄を探し直す。見つからなければ例外にして、そこで止める
-  const js = `(() => {
-    const det = [...document.querySelectorAll('#board details.lobby-rules')].find((d) => (d.querySelector('summary')?.textContent ?? '').startsWith('詳細設定'));
-    if (!det) throw new Error('待合室に詳細設定が無い');
-    const lab = [...det.querySelectorAll('label')].find((l) => l.querySelector('b')?.textContent === ${JSON.stringify(x.label)});
-    if (!lab) throw new Error('詳細設定の欄が無い: ' + ${JSON.stringify(x.label)});
-    const sel = lab.querySelector('select'); const cb = lab.querySelector('input[type=checkbox]');
-    if (sel) { sel.value = ${JSON.stringify(String(want.idx ?? 0))}; sel.dispatchEvent(new Event('change')); return sel.options[sel.selectedIndex].textContent; }
-    if (cb) { if (cb.checked !== ${JSON.stringify(want.on ?? false)}) cb.click(); return cb.checked; }
-    throw new Error('欄に選ぶ部品が無い: ' + ${JSON.stringify(x.label)});
-  })()`;
-  return { eval: js, as: `rule_${key}` };
-});
+// --rule 鍵=値 を、待合室の詳細設定を変える操作に直す（play-common.mjs）
+const ruleSteps = ruleEvals(gameId, opt.rules);
 
-// ---------- 持ち主の印（owner.js から読む） ----------
-const ownerSrc = fs.readFileSync(path.join(ROOT, 'app', 'js', 'owner.js'), 'utf8');
-const ownerKey = ownerSrc.match(/const OWNER_KEY = '([0-9a-f]+)'/)?.[1];
-const storeKey = ownerSrc.match(/const STORE_KEY = '([^']+)'/)?.[1];
-if (!ownerKey || !storeKey) fail('app/js/owner.js から OWNER_KEY・STORE_KEY を読めません（書き方が変わったら、この台本の読み方を直す）');
+// ---------- 持ち主の印と確認用サーバー（play-common.mjs） ----------
+const { ownerKey, storeKey } = ownerMark();
 if (!fs.existsSync(HS)) { console.error(`headless-shot.js がありません: ${HS}\n別の場所にあるときは環境変数 HEADLESS_SHOT に入れます`); process.exit(3); }
-
-// ---------- 確認用サーバーを空いている番号で起こす ----------
-const freePort = () => new Promise((resolve, reject) => {
-  const s = net.createServer();
-  s.once('error', reject);
-  s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); });
-});
-const port = await freePort();
-const base = `http://localhost:${port}/`;
-const server = spawn(process.execPath, [path.join(ROOT, 'tools', 'serve.js'), String(port)], { stdio: 'ignore' });
-const stopServer = () => { try { server.kill(); } catch { /* もう止まっている */ } };
-process.on('exit', stopServer);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { stopServer(); process.exit(130); });
-let up = false;
-for (let i = 0; i < 50 && !up; i++) {
-  try { up = (await fetch(base)).ok; } catch { await new Promise((r) => setTimeout(r, 100)); }
-}
-if (!up) { stopServer(); fail(`確認用サーバーが起きません（${base}）`); }
+const { base, stop: stopServer } = await startServer();
 
 // ---------- 操作を組み立てる ----------
 const steps = [
