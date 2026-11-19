@@ -12180,4 +12180,228 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('mizu 44 OK');
 }
 
+// 2026-11-19 に足した5つ（目の錯覚クイズ・道案内早押し・角度あわせ・抜けた数さがし・チキンレース）
+// 目の錯覚クイズ: 正解と本当の大きさが合う・半分ほどが「同じ」・大きく見える方が正解のときと逆のときがどちらも出る・6種類が1巡ずつ・図に NaN がない・CPU どうしで最後まで
+{
+  const G = GAMES.sakkaku;
+  const { makeQuestions, figure, KINDS, SAME, diffOf } = await import('../app/js/games/sakkaku.js');
+  let same = 0, total = 0, withLook = 0, against = 0;
+  for (let seed = 0; seed < 60; seed++) {
+    for (const k of [5, 10, 20]) {
+      const qs = makeQuestions(k, seed);
+      assert.equal(qs.length, k);
+      for (let i = 0; i + 6 <= k; i += 6) assert.deepEqual(qs.slice(i, i + 6).map((x) => x.kind).sort(), KINDS.slice().sort(), '錯覚クイズ: 6種類が1巡ずつ');
+      qs.forEach((x, q) => {
+        total += 1;
+        assert.ok([0, 1, SAME].includes(x.ans), '錯覚クイズ: 答えは 0・1・同じ');
+        if (x.ans === SAME) { same += 1; assert.equal(x.v[0], x.v[1], '錯覚クイズ: 同じなら同じ大きさ'); return; }
+        assert.ok(x.v[x.ans] > x.v[1 - x.ans], `錯覚クイズ: 正解の方が大きい ${JSON.stringify(x)}`);
+        assert.ok(Math.abs(x.v[x.ans] / x.v[1 - x.ans] - 1 - diffOf(q, k)) < 0.01, '錯覚クイズ: 差の割合');
+        if (x.ans === x.look) withLook += 1; else against += 1;
+      });
+      for (const x of qs) {
+        const f = figure(x);
+        assert.ok(!/NaN|undefined/.test(f.body) && f.h > 0 && f.h <= 175, `錯覚クイズ: 図 ${x.kind} ${f.h}`);
+      }
+    }
+  }
+  assert.ok(same / total > 0.4 && same / total < 0.6, `錯覚クイズ: 半分ほどが同じ ${same}/${total}`);
+  assert.ok(withLook > total * 0.15 && against > total * 0.15, `錯覚クイズ: 見た感じどおりと逆のどちらも出る ${withLook} ${against}`);
+  assert.deepEqual(makeQuestions(10, 7), makeQuestions(10, 7), '錯覚クイズ: 問題は種から決まる');
+  let s = G.apply(G.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  const x = s.qs[0];
+  const ng = [0, 1, SAME].find((c) => c !== x.ans);
+  assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, c: 3, ms: 300 }), null, '錯覚クイズ: 0・1・2 のほかは弾く');
+  s = G.apply(s, { p: 0, t: 'ans', q: 0, c: ng, ms: 300 });
+  assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, c: x.ans, ms: 400 }), null, '錯覚クイズ: 答えられるのは1回だけ');
+  s = G.apply(s, { p: 1, t: 'ans', q: 0, c: x.ans, ms: 900 });
+  s = G.apply(s, { p: 2, t: 'ans', q: 0, c: x.ans, ms: 700 });
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [0, 2, 3], '錯覚クイズ: 速い順に3・2点、まちがいは0点');
+  for (const rules of [{}, { rounds: 20 }]) {
+    const end = runCpus(G, 5, 8, rules, 200, 6000);
+    assert.ok(G.result(end) && end.scores.some((v) => v > 0), `錯覚クイズ: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('sakkaku OK');
+}
+
+// 道案内早押し: 道は地図の中で同じますを通らない・指示どうしは直角・着く所は道の最後・むずかしいの「右・左」が向きと合う・CPU どうしで最後まで
+{
+  const G = GAMES.michi;
+  const { makeQuestion, stepTexts, DIRS, N } = await import('../app/js/games/michi.js');
+  for (const level of ['easy', 'normal', 'hard']) {
+    for (let seed = 0; seed < 40; seed++) {
+      for (let q = 0; q < 20; q++) {
+        const x = makeQuestion(seed, q, level);
+        assert.equal(x.steps.length, level === 'easy' ? 2 : 3, `道案内: ${level} の指示の数`);
+        assert.equal(x.b.length, N * N);
+        let cx = x.start % N, cy = Math.floor(x.start / N);
+        const path = [x.start];
+        x.steps.forEach((st, i) => {
+          assert.ok(st.n >= 1 && st.n <= 3, '道案内: 1〜3ます');
+          if (i) assert.equal(Math.abs(st.d - x.steps[i - 1].d) % 2, 1, '道案内: 指示どうしは直角');
+          for (let k = 0; k < st.n; k++) {
+            cx += DIRS[st.d][0]; cy += DIRS[st.d][1];
+            assert.ok(cx >= 0 && cy >= 0 && cx < N && cy < N, '道案内: 地図の中');
+            path.push(cy * N + cx);
+          }
+        });
+        assert.deepEqual(path, x.path, '道案内: 道');
+        assert.equal(new Set(path).size, path.length, '道案内: 同じますを2回通らない');
+        assert.equal(x.end, path.at(-1), '道案内: 着く所は道の最後');
+        if (level === 'hard') {
+          assert.equal(x.steps[0].d, x.facing, '道案内: むずかしいの最初は向いている方へまっすぐ');
+          stepTexts(x, level).slice(1).forEach((t, i) => {
+            const turn = (x.steps[i + 1].d - x.steps[i].d + 4) % 4;
+            assert.ok(t.startsWith(turn === 1 ? '右' : '左'), `道案内: 右回りが「右」 ${t}`);
+          });
+        }
+      }
+    }
+  }
+  assert.deepEqual(stepTexts({ steps: [{ d: 0, n: 2 }, { d: 1, n: 3 }] }, 'easy'), ['北へ2つ', '東へ3つ']);
+  assert.deepEqual(stepTexts({ steps: [{ d: 0, n: 2 }, { d: 1, n: 1 }, { d: 0, n: 3 }] }, 'hard'), ['まっすぐ2つ', '右へ曲がって1つ', '左へ曲がって3つ'], '道案内: 北から東は右、東から北は左');
+  let s = G.apply(G.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  const x = s.qs[0];
+  assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, c: N * N, ms: 300 }), null, '道案内: 地図の外は弾く');
+  s = G.apply(s, { p: 0, t: 'ans', q: 0, c: x.start, ms: 300 });
+  assert.equal(s.miss[0], true, '道案内: ちがうますはまちがい');
+  s = G.apply(s, { p: 1, t: 'ans', q: 0, c: x.end, ms: 900 });
+  assert.equal(G.referee(s).ms, 5000, '道案内: だれかが正解したら5秒で締め切り');
+  s = G.apply(s, { p: 2, t: 'ans', q: 0, c: x.end, ms: 700 });
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [0, 2, 3], '道案内: 速い順に3・2点');
+  for (const rules of [{}, { level: 'easy' }, { level: 'hard', rounds: 20 }]) {
+    const end = runCpus(G, 5, 8, rules, 200, 8000);
+    assert.ok(G.result(end) && end.scores.some((v) => v > 0), `道案内: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('michi OK');
+}
+
+// 角度あわせ: むずかしさごとの角度・始まりの棒が答えから離れている・角度の差は360の回りを考える・近い順の点とぴったりの +2点・CPU どうしで最後まで
+{
+  const G = GAMES.kakudo;
+  const { makeQuestions, angDiff, anglePoints, EASY } = await import('../app/js/games/kakudo.js');
+  let over = 0;
+  for (let seed = 0; seed < 60; seed++) {
+    for (const level of ['easy', 'normal', 'hard']) {
+      for (const x of makeQuestions(20, seed, level)) {
+        if (level === 'easy') assert.ok(EASY.includes(x.t), '角度あわせ: やさしいはきりのいい角度');
+        if (level === 'normal') assert.ok(x.t % 5 === 0 && x.t >= 10 && x.t <= 170, `角度あわせ: ふつうは5°きざみ ${x.t}`);
+        if (level === 'hard') { assert.ok(x.t >= 5 && x.t <= 355 && x.t !== 180, `角度あわせ: むずかしい ${x.t}`); if (x.t > 180) over += 1; }
+        assert.ok(Number.isInteger(x.base) && x.base >= 0 && x.base < 360, '角度あわせ: 土台の向き');
+        assert.ok(angDiff(x.a0, x.t) >= 25, '角度あわせ: 始まりの棒は答えから離す');
+      }
+    }
+  }
+  assert.ok(over > 100, '角度あわせ: むずかしいで180°を超える角度が出る');
+  assert.equal(angDiff(359, 5), 6, '角度あわせ: 0°をまたぐ差');
+  assert.equal(angDiff(10, 350), 20);
+  assert.deepEqual(anglePoints([{ a: 90, ms: 900 }, { a: 91, ms: 100 }, { a: 100, ms: 50 }, null, { a: 130, ms: 10 }], 90), [5, 4, 1, 0, 0], '角度あわせ: 近い順 3・2・1、1°以内は +2');
+  assert.deepEqual(anglePoints([{ a: 80, ms: 300 }, { a: 100, ms: 200 }], 90), [2, 3], '角度あわせ: 同じ近さは速い方が上');
+  assert.deepEqual(anglePoints([{ a: 270, ms: 300 }, { a: 100, ms: 200 }], 90), [5, 2], '角度あわせ: やさしい・ふつうは右回りに開いても同じ角度');
+  assert.deepEqual(anglePoints([{ a: 270, ms: 300 }, { a: 100, ms: 200 }], 90, true), [2, 3], '角度あわせ: むずかしいは左回りで測る（270° は 90° から180°ずれ）');
+  let s = G.apply(G.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  const t = s.qs[0].t;
+  for (const a of [360, -1, 1.5]) assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, a, ms: 300 }), null, `角度あわせ: ${a} は弾く`);
+  s = G.apply(s, { p: 0, t: 'ans', q: 0, a: t, ms: 3000 });
+  assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, a: t, ms: 3100 }), null, '角度あわせ: 決められるのは1回だけ');
+  s = G.apply(s, { p: 1, t: 'ans', q: 0, a: (t + 10) % 360, ms: 1000 });
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [5, 2, 0], '角度あわせ: ぴったりは 3＋2点・答えない人は0点');
+  for (const rules of [{}, { level: 'hard', rounds: 5 }]) {
+    const end = runCpus(G, 5, 8, rules, 200, 6000);
+    assert.ok(G.result(end) && end.scores.some((v) => v > 0), `角度あわせ: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('kakudo OK');
+}
+
+// 抜けた数さがし: 数字は1つだけ抜けて残りは1回ずつ・図の中で重ならない・CPU どうしで最後まで
+{
+  const G = GAMES.nukekazu;
+  const { makeQuestion, MAX, W, H } = await import('../app/js/games/nukekazu.js');
+  for (const level of ['easy', 'normal', 'hard']) {
+    for (let seed = 0; seed < 25; seed++) {
+      for (let q = 0; q < 6; q++) {
+        const x = makeQuestion(seed, q, level);
+        const max = MAX[level];
+        assert.ok(x.miss >= 1 && x.miss <= max, '抜けた数: 抜けた数は範囲の中');
+        assert.deepEqual(x.nums.map((n) => n.v).sort((a, b) => a - b), Array.from({ length: max }, (_, i) => i + 1).filter((v) => v !== x.miss), '抜けた数: 残りは1回ずつ');
+        // 傾けたあとの外枠（作るときと同じ式。すき間の分は除く）が重ならず、図の中に入る
+        const box = (n) => {
+          const r = (n.r * Math.PI) / 180;
+          const w0 = n.h * (0.62 * String(n.v).length + 0.25);
+          const w = w0 * Math.abs(Math.cos(r)) + n.h * 0.8 * Math.abs(Math.sin(r));
+          const h = w0 * Math.abs(Math.sin(r)) + n.h * 0.8 * Math.abs(Math.cos(r));
+          return { l: n.x - w / 2, r: n.x + w / 2, t: n.y - h / 2, b: n.y + h / 2 };
+        };
+        const bs = x.nums.map(box);
+        bs.forEach((b, i) => {
+          assert.ok(b.l >= 0 && b.r <= W && b.t >= 0 && b.b <= H, `抜けた数: 図の中 ${level} ${seed} ${q}`);
+          for (let j = 0; j < i; j++) {
+            const o = bs[j];
+            assert.ok(b.r <= o.l + 0.2 || b.l >= o.r - 0.2 || b.b <= o.t + 0.2 || b.t >= o.b - 0.2, `抜けた数: 重ならない ${level} ${seed} ${q} ${x.nums[i].v} ${x.nums[j].v}`);
+          }
+        });
+      }
+    }
+  }
+  let s = G.apply(G.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  const x = s.qs[0];
+  assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, c: 100, ms: 300 }), null, '抜けた数: 3桁は弾く');
+  s = G.apply(s, { p: 0, t: 'ans', q: 0, c: x.miss === 1 ? 2 : 1, ms: 300 });
+  assert.equal(s.miss[0], true, '抜けた数: ある数はまちがい');
+  s = G.apply(s, { p: 1, t: 'ans', q: 0, c: x.miss, ms: 9000 });
+  assert.equal(G.referee(s).ms, 8000, '抜けた数: だれかが正解したら8秒で締め切り');
+  s = G.apply(s, { p: 2, t: 'ans', q: 0, c: x.miss, ms: 7000 });
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [0, 2, 3], '抜けた数: 速い順に3・2点');
+  assert.equal(G.init(2, 1, { rules: {} }).qs.length, 5, '抜けた数: 最初は5問');
+  for (const rules of [{}, { level: 'hard', rounds: 3 }, { level: 'easy', rounds: 10 }]) {
+    const end = runCpus(G, 5, 8, rules, 250, 8000);
+    assert.ok(G.result(end) && end.scores.some((v) => v > 0), `抜けた数: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('nukekazu OK');
+}
+
+// チキンレース: 止まる位置の計算・崖に着いたら落ちる・近い順に 3・2・1点（同じ残りは同じ点）・ブレーキは1回・CPU どうしで最後まで
+{
+  const G = GAMES.chicken;
+  const { makeRounds, finalOf, posAt, racePoints, slideOf, vOf, D, ACC } = await import('../app/js/games/chicken.js');
+  for (let seed = 0; seed < 50; seed++) {
+    for (const x of makeRounds(seed, 10)) {
+      assert.ok(Number.isInteger(x.T) && x.T >= 1800 && x.T <= 4200, 'チキンレース: 崖まで 1.8〜4.2秒');
+      const sl = slideOf(x);
+      assert.ok(sl > 5 && sl < 32, `チキンレース: すべる長さ ${sl}`);
+      assert.deepEqual(finalOf(x, 0), { pos: Math.round(sl * 10) / 10, fell: false }, 'チキンレース: すぐ押せばすべる長さで止まる');
+      assert.equal(finalOf(x, x.T).fell, true, 'チキンレース: 崖に着いたら落ちる');
+      assert.equal(finalOf(x, null).fell, true, 'チキンレース: 押さなければ落ちる');
+      const ideal = (D - sl) / vOf(x);
+      assert.equal(finalOf(x, Math.floor(ideal) - 2).fell, false, 'チキンレース: ぎりぎりの手前は落ちない');
+      assert.equal(finalOf(x, Math.ceil(ideal) + 5).fell, true, 'チキンレース: ぎりぎりを過ぎたら落ちる');
+      const tb = Math.floor(ideal * 0.7);
+      assert.ok(Math.abs(posAt(x, tb, tb + vOf(x) / ACC + 500) - finalOf(x, tb).pos) < 0.06, 'チキンレース: 画面の動きと止まる位置が同じ');
+    }
+  }
+  assert.deepEqual(racePoints([{ pos: 99, fell: false }, { pos: 95, fell: false }, { pos: null, fell: true }, { pos: 99, fell: false }, { pos: 80, fell: false }]), [3, 1, 0, 3, 0], 'チキンレース: 同じ残りは同じ点・落ちたら0点');
+  let s = G.apply(G.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  const x = s.rs[0];
+  s = G.apply(s, { p: 0, t: 'brake', q: 0, ms: 100 });
+  assert.equal(G.apply(s, { p: 0, t: 'brake', q: 0, ms: 200 }), null, 'チキンレース: ブレーキは1回だけ');
+  assert.equal(G.apply(s, { p: 1, t: 'brake', q: 0, ms: 1.5 }), null, 'チキンレース: 時刻は整数');
+  s = G.apply(s, { p: 1, t: 'brake', q: 0, ms: Math.floor((D - slideOf(x)) / vOf(x)) - 50 });
+  s = G.apply(s, { p: 2, t: 'brake', q: 0, ms: x.T + 10 });
+  assert.equal(G.referee(s).ms, Math.ceil(vOf(x) / ACC) + 900, 'チキンレース: 全員押したら止まるのを待って締める');
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [2, 3, 0], 'チキンレース: 崖に近い順・落ちたら0点');
+  let fell = 0;
+  for (const [k, rules] of [{}, { rounds: 10 }, { rounds: 3 }].entries()) {
+    const end = runCpus(G, 6, 20 + k, rules, 50, 20000);
+    assert.ok(G.result(end) && end.scores.some((v) => v > 0), `チキンレース: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+    fell += end.log.flatMap((r) => r.res).filter((r) => r.fell).length;
+  }
+  assert.ok(fell > 0, 'チキンレース: CPU もときどき落ちる');
+  console.log('chicken OK');
+}
+
 console.log('ALL OK');

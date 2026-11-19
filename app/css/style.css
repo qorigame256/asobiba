@@ -3740,6 +3740,71 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .tt-res.me { background: var(--soft, #fff3e6); font-weight: 800; font-size: 1rem; }
 .tt-res small { display: block; color: var(--muted); font-weight: 400; }
 
+/* ---------- 2026-11-19 に足した5つ（目の錯覚クイズ・道案内早押し・角度あわせ・抜けた数さがし・チキンレース） ---------- */
+:is([data-game="sakkaku"], [data-game="michi"], [data-game="kakudo"], [data-game="nukekazu"], [data-game="chicken"]) .board { width: min(100%, 560px); }
+/* 目の錯覚クイズ（答えのときは飾り .ind を薄くして、比べる所 .tg を緑にする） */
+.sak-fig { display: block; width: min(100%, 420px); margin: 8px auto 4px; color: var(--ink); }
+.sak-fig line { stroke: currentColor; stroke-width: 3; stroke-linecap: round; }
+.sak-fig line.thick { stroke-width: 5; }
+.sak-fig .fill { fill: currentColor; stroke: none; }
+.sak-fig circle.ind.fill { fill: color-mix(in srgb, var(--ink) 45%, transparent); }
+.sak-fig.shown .ind { opacity: .15; }
+.sak-fig.shown line.tg { stroke: #2f8a4a; }
+.sak-fig.shown .tg.fill { fill: #2f8a4a; }
+.sak-ans { text-align: center; }
+.sak-choices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: min(100%, 460px); margin: 0 auto; touch-action: manipulation; }
+.board button.btn.sak-choice { font-size: clamp(1.1rem, 5vw, 1.5rem); }
+/* 道案内早押し */
+.mch-steps { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; margin: 6px 0; }
+.mch-step { padding: 4px 12px; border: 2px solid var(--accent); border-radius: 999px; background: var(--field); font-weight: 800; font-size: clamp(1rem, 4.6vw, 1.25rem); }
+.mch-arrow { color: var(--muted); font-weight: 800; }
+.mch-map { position: relative; display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; width: min(100%, 420px); margin: 1.3em auto 0; padding: 5px; border-radius: 12px; background: #c9bf9f; touch-action: manipulation; }
+.mch-north { position: absolute; top: -1.35em; right: 4px; font-size: .8rem; font-weight: 800; color: var(--muted); }
+.board button.mch-cell { position: relative; aspect-ratio: 1; display: grid; place-items: center; padding: 0; border: 2px solid transparent; border-radius: 8px; background: #f6f1e3; color: #333; font-size: clamp(1.05rem, 5.5vw, 1.7rem); cursor: pointer; }
+.board button.mch-cell:disabled { cursor: default; }
+.board button.mch-cell.start { background: #ffe9a8; color: #c0392b; font-weight: 900; }
+.board button.mch-cell.path { background: #d6e9ff; }
+.board button.mch-cell.picked { border-color: #e8a913; }
+.board button.mch-cell.ng { border-color: #d9534f; background: #f8d7d6; }
+.board button.mch-cell.ans { border-color: #2f8a4a; box-shadow: 0 0 0 3px var(--win); }
+.board button.mch-cell[data-n]::after { content: attr(data-n); position: absolute; top: 1px; left: 3px; font-size: .62rem; font-weight: 800; color: #2f6fb3; }
+/* 角度あわせ */
+.kdo-t { font-size: clamp(2rem, 10vw, 2.8rem); font-weight: 900; font-variant-numeric: tabular-nums; }
+.kdo-fig { display: block; width: min(100%, 320px); margin: 4px auto; touch-action: none; cursor: pointer; -webkit-user-select: none; user-select: none; }
+.kdo-fig line { stroke-linecap: round; }
+.kdo-base { stroke: var(--ink); stroke-width: 7; }
+.kdo-move { stroke: var(--accent); stroke-width: 7; }
+.kdo-knob { fill: var(--accent); stroke: #fff; stroke-width: 3; }
+.kdo-pivot { fill: var(--ink); }
+.kdo-arc { fill: var(--accent); opacity: .22; }
+.kdo-arc.ans { fill: #2f8a4a; }
+.kdo-other { stroke-width: 4; opacity: .85; }
+.kdo-other.me { stroke-width: 6; opacity: 1; }
+.kdo-right { stroke: #2f8a4a; stroke-width: 5; stroke-dasharray: 9 7; }
+.kdo-star { fill: #2f8a4a; font-size: 22px; text-anchor: middle; dominant-baseline: central; }
+.kdo-btns { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 10px; width: min(100%, 420px); margin: 0 auto; touch-action: manipulation; }
+.board button.btn.kdo-ok { padding: 10px 12px; border-radius: 999px; background: var(--accent); color: var(--accent-ink, #fff); font-weight: 800; cursor: pointer; }
+/* 抜けた数さがし */
+.nk-head { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; font-weight: 700; }
+.nk-fig { display: block; width: min(100%, 440px); margin: 6px auto; border: 1.5px solid var(--line); border-radius: 12px; background: var(--field); }
+.nk-fig text { font-weight: 800; }
+.nk-pad { margin-top: 4px; }
+/* チキンレース（--cliff は崖の位置。車の前の端を left に合わせる。左の 48px は車1台ぶんの出発の場所） */
+.ck-head { color: var(--ink); }
+.ck-road { --cliff: calc(48px + (100% - 48px) * 0.8929); position: relative; display: flex; flex-direction: column; gap: 3px; padding: 5px 0; border-radius: 10px; overflow: hidden;
+  background: linear-gradient(90deg, #6f6f6f 0, #6f6f6f var(--cliff), #9fd3f5 var(--cliff), #d6eefc 100%); }
+.ck-lane { position: relative; height: 36px; border-bottom: 2px dashed rgba(255, 255, 255, .45); }
+.ck-lane.me { background: rgba(255, 230, 120, .28); }
+.ck-name, .ck-tag { position: absolute; left: 6px; max-width: 45%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: .7rem; font-weight: 800; color: #fff; pointer-events: none; text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }
+.ck-name { top: 1px; }
+.ck-tag { bottom: 1px; }
+.ck-tag.best { color: #ffe066; }
+.ck-car { position: absolute; top: 5px; width: 48px; height: 26px; }
+.ck-car-svg { display: block; width: 100%; height: 100%; }
+.ck-car.braked .ck-car-svg { filter: drop-shadow(-4px 0 3px #ff3b30); }
+.ck-edge { position: absolute; top: 0; bottom: 0; left: var(--cliff); width: 5px; background: #5a3d1e; }
+.board button.btn.ck-brake { display: block; width: min(100%, 420px); margin: 10px auto 0; padding: 18px; border-radius: 16px; background: #d9342b; color: #fff; font-size: 1.5rem; font-weight: 900; cursor: pointer; touch-action: manipulation; }
+
 /* 押せないボタン（2026-11-17 見た目の点検）: どこに置いても押せないと分かるように。待合室の下に留めた「始める」（.dock）には効いていなかった。
    橙のボタンは薄くすると白い字が地に溶けて読めなかった（ダウトの「札をえらんでください」など）ので、薄い橙の地に濃い字にする。
    ファイルの最後に置くのは、同じ強さの「.○○ .cc-actions .btn:disabled { opacity: .4 }」より後に効かせるため */
