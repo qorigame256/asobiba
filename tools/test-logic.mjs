@@ -4333,6 +4333,9 @@ s = DB.apply(s, { p: dbr, t: 'doubt', w: prevPlays, ms: 500 });
 s = DB.apply(s, { p: -1, t: 'close', w: prevPlays });
 assert.equal(s.reveal.lie, false);
 assert.equal(s.hands[dbr].length, before + pile, '本当ならダウトした人が場の札を全部引き取る');
+// 答え合わせ（2026-11-19）: 締め切りのたびに、出した札・言った数字・ダウトした人・うそかを残す
+assert.ok(s.log.length === s.plays && s.log.slice(0, -1).every((x) => x.lie && x.by === null && x.cards.length === 1)
+  && s.log.at(-1).by === dbr && s.log.at(-1).lie === false && s.log.at(-1).p === pl, '答え合わせ: 通ったうそとダウトされた本当の札を残す');
 assert.equal(s.pile.length, 0);
 // 最後の札が通れば上がり
 s = DB.init(3, 13, {});
@@ -4987,7 +4990,7 @@ assert.ok(t.hide && !t.over && t.last.capture.got === 6 && /とった/.test(MC.i
   assert.deepEqual([round.pits[13], round.pits[20], round.pits[27]], [0, 0, 0], '4人: ほかの3人のゴールは飛ばす');
   // 先手の 1 番目（空）で止まる: 向かいの人（三番手 = 席2）の 4 番目（= 14+4 = 18）だけをとる。両どなり（8・22）の同じ番目はとらない
   const cap = MC.apply({ ...mc4, pits: p4({ 0: 1, 3: 1, 18: 3, 8: 5, 22: 5, 15: 2, 7: 1, 21: 1 }) }, 0);
-  assert.deepEqual(cap.last.capture, { at: 1, opp: [18], got: 4 }, '4人: 向かいの人の向かいの穴をとる');
+  assert.deepEqual(cap.last.capture, { at: 1, opp: [18], got: 4, each: [3] }, '4人: 向かいの人の向かいの穴をとる');
   assert.deepEqual([cap.pits[6], cap.pits[18], cap.pits[8], cap.pits[22], cap.pits[15]], [4, 0, 5, 5, 2], '4人: 両どなりの石はとらない');
   assert.equal(cap.turn, 1, '4人: 次の人へ');
   assert.equal(MC.apply({ ...mc4, pits: p4({ 0: 1, 8: 5, 22: 5, 7: 1, 21: 1, 14: 1 }) }, 0).last.capture, null, '4人: 向かいが空ならとらない');

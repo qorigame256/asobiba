@@ -847,6 +847,7 @@ function mount(root, opts) {
     st.score = scoreOf(n, st.lost);
     st.over = limit ? (st.timeUp ? overTime(n, st.score) : null) : overOf(n, st.score, target);
     if (c !== null) st.flash = { c, t: FLASH };
+    if (c !== null && !st.over) startReplay();
     if (st.over) {
       playing = false;
       finish();
@@ -1450,7 +1451,73 @@ function mount(root, opts) {
     tick(now);
     if (n === 2) drawRect(ctx, view, st, toScreen, { rotateTop: opts.mode === 'two', flip, goal: T.goal, block: T.block, rm: T.rm });
     else drawHex(ctx, view, st, toScreen, T.goal, T.block, T.rm, T.geo);
+    keepTrail(now);
+    drawReplay(now);
     raf = requestAnimationFrame(frame);
+  }
+
+  /* ---------- 決まった瞬間をもう一度（2026-11-19 の UI・UX の10回目。本人が決めたことは hockey.md） ---------- */
+  // 描いたパックの位置を直前の1秒ぶん覚えておき、ゴールが決まったら、ゴールのあとの止まっている間（GOAL_PAUSE）に、直前 REPLAY_SPAN 秒の通り道を
+  // その長さに引き伸ばして（半分ほどの速さで）金色の跡と半透明のパックで流す。どの端末も自分が描いた位置で流す（送らない。対局には関わらない）。
+  // Claude の判断: パック1つのときは盤を少し暗くする。パック2つ（止めずに続ける）のときは、もう1つが動いているので暗くしない。
+  // 決着のゴールでは流さない（結果の表示がすぐ出るため）。盤を押すと飛ばす。動きを減らす設定の端末では流さない
+  const REPLAY_SPAN = 0.7;
+  const trail = []; // { t, p: [[x, y] | null …] }
+  let replay = null; // { frames, t0, dur, dim }
+  function keepTrail(now) {
+    if (replay || st.over || st.pause > 0) return;
+    trail.push({ t: now, p: st.pucks.map((q) => (q ? [q.x, q.y] : null)) });
+    while (trail.length && now - trail[0].t > 1000) trail.shift();
+  }
+  function startReplay() {
+    const now = performance.now();
+    const frames = trail.filter((f) => now - f.t <= REPLAY_SPAN * 1000);
+    trail.length = 0;
+    if (frames.length < 4 || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
+    replay = { frames, t0: now, dur: GOAL_PAUSE * 1000, dim: pucks === 1 };
+  }
+  canvas.addEventListener('pointerdown', () => { replay = null; });  function drawReplay(now) {
+    if (!replay) return;
+    const k = Math.max(0, (now - replay.t0) / replay.dur); // now はその描き替えの始めの時刻で、ゴール（t0）より少し前のことがある
+    if (k >= 1 || st.over) { replay = null; return; }
+    const F = replay.frames;
+    const at = k * (F.length - 1);
+    const i0 = Math.floor(at);
+    const f = at - i0;
+    ctx.save();
+    if (replay.dim) { ctx.fillStyle = 'rgba(0, 0, 0, .3)'; ctx.fillRect(0, 0, view.w, view.h); }
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (let j = 0; j < F[0].p.length; j++) {
+      const pts = [];
+      for (let i = 0; i <= Math.min(i0 + 1, F.length - 1); i++) {
+        const q = F[i].p[j];
+        if (!q) continue;
+        if (i === i0 + 1) { const a = F[i0].p[j]; if (a) pts.push(toScreen(a[0] + (q[0] - a[0]) * f, a[1] + (q[1] - a[1]) * f)); } else pts.push(toScreen(q[0], q[1]));
+      }
+      if (pts.length < 2) continue;
+      ctx.strokeStyle = 'rgba(242, 194, 48, .85)';
+      ctx.lineWidth = Math.max(3, view.s * 0.022);
+      ctx.beginPath();
+      pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+      ctx.stroke();
+      const [x, y] = pts.at(-1);
+      ctx.globalAlpha = 0.85;
+      ctx.fillStyle = '#222';
+      ctx.beginPath();
+      ctx.arc(x, y, R_P * view.s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#f2c230';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.round(Math.max(12, view.s * 0.05))}px sans-serif`;
+    ctx.shadowColor = 'rgba(0, 0, 0, .6)';
+    ctx.shadowBlur = 3;
+    ctx.fillText('◀◀', 10, Math.max(20, view.s * 0.07));
+    ctx.restore();
   }
   // 画面が隠れて描き替えが止まっても（ほかのアプリへ切り替えたときなど）、オンラインでは位置のやり取りを続ける
   const backup = setInterval(() => {

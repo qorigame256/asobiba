@@ -2511,6 +2511,7 @@ function renderPage() {
     });
   }
   game.render(board, st, opts);
+  appendPeek(game, st, board, opts);
   if (game.multi) delete board.dataset.seats; else board.dataset.seats = boardSeats(S.gameId, S.rules); // 色に形を添える（2026-11-11。3〜4人の盤だけ）
   drawGhosts(game, st, board); // 2回押して置く・相手の迷い（2026-11-11）
   if (tapGhost && tapGhost.k === ghostKey() && twoTapOn(game) && opts.canMove) status.insertAdjacentHTML('beforeend', '<div class="status-sub tap-hint">👆 同じ所をもう一度押すと置きます</div>');
@@ -2781,6 +2782,17 @@ function profileTargets(root) {
 // 手札や自分だけの盤があるゲーム（カードゲーム（multi）と、隠す情報のある盤のゲーム（noLocal。海戦ゲーム））で、観戦の人だけに出す。
 // 選んだ人の席の番号をゲームの me に渡す（canMove は myPlayer で見るので、見るだけで打てない）。選びは人の id で覚え、この端末だけ（送らない・保存しない）。
 const watchable = (game) => S.mode === 'online' && (game.multi || game.noLocal) && !game.live;
+// 観戦の人は全員の手札を開いて見られる（2026-11-19 の UI・UX の10回目。room.md）: 「みんなの手札を開く」を選ぶと S.watchId を PEEK_ALL にし、
+// ゲームにはみんなの画面（me は観戦）を描かせたうえで、ゲームの peekHands が作る全員の手札の欄を盤の下に足す。持っているゲームにだけ選びを出す（Claude の判断:
+// 手札が伏せてあるトランプ6つ。ブラックジャック・ひたいカード・スピードは観戦の画面でもともと見える分で足りるので付けない）
+const PEEK_ALL = '*all';
+// 欄は盤の中でなく盤のすぐ後ろに置く（ゲームが自分で盤を描き直しても消えないように。ババ抜きのつまんだ札の知らせ など）
+function appendPeek(game, st, board, opts) {
+  board.parentElement?.querySelectorAll(':scope > .peek-hands').forEach((x) => x.remove());
+  if (S.watchId !== PEEK_ALL || myPlayer() !== SPECTATOR || !watchable(game) || !game.peekHands) return;
+  const box = game.peekHands(st, opts);
+  if (box) board.after(box);
+}
 function watchSeat(game) {
   const me = myPlayer();
   if (me !== SPECTATOR || !watchable(game) || !S.watchId) return me;
@@ -2794,8 +2806,9 @@ function appendWatchSelect(game) {
   label.textContent = '👀 見る画面 ';
   const sel = document.createElement('select');
   sel.append(new Option('みんなの画面（手札は見えない）', ''));
+  if (game.peekHands) sel.append(new Option('みんなの手札を開く', PEEK_ALL)); // 観戦の人は全員の手札を開いて見られる（2026-11-19）
   S.order.forEach((id) => { if (!isCpu(id) || game.multi) sel.append(new Option(`${nameOf(id)} の画面`, id)); });
-  sel.value = S.order.includes(S.watchId) ? S.watchId : '';
+  sel.value = S.order.includes(S.watchId) || (S.watchId === PEEK_ALL && game.peekHands) ? S.watchId : '';
   sel.onblur = () => render();
   sel.onchange = () => { S.watchId = sel.value || null; sel.onblur = null; sel.blur(); render(); };
   label.append(sel);

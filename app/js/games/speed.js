@@ -177,6 +177,7 @@ export default {
   render(root, s, o) {
     const me = o.me >= 0 ? o.me : null;
     cur = { s, o, root };
+    queueMicrotask(() => bounceBack(root, s, o.me >= 0 ? o.me : null)); // 先を越された札がはね返る（2026-11-19）。描き終えてから
     if (drag && (!o.canMove || !s.fields[me ?? 0]?.includes(drag.card))) endDrag();
     const n = s.piles.length;
     const bottom = me ?? 0;
@@ -274,6 +275,33 @@ export default {
 let cur = null; // いちばん新しい描き直しの { s, o, root }
 let drag = null; // つかんでいる札 { id, card, x0, y0, dx, dy, moved }
 
+// 先を越された札がはね返る（2026-11-19 の UI・UX の10回目。本人が決めたことは card-games.md）:
+// 自分の札を出すと、自分の画面ではすぐ台札に乗る（main.js が手を先に足して送る）。ほかの人が一瞬早く同じ台札に出していると、ホストが自分の手を弾き（main.js の rebase）、
+// 届いた手の一覧では札が手元に戻る。そのとき、戻った札を台札の所から手元へはね返して見せる。
+// 見分け方（Claude の判断）: 出した札を sent に覚え、台札に乗ったのを見たあとで（landed）、3秒以内にその札が手元にまた現れたら弾かれたとみなす（出した札が手元に戻ることはほかに無い）
+const BOUNCE_WAIT = 3000;
+let sent = null; // 最後に出した札 { card, pile, at, landed }
+function bounceBack(root, s, me) {
+  if (!sent || me === null) return;
+  if (Date.now() - sent.at > BOUNCE_WAIT) { sent = null; return; }
+  if (s.piles[sent.pile]?.at(-1) === sent.card) { sent.landed = true; return; }
+  if (!sent.landed || !s.fields[me]?.includes(sent.card)) return;
+  const { card, pile } = sent;
+  sent = null;
+  const e = root.querySelector(`.sp-side.mine [data-card="${card}"]`);
+  const p = root.querySelector(`.sp-pile[data-pile="${pile}"]`);
+  if (!e || !p || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
+  const a = e.getBoundingClientRect(), b = p.getBoundingClientRect();
+  const dx = b.left - a.left, dy = b.top - a.top;
+  e.animate([
+    { transform: `translate(${dx}px, ${dy}px)`, offset: 0 },
+    { transform: `translate(${dx * 0.78}px, ${dy * 0.78}px) rotate(-9deg)`, offset: 0.18 },
+    { transform: 'translate(0, 0) rotate(5deg)', offset: 0.7 },
+    { transform: 'translate(0, 0) rotate(-3deg)', offset: 0.85 },
+    { transform: 'translate(0, 0)' },
+  ], { duration: 650, easing: 'ease-out' });
+}
+
 function cardNode() { return drag && cur?.root.querySelector(`.sp-side.mine [data-card="${drag.card}"]`); }
 function endDrag() {
   const e = cardNode();
@@ -306,7 +334,10 @@ if (typeof window !== 'undefined') {
     const { card, moved } = drag;
     const pile = moved ? pileAt(ev.clientX, ev.clientY) : -1; // 出せる台札の上で離したときだけ出す
     endDrag();
-    if (pile >= 0 && cur.o.canMove) cur.o.onMove({ t: 'play', card, pile });
+    if (pile >= 0 && cur.o.canMove) {
+      sent = { card, pile, at: Date.now(), landed: false };
+      cur.o.onMove({ t: 'play', card, pile });
+    }
   });
   window.addEventListener('pointercancel', (ev) => { if (drag && ev.pointerId === drag.id) endDrag(); });
 }

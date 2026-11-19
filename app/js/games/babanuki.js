@@ -19,7 +19,7 @@
 //   CPU はつままずにすぐ引く。ありのときだけ局面に peek: true を持つ。
 
 import { mulberry32, shuffle } from './util.js';
-import { makeDeck, rankOf, suitOf, cardEl, backEl, cardLabel, JOKER, fanHand, dragSort } from './cards.js';
+import { makeDeck, rankOf, suitOf, cardEl, backEl, cardLabel, JOKER, fanHand, dragSort, peekBox } from './cards.js';
 
 const clone = (s) => ({ ...s, hands: s.hands.map((h) => h.slice()), out: s.out.slice() });
 
@@ -166,6 +166,9 @@ export default {
     peek = i === null ? null : { key: peekKey(s), i };
     if (view.root.isConnected) this.render(view.root, s, { ...view.o, fresh: false });
   },
+
+  // 観戦の人の「みんなの手札を開く」（2026-11-19 の UI・UX の10回目。room.md）: 全員の手札を開いた欄（cards.js の peekBox）。main.js が観戦の人の画面の盤の下に足す
+  peekHands(s, o) { return peekBox(s.hands.map((h, p) => ({ name: o.names[p], cards: h.map((c) => cardEl(c)), note: h.length ? '' : '上がり' }))); },
 
   render(root, s, o) {
     view = { root, s, o };

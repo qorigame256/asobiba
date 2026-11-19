@@ -22,7 +22,7 @@
 //   全員が同時に押すので、この間だけホストが手を足し直す（concurrent。main.js の rebase）。
 
 import { mulberry32, shuffle } from './util.js';
-import { SUITS, JOKER, suitOf, rankOf, makeDeck, cardEl, backEl, turnUp, fanHand, dragSort, ownOrder, setOwnOrder } from './cards.js';
+import { SUITS, JOKER, suitOf, rankOf, makeDeck, cardEl, backEl, turnUp, fanHand, dragSort, ownOrder, setOwnOrder, peekBox } from './cards.js';
 import { since } from './party.js';
 
 const START_CHIPS = 1000;
@@ -510,6 +510,9 @@ export default {
     if (str >= 1.2 || (need <= h.unit && str >= 0.7) || Math.random() < 0.1) return { t: 'call' };
     return { t: 'fold' };
   },
+
+  // 観戦の人の「みんなの手札を開く」（2026-11-19 の UI・UX の10回目。room.md）: 全員の手札を開いた欄（cards.js の peekBox）。main.js が観戦の人の画面の盤の下に足す
+  peekHands(s, o) { return s.h ? peekBox(s.h.cards.map((h, p) => ({ name: o.names[p], cards: (h ?? []).map((c) => cardEl(c)), note: !h ? '抜けた' : s.h.folded[p] ? 'おりた' : '' }))) : null; },
 
   render(root, s, o) {
     const h = s.h;

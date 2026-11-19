@@ -44,7 +44,7 @@
 //     対局をまたぐ順位の引き継ぎ（carry）は合計点の順（同じ点なら最後の回の順位で決める）。1回のときは match を持たず、今までと全く同じ局面。
 
 import { mulberry32, shuffle } from './util.js';
-import { JOKER, SUITS, SUIT_MARK, suitOf, rankOf, rankLabel, makeDeck, cardEl, cardLabel, fanHand, dragSort, ownOrder, setOwnOrder } from './cards.js';
+import { JOKER, SUITS, SUIT_MARK, suitOf, rankOf, rankLabel, makeDeck, cardEl, cardLabel, fanHand, dragSort, ownOrder, setOwnOrder, peekBox } from './cards.js';
 
 const power = (c) => {
   if (c === JOKER) return 16;
@@ -733,6 +733,9 @@ export default {
     const pool = cheap.length ? cheap : plays;
     return pick(pool.reduce((a, b) => (strength(b) < strength(a) ? b : a)));
   },
+
+  // 観戦の人の「みんなの手札を開く」（2026-11-19 の UI・UX の10回目。room.md）: 全員の手札を開いた欄（cards.js の peekBox）。main.js が観戦の人の画面の盤の下に足す
+  peekHands(s, o) { return peekBox(s.hands.map((h, p) => ({ name: o.names[p], cards: h.map((c) => cardEl(c)), note: h.length ? '' : '上がり' }))); },
 
   render(root, s, o) {
     const me = o.me >= 0 ? o.me : null;

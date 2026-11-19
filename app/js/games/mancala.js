@@ -107,7 +107,7 @@ const game = {
       turn = p;
     } else if (!s.nocap && i >= pitOf(s, p, 0) && i < mine && pits[i] === 1 && opp.some((j) => pits[j] > 0)) {
       const got = opp.reduce((a, j) => a + pits[j], 1);
-      last.capture = { at: i, opp, got };
+      last.capture = { at: i, opp, got, each: opp.map((j) => pits[j]) }; // each = とる前の相手の穴の石（石を1つずつまく動きで、とる前の数を出すため）
       pits[mine] += got;
       pits[i] = 0;
       for (const j of opp) pits[j] = 0;
@@ -210,6 +210,7 @@ const game = {
     const pvCap = new Set(pv && !s.hide && pv.last.capture ? [pv.last.capture.at, ...pv.last.capture.opp] : []);
     const pvFrom = pv ? pitOf(s, s.turn, pick.k) : null;
     const redraw = () => this.render(root, s, o);
+    queueMicrotask(() => sowFx(root, s, o.fresh)); // 石を1つずつまく（2026-11-19）。盤を描き終えてから、画面に出る前に数を戻して動かし始める
     const bottom = Number.isInteger(o.view) && o.view >= 0 && o.view < np ? o.view : Number.isInteger(o.me) && o.me > 0 && o.me < np ? o.me : 0; // 自分の側を下に。盤の向きを変えた（⇅）ときは o.view の人が下
     const top = 1 - bottom;
     root.innerHTML = '';
@@ -232,7 +233,8 @@ const game = {
         };
         e.setAttribute('aria-label', hide ? `${k + 1}番目の穴` : `${k + 1}番目の穴（石${s.pits[i]}個）`);
       }
-      e.className = 'mc-pit p' + owner + (store ? ' store' : '') + (can ? ' playable' : '') + (sown.has(i) ? ' sown' : '')
+      e.dataset.pit = i; // 石を1つずつまく動き（sowFx）が穴を探す印
+      e.className = 'mc-pit p' + owner + (store ? ' store' : '') + (can ? ' playable' : '') + (sown.has(i) ? ' sown' : '') + (sown.has(i) && i === s.last.sown.at(-1) ? ' lastin' : '')
         + (s.last?.from === i ? ' from' : '') + (s.last?.capture && (s.last.capture.at === i || [s.last.capture.opp].flat().includes(i)) ? ' cap' : '')
         + (i === pvFrom ? ' pv-from' : '') + (pvSown.has(i) ? ' pv-sown' : '') + (i === pvEnd ? ' pv-end' : '') + (pvCap.has(i) && i !== pv?.last.capture?.at ? ' pv-cap' : '');
       const stones = document.createElement('div');
@@ -345,5 +347,105 @@ const game = {
     root.append(note);
   },
 };
+
+// 石を1つずつまく（2026-11-19 の UI・UX の10回目。本人が決めたことは board-games.md）: 新しく届いた手のあと、打った穴から石が1つずつ隣の穴へ跳んで入る。
+// 盤は打ったあとの数で描かれているので、まく前の数（打ったあとの数から、まいた分ととった分を戻す）に書き換えてから、1つ入るごとに1つ増やし、
+// 最後にとった分（cap の穴）を打ったあとの数にする。最後の1つが入った穴は金色に縁取る（.lastin）。
+// Claude の判断: 1つ 0.15秒（たくさんまくときは全部で2.4秒に収める）。終わった手（残りをゴールへ入れる）と動きを減らす設定の端末では動かさない。
+// 描き直しても続きから動かすため、始めた時刻を局面ごとに覚える（読み込み直し・あとから見た人には動かさない）
+const SOW_MS = 150, SOW_MAX = 2400;
+let sowing = { key: null, t0: 0 };
+let sowGen = 0; // 描き直すたびに進め、前の描き方で予約した動きを止める（描き直した盤で続きを予約し直す）
+function sowFx(root, s, fresh) {
+  const gen = ++sowGen;
+  const L = s.last;
+  if (!L?.sown?.length || s.over || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
+  const key = `${s.count}:${L.p}:${L.from}:${s.pits.join()}`;
+  if (fresh && sowing.key !== key) sowing = { key, t0: Date.now() };
+  if (sowing.key !== key) return;
+  const step = Math.min(SOW_MS, SOW_MAX / L.sown.length);
+  const elapsed = Date.now() - sowing.t0;
+  if (elapsed >= L.sown.length * step) return;
+  const pitAt = (i) => root.querySelector(`[data-pit="${i}"]`);
+  if (!pitAt(L.from)) return;
+  // まいたあと・とる前の数
+  const after = s.pits.slice();
+  const c = L.capture;
+  if (c) {
+    after[c.at] = 1;
+    after[storeOf(s, L.p)] -= c.got;
+    c.opp.forEach((j, n) => { after[j] = c.each?.[n] ?? (c.opp.length === 1 ? c.got - 1 : 0); });
+  }
+  const shown = after.slice();
+  for (const i of L.sown) shown[i] -= 1;
+  const landed = Math.min(L.sown.length, Math.floor(elapsed / step));
+  for (let k = 0; k < landed; k++) shown[L.sown[k]] += 1;
+  const set = (i) => setPit(pitAt(i), shown[i], s, i);
+  for (let i = 0; i < s.pits.length; i++) if (shown[i] !== s.pits[i]) set(i);
+  for (const i of L.sown) pitAt(i)?.classList.remove('sown', 'lastin');
+  if (c) for (const i of [c.at, ...c.opp]) pitAt(i)?.classList.remove('cap');
+  for (let k = 0; k < landed; k++) pitAt(L.sown[k])?.classList.add('sown');
+  for (let k = landed; k < L.sown.length; k++) {
+    const due = (k + 1) * step - elapsed;
+    setTimeout(() => {
+      if (gen !== sowGen || !root.isConnected) return;
+      const to = pitAt(L.sown[k]);
+      if (!to) return;
+      flyStone(pitAt(k ? L.sown[k - 1] : L.from), to, step);
+    }, Math.max(0, due - step));
+    setTimeout(() => {
+      if (gen !== sowGen || !root.isConnected) return;
+      const to = pitAt(L.sown[k]);
+      if (!to) return;
+      shown[L.sown[k]] += 1;
+      set(L.sown[k]);
+      to.classList.add('sown');
+      to.classList.remove('mc-bump'); void to.offsetWidth; to.classList.add('mc-bump');
+      if (k === L.sown.length - 1) {
+        to.classList.add('lastin');
+        if (c) { // とる
+          for (let i = 0; i < s.pits.length; i++) if (shown[i] !== s.pits[i]) { shown[i] = s.pits[i]; set(i); }
+          for (const i of [c.at, ...c.opp]) pitAt(i)?.classList.add('cap');
+        }
+      }
+    }, Math.max(0, due));
+  }
+}
+// 穴 e の石の数を n にする（数の丸と、描く石。描く数の上限は render と同じ）
+function setPit(e, n, s, i) {
+  if (!e) return;
+  const num = e.querySelector('.mc-num');
+  if (num) num.textContent = n;
+  const stones = e.querySelector('.mc-stones');
+  if (!stones) return;
+  const store = e.classList.contains('store');
+  const want = s.hide ? n : Math.min(n, store ? 0 : 12);
+  while (stones.childElementCount > want) stones.lastChild.remove();
+  for (let j = stones.childElementCount; j < want; j++) {
+    const d = document.createElement('i');
+    d.style.setProperty('--h', ((i * 7 + j * 53) % 360) + 'deg');
+    stones.append(d);
+  }
+}
+// 石が1つ from の穴から to の穴へ弧を描いて跳ぶ（画面に固定した小さな石。ms で着く）
+function flyStone(from, to, ms) {
+  if (!from || !to) return;
+  const a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
+  const st = document.createElement('i');
+  st.className = 'mc-fly';
+  const size = Math.max(8, Math.min(16, a.width * 0.22));
+  st.style.width = st.style.height = size + 'px';
+  st.style.setProperty('--h', ((to.dataset.pit * 7) % 360) + 'deg');
+  document.body.append(st);
+  const x0 = a.left + a.width / 2 - size / 2, y0 = a.top + a.height / 2 - size / 2;
+  const x1 = b.left + b.width / 2 - size / 2, y1 = b.top + b.height / 2 - size / 2;
+  const lift = Math.max(14, Math.hypot(x1 - x0, y1 - y0) * 0.35);
+  st.animate([
+    { transform: `translate(${x0}px, ${y0}px)` },
+    { transform: `translate(${(x0 + x1) / 2}px, ${Math.min(y0, y1) - lift}px)`, offset: 0.5 },
+    { transform: `translate(${x1}px, ${y1}px)` },
+  ], { duration: ms, easing: 'ease-in-out' }).finished.then(() => st.remove(), () => st.remove());
+  setTimeout(() => st.remove(), ms + 200);
+}
 
 export default game;

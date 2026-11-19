@@ -10,9 +10,12 @@
 //   最初の1回は A だけ。ダウトで札を引き取ったあとも、直前に言った数字から続ける（局面の last）。手の n が言った数字で、選べない数字なら反則。
 // 手: { p, t: 'play', cards: [札…], n: 言った数字（free のときだけ） } / { p, t: 'doubt', w: 何回目の出し札か, ms } / { p, t: 'pass', w } / { p: -1, t: 'close', w }（ホストの締め切り）
 // 全員が同時に動く（realtime）。同じ手が2回来ても、札はもう手札に無い・同じ回には1回しか押せないので2回目は弾かれる。
+// 答え合わせ（2026-11-19 の UI・UX の10回目。card-games.md）: 締め切りのたびに、出した札を局面の log に残す（{ p, cards, num, by: ダウトした人か null, lie }）。
+//   決着したら結果の画面に、伏せて出された札を最初から全部開いて並べる。うそには朱の印（通ったうそは塗り、ダウトでばれたうそは枠だけ）、ダウトされた本当の札には緑の枠。
+//   1行ずつ順に開く（全部で2.5秒ほどに収める。手が届いた端末だけで、読み込み直したときは開いたまま出す）。log の無い前の版の局面では出さない（Claude の判断）。
 
 import { mulberry32, shuffle, esc } from './util.js';
-import { makeDeck, rankOf, rankLabel, cardEl, backEl, cardLabel, fanHand, dragSort, ownOrder, setOwnOrder } from './cards.js';
+import { makeDeck, rankOf, rankLabel, cardEl, backEl, cardLabel, fanHand, dragSort, ownOrder, setOwnOrder, turnUp, peekBox } from './cards.js';
 import { since, timeBar } from './party.js';
 
 const MAX_PLAYS = 400;
@@ -49,7 +52,7 @@ export default {
     deck.forEach((c, k) => hands[k % n].push(c));
     return {
       n, seed, hands, pile: [], turn: 0, plays: 0, phase: 'play', played: null, calls: {}, passed: [],
-      reveal: null, winner: null, limit: WINDOWS[rules.window] ?? 4000, step: 0, free: rules.free === true, last: 0,
+      reveal: null, log: [], winner: null, limit: WINDOWS[rules.window] ?? 4000, step: 0, free: rules.free === true, last: 0,
     };
   },
 
@@ -174,6 +177,9 @@ export default {
     return { t: 'play', cards: fake.slice(0, k), ...said };
   },
 
+  // 観戦の人の「みんなの手札を開く」（2026-11-19 の UI・UX の10回目。room.md）: 全員の手札を開いた欄（cards.js の peekBox）。main.js が観戦の人の画面の盤の下に足す
+  peekHands(s, o) { return peekBox(s.hands.map((h, p) => ({ name: o.names[p], cards: h.slice().sort((a, b) => rankOf(a) - rankOf(b)).map((c) => cardEl(c)), note: h.length ? '' : '上がり' }))); },
+
   render(root, s, o) {
     const me = o.me >= 0 ? o.me : null;
     const nameP = (p) => (p === me ? 'あなた' : o.names[p]);
@@ -257,6 +263,7 @@ export default {
     log.className = 'cc-log';
     log.innerHTML = logHtml(s, nameP);
     root.append(log);
+    if (s.phase === 'end' && s.log?.length) root.append(answerBox(s, nameP, o.fresh));
 
     // ダウトの受付
     if (s.phase === 'doubt') {
@@ -348,6 +355,43 @@ export default {
   },
 };
 
+// 答え合わせの欄（先頭のコメント）
+function answerBox(s, nameP, fresh) {
+  const box = document.createElement('details');
+  box.className = 'mk-review db-answer';
+  box.open = true;
+  const sum = document.createElement('summary');
+  const slipped = s.log.filter((x) => x.lie && x.by === null).length;
+  sum.textContent = `🃏 答え合わせ（全${s.log.length}回・通ったうそ ${slipped}回）`;
+  const list = document.createElement('ol');
+  const gap = Math.min(110, 2500 / s.log.length);
+  s.log.forEach((x, i) => {
+    const li = document.createElement('li');
+    const d = Math.round(i * gap);
+    if (fresh) { li.className = 'db-rv-in'; li.style.setProperty('--d', `${d}ms`); }
+    li.innerHTML = `<span class="mk-rv-n">${i + 1}</span><b class="db-rv-who">${esc(nameP(x.p))}</b><span class="db-rv-say">「${rankLabel(x.num)}」</span>`;
+    const cards = document.createElement('span');
+    cards.className = 'db-rv-cards';
+    x.cards.forEach((c, k) => {
+      const e = cardEl(c);
+      if (rankOf(c) !== x.num) e.classList.add('lie');
+      turnUp(e, `dbrv:${s.seed}:${i}:${c}`, fresh, d + 80 + k * 40);
+      cards.append(e);
+    });
+    li.append(cards);
+    if (x.lie || x.by !== null) {
+      const t = document.createElement('span');
+      t.className = 'db-rv-mark ' + (x.lie ? (x.by === null ? 'slip' : 'lie') : 'true');
+      t.textContent = x.lie ? (x.by === null ? 'うそ（通った）' : 'うそ（ダウト）') : '本当（ダウト）';
+      if (fresh) t.style.setProperty('--d', `${d + 380}ms`);
+      li.append(t);
+    }
+    list.append(li);
+  });
+  box.append(sum, list);
+  return box;
+}
+
 // 締め切り。ダウトがあれば札を表にして、引き取る人を決める
 function close(s0) {
   const s = clone(s0);
@@ -367,6 +411,7 @@ function close(s0) {
   } else {
     s.reveal = { by: null, p: pl.p };
   }
+  if (s0.log) s.log = [...s0.log, { p: pl.p, cards: pl.cards, num: pl.num, by, lie }];
   s.plays += 1;
   s.calls = {};
   s.passed = [];

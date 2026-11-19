@@ -947,6 +947,21 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .mj-deltas li span:first-child { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mj-deltas .plus { color: #1f7a3d; }
 .mj-deltas .minus { color: #c62d1f; }
+/* 点の受け渡しを矢印で（2026-11-19 の UI・UX の10回目。mahjong.js の flowPanel）。卓は viewBox と同じ縦横の比にして、矢じりと字がゆがまないようにする */
+.mj-flow { position: relative; width: 100%; max-width: 380px; aspect-ratio: 100 / 64; margin: 4px auto; background: var(--felt, #2e6b47), #2e6b47; border-radius: 12px; box-shadow: inset 0 0 0 4px rgba(0, 0, 0, .18); }
+.mj-flow svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.mj-arrow { fill: none; stroke: #f2c230; stroke-width: 1.3; stroke-linecap: round; stroke-dasharray: 1; }
+.mj-alab { fill: #fff; font-size: 4.6px; font-weight: 800; paint-order: stroke; stroke: rgba(0, 0, 0, .65); stroke-width: 1.1px; font-variant-numeric: tabular-nums; }
+@keyframes mj-arrow { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes mj-alab { from { opacity: 0; } }
+.mj-fseat { position: absolute; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; min-width: 4.6em; max-width: 34%; padding: 2px 6px; border-radius: 8px; background: rgba(0, 0, 0, .42); color: #fff; font-size: .74rem; line-height: 1.25; }
+.mj-fseat span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mj-fseat b { font-size: .92rem; font-variant-numeric: tabular-nums; }
+.mj-fseat.win { box-shadow: 0 0 0 2px #f2c230; }
+.mj-fdelta { position: absolute; left: 50%; bottom: 100%; transform: translate(-50%, -2px); font-style: normal; font-weight: 900; font-size: .8rem; white-space: nowrap; text-shadow: 0 1px 2px rgba(0, 0, 0, .7); }
+.mj-fdelta.plus { color: #ffe28a; }
+.mj-fdelta.minus { color: #ffb3a8; }
+@keyframes mj-fdelta { from { opacity: 0; transform: translate(-50%, 6px); } }
 .mj-note { margin: 0; color: var(--muted); font-size: .85rem; }
 .mj-end .btn { align-self: center; }
 /* 和了を一つずつ見せる（2026-11-06。mahjong.js の endPanel と revealAt）。部品ごとに animation を付け、描き直しても途中から続ける */
@@ -2061,6 +2076,12 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .mc-pit.sown { box-shadow: inset 0 3px 6px rgba(0, 0, 0, .45), 0 0 0 2px #fff8; }
 .mc-pit.from { box-shadow: inset 0 3px 6px rgba(0, 0, 0, .45), 0 0 0 2px var(--accent); }
 .mc-pit.cap { box-shadow: inset 0 3px 6px rgba(0, 0, 0, .45), 0 0 0 3px #e04b3c; }
+/* 石を1つずつまく（2026-11-19 の UI・UX の10回目。mancala.js の sowFx）: 最後の1つが入った穴は金色（とった穴（cap）なら赤のまま） */
+.mc-pit.lastin:not(.cap) { box-shadow: inset 0 3px 6px rgba(0, 0, 0, .45), 0 0 0 3px #f2c230; }
+.mc-pit.mc-bump { animation: mc-bump .2s ease-out; }
+@keyframes mc-bump { 50% { scale: 1.1; } }
+.mc-fly { position: fixed; left: 0; top: 0; z-index: 70; border-radius: 50%; pointer-events: none; background: hsl(var(--h), 55%, 62%); box-shadow: inset -1px -1px 2px rgba(0, 0, 0, .3), 0 2px 4px rgba(0, 0, 0, .3); }
+@media (prefers-reduced-motion: reduce) { .mc-pit.mc-bump { animation: none; } }
 /* 2回押して決める（2026-10-26）: 選んだ穴・石が入る穴・最後の石・とれる相手の穴 */
 .board .mc-pit.pv-from, .board button.mc-pit.pv-from { box-shadow: inset 0 3px 6px rgba(0, 0, 0, .45), 0 0 0 4px #ffd54a; transform: scale(1.06); }
 .board .mc-pit.pv-sown, .board button.mc-pit.pv-sown { box-shadow: inset 0 3px 6px rgba(0, 0, 0, .45), 0 0 0 3px #8fd3ff; }
@@ -2442,6 +2463,31 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .db-stamp { font-size: 2.6rem; font-weight: 900; text-align: center; letter-spacing: .1em; margin: 4px 0; }
 .db-stamp.lie { color: #c0392b; }
 .db-stamp.true { color: #2f8a4a; }
+/* 観戦の人の「みんなの手札を開く」（2026-11-19 の UI・UX の10回目。cards.js の peekBox・main.js の appendPeek） */
+.peek-hands { display: grid; gap: 6px; margin-top: 10px; padding: 8px 10px; background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); }
+.peek-row { display: grid; grid-template-columns: 5.5em 1fr; gap: 8px; align-items: center; }
+.peek-name { font-size: .82rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.peek-name small { display: block; font-weight: 400; color: var(--muted); }
+.peek-cards { display: flex; flex-wrap: wrap; gap: 2px; min-width: 0; }
+.peek-cards .pcard { width: 28px; }
+.peek-cards .ccard { width: 28px; font-size: .5rem; }
+/* ダウトの答え合わせ（2026-11-19 の UI・UX の10回目。doubt.js の answerBox） */
+.db-answer ol { max-height: 22rem; overflow-y: auto; overflow-x: hidden; } /* 横は隠す（行が左から入ってくる間に横の棒が出ないように） */
+.db-answer li { align-items: center; }
+.db-rv-who { max-width: 7em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .88rem; }
+.db-rv-say { font-weight: 800; }
+.db-rv-cards { display: inline-flex; flex-wrap: wrap; gap: 3px; }
+.db-rv-cards .pcard { width: 30px; }
+.db-rv-cards .pcard.lie { box-shadow: 0 0 0 2px #e04b3c; }
+.db-rv-mark { margin-left: auto; font-size: .75rem; font-weight: 800; border: 2px solid currentColor; border-radius: 6px; padding: 0 6px; white-space: nowrap; }
+.db-rv-mark.slip { background: #c0392b; border-color: #c0392b; color: #fff; }
+.db-rv-mark.lie { color: #c0392b; }
+.db-rv-mark.true { color: #2f8a4a; }
+.db-rv-in { animation: db-rv-in .25s ease-out both; animation-delay: var(--d, 0ms); }
+.db-rv-in .db-rv-mark { animation: db-rv-stamp .25s cubic-bezier(.3, 1.6, .5, 1) both; animation-delay: var(--d, 0ms); }
+@keyframes db-rv-in { from { opacity: 0; transform: translateX(-10px); } }
+@keyframes db-rv-stamp { from { opacity: 0; transform: scale(1.8); } }
+@media (prefers-reduced-motion: reduce) { .db-rv-in, .db-rv-in .db-rv-mark { animation: none; } }
 
 /* ---------- 2026-10-29 に足した5つ（ビンゴ・迷路早抜け・色ちがい早押し・すごろく・海賊のたる） ---------- */
 :is([data-game="bingo"], [data-game="meiro"], [data-game="iroji"], [data-game="sugoroku"], [data-game="taru"]) .board { width: min(100%, 560px); }

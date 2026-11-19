@@ -14,7 +14,7 @@
 // 手: { p, t: 'play', c: 札 } / { p, t: 'play', c: 'JK', at: 置く所 } / { p, t: 'pass' }
 
 import { mulberry32, shuffle } from './util.js';
-import { makeDeck, suitOf, rankOf, cardEl, cardLabel, SUITS, SUIT_MARK, JOKER, fanHand, dragSort, ownOrder, setOwnOrder } from './cards.js';
+import { makeDeck, suitOf, rankOf, cardEl, cardLabel, SUITS, SUIT_MARK, JOKER, fanHand, dragSort, ownOrder, setOwnOrder, peekBox } from './cards.js';
 
 const clone = (s) => ({ ...s, hands: s.hands.map((h) => h.slice()), field: { ...s.field }, passes: s.passes.slice(), done: s.done.slice(), outs: s.outs.slice() });
 const ORDER = (c) => (c === JOKER ? 99 : SUITS.indexOf(suitOf(c)) * 13 + rankOf(c));
@@ -200,6 +200,9 @@ export default {
     if (!s.forced && scored[0].v < 1 && left >= 2 && hand.length > 4 && Math.random() < 0.35) return { t: 'pass' };
     return { t: 'play', c: scored[0].c };
   },
+
+  // 観戦の人の「みんなの手札を開く」（2026-11-19 の UI・UX の10回目。room.md）: 全員の手札を開いた欄（cards.js の peekBox）。main.js が観戦の人の画面の盤の下に足す
+  peekHands(s, o) { return peekBox(s.hands.map((h, p) => ({ name: o.names[p], cards: h.map((c) => cardEl(c)), note: h.length ? '' : '上がり' }))); },
 
   render(root, s, o) {
     const me = o.me >= 0 ? o.me : null;

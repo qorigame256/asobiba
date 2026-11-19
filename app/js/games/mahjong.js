@@ -1109,17 +1109,22 @@ function endPanel(s, o, me) {
     p.textContent = ten.length ? `聴牌: ${ten.join('、')}` : '全員ノーテン';
     box.append(p);
   }
-  const table = document.createElement('ul');
-  table.className = 'mj-deltas';
-  revealPart(table, 'rise', next, t);
-  for (let p = 0; p < s.n; p++) {
-    const li = document.createElement('li');
-    const d = e.deltas[p];
-    li.innerHTML = `<span></span><span class="${d > 0 ? 'plus' : d < 0 ? 'minus' : ''}">${d > 0 ? '+' : ''}${d.toLocaleString()}</span><span>${s.scores[p].toLocaleString()}</span>`;
-    li.firstChild.textContent = name(p);
-    table.append(li);
+  if (e.type !== 'draw') {
+    box.append(flowPanel(s, e, me, name, next, t));
+    next += 1300;
+  } else {
+    const table = document.createElement('ul');
+    table.className = 'mj-deltas';
+    revealPart(table, 'rise', next, t);
+    for (let p = 0; p < s.n; p++) {
+      const li = document.createElement('li');
+      const d = e.deltas[p];
+      li.innerHTML = `<span></span><span class="${d > 0 ? 'plus' : d < 0 ? 'minus' : ''}">${d > 0 ? '+' : ''}${d.toLocaleString()}</span><span>${s.scores[p].toLocaleString()}</span>`;
+      li.firstChild.textContent = name(p);
+      table.append(li);
+    }
+    box.append(table);
   }
-  box.append(table);
   if (e.over) {
     box.insertAdjacentHTML('beforeend', '<p class="mj-note">これで対局は終わりです</p>');
     revealPart(box.lastChild, 'rise', next, t);
@@ -1130,6 +1135,85 @@ function endPanel(s, o, me) {
     box.insertAdjacentHTML('beforeend', '<p class="mj-note">ほかの人を待っています…（30秒で自動で進みます）</p>');
   }
   return box;
+}
+
+// 点の受け渡しを矢印で（2026-11-19 の UI・UX の10回目。本人が決めたことは mahjong.md）: 和了の局の結果で、点の増減の表の代わりに小さな卓を描き、
+// 席（自分が下。観戦の人は席0が下）に名前・増減・新しい点を置いて、払った人から和了した人へ金の矢印を伸ばし、点を回して変える（表と同じ中身なので表は出さない。Claude の判断）。
+// 矢印は払った分（ロンは放銃した人1本、ツモはほかの全員）。供託（リーチ棒）は和了した人の増減に入るだけで矢印にしない。流局は今までどおり表（だれがだれに払うかが決まらないため）。
+// 時刻の決め方は和了を一つずつ見せるのと同じ（start ms から。描き直しで途中から続け、押せば飛ばす）
+const FLOW_W = 100, FLOW_H = 64;
+function flowPanel(s, e, me, name, start, t) {
+  const box = document.createElement('div');
+  box.className = 'mj-flow';
+  const base = me >= 0 ? me : 0;
+  const at = (p) => {
+    const a = Math.PI / 2 - (((p - base + s.n) % s.n) * 2 * Math.PI) / s.n; // 下から反時計回り（右が次の人）
+    return [FLOW_W / 2 + 36 * Math.cos(a), FLOW_H / 2 + 22 * Math.sin(a)];
+  };
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${FLOW_W} ${FLOW_H}`);
+  svg.innerHTML = '<defs><marker id="mj-ah" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="4" markerHeight="4" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#f2c230"/></marker></defs>';
+  for (let q = 0; q < s.n; q++) {
+    if (q === e.winner || e.deltas[q] >= 0) continue;
+    const [x1, y1] = at(q), [x2, y2] = at(e.winner);
+    const sx = x1 + (x2 - x1) * 0.24, sy = y1 + (y2 - y1) * 0.24, ex = x1 + (x2 - x1) * 0.72, ey = y1 + (y2 - y1) * 0.72;
+    const mx = (sx + ex) / 2 + (ey - sy) * 0.18, my = (sy + ey) / 2 - (ex - sx) * 0.18;
+    const g = document.createElementNS(NS, 'g');
+    const f1 = (v) => v.toFixed(1);
+    g.innerHTML = `<path class="mj-arrow" pathLength="1" d="M${f1(sx)},${f1(sy)} Q${f1(mx)},${f1(my)} ${f1(ex)},${f1(ey)}" marker-end="url(#mj-ah)"/>`
+      + `<text class="mj-alab" x="${f1(mx)}" y="${f1(my + 1.4)}" text-anchor="middle">${(-e.deltas[q]).toLocaleString()}</text>`;
+    flowPart(g.firstChild, 'mj-arrow', 550, start, t);
+    flowPart(g.lastChild, 'mj-alab', 250, start + 350, t);
+    svg.append(g);
+  }
+  box.append(svg);
+  for (let p = 0; p < s.n; p++) {
+    const [x, y] = at(p);
+    const seat = document.createElement('div');
+    seat.className = 'mj-fseat' + (p === e.winner ? ' win' : '');
+    seat.style.left = `${(x / FLOW_W) * 100}%`;
+    seat.style.top = `${(y / FLOW_H) * 100}%`;
+    const nm = document.createElement('span');
+    nm.textContent = name(p);
+    const pts = document.createElement('b');
+    pts.className = 'mj-pts';
+    pts.dataset.v = s.scores[p].toLocaleString();
+    pts.textContent = pts.dataset.v;
+    seat.append(nm, pts);
+    const d = e.deltas[p];
+    if (d) {
+      const dl = document.createElement('i');
+      dl.className = 'mj-fdelta ' + (d > 0 ? 'plus' : 'minus');
+      dl.textContent = (d > 0 ? '+' : '−') + Math.abs(d).toLocaleString();
+      flowPart(dl, 'mj-fdelta', 400, start + 600, t);
+      seat.append(dl);
+      rollPts(pts, s.scores[p] - d, s.scores[p], start + 600, t);
+    }
+    box.append(seat);
+  }
+  return box;
+}
+// 部品 x に、start ms（出し始めから）に kind の動きを付ける（revealPart と同じ考え方。SVG の部品にも使う）
+function flowPart(x, kind, ms, start, t) {
+  if (t >= start + ms) return;
+  x.dataset.at = '1';
+  x.style.animation = `${kind} ${ms}ms ease-out ${Math.round(start - t)}ms both`;
+}
+// 点を from から to へ回す（countUp と同じ考え方。押して飛ばしたら dataset.v に戻る）
+function rollPts(x, from, to, start, t) {
+  const COUNT = 700;
+  if (t >= start + COUNT) return;
+  const t0 = Date.now() - t;
+  const step = () => {
+    if (!x.isConnected && x.dataset.go) return;
+    x.dataset.go = '1';
+    const k = Math.min(1, Math.max(0, (Date.now() - t0 - start) / COUNT));
+    x.textContent = reveal.start === -Infinity || k >= 1 ? x.dataset.v : Math.round(from + (to - from) * (1 - (1 - k) ** 3)).toLocaleString();
+    if (k < 1 && reveal.start !== -Infinity) requestAnimationFrame(step);
+  };
+  step();
+  setTimeout(() => { if (x.isConnected) x.textContent = x.dataset.v; }, Math.max(0, start + COUNT - t) + 50);
 }
 
 // 点をくるくる増やす（和了を一つずつ見せる）。start ms（出し始めから）に 0 から始めて 750ms で value に。描き直しで外れたら止める。

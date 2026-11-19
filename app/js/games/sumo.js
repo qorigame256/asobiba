@@ -416,6 +416,7 @@ function mount(root, opts) {
       g.fillStyle = '#333';
       g.fillText(t, tx, ty);
     }
+    drawReplay(g);
     // 回の始めの数え・結果
     g.textAlign = 'center';
     if (game.phase === 'count' && !game.over) {
@@ -435,6 +436,74 @@ function mount(root, opts) {
       meter.innerHTML = `<span>ぐらつき</span><i style="--v:${(v * 100).toFixed(0)}%" class="${v > 0.7 ? 'hi' : ''}"></i>`;
       btn.disabled = game.phase !== 'fight' || game.over || !w?.alive;
     }
+  }
+
+  // 決まった瞬間をもう一度（2026-11-19 の UI・UX の10回目。本人が決めたことは action-games.md）: 取り組みの間、描いた位置を直前の1.2秒ぶん覚えておき、
+  // 回の勝負が決まって結果を見せる間（show）に入ったら、直前 REPLAY_SPAN 秒を倍の長さ（半分の速さ）で、土俵を少し暗くして跡と半透明の力士で流す。
+  // Claude の判断: 流すのは、その間にだれかが倒れた・落ちたときだけ（時間切れの決着では流さない）。どの端末も自分が描いた位置で流す（送らない）。
+  // 土俵を押すと飛ばす（押すのはトンと同じ所だが、結果を見せている間はトンが効かない）。動きを減らす設定の端末では流さない
+  const REPLAY_SPAN = 0.9;
+  const trail = []; // { t, w: [[x, y, alive] …] }
+  let replay = null; // { frames, t0, dur }
+  let prevPhase = game.phase;
+  function keepTrail(now, ws) {
+    if (prevPhase === 'fight' && game.phase === 'show') { // 決まった瞬間の位置（倒れた・落ちた形）も足してから流す
+      trail.push({ t: now, w: ws.map((w) => [w.x, w.y, w.alive]) });
+      startReplay(now);
+    }
+    prevPhase = game.phase;
+    if (game.phase !== 'fight') { if (game.phase === 'count') trail.length = 0; return; }
+    trail.push({ t: now, w: ws.map((w) => [w.x, w.y, w.alive]) });
+    while (trail.length && now - trail[0].t > 1200) trail.shift();
+  }
+  function startReplay(now) {
+    const frames = trail.filter((f) => now - f.t <= REPLAY_SPAN * 1000);
+    trail.length = 0;
+    if (frames.length < 4 || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
+    const fell = frames[0].w.some((a, p) => a[2] && !frames.at(-1).w[p][2]);
+    if (!fell) return;
+    replay = { frames, t0: now, dur: REPLAY_SPAN * 2000 };
+  }
+  canvas.addEventListener('pointerdown', () => { replay = null; });
+  function drawReplay(g) {
+    if (!replay) return;
+    const k = Math.max(0, (performance.now() - replay.t0) / replay.dur);
+    if (k >= 1 || game.phase !== 'show') { replay = null; return; }
+    const F = replay.frames;
+    const at = k * (F.length - 1);
+    const i0 = Math.floor(at);
+    const f = at - i0;
+    const r = BODY * SIZE * 0.42;
+    g.save();
+    g.fillStyle = 'rgba(0, 0, 0, .3)';
+    g.beginPath(); g.arc(SIZE / 2, SIZE / 2, SIZE * 0.48, 0, Math.PI * 2); g.fill();
+    g.lineCap = 'round';
+    g.lineJoin = 'round';
+    F[0].w.forEach((_, p) => {
+      const pts = [];
+      for (let i = 0; i <= Math.min(i0, F.length - 1); i++) pts.push(toScreen(F[i].w[p][0], F[i].w[p][1]));
+      const a = F[i0].w[p], b = F[Math.min(i0 + 1, F.length - 1)].w[p];
+      const [x, y] = toScreen(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f);
+      pts.push([x, y]);
+      g.strokeStyle = COLORS[p];
+      g.globalAlpha = 0.8;
+      g.lineWidth = 4;
+      g.beginPath();
+      pts.forEach(([px, py], i) => (i ? g.lineTo(px, py) : g.moveTo(px, py)));
+      g.stroke();
+      g.globalAlpha = a[2] ? 0.85 : 0.45;
+      g.fillStyle = COLORS[p];
+      g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+      g.strokeStyle = '#f2c230'; g.lineWidth = 2; g.stroke();
+    });
+    g.globalAlpha = 1;
+    g.fillStyle = '#fff';
+    g.font = 'bold 16px sans-serif';
+    g.textAlign = 'left';
+    g.shadowColor = 'rgba(0, 0, 0, .6)';
+    g.shadowBlur = 3;
+    g.fillText('◀◀', 10, 22);
+    g.restore();
   }
 
   // ゲストが答えた続きを、読み込み直したホストが引き継ぐ（いちばん先に届いた1つだけ）
@@ -500,6 +569,7 @@ function mount(root, opts) {
     const ws = host ? ring.w : shown.w;
     if (ws.some((w, p) => seenAlive[p] && !w.alive)) play('punch', 0.7);
     seenAlive = ws.map((w) => w.alive);
+    keepTrail(now, ws);
     draw();
     raf = requestAnimationFrame(frame);
   }

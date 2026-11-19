@@ -46,6 +46,28 @@ export function backEl() {
   return e;
 }
 
+// 観戦の人は全員の手札を開いて見られる（2026-11-19 の UI・UX の10回目。本人が決めたことは room.md）。
+// ゲームの peek(s, o) がこれで欄を作って返し、main.js が観戦の人の「みんなの手札を開く」のときだけ盤の下に足す。
+// rows = [{ name, cards: [札の要素…], note: 名前の横の小さな字（任意） }]。札が無い人（上がった人など）は note だけ出す
+export function peekBox(rows) {
+  const box = document.createElement('div');
+  box.className = 'peek-hands';
+  for (const r of rows) {
+    const row = document.createElement('div');
+    row.className = 'peek-row';
+    const nm = document.createElement('div');
+    nm.className = 'peek-name';
+    nm.textContent = r.name;
+    if (r.note) { const sm = document.createElement('small'); sm.textContent = r.note; nm.append(sm); }
+    const cs = document.createElement('div');
+    cs.className = 'peek-cards';
+    cs.append(...r.cards);
+    row.append(nm, cs);
+    box.append(row);
+  }
+  return box;
+}
+
 // 手札を扇形に持つ（2026-11-10 の UI・演出・アニメーションの案の3回目。本人が決めたことは card-games.md）。
 // box（自分の手札を並べた入れ物。札を全部入れてから呼ぶ）の札をゆるい扇形にする。up = いま自分が札を選べる（手札を持ち上げ、光っている札をもう少し浮かせる）。
 // でなければ少し沈めて暗くする。重なり具合は style.css の .fan-hand が入れ物の幅と札の数から決める（描き直しの途中で長さを測らないため）。

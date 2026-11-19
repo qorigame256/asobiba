@@ -64,7 +64,7 @@
 
 
 import { mulberry32, shuffle } from './util.js';
-import { fanHand } from './cards.js';
+import { fanHand, peekBox } from './cards.js';
 
 const COLORS = ['r', 'y', 'g', 'b'];
 const COLOR_NAME = { r: '赤', y: '黄', g: '緑', b: '青' };
@@ -665,6 +665,9 @@ export default {
     };
     return play(legal.reduce((a, b) => (score(hand[b]) > score(hand[a]) ? b : a)));
   },
+
+  // 観戦の人の「みんなの手札を開く」（2026-11-19 の UI・UX の10回目。room.md）: 全員の手札を開いた欄（cards.js の peekBox）。main.js が観戦の人の画面の盤の下に足す
+  peekHands(s, o) { return peekBox(s.hands.map((h, p) => ({ name: o.names[p], cards: h.map((c) => cardEl(c)), note: h.length ? '' : '上がり' }))); },
 
   render(root, s, o) {
     const draw = () => this.render(root, s, o);
