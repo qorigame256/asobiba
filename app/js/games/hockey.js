@@ -57,12 +57,17 @@ const FRICTION = 0.3;
 const E_WALL = 0.9;
 const E_HIT = 0.9;
 const STEP = 1 / 240;
-const SEND_MS = 40; // オンラインで位置を送る間隔
+// オンラインで位置を送る間隔。2026-11-19 に 40ms から広げた（本人の選択「送る数を上限より下げる」）: 中継サーバーは1つの接続から区切られた1秒に10通までしか配らず、
+//   超えた分は大事な知らせ（ゴール・持ち主を渡す知らせ・部屋の here や state）ごと捨てる（net.js の「送る数の見張り」。実測は tools/net-rate.mjs）。
+//   40ms（1秒に25通）のころも、相手に届いていたのは1秒に約10通だけだった。位置（1秒に約6通）＋遅れを測る合図（PING_MS おきの ping と、その返事の pong）＋部屋の ping で、
+//   1秒に8通（net.js の QOS0_PER_WINDOW）より下に収める。**縮めるときは、合図と合わせた数を数え直す**（4人では pong がほかの3台ぶん要る）。
+const SEND_MS = 160;
+const PING_MS = 2000; // 遅れを測る合図を送る間隔（2026-11-19 に 1000ms から広げた。上と同じわけ）
 // 2026-10-26 本人の声「3人だととても重い」への対策（Claude の判断。本物の中継サーバーでは測れていない）:
 //   パックを1つも持っていない端末は、マレットの位置を SEND_IDLE_MS おきにしか送らない（ほかの陣地のマレットは見た目だけで、当たりには使わないため）。
 //   3人では送る端末が3台になり、中継サーバーを通る数が2人の1.5倍以上になるので、まずそれを減らす。
 //   ほかの端末が持っているパックの位置は、届くたびに飛び移らず、なめらかに寄せる（2026-11-03 に「差の半分ずつ寄せる」から下の OFFSET_T の形に替えた）。
-const SEND_IDLE_MS = 90;
+const SEND_IDLE_MS = 200; // 2026-11-19 に 90ms から広げた（SEND_MS と同じわけ）
 // 2026-11-03 本人の声「まだラグい、パックがワープする」への対策（Claude の判断。本物の中継サーバーでは測れていない）:
 //   - ほかの端末から位置が届いて直すとき、計算に使う位置はすぐ直し、画面に描く位置だけを前の見た目から OFFSET_T 秒ほどでなめらかに寄せる（q.ox・q.oy）。
 //     前は差の半分ずつ寄せ、0.15 より離れていたら飛び移っていた（相手が打ったパックは遅れの分だけ大きくずれるので、飛び移って見えた）。SNAP_FAR より離れていたら飛び移る。
@@ -1380,7 +1385,7 @@ function mount(root, opts) {
     if (dv.length) {
       if (!net.started && now - net.lastHi > 500) { net.lastHi = now; opts.send({ k: 'hi', c: dv }); }
       // 遅れを測る合図の時刻は performance.now()（描き替えの時刻 now は古いことがあり、遅れが大きく出る）
-      if (now - net.lastPing > 1000) { net.lastPing = now; opts.send({ k: 'ping', t: performance.now(), id: net.id }); }
+      if (now - net.lastPing > PING_MS) { net.lastPing = now; opts.send({ k: 'ping', t: performance.now(), id: net.id }); }
       const t = performance.now();
       const quiet = net.started && needed().some((p) => t - (net.heard[p] ?? 0) > 3000);
       if (quiet !== net.quietShown) { net.quietShown = quiet; showStatus(); }

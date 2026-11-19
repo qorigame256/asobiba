@@ -47,7 +47,9 @@ const BOUNCE = 0.2;
 export const ROUND_SEC = 30;
 const COUNT_SEC = 2;
 const SHOW_SEC = 2.5;
-const SEND_MS = 50;
+// ホストが力士の位置を配る間隔。2026-11-19 に 50ms から広げた（本人の選択「送る数を上限より下げる」）: 中継サーバーは1つの接続から区切られた1秒に10通までしか配らず、
+// 超えた分は大事な知らせ（決着・部屋の here や state）ごと捨てる（net.js の「送る数の見張り」）。1秒に約7通にして、net.js の QOS0_PER_WINDOW（8通）より下に収める
+const SEND_MS = 140;
 const STEP = 1 / 120;
 
 /* ---------- 動き（ホストの端末と自動確認が使う。画面に依存しない） ---------- */

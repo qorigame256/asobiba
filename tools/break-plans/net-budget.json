@@ -1,0 +1,60 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "app/fonts",
+    "app/voice",
+    "tools/test-logic.mjs",
+    "tools/font-chars.json",
+    "tools/font-texts.mjs",
+    "tools/voice-texts.mjs"
+  ],
+  "cwd": "copy",
+  "env": {
+    "QUICK": "1",
+    "SEED": "1"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/net.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 300,
+  "breaks": [
+    {
+      "name": "qos 0 の上限を 8 から 12 に上げる",
+      "file": "app/js/net.js",
+      "old": "const QOS0_PER_WINDOW = 8;",
+      "new": "const QOS0_PER_WINDOW = 12;",
+      "expect": ["見張り: 1秒に25通の qos 0 は、1秒に8通だけ送る"]
+    },
+    {
+      "name": "qos 1 もいっぱいなら送らない",
+      "file": "app/js/net.js",
+      "old": "if (qos === 0 && sent.length >= QOS0_PER_WINDOW) return false;",
+      "new": "if (qos <= 1 && sent.length >= QOS0_PER_WINDOW) return false;",
+      "expect": ["見張り: qos 1 はいっぱいでも送る"]
+    },
+    {
+      "name": "qos 1 を送った数に入れない",
+      "file": "app/js/net.js",
+      "old": "    sent.push(t);",
+      "new": "    if (qos === 0) sent.push(t);",
+      "expect": ["見張り: qos 1 の2通も数に入るので、qos 0 は6通まで"]
+    },
+    {
+      "name": "見張りの1秒を 0.5秒に縮める",
+      "file": "app/js/net.js",
+      "old": "const WINDOW_MS = 1000;",
+      "new": "const WINDOW_MS = 500;",
+      "expect": ["見張り: 1秒に25通の qos 0 は、1秒に8通だけ送る"]
+    }
+  ]
+}

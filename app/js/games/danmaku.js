@@ -3,7 +3,7 @@
 // （通信の遅れは「始まるのが少し遅れる」だけなので、だれも不利にならない）。
 // 自分の当たり判定は自分の端末だけがして、当たったら「何秒もったか」を手として送る。順位はこの秒数で決める。
 // 時間（詳細設定）まで残った人は全員1位。最後の1人になって、ほかの全員より長くもったら、その時点で終わる（手 last）。
-// ほかの人の自機の位置は見た目だけなので、手の一覧に入れず 0.1秒ごとに送りっぱなしにする（o.stream / onStream）。
+// ほかの人の自機の位置は見た目だけなので、手の一覧に入れず 0.15秒ごと（SEND_MS）に送りっぱなしにする（o.stream / onStream）。
 //
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready →(3秒)→ go → play →(時間＋待ち)→ end
 // 詳細設定「残機」（2026-10-06 本人の決定。最初は 1機＝今までどおり当たったら脱落）: 2機・3機なら、その数だけ当たったら脱落。
@@ -31,7 +31,9 @@ const GRACE_MS = 2500;
 export const H = 1.25; // 盤は横 1 : 縦 1.25
 export const HIT_R = 0.009; // 自機の当たり判定の半径（見た目より小さい）
 const SHIP_R = 0.02;
-const SEND_MS = 100;
+// 位置を送る間隔。2026-11-19 に 100ms から広げた（本人の選択「送る数を上限より下げる」）: 中継サーバーは1つの接続から区切られた1秒に10通までしか配らず、
+// 超えた分は当たりの手ごと捨てる（net.js の「送る数の見張り」）。1秒に約7通にして、net.js の QOS0_PER_WINDOW（8通）より下に収める
+const SEND_MS = 150;
 const START = { x: 0.5, y: H - 0.12 };
 const SAFE_SEC = 2; // 残機があって当たったあと、当たらない秒数
 export const SLOW_SEC = 3; // スローの長さ（実の秒）
@@ -379,32 +381,32 @@ function step() {
     ui.sentLast = true;
     o.onMove({ t: 'last', ms: Math.round(sec * 1000) });
   }
-  const now = performance.now();
-  if (now - ui.lastSend > SEND_MS) {
-    ui.lastSend = now;
-    o.stream({ a: [[ui.me, +ui.x.toFixed(3), +ui.y.toFixed(3)]] });
-  }
+  ui.selfPos = [ui.me, +ui.x.toFixed(3), +ui.y.toFixed(3)]; // よけている間だけ送る（sendPositions）
 }
 
-// ホストの端末では CPU の位置も送る（ほかの人の画面に出すため）
-function sendCpus() {
+// 自分の位置と、ホストの端末では CPU の位置も送る（ほかの人の画面に出すため）。
+// 自分の分と CPU の分は1通にまとめる（2026-11-19。前は別々に 0.1秒ごとで、ホストは1秒に20通送っていた。SEND_MS の所のわけ）
+function sendPositions() {
   const { s, o } = ui.cur;
+  const self = ui.selfPos;
+  ui.selfPos = null;
   const now = performance.now();
-  if (s.phase !== 'play' || now - ui.lastCpuSend < SEND_MS) return;
-  ui.lastCpuSend = now;
-  const a = [];
+  if (s.phase !== 'play' || now - ui.lastSend < SEND_MS) return;
+  const a = self ? [self] : [];
   for (let p = 0; p < s.n; p++) {
     const c = sims.get(`${s.seed}:${p}`);
     if (c && !c.dead && s.dead[p] === null) a.push([p, +c.x.toFixed(3), +c.y.toFixed(3)]);
   }
-  if (a.length) o.stream({ a });
+  if (!a.length) return;
+  ui.lastSend = now;
+  o.stream({ a });
 }
 
 function loop(token) {
   if (ui !== token || !ui.canvas.isConnected) return;
   if (ui.wrap.clientWidth !== ui.boxW) resize(); // 画面の幅が変わった（向きを変えたときなど、知らせを取りこぼしても合わせ直す）
   step();
-  sendCpus();
+  sendPositions();
   draw();
   slowButton();
   requestAnimationFrame(() => loop(token));
@@ -627,7 +629,7 @@ export default {
     since(`danmaku:${s.seed}:ready`);
     ui = {
       key, canvas, ctx: canvas.getContext('2d'), chips, wrap, me, cur: { s, o }, scale: 300,
-      x: START.x, y: START.y, hit: me !== null && s.hits[me] >= livesOf(s), hits: me !== null ? s.hits[me] : 0, safeUntil: 0, boomAt: 0, sentLast: false, lastSend: 0, lastCpuSend: 0, last: null,
+      x: START.x, y: START.y, hit: me !== null && s.hits[me] >= livesOf(s), hits: me !== null ? s.hits[me] : 0, safeUntil: 0, boomAt: 0, sentLast: false, lastSend: 0, selfPos: null, last: null,
       ghosts: new Map(), keys: new Set(), view: tracker(bulletsOf(s)), mine: tracker(bulletsOf(s)),
       slowBtn, slowAt: null, slowNote: null, slowSeen: slowOn(s) ? s.slow.map((v) => v !== null) : [],
     };

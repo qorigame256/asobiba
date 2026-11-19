@@ -12598,4 +12598,36 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('chicken OK');
 }
 
+// 送る数の見張り（net.js の sendBudget。2026-11-19）: 中継サーバーの上限（1つの接続から区切られた1秒に10通）を超えないよう、直近1秒に8通送ったら qos 0 は送らない。qos 1 はいつも送る
+{
+  const { sendBudget } = await import('../app/js/net.js');
+  let t = 0;
+  let allow = sendBudget(() => t);
+  // 40ms おき（エアホッケーの前の速さ）に qos 0 を10秒: どの1秒を切り取っても8通まで
+  const at = [];
+  for (t = 0; t < 10000; t += 40) if (allow(0)) at.push(t);
+  assert.equal(at.length, 80, '見張り: 1秒に25通の qos 0 は、1秒に8通だけ送る');
+  for (const a of at) assert.ok(at.filter((b) => b >= a && b < a + 1000).length <= 8, '見張り: どの1秒にも qos 0 は8通まで');
+  // qos 0 でいっぱいの間も qos 1 は送り、その分だけ次の qos 0 を待たせる
+  t = 0;
+  allow = sendBudget(() => t);
+  for (let i = 0; i < 8; i++) assert.equal(allow(0), true, '見張り: 8通目までは送る');
+  assert.equal(allow(0), false, '見張り: 9通目の qos 0 は送らない');
+  t = 500;
+  assert.equal(allow(1), true, '見張り: qos 1 はいっぱいでも送る');
+  assert.equal(allow(1), true, '見張り: qos 1 は続けても送る');
+  t = 999;
+  assert.equal(allow(0), false, '見張り: 1秒たつ前は送らない');
+  t = 1000; // 最初の8通が1秒を過ぎた。残っているのは 0.5秒のときの qos 1 の2通
+  for (let i = 0; i < 6; i++) assert.equal(allow(0), true, '見張り: 古い分が1秒を過ぎたら送る');
+  assert.equal(allow(0), false, '見張り: qos 1 の2通も数に入るので、qos 0 は6通まで');
+  // 1秒に8通より少ない送り（エアホッケーの今の速さ 160ms）は1通も捨てない
+  t = 0;
+  allow = sendBudget(() => t);
+  let dropped = 0;
+  for (t = 0; t < 10000; t += 160) if (!allow(0)) dropped++;
+  assert.equal(dropped, 0, '見張り: 160ms おきの qos 0 は全部送る');
+  console.log('net OK');
+}
+
 console.log(QUICK ? 'QUICK OK（軽い流し方。コミットの前は QUICK を付けずに全部を流す）' : 'ALL OK');

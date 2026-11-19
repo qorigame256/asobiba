@@ -6,6 +6,27 @@
 const BROKER_URL = 'wss://broker.emqx.io:8084/mqtt';
 const TOPIC_PREFIX = 'asobiba-q7m/v1/room/';
 
+// 送る数の見張り（2026-11-19。本人の選択「送る数を上限より下げる」）。
+// 中継サーバーは、1つの接続から受け取る数を「区切られた1秒ごとに10通まで」にしていて、超えた分は qos 1 でも配らずに捨てる
+// （MQTT 3.1.1 では PUBACK は返るので、送った側は気づけない。実測は tools/net-rate.mjs。まとめて送ると、平均が10通より少なくても同じ1秒に入った分が捨てられる）。
+// エアホッケー・紙相撲が位置を1秒に20通以上送っていて、その間は here・state・ping・ゴールの知らせまで消えていた。
+// そこで、この端末が直近1秒（WINDOW_MS）に送った数が QOS0_PER_WINDOW 以上のあいだ、qos 0（届かなくてもよい見た目だけの中身）は送らずに捨てる。
+// qos 1（大事な知らせ）はいつも送り、数には入れる（qos 1 の分だけ qos 0 が減る）。残りの2通は qos 1 と、届く間が通信のゆれで詰まる分の余裕。
+// 続けて送るゲームは、自分の間隔でこの数より下に収めておく（ここで捨てると、届く間がふぞろいになる）。
+const WINDOW_MS = 1000;
+const QOS0_PER_WINDOW = 8;
+// now = 今の時刻（ミリ秒）を返す関数。返る関数は、送ってよければ true（送った数に数える）
+export function sendBudget(now = () => Date.now()) {
+  const sent = [];
+  return (qos) => {
+    const t = now();
+    while (sent.length && t - sent[0] >= WINDOW_MS) sent.shift();
+    if (qos === 0 && sent.length >= QOS0_PER_WINDOW) return false;
+    sent.push(t);
+    return true;
+  };
+}
+
 // onSelf（任意）: 自分が送ったものが中継サーバーから戻ってきたとき（通信の遅れを測るのに使う）
 export function connectRoom(code, myId, onMessage, onStatus, onSelf) {
   if (typeof mqtt === 'undefined') throw new Error('mqtt.js が読み込めていません');
@@ -16,7 +37,10 @@ export function connectRoom(code, myId, onMessage, onStatus, onSelf) {
     keepalive: 30,
     reconnectPeriod: 2000,
     connectTimeout: 10000,
+    // 切れている間の qos 0 はためない（既定はためて、つながった瞬間にまとめて送る。その束が上の上限を超え、つなぎ直しの hello・state まで捨てられる）
+    queueQoSZero: false,
   });
+  const allow = sendBudget();
 
   client.on('connect', () => {
     client.subscribe(topic, { qos: 1 }, (err) => onStatus(err ? 'error' : 'ready'));
@@ -35,7 +59,7 @@ export function connectRoom(code, myId, onMessage, onStatus, onSelf) {
 
   return {
     // qos 0 = 届いたか確かめない（エアホッケーの位置のように何度も送るもの）。ふだんは 1（届くまで送り直す）
-    send(msg, qos = 1) { client.publish(topic, JSON.stringify({ ...msg, from: myId }), { qos }); },
+    send(msg, qos = 1) { if (allow(qos)) client.publish(topic, JSON.stringify({ ...msg, from: myId }), { qos }); },
     close() { client.end(true); },
   };
 }
