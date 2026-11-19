@@ -1,0 +1,37 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app",
+    "tools/sweep-rejoin.mjs",
+    "tools/play-two.mjs",
+    "tools/play-common.mjs",
+    "tools/serve.js"
+  ],
+  "cwd": "copy",
+  "env": {
+    "HEADLESS_SHOT_MODULES": "{root}/../Claudeの使い道/tools/screen-check/node_modules"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/sweep-rejoin.mjs",
+    "yuki"
+  ],
+  "failPattern": "^★ (\\S+?)（",
+  "timeoutSec": 150,
+  "breaks": [
+    {
+      "name": "雪合戦の「作り直さない」判定から、盤がページにあるかの確かめを外す",
+      "file": "app/js/games/yuki.js",
+      "old": "if (ui?.key === key && root.contains(ui.canvas)) {",
+      "new": "if (ui?.key === key) {",
+      "expect": ["yuki"]
+    }
+  ]
+}

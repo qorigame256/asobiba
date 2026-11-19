@@ -17,10 +17,12 @@
 //     --size <幅x高さ>     画面の大きさ（既定 390x844）
 //     --timeout <秒>       全体の上限（既定 180）
 //
-// --script のファイル: export default async function ({ host, guests, join, readyAll, shot, sleep, base, code }) { …; return 値; }
+// --script のファイル: export default async function ({ host, guests, join, readyAll, menu, shot, sleep, base, code }) { …; return 値; }
 //   host・guests[i] … Playwright のページ（page.click('セレクタ')・page.evaluate(() => …)・page.waitForSelector(…) など）。
 //   join(名前)     … もう1人を部屋に入れて、そのページを返す（guests にも足す）。page.context().close() で、その人のタブを閉じたことになる
 //   readyAll()     … 待合室で、対局する席のゲスト全員が「準備OK」を押す（押さないとホストの「始める」が押せない。--no-start でないときは台本が先に呼ぶ）
+//   menu(page, 文字) … 対局の画面の畳んである「⚙ 部屋のメニュー」（と、その中の「部屋の人」）を開けてから、その文字を含むボタンを押す
+//                    （待合室へ・みんなで待合室へ・退出させる など。遊びの操作のほかは全部この中にあり、開けないと押せない）
 //   shot(page, 名前, { full }) … <out>/名前.png を撮る
 //   sleep(ミリ秒)
 //   目印は play-shot.mjs と同じ（盤 #board・下の段 #controls・大きなボタン #dock・上の知らせ #status）。
@@ -126,6 +128,14 @@ async function readyAll() {
   }
 }
 
+// 畳んである「⚙ 部屋のメニュー」と、その中の「部屋の人」を開けてから、その文字を含むボタンを押す
+async function menu(page, text) {
+  await page.evaluate(() => {
+    for (const sel of ['details.play-menu', 'details.member-panel']) { const d = document.querySelector(sel); if (d && !d.open) d.querySelector('summary').click(); }
+  });
+  await page.locator('button', { hasText: text }).first().click();
+}
+
 const finish = async (exitCode) => {
   fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify(result, null, 1));
   console.log(`${result.ok ? 'できた' : '止まった'}  ${game.name}（${gameId}）・部屋 ${result.code ?? '—'}・人 ${pages.length}人`);
@@ -175,7 +185,7 @@ try {
   // ---------- 続きの関数 ----------
   const mod = await import(pathToFileURL(path.resolve(opt.script)).href);
   if (typeof mod.default !== 'function') throw new Error('--script のファイルに export default の関数が無い');
-  result.value = (await mod.default({ host, guests, join, readyAll, shot, sleep, base, code })) ?? null;
+  result.value = (await mod.default({ host, guests, join, readyAll, menu, shot, sleep, base, code })) ?? null;
   result.ok = true;
   clearTimeout(timer);
   await finish(0);
