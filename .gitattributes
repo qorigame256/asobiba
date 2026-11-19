@@ -1,0 +1,2 @@
+# 改行は LF にそろえる（Windows でも CRLF に変えない）。置き換えの台本や Edit が改行のずれで空振りするのを防ぐため。
+* text=auto eol=lf

@@ -1,5 +1,20 @@
 // ゲームのルール（勝敗判定・置ける場所）の自動確認。使い方: node tools/test-logic.mjs
+//   SEED=<数> を付けると乱数の種を決めて流す（下の「乱数の種」）。QUICK=1 を付けると途中用の軽い流し方になる（下の「軽い流し方」）。
 import assert from 'node:assert/strict';
+
+// 乱数の種: 何も付けなければ毎回ちがう種で流し、最初にその種を表示する。運で落ちたら、表示された種を SEED に入れて流すと同じ乱数で流し直せる。
+// CPU の考えと無作為の対局が使う Math.random を、種から作る乱数（util.js の mulberry32）に置き換えている。
+// 下に何か所かある「Math.random を一時的に差し替える確認」は、終わるとこの乱数に戻る。
+const SEED = process.env.SEED ? Number(process.env.SEED) : Math.floor(Math.random() * 2 ** 31);
+assert.ok(Number.isInteger(SEED) && SEED >= 0, 'SEED は 0 以上の整数で指定する');
+Math.random = (await import('../app/js/games/util.js')).mulberry32(SEED);
+console.log(`seed ${SEED}（同じ乱数で流し直すとき: SEED=${SEED} node tools/test-logic.mjs）`);
+
+// 軽い流し方: QUICK=1 を付けると、時間のかかる「CPU どうしで最後まで打たせる」繰り返しの回数だけを減らす（quick(全部のとき, 軽いとき) と書いた所）。
+// 作業の途中で何度も流すためのもの。コミットの前は QUICK を付けずに全部を流す（最後の行が ALL OK になる。軽い流し方では QUICK OK）。
+const QUICK = process.env.QUICK === '1';
+const quick = (full, light) => (QUICK ? light : full);
+
 const { GAMES, winnersOf } = await import('../app/js/games/index.js');
 const { tictactoe: T, connect4: C, reversi: R } = GAMES;
 
@@ -13,6 +28,11 @@ assert.equal(T.apply(T.init(), 9), null);
 assert.equal(T.apply(play(T, [4]), 4), null, '埋まったマス');
 s = play(T, [0, 1, 2, 4, 3, 5, 7, 6, 8]);
 assert.deepEqual(T.result(s), { winner: null, cells: [] }, '引き分け');
+// 8本の並び（横3・縦3・斜め2）のどれでも勝ちになる（2026-11-19: 斜めの1本を壊しても検査が落ちなかったので足した）
+for (const line of [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]]) {
+  const rest = [...Array(9).keys()].filter((i) => !line.includes(i));
+  assert.deepEqual(T.result(play(T, [line[0], rest[0], line[1], rest[1], line[2]])), { winner: 0, cells: line }, `マルバツ: ${line} の並びで勝ち`);
+}
 
 // スーパーマルバツ（詳細設定「盤」= スーパー）
 const big = (over = {}) => ({ ...T.init({ rules: { size: 'super' } }), ...over });
@@ -103,7 +123,7 @@ assert.equal(C.init({ rules: { players: 3, wide: '8-7' } }).w, 8, '盤の大き�
 assert.equal(C.init({ rules: { players: 2 } }).grid.length, 42, '2人のおまかせは 7×6');
 assert.deepEqual([C.init({ rules: { players: 2, wide: '11-9' } }).w, C.init({ rules: { players: 2, wide: '11-9' } }).h], [11, 9], '2人でも盤の大きさを選べる');
 // 2人の広い盤: CPU が反則を出さず最後まで打てる（偶数の列でも）・ポップアウトとじゃま石も一緒に使える
-for (const wide of ['8-7', '9-7', '10-8', '11-9']) {
+for (const wide of quick(['8-7', '9-7', '10-8', '11-9'], ['8-7'])) {
   for (const extra of [{}, { pop: 'on' }, { block: 'on' }]) {
     let x = C.init({ rules: { players: 2, wide, ...extra }, seed: 3 });
     let guard = 0;
@@ -252,7 +272,7 @@ assert.equal(C.apply(C.init({ rules: { players: 3 } }), 9), null, '盤の外');
   x = { ...C.init({ rules: { block: 'on', pop: 'on' } }), grid: g.slice() };
   assert.equal(C.apply(x, { pop: 3 }), null, 'じゃま石は抜けない');
   for (const rules of [{}, { players: 3 }, { players: 4 }, { pop: 'on' }]) {
-    for (let k = 0; k < 6; k++) {
+    for (let k = 0; k < quick(6, 2); k++) {
       let st = C.init({ rules: { block: 'on', ...rules }, seed: 100 + k });
       let guard = 0;
       while (!C.result(st)) {
@@ -349,7 +369,7 @@ for (const players of [2, 3]) {
   assert.equal(R.apply({ ...g, closed: new Set([61]), board: Object.assign(g.board.slice(), { 2: 1 }) }, 0)?.board[1], 0, '穴でなければはさめる');
   assert.equal(R.apply({ ...g, board: Object.assign(g.board.slice(), { 1: null, 3: 1, 4: 0 }) }, 2), null, '穴には置けない');
   for (const rules of [{}, { players: 3 }, { players: 4 }, { corners: true }, { size: 6 }, { size: 10 }]) {
-    for (let k = 0; k < 3; k++) {
+    for (let k = 0; k < quick(3, 1); k++) {
       let st = R.init({ rules: { holes: true, ...rules }, seed: 50 + k });
       let guard = 0;
       while (!R.result(st)) {
@@ -397,7 +417,7 @@ for (const players of [2, 3]) {
   const sizeOfBoard = (st) => Math.round(Math.sqrt(st.board.length));
   let bonus = 0;
   for (const rules of [{}, { players: 3 }, { players: 4 }, { size: 6 }, { size: 10 }, { holes: true }, { corners: true }, { players: 3, holes: true }]) {
-    for (let k = 0; k < 3; k++) {
+    for (let k = 0; k < quick(3, 1); k++) {
       const all = { ...rules, corner: true, cpu: ['weak', 'normal', rules.size === 10 ? 'normal' : 'strong'][k] };
       let st = R.init({ rules: all, seed: 70 + k });
       const moves = [];
@@ -419,7 +439,7 @@ for (const players of [2, 3]) {
       assert.equal(JSON.stringify({ ...again, closed: [...(again.closed ?? [])] }), JSON.stringify({ ...st, closed: [...(st.closed ?? [])] }), '同じ手の一覧から同じ局面');
     }
   }
-  assert.ok(bonus > 10, '角でもう1手が CPU どうしの対局で起きる ' + bonus);
+  assert.ok(bonus > quick(10, 0), '角でもう1手が CPU どうしの対局で起きる ' + bonus);
   // なしでは、同じ人が続けて打つのはパスのときだけ（今と同じ）
   for (let k = 0; k < 20; k++) {
     let st = R.init();
@@ -1982,7 +2002,7 @@ console.log('hitblow games 100, avg rounds', (hbRounds / 100).toFixed(1));
   assert.ok(HB.apply(HB.init(2, 4, { rules: { digits: 5, secret: 'own', dup: 'on' } }), { p: 0, t: 'secret', g: '11111' }), '同じ数字ありなら答えにも使える');
   // CPU どうしで最後まで（遊び方・同じ数字・答えの組み合わせ全部。CPU が1回に考える時間も測る）
   let slow = 0;
-  for (let k = 0; k < 24; k++) {
+  for (let k = 0; k < quick(24, 8); k++) {
     const n = 2 + (k % 4);
     const rules = { digits: 5, mode: k % 2 ? 'race' : 'turn', dup: (k >> 1) % 2 ? 'on' : 'off', secret: (k >> 2) % 2 ? 'own' : 'same' };
     let st = HB.init(n, k * 17 + 2, { rules });
@@ -4068,7 +4088,7 @@ assert.notEqual(GM.cpu(s, 0, { cpu: 'strong' }), 3, 'ぴったり五目の CPU �
   for (let k = 0; !HS.result(h); k++) h = HS.apply(h, loop[k % 4]);
   assert.deepEqual([HS.result(h).winner, h.won.repeat, h.ply], [null, true, 8], '同じ局面が3回出たら引き分け（最初の局面が 0・4・8手目）');
   // CPU どうしで最後まで（反則を出さない・必ず終わる）
-  for (let g = 0; g < 6; g++) {
+  for (let g = 0; g < quick(6, 2); g++) {
     let st = HS.init({ rules: { goal: g % 2 ? 'all' : 5 } });
     while (!HS.result(st)) {
       st = HS.apply(st, HS.cpu(st, st.turn, { cpu: ['weak', 'normal'][g % 2] }));
@@ -4116,7 +4136,7 @@ assert.notEqual(GM.cpu(s, 0, { cpu: 'strong' }), 3, 'ぴったり五目の CPU �
     for (const m of [mv(at(8, 0), at(3, 0)), mv(at(0, 1), at(3, 1)), mv(at(8, 2), at(3, 2))]) { a9 = HS.apply(a9, m); b9 = HS.apply(b9, m); }
     assert.deepEqual([a9.board, a9.hist.a, a9.hist.b, a9.taken], [b9.board, b9.hist.a, b9.hist.b, b9.taken], '9×9 は手の形（元 * 81 + 先）も結果も前と同じ');
   }
-  for (let g = 0; g < 6; g++) {
+  for (let g = 0; g < quick(6, 2); g++) {
     let st = HS.init({ rules: { size: 7, goal: g % 2 ? 'all' : 5 } });
     while (!HS.result(st)) {
       st = HS.apply(st, HS.cpu(st, st.turn, { cpu: ['weak', 'normal', 'strong'][g % 3] }));
@@ -5009,7 +5029,7 @@ const end3 = MC.apply({ ...mc3, pits: p3({ 5: 1, 7: 2, 15: 3, 20: 4 }) }, 5);
 assert.ok(end3.over && end3.pits[6] === 1 && end3.pits[13] === 2 && end3.pits[20] === 7, '3人: 誰かの側が空になったら全員終わり');
 assert.equal(MC.result(end3).winner, 2);
 assert.equal(MC.result({ ...end3, pits: p3({ 6: 5, 13: 5, 20: 1 }) }).winner, null, '3人: 一番が2人なら引き分け');
-for (let g = 0; g < 12; g++) {
+for (let g = 0; g < quick(12, 2); g++) {
   let st = MC.init({ rules: { players: 3, stones: 3 + (g % 4) } });
   const total = st.pits.reduce((a, b) => a + b, 0);
   let guard = 0;
@@ -7544,7 +7564,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     }
   }
   for (const folds of [1, 2, 3]) {
-    for (let seed = 0; seed < 12; seed++) {
+    for (let seed = 0; seed < quick(12, 2); seed++) {
       for (const x of K.makeQuestions(10, seed, folds)) {
         const right = x.choices[x.side];
         const rr = K.raster(right);
@@ -7894,7 +7914,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.deepEqual(Q.result(s).cells.slice().sort((a, b) => a - b), red);
   const full = playQ([3, 3, 3, 3]);
   assert.equal(Q.apply(full, 3), null, '立体四目: 4段積んだ柱には積めない');
-  for (const cpu of ['weak', 'normal', 'strong']) {
+  for (const cpu of quick(['weak', 'normal', 'strong'], ['weak'])) {
     let x = Q.init();
     for (let k = 0; k < 64 && !Q.result(x); k++) x = Q.apply(x, Q.cpu(x, x.turn, { cpu }));
     assert.ok(Q.result(x), `立体四目: CPU（${cpu}）どうしで最後まで`);
@@ -7913,7 +7933,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   f = Q.apply(f, 51);
   assert.equal(Q.result(f).winner, 0, '重力なし: 宙に浮いた並びで勝ち');
   assert.ok(f.free, '重力なし: 局面に印が残る');
-  for (const cpu of ['weak', 'normal', 'strong']) {
+  for (const cpu of quick(['weak', 'normal', 'strong'], ['weak'])) {
     let x = Q.init({ rules: { free: true } });
     for (let k = 0; k < 64 && !Q.result(x); k++) x = Q.apply(x, Q.cpu(x, x.turn, { cpu, free: true }));
     assert.ok(Q.result(x), `重力なし: CPU（${cpu}）どうしで最後まで`);
@@ -12571,4 +12591,4 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('chicken OK');
 }
 
-console.log('ALL OK');
+console.log(QUICK ? 'QUICK OK（軽い流し方。コミットの前は QUICK を付けずに全部を流す）' : 'ALL OK');
