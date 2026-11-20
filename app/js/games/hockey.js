@@ -966,7 +966,7 @@ function mount(root, opts) {
     return me === c ? 'あなたが失点…' : `${PLAYERS[c]}が失点`;
   }
   // 決着を main.js へ知らせる（自分の記録に数える。2026-11-19 本人の決定）。何試合目か = オンラインは「もう一回」の回数（全員同じ）、同じ画面は開いてからの数。
-  // 行き違った失点で順位が直ったときも呼ばれるが、同じ試合は main.js が1回だけ数える
+  // 行き違った失点で順位が直ったときも呼ばれるが、同じ試合は main.js が1回だけ数え、勝ちの数だけ今の順位に直す
   let localNo = 0;
   function finish() {
     opts.onOver?.(st.over.rank.slice(), online ? net.ep : ++localNo);

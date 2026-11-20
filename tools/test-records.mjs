@@ -66,6 +66,21 @@ assert.deepEqual(readRecords().games, { flags: { p: 2, w: 1 }, reversi: { p: 1, 
 localStorage.setItem('bg-records', JSON.stringify({ ...JSON.parse(localStorage.getItem('bg-records')), games: { a: { p: 2, w: 9 }, b: { p: 0, w: 0 }, c: { p: 'x' }, d: null } }));
 assert.deepEqual(readRecords().games, { a: { p: 2, w: 2 } }, 'おかしな値は捨て、勝ちは遊んだ数を超えない');
 
+// 決着があとで直る毎フレーム動くゲーム（revise。エアホッケーの延長。2026-11-20 の Codex の点検）: 同じ対局の勝ちの数だけ今の結果に直し、遊んだ数は増やさない
+{
+  const h0 = readRecords().hwins, p0 = readRecords().played;
+  noteGame('k', { won: false, withHuman: true, best: null, gameId: 'hockey', revise: true });
+  noteGame('k', { won: true, withHuman: true, best: null, gameId: 'hockey' });
+  assert.deepEqual([readRecords().hwins, readRecords().games.hockey], [h0, { p: 1, w: 0 }], 'revise を付けなければ同じ対局は直さない');
+  noteGame('k', { won: true, withHuman: true, best: null, gameId: 'hockey', revise: true });
+  noteGame('k', { won: true, withHuman: true, best: null, gameId: 'hockey', revise: true });
+  r = readRecords();
+  assert.deepEqual([r.hwins, r.played, r.games.hockey], [h0 + 1, p0 + 1, { p: 1, w: 1 }], '延長のあと勝ったら、負けを勝ちに直す（2回届いても1回）');
+  noteGame('k', { won: false, withHuman: true, best: null, gameId: 'hockey', revise: true });
+  r = readRecords();
+  assert.deepEqual([r.hwins, r.games.hockey], [h0, { p: 1, w: 0 }], '勝ちが負けに直ったら戻す');
+}
+
 // ④ 弾幕回避: 当たった人はその時刻、最後の1人は last の手の時刻、時間切れまで残った人は時間いっぱい
 const st = { rules: { time: '90' }, dead: [12000, null, null] };
 assert.equal(dm.record.of(st, 0, []), 12000);

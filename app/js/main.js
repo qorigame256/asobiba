@@ -3131,7 +3131,7 @@ function noteAchievements(game, res, st) {
 }
 
 // 毎フレーム動くゲーム（エアホッケー・紙相撲）の決着を、自分の記録の「遊んだ対局」と「人がいた対局の勝ち」に数える（2026-11-19 本人の決定。色の解放のため）。
-// 結果が main.js を通らないので、ゲームが決着のたびに mount の onOver(席ごとの順位, 何試合目か) で知らせる。同じ試合は noteGame が鍵で1回だけ数える。
+// 結果が main.js を通らないので、ゲームが決着のたびに mount の onOver(席ごとの順位, 何試合目か) で知らせる。同じ試合は noteGame が鍵で1回だけ数え、あとで決着が直ったら勝ちの数だけ直す（revise）。
 // CPU 図鑑・実績・ゲームの自己ベストは今までどおり数えない（Claude の判断）。
 function noteLiveOver(rank, no, mountAt) {
   if (!S || !Array.isArray(rank)) return;
@@ -3140,7 +3140,7 @@ function noteLiveOver(rank, no, mountAt) {
   if (!(me >= 0)) return;
   const won = rank[me] === 1 && rank.some((v) => v !== 1);
   const withHuman = S.order.some((id) => id && id !== S.myId && !isCpu(id));
-  noteGame(`${S.code}:${S.gameId}:${S.round}:live${no}`, { won, withHuman, best: null, gameId: S.gameId });
+  noteGame(`${S.code}:${S.gameId}:${S.round}:live${no}`, { won, withHuman, best: null, gameId: S.gameId, revise: true }); // 行き違った失点で決着が直ったら勝ちの数も直す
 }
 
 // 決着したときの記録の知らせ（自己ベスト・CPU 図鑑・色の解放）は、決着のあいさつ（greet。最大1.9秒後に出て2.2秒見える）に上書きされないよう、

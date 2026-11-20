@@ -31,6 +31,7 @@ function load() {
   if (a?.cpus && typeof a.cpus === 'object') {
     for (const [k, v] of Object.entries(a.cpus)) if (typeof k === 'string' && Number.isInteger(v?.n) && v.n > 0) cpus[k] = { n: v.n, hard: v.hard === true };
   }
+  const seen = Array.isArray(a?.seen) ? a.seen.filter((x) => typeof x === 'string').slice(-20) : []; // 数えた対局（描き直しで2回数えない）
   const games = {};
   if (a?.games && typeof a.games === 'object') {
     for (const [k, v] of Object.entries(a.games)) {
@@ -44,7 +45,9 @@ function load() {
     hwins: Number.isInteger(a?.hwins) ? a.hwins : 0,
     best,
     recent: Array.isArray(a?.recent) ? [...new Set(a.recent.filter((x) => typeof x === 'string'))].slice(0, RECENT_MAX) : [],
-    seen: Array.isArray(a?.seen) ? a.seen.filter((x) => typeof x === 'string').slice(-20) : [], // 数えた対局（描き直しで2回数えない）
+    seen,
+    // 数えた対局ごとに、勝ちに数えたか（w: ゲームごとの勝ち・h: 人がいた対局の勝ち）。決着があとで直る毎フレーム動くゲーム（revise）だけが見る
+    won: Object.fromEntries(Object.entries(a?.won && typeof a.won === 'object' ? a.won : {}).filter(([k, v]) => seen.includes(k) && v && typeof v === 'object').map(([k, v]) => [k, { w: v.w === 1 ? 1 : 0, h: v.h === 1 ? 1 : 0 }])),
   };
 }
 function save(a) {
@@ -115,11 +118,26 @@ export function onRecords(fn) { watchers.add(fn); }
 // 対局者として決着を見た。key は対局ごとに1つ（同じ対局を2回数えない）。
 // won: 自分が勝った・withHuman: 自分のほかに人がいた（オンライン）・best: { game, rules, value }（自己ベストを取るゲームの、自分の席の数字）
 // beat: 倒した CPU の名前の一覧・hard: 強さ「つよい」の対局か（CPU 図鑑）・gameId: ゲームの id（ゲームごとの成績）
+// revise: 同じ対局がもう数えてあれば、遊んだ数はそのままで勝ちの数だけ今の結果に直す（エアホッケーの延長で決着が取り消され、あとで勝ちが変わったとき。
+//   2026-11-20 の Codex の点検。本人の承認。前は最初の決着の負けのまま直らなかった）。毎フレーム動くゲーム（main.js の noteLiveOver）だけが付ける
 // 新しい自己ベストなら isNew、初めて倒した CPU の名前を fresh で返す
-export function noteGame(key, { won, withHuman, best, beat = [], hard = false, gameId = null }) {
+export function noteGame(key, { won, withHuman, best, beat = [], hard = false, gameId = null, revise = false }) {
   const before = load();
-  if (before.seen.includes(key)) return { isNew: false, fresh: [] };
-  const a = { ...before, best: { ...before.best }, cpus: { ...before.cpus }, games: { ...before.games }, seen: [...before.seen, key].slice(-20) };
+  const res = { w: won ? 1 : 0, h: won && withHuman ? 1 : 0 };
+  if (before.seen.includes(key)) {
+    const prev = before.won[key];
+    if (!revise || !prev || (prev.w === res.w && prev.h === res.h)) return { isNew: false, fresh: [] };
+    const a = { ...before, games: { ...before.games }, won: { ...before.won, [key]: res } };
+    const g = typeof gameId === 'string' ? a.games[gameId] : null;
+    if (g) a.games[gameId] = { p: g.p, w: Math.max(0, Math.min(g.p, g.w + res.w - prev.w)) };
+    a.hwins = Math.max(0, a.hwins + res.h - prev.h);
+    save(a);
+    if (a.hwins > before.hwins) reportScores([{ id: WINS_LB, value: a.hwins }]);
+    watchers.forEach((fn) => fn(before, a));
+    return { isNew: false, fresh: [] };
+  }
+  const seen = [...before.seen, key].slice(-20);
+  const a = { ...before, best: { ...before.best }, cpus: { ...before.cpus }, games: { ...before.games }, seen, won: Object.fromEntries([...Object.entries(before.won), [key, res]].filter(([k]) => seen.includes(k))) };
   if (typeof gameId === 'string') {
     a.recent = [gameId, ...a.recent.filter((x) => x !== gameId)].slice(0, RECENT_MAX);
     const g = a.games[gameId];

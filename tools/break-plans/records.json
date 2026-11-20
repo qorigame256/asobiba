@@ -1,0 +1,44 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "tools/test-records.mjs"
+  ],
+  "cwd": "copy",
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/records.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-records.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 60,
+  "breaks": [
+    {
+      "name": "同じ対局の勝ちを直さない（revise を効かせない）",
+      "file": "app/js/records.js",
+      "old": "    if (!revise || !prev ||",
+      "new": "    if (true || !prev ||",
+      "expect": ["延長のあと勝ったら、負けを勝ちに直す（2回届いても1回）"]
+    },
+    {
+      "name": "revise が無くても同じ対局を直す",
+      "file": "app/js/records.js",
+      "old": "    if (!revise || !prev ||",
+      "new": "    if (!prev ||",
+      "expect": ["CPU だけ相手の勝ちは数えない"]
+    },
+    {
+      "name": "勝ちに直したあとも覚えている結果を変えない（2回目でまた足す）",
+      "file": "app/js/records.js",
+      "old": "won: { ...before.won, [key]: res } };",
+      "new": "won: { ...before.won } };",
+      "expect": ["延長のあと勝ったら、負けを勝ちに直す（2回届いても1回）"]
+    }
+  ]
+}
