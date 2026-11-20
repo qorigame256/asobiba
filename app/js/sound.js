@@ -22,6 +22,7 @@
 //   ★call interface-sounds / maximize_006          ★win interface-sounds / confirmation_004   ★lose digital-audio / phaserDown1
 //   ★draw_game music-jingles / jingles_PIZZI08
 // 勝ち・負け・正解・番が来た・ゴールは、2026-10-03 にも本人が試聴ページで聞いて選んでいた。
+// 音当ての o_do〜o_si（2026-11-20）は Claude がプログラムで作った音（tools/make-notes.mjs）。NAMES に入れず、wantSounds で音当てを開いたときだけ取る。
 // 和了は効果音でなく声で「ロン！」「ツモ！」と言う（SAY）。リーチも声で「リーチ！」（2026-10-04 本人の決定。前は鐘の音 impact-sounds / impactBell_heavy_000）。
 // 将棋の王手も声で「王手！」と言う（2026-10-07 詳細設定「王手の知らせ」。ありのときだけ）。
 //
@@ -97,6 +98,7 @@ function unlock() {
         .catch(() => { /* 読めない音は鳴らさないだけ */ });
     }
     preloadVoice([...Object.values(SAY), ...Object.values(GREET)]);
+    loadWanted();
   }
   if (ctx.state !== 'running') ctx.resume().catch(() => {});
   // iPhone は、画面に触れた流れの中で一度読み上げておかないと、あとから読み上げられない。
@@ -229,6 +231,27 @@ export function play(name, vol = 1) {
   src.connect(g).connect(ctx.destination);
   src.start();
 }
+
+// あとから取る音（2026-11-20。音当ての ド〜シ の7つ。NAMES に入れると、遊ばない人も最初に全部取ることになるため、そのゲームが呼んだときだけ取る）
+const wanted = new Set();
+const loading = new Set();
+export function wantSounds(names) {
+  for (const n of names) wanted.add(n);
+  if (ctx) loadWanted();
+}
+function loadWanted() {
+  for (const name of wanted) {
+    if (buffers[name] || loading.has(name)) continue;
+    loading.add(name);
+    fetch(`sounds/${name}.wav`)
+      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(r.status)))
+      .then((b) => ctx.decodeAudioData(b))
+      .then((buf) => { buffers[name] = buf; })
+      .catch(() => { loading.delete(name); /* 次に呼ばれたときもう一度取りに行く */ });
+  }
+}
+// その音がもう鳴らせるか（読み込み済みか）
+export const soundReady = (name) => !!buffers[name];
 
 // 文を声で言う（番が来たときの「○○さんのターン」・あいさつ・ビンゴ・かるた・旗揚げ）。text は文か、つないで読む部品の配列（旗揚げのお題）。
 // opts.cut なら同じ key で言いかけの声を止めてから言う。opts.rate はブラウザの読み上げで言うときの速さ。

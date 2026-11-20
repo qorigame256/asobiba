@@ -1,0 +1,74 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "app/fonts",
+    "app/voice",
+    "app/sounds",
+    "tools/test-logic.mjs",
+    "tools/font-chars.json",
+    "tools/font-texts.mjs",
+    "tools/voice-texts.mjs"
+  ],
+  "cwd": "copy",
+  "env": {
+    "QUICK": "1",
+    "SEED": "1"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 300,
+  "breaks": [
+    {
+      "name": "音当て: 問題の音が鳴る前でも押せる",
+      "file": "app/js/games/oto.js",
+      "old": "!(m.ms >= askOf(s0))",
+      "new": "!(m.ms >= 0)",
+      "expect": ["音当て: 問題の音が鳴る前は押せない"]
+    },
+    {
+      "name": "音当て: 同じ音が続く",
+      "file": "app/js/games/oto.js",
+      "old": "if (i > 0 && x === out[i - 1]) x =",
+      "new": "if (false) x =",
+      "expect": ["音当て: 同じ音は続けない"]
+    },
+    {
+      "name": "音当て: レとミの音のファイルを取りちがえる",
+      "file": "app/js/games/oto.js",
+      "old": "['o_do', 'o_re', 'o_mi',",
+      "new": "['o_do', 'o_mi', 'o_re',"
+    },
+    {
+      "name": "氷割り: 上の列だけが枠に乗っている",
+      "file": "app/js/games/koori.js",
+      "old": "if (ice[i] && isEdge(i))",
+      "new": "if (ice[i] && i < N)",
+      "expect": ["氷割り: 下の列の氷も枠に乗っている"]
+    },
+    {
+      "name": "氷割り: まん中もたたける",
+      "file": "app/js/games/koori.js",
+      "old": "i < N * N && i !== CENTER && ice[i]",
+      "new": "i < N * N && ice[i]",
+      "expect": ["氷割り: まん中はたたけない"]
+    },
+    {
+      "name": "氷割り: 次の人が負けになる",
+      "file": "app/js/games/koori.js",
+      "old": "loser: s.last.p }",
+      "new": "loser: (s.last.p + 1) % s.n }",
+      "expect": ["氷割り: ペンギンを落とした人の負け"]
+    }
+  ]
+}

@@ -3856,6 +3856,50 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .ck-edge { position: absolute; top: 0; bottom: 0; left: var(--cliff); width: 5px; background: #5a3d1e; }
 .board button.btn.ck-brake { display: block; width: min(100%, 420px); margin: 10px auto 0; padding: 18px; border-radius: 16px; background: #d9342b; color: #fff; font-size: 1.5rem; font-weight: 900; cursor: pointer; touch-action: manipulation; }
 
+/* 音当て（oto.js）。鍵盤はどのスキンでも白と黒の線（本物の鍵盤の色） */
+.ot-head { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.ot-wave { font-size: 1.8rem; transition: transform .15s; }
+.ot-wave.on { animation: ot-beat .5s ease-in-out infinite alternate; }
+@keyframes ot-beat { from { transform: scale(1); } to { transform: scale(1.3) rotate(-8deg); } }
+.ot-q b { font-size: 1.5em; color: var(--accent); }
+.ot-step { min-height: 1.4em; font-weight: 700; }
+.ot-mute { color: #c0392b; font-weight: 700; }
+.ot-keys { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; width: min(100%, 480px); margin: 4px auto 0; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+.board button.ot-key { height: clamp(110px, 32vw, 160px); background: #fff; border: 1.5px solid #8a8f99; border-radius: 0 0 9px 9px; box-shadow: inset 0 -6px 0 #e3e5ea; color: #222;
+  display: flex; align-items: flex-end; justify-content: center; padding: 0 0 12px; font: inherit; font-weight: 800; font-size: clamp(.85rem, 3.6vw, 1.1rem); cursor: pointer; }
+.board button.ot-key:active:not(:disabled) { background: #f0f1f4; box-shadow: inset 0 -2px 0 #e3e5ea; }
+.board button.ot-key:disabled { cursor: default; }
+.board button.ot-key.off { opacity: .55; }
+.board button.ot-key.ok { background: #2f8a4a; border-color: #2f8a4a; color: #fff; box-shadow: none; }
+.board button.ot-key.ng { background: #d9534f; border-color: #d9534f; color: #fff; box-shadow: none; }
+.board button.ot-key:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .ot-wave.on { animation: none; } }
+
+/* ペンギンの氷割り（koori.js）。水と氷はどのスキンでも同じ色 */
+.board.koori { width: min(100%, 460px); }
+.koori-pond { background: radial-gradient(circle at 50% 40%, #5aa9d6, #2c6f9e); border: 6px solid #8b6a43; border-radius: 14px; padding: 8px; margin: 8px auto 0; box-shadow: inset 0 0 18px rgba(0, 0, 0, .35); }
+.koori-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; touch-action: manipulation; }
+.koori-cell { aspect-ratio: 1; border-radius: 6px; background: linear-gradient(145deg, #ffffff, #cfeaf7 60%, #a9d4ea); border: 1.5px solid #e9f6fc; box-shadow: 0 3px 0 #7fb3cf;
+  display: grid; place-items: center; position: relative; padding: 0; font: inherit; }
+.board button.koori-cell { background: linear-gradient(145deg, #ffffff, #cfeaf7 60%, #a9d4ea); border: 1.5px solid #e9f6fc; box-shadow: 0 3px 0 #7fb3cf; border-radius: 6px; cursor: pointer; }
+.board button.koori-cell:hover { filter: brightness(1.04); }
+.koori-cell.mid { background: linear-gradient(145deg, #ffffff, #dff1fa); }
+.board .koori-cell.gone { background: transparent; border-color: transparent; box-shadow: none; }
+.board .koori-cell.mid.gone { background: transparent; }
+.board button.koori-cell.sel { outline: 3px solid #e0a400; outline-offset: -3px; background: linear-gradient(145deg, #fff6d6, #f6dc8a); }
+.board .koori-cell.warn { background: repeating-linear-gradient(135deg, #cfeaf7 0 6px, #f4b9b0 6px 10px); }
+.koori-cell.fell, .koori-cell.hit { animation: koori-sink .6s ease-in forwards; }
+.koori-cell.hit::after, .koori-cell.fell::after { content: ''; }
+@keyframes koori-sink { 0% { opacity: 1; transform: scale(1); background: linear-gradient(145deg, #ffffff, #cfeaf7 60%, #a9d4ea); } 100% { opacity: 0; transform: scale(.6) translateY(6px); } }
+.koori-cell.mid.fell { animation: koori-melt .6s ease-in forwards; } /* まん中は氷だけ消し、ペンギンは残して沈ませる */
+@keyframes koori-melt { 0% { background: linear-gradient(145deg, #ffffff, #dff1fa); box-shadow: 0 3px 0 #7fb3cf; } 100% { background: transparent; box-shadow: none; } }
+.koori-peng { font-size: clamp(1.6rem, 9vw, 2.4rem); line-height: 1; }
+.koori-peng.sink { animation: koori-peng .9s ease-in forwards; }
+.koori-peng.sink::after { content: '💦'; position: absolute; left: 50%; bottom: -4px; transform: translateX(-50%); font-size: .6em; }
+.koori-cell.mid .koori-peng { position: relative; }
+@keyframes koori-peng { 0% { transform: none; opacity: 1; } 30% { transform: rotate(-15deg) translateY(-6px); } 100% { transform: rotate(20deg) translateY(10px) scale(.8); opacity: .6; } }
+@media (prefers-reduced-motion: reduce) { .koori-cell.fell, .koori-cell.hit, .koori-peng.sink { animation: none; } .koori-cell.fell:not(.mid), .koori-cell.hit { opacity: 0; } .koori-peng.sink { opacity: .6; } }
+
 /* 押せないボタン（2026-11-17 見た目の点検）: どこに置いても押せないと分かるように。待合室の下に留めた「始める」（.dock）には効いていなかった。
    橙のボタンは薄くすると白い字が地に溶けて読めなかった（ダウトの「札をえらんでください」など）ので、薄い橙の地に濃い字にする。
    ファイルの最後に置くのは、同じ強さの「.○○ .cc-actions .btn:disabled { opacity: .4 }」より後に効かせるため */
