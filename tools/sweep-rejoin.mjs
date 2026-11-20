@@ -29,6 +29,9 @@ const snap = (page) => page.evaluate(() => {
     cls: (b?.className ?? '').replace('board ', ''), all: b?.querySelectorAll('*').length ?? -1, canvas: b?.querySelectorAll('canvas').length ?? -1,
     h: Math.round(b?.getBoundingClientRect().height ?? -1),
     status: document.querySelector('#status')?.textContent.trim().replace(/\s+/g, ' ').slice(0, 40) ?? '',
+    // 自分が観戦の側か（main.js の状態の欄の「観戦中です…」「観戦中: …」と、観戦の人の行「👀 …観戦中（…あなた…）」）。
+    // 席でなく観戦に戻っても盤は描けるので、盤の数だけでは見分けられない（2026-11-20 の Codex の点検）。エアホッケーなど状態の欄を描かないゲームでは見分けられない
+    spec: /観戦中です|観戦中: |観戦中（[^）]*あなた/.test(document.querySelector('#status')?.textContent ?? ''),
   };
 });
 
@@ -91,6 +94,8 @@ if (process.argv[1] && path.resolve(process.argv[1]) === SELF) {
     const g = GAMES[id];
     const guests = g.noCpu && (g.minPlayers ?? 2) > 2 ? g.minPlayers - 1 : 1; // CPU を入れられないゲームは、人だけで最低人数にする
     const out = path.join(outRoot, id);
+    // 同じ --out で前に流した結果を読まないよう、先に消す（play-two.mjs が結果を書けずに終わると、前の回の成功を読んで通っていた。2026-11-20 の Codex の点検）
+    fs.rmSync(path.join(out, 'result.json'), { force: true });
     const args = ['tools/play-two.mjs', id, '--script', SELF, '--out', out, '--timeout', '80', '--guests', String(guests), ...(opt.app ? ['--app', path.resolve(opt.app)] : [])];
     spawn(process.execPath, args, { cwd: ROOT, stdio: 'ignore' }).on('exit', () => {
       let r = null;
@@ -100,6 +105,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === SELF) {
       if (!v) flags.push('止まった: ' + String(r?.error ?? '結果が無い').split('\n')[0].slice(0, 140));
       else {
         if (v.homeAll !== 0) flags.push('ホームで盤が空になっていない');
+        if (v.back.spec && !v.before.spec) flags.push('観戦の側に戻った');
         if (v.back.all <= 0) flags.push('戻った盤が空');
         else if (v.before.h >= 40 && v.back.h < 40) flags.push('戻った盤が低い');
         if (v.before.canvas > 0 && v.back.canvas === 0 && v.back.cls === v.before.cls) flags.push('戻った盤に canvas が無い');

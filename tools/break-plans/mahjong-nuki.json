@@ -1,0 +1,30 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "tools/test-mahjong.mjs"
+  ],
+  "cwd": "copy",
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/mahjong.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-mahjong.mjs"
+  ],
+  "failPattern": "^NG  (抜いた北へのロンで[^ ]*)",
+  "timeoutSec": 120,
+  "breaks": [
+    {
+      "name": "抜いた北へのロンで、取られた北を抜いた人の側から外さない",
+      "file": "app/js/games/mahjong.js",
+      "old": "      if (src === 'nuki') h.nuki[from] = h.nuki[from].filter((x) => x !== id);\n",
+      "new": "",
+      "expect": ["抜いた北へのロンで、取られた北は抜いた人の抜きドラから外れる"]
+    }
+  ]
+}

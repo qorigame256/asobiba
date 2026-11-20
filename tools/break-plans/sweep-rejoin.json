@@ -23,7 +23,7 @@
     "tools/sweep-rejoin.mjs",
     "yuki"
   ],
-  "failPattern": "^★ (\\S+?)（",
+  "failPattern": "^★ (\\S+?)（.*(?:戻った盤が空|戻った盤が低い|戻った盤に canvas が無い)",
   "timeoutSec": 150,
   "breaks": [
     {

@@ -11,6 +11,7 @@
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { ROOT, startServer } from './play-common.mjs';
+import { BROKER_URL } from '../app/js/net.js'; // 測る先はアプリと同じ中継サーバー（別々に書くと、替えたときに古い方を測る。2026-11-20 の Codex の点検）
 const ver = Number(process.argv[2] ?? 4);
 const require = createRequire(import.meta.url);
 const modDirs = [process.env.HEADLESS_SHOT_MODULES, path.resolve(ROOT, '..', 'Claudeの使い道', 'tools', 'screen-check', 'node_modules')].filter(Boolean);
@@ -25,8 +26,7 @@ await page.goto(base);
 await page.waitForFunction(() => typeof mqtt !== 'undefined');
 const plans = JSON.parse(process.env.PLANS ?? '[[5,6],[9,6],[12,6],[15,6],[25,6],[50,6]]'); // [1秒あたりの通数, 秒]
 try {
-  const out = await page.evaluate(async ({ plans, ver, two, padLen, burst }) => {
-    const URL = 'wss://broker.emqx.io:8084/mqtt';
+  const out = await page.evaluate(async ({ plans, ver, two, padLen, burst, URL }) => {
     const topic = 'asobiba-q7m/ratetest/' + Math.random().toString(36).slice(2, 10);
     const mk = (name) => new Promise((res, rej) => {
       const c = mqtt.connect(URL, { clientId: 'rt_' + name + '_' + Math.random().toString(36).slice(2, 8), clean: true, keepalive: 30, reconnectPeriod: 0, connectTimeout: 10000, protocolVersion: ver });
@@ -83,7 +83,7 @@ try {
     }
     pub.end(true); sub.end(true);
     return res;
-  }, { plans, ver, two: !!process.env.TWO, padLen: Number(process.env.PAD ?? 150), burst: Math.max(1, Number(process.env.BURST ?? 1)) });
+  }, { plans, ver, two: !!process.env.TWO, padLen: Number(process.env.PAD ?? 150), burst: Math.max(1, Number(process.env.BURST ?? 1)), URL: BROKER_URL });
   for (const r of out) console.log(JSON.stringify(r));
 } finally {
   await browser.close();

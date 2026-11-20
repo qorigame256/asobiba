@@ -354,6 +354,17 @@ if (!TESTDATA || !fs.existsSync(TESTDATA)) {
     const pass = act(mk(), { a: 'pass', p: 1 });
     check('だれもロンしなければ一発が消える', pass?.h.ippatsu[1] === false && pass.h.melds[0][0].type === 'kakan');
   }
+  // 3人麻雀で抜いた北へのロン: 取られた北は抜いた人の抜きドラから外れ、和了の牌（end.win）にだけ残る（2026-11-20 の Codex の点検。
+  // test-mahjong-play.mjs の無作為の対局ではこの場面がまず起きず、外さなくしても落ちなかった）
+  {
+    const s = table(['19m19p19s1235677z4z', '123p456p789s111s4z', ''], 3);
+    s.h.riichi[1] = 1; // 北の単騎待ちに役を付ける
+    const x = act(s, { a: 'nuki', p: 0 });
+    check('北を抜くと確認が開き、北待ちの人はロンできる', x?.h.phase === 'claim' && x.h.claim.options[1]?.includes('ron'), `phase=${x?.h.phase}`);
+    const end = x && act(x, { a: 'ron', p: 1 });
+    const win = end?.h.end?.win;
+    check('抜いた北へのロンで、取られた北は抜いた人の抜きドラから外れる', end?.h.end?.type === 'ron' && T.kindOf(win) === E.NORTH && !end.h.nuki[0].includes(win), `type=${end?.h.end?.type} nuki=${end?.h.nuki[0]}`);
+  }
 
   // 3. 役の早見表（2026-10-07）。表の役の名前と翻数が、エンジンで実際に数えた翻数と食い違わないか
   section('役の早見表');

@@ -55,6 +55,13 @@
       "old": "const WINDOW_MS = 1000;",
       "new": "const WINDOW_MS = 500;",
       "expect": ["見張り: 1秒に25通の qos 0 は、1秒に8通だけ送る"]
+    },
+    {
+      "name": "本物の送り口（send）から見張りを外す",
+      "file": "app/js/net.js",
+      "old": "send(msg, qos = 1) { if (allow(qos)) client.publish(",
+      "new": "send(msg, qos = 1) { if (allow(qos) || true) client.publish(",
+      "expect": ["見張り: send で続けて送った qos 0 は8通だけ中継サーバーへ出す"]
     }
   ]
 }

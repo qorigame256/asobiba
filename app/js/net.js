@@ -3,7 +3,7 @@
 // アカウント登録が要らない代わりに、部屋コードを知っている人なら誰でもやり取りを見られる（ゲームの手しか流さない）。
 // mqtt.js は index.html で CDN から読み込み、グローバル変数 mqtt として使う。
 
-const BROKER_URL = 'wss://broker.emqx.io:8084/mqtt';
+export const BROKER_URL = 'wss://broker.emqx.io:8084/mqtt'; // tools/net-rate.mjs もここから読む（中継サーバーを替えたら、測る先も一緒に替わるように）
 const TOPIC_PREFIX = 'asobiba-q7m/v1/room/';
 
 // 送る数の見張り（2026-11-19。本人の選択「送る数を上限より下げる」）。

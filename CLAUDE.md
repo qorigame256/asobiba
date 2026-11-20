@@ -230,7 +230,7 @@
 - `tools/test-shogi.mjs` … 将棋のルールと CPU の自動確認（`node tools/test-shogi.mjs`。数秒）。
 - `tools/test-mahjong.mjs` … 麻雀の役・符・点数・向聴数を元のアプリの対照表と全件突き合わせ、
   進行の決まり（フリテン・喰い替え・頭ハネなど）を確かめる（数秒）。対照表は公開リポジトリに写さず、あちらのフォルダから直接読む
-  （場所は Git に入れない `tools/local-paths.json` の `mahjongTestdata`。無ければ突き合わせだけ飛ばす）。
+  （場所は Git に入れない `tools/local-paths.json` の `mahjongTestdata`。無ければ突き合わせだけ飛ばす）。壊す確認の計画は `tools/break-plans/mahjong-nuki.json`（抜いた北へのロン）。
 - `tools/test-mahjong-play.mjs` … 麻雀を CPU どうし・無作為の手で48局と、トビなしの6局・1局だけの12局を最後まで打ち、点数の合計・牌の数などが崩れないかを見る（3分ほど）。
 - `tools/test-hockey.mjs` … エアホッケーの CPU どうしを80試合（3人の六角形の盤は30試合）打たせ、パックが壁を抜けない・決着が付く・強さの順を確かめる（数秒）。
 

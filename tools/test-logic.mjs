@@ -12657,6 +12657,20 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   let dropped = 0;
   for (t = 0; t < 10000; t += 160) if (!allow(0)) dropped++;
   assert.equal(dropped, 0, '見張り: 160ms おきの qos 0 は全部送る');
+  // 本物の送り口（connectRoom の send）が見張りを通しているか（2026-11-20 の Codex の点検。上は見張りを単独で呼ぶだけで、send から外しても落ちなかった）。
+  // mqtt.js の代わりに、publish を数えるだけの物を置く。続けて送るので、全部が直近1秒に入る
+  const pub = [];
+  globalThis.mqtt = { connect: () => ({ on() {}, subscribe() {}, publish: (topic, body, o) => pub.push(o.qos), end() {} }) };
+  try {
+    const { connectRoom } = await import('../app/js/net.js');
+    const room = connectRoom('test', 'me', () => {}, () => {});
+    for (let i = 0; i < 20; i++) room.send({ type: 'x' }, 0);
+    assert.equal(pub.length, 8, '見張り: send で続けて送った qos 0 は8通だけ中継サーバーへ出す');
+    room.send({ type: 'x' });
+    assert.deepEqual(pub.slice(8), [1], '見張り: send の qos 1 はいっぱいでも出す');
+  } finally {
+    delete globalThis.mqtt;
+  }
   console.log('net OK');
 }
 

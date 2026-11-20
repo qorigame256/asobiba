@@ -533,6 +533,9 @@ export default {
     const draw = () => this.render(root, s, o);
     const shown = h.phase === 'end' && h.result.kind === 'show';
     const potTotal = h.total.reduce((a, b) => a + b, 0);
+    // 優勝した人の札を光らせる。同点優勝なら全員（result の winners。2026-11-20 の Codex の点検。前は ranking の先頭の1人だけだった）
+    const fin = this.result(s);
+    const tops = fin ? (fin.winners ?? [fin.winner]) : [];
 
     root.innerHTML = '';
     root.className = 'board pk';
@@ -542,7 +545,7 @@ export default {
     for (let k = me === null ? 0 : 1; k < s.n; k++) {
       const p = ((me ?? 0) + k) % s.n;
       const chip = document.createElement('div');
-      chip.className = 'cc-opp' + (this.turn(s) === p ? ' turn' : '') + (s.ranking?.[0] === p ? ' won' : '');
+      chip.className = 'cc-opp' + (this.turn(s) === p ? ' turn' : '') + (tops.includes(p) ? ' won' : '');
       const name = document.createElement('div');
       name.className = 'cc-opp-name';
       name.textContent = (h.dealer === p ? 'Ⓓ ' : '') + o.names[p];

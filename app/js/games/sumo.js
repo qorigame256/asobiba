@@ -331,6 +331,7 @@ function mount(root, opts) {
     const wasPhase = game.phase;
     const wasLast = game.last;
     const wasRound = game.round;
+    const wasEp = ep;
     ep = d.ep;
     game = { ep, round: d.g.round, wins: d.g.wins, phase: d.g.phase, phaseT: d.g.phaseT, last: d.g.last, over: !!d.g.over };
     ring.t = d.t;
@@ -340,7 +341,8 @@ function mount(root, opts) {
     });
     if (game.round !== wasRound || (wasPhase === 'show' && game.phase === 'count')) shown = startRound(n);
     if (game.phase === 'show' && (wasPhase !== 'show' || wasLast !== game.last)) play(game.last === me ? 'goal' : 'pop');
-    if (game.over && !wasOver) finish();
+    // 前の試合の決着を出したまま、つながっていない間に次の試合（ep が進んだ）も決着していたときも数える（2026-11-20 の Codex の点検。前は wasOver だけを見て、その試合を記録に数えず決着の画面も前の試合のままだった）
+    if (game.over && (!wasOver || ep !== wasEp)) finish();
     if (!game.over && wasOver) panel.innerHTML = '';
     showStatus();
   }

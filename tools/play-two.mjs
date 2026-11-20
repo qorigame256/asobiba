@@ -138,7 +138,11 @@ async function menu(page, text) {
   await page.locator('button', { hasText: text }).first().click();
 }
 
+// 終わり方は1回だけ（全体の上限の時計が先に走ったあとで続きの関数が返っても、成功として書き直して終了コード 0 で出ないように。2026-11-20 の Codex の点検）
+let finishing = false;
 const finish = async (exitCode) => {
+  if (finishing) return;
+  finishing = true;
   fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify(result, null, 1));
   console.log(`${result.ok ? 'できた' : '止まった'}  ${game.name}（${gameId}）・部屋 ${result.code ?? '—'}・人 ${pages.length}人`);
   if (result.error) console.log(`  理由: ${result.error}`);

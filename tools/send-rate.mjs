@@ -11,7 +11,7 @@
 //   → 人ごとに、測った間の「送ろうとした数・送った数（1秒あたりと、直近1秒の最多）・見張りが捨てた数（qos ごと）・種類ごとの1秒あたり・ほかの人から届いた数（種類ごと）・
 //   描き替えの回数」を出す。種類の名前は、live はゲームの中の種類（live:s など）、stream は中身の鍵（雪合戦の stream:a,t など）まで付ける。
 // 操作（人の端末ごと。NO_INPUT でなければ）: エアホッケー・弾幕回避はマウスを自分の側で回し続ける（弾幕回避は押したまま）/ 紙相撲は TAP_HZ でトン /
-//   雪合戦は 0.35秒ごとに盤の上の側と下の側を交互に押す（歩く・投げる）。ほかのゲームは操作しない。
+//   雪合戦は 0.35秒ごとに盤の上の側と下の側を交互に押す（歩く・投げる）/ ミニゴルフは盤のまんなかから向きをばらばらに引いて離す（打てるたびに打つ）。ほかのゲームは操作しない。
 // 見方: 「直近1秒の最多」が 8 以下なら見張りは1通も捨てない（9通目の qos 0 から捨てる）。捨てた数が 0 でなければ、そのゲームの送る間隔を見直す。
 // 終了コード: play-two.mjs と同じ（0＝測れた）。
 
@@ -40,6 +40,17 @@ async function drive(game, page, stopAt, tapHz) {
     if (game === 'danmaku') await page.mouse.up();
   } else if (game === 'sumo') {
     while (Date.now() < stopAt) { await page.mouse.click(cx, box.y + box.height / 2); await sleep(1000 / tapHz); }
+  } else if (game === 'golf') {
+    // 盤のまんなかを押して向きをばらばらに引いて離す（打てない間の引っ張りはゲームが無視する）。転がる間の位置の送り（golf.js の loop）を起こすため。2026-11-20 の Codex の点検
+    const cy = box.y + box.height / 2;
+    while (Date.now() < stopAt) {
+      const a = Math.random() * Math.PI * 2, r = Math.min(box.width, box.height) * (0.15 + Math.random() * 0.15);
+      await page.mouse.move(cx, cy);
+      await page.mouse.down();
+      for (let i = 1; i <= 6; i++) { await page.mouse.move(cx + (Math.cos(a) * r * i) / 6, cy + (Math.sin(a) * r * i) / 6); await sleep(16); }
+      await page.mouse.up();
+      await sleep(400);
+    }
   } else if (game === 'yuki') {
     let i = 0;
     while (Date.now() < stopAt) {
