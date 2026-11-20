@@ -2525,7 +2525,8 @@ function renderPage() {
       hidden: S.order.map((id) => !!S.hidden?.includes(id)), // 「この人を隠す」を押した人の席（その人の言葉と絵を出さない）
       watching: myPlayer() === SPECTATOR && opts.me !== SPECTATOR, // 観戦の人がほかの人の画面を見ている（me はその人の番号）
       // 見た目だけの中身（ほかの人の位置など）を送りっぱなしにする。届いた側ではゲームの onStream が受け取る
-      stream: (d) => { if (S?.mode === 'online') send({ type: 'stream', gameId: S.gameId, round: S.round, d }, 0); },
+      // important（2026-11-20）: 届くまで送り直す（qos 1。net.js の見張りにも捨てられない）。雪合戦の雪玉が乗った知らせ。続けて送る間隔の中でだけ使う（CLAUDE.md の中継サーバーの項）
+      stream: (d, important) => { if (S?.mode === 'online') send({ type: 'stream', gameId: S.gameId, round: S.round, d }, important ? 1 : 0); },
     });
   }
   game.render(board, st, opts);

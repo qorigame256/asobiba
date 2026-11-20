@@ -59,15 +59,21 @@ const E_HIT = 0.9;
 const STEP = 1 / 240;
 // オンラインで位置を送る間隔。2026-11-19 に 40ms から広げた（本人の選択「送る数を上限より下げる」）: 中継サーバーは1つの接続から区切られた1秒に10通までしか配らず、
 //   超えた分は大事な知らせ（ゴール・持ち主を渡す知らせ・部屋の here や state）ごと捨てる（net.js の「送る数の見張り」。実測は tools/net-rate.mjs）。
-//   40ms（1秒に25通）のころも、相手に届いていたのは1秒に約10通だけだった。位置（1秒に約6通）＋遅れを測る合図（PING_MS おきの ping と、その返事の pong）＋部屋の ping で、
-//   1秒に8通（net.js の QOS0_PER_WINDOW）より下に収める。**縮めるときは、合図と合わせた数を数え直す**（4人では pong がほかの3台ぶん要る）。
-const SEND_MS = 160;
-const PING_MS = 2000; // 遅れを測る合図を送る間隔（2026-11-19 に 1000ms から広げた。上と同じわけ）
+//   40ms（1秒に25通）のころも、相手に届いていたのは1秒に約10通だけだった。位置（1秒に5通）＋遅れを測る合図（ping と、その返事の pong で合わせて1秒に約1通）＋部屋の ping で、
+//   どの1秒をとっても8通（net.js の QOS0_PER_WINDOW）を超えないようにする。**縮めるときは、合図と合わせた数を tools/send-rate.mjs で数え直す**。
+//   2026-11-20 に 160ms から 200ms に広げた（本人の承認「推奨どおり直す」）: 1秒に60回描き替える端末では、160ms は次の描き替えの 167ms おき（1秒に6通）になり、
+//   合図・ゴール・部屋の ping と重なった1秒に10通まで送って、見張りが12秒に9通捨てていた（11-19 に測った 6.8通は、描き替えが1秒に約4.5回しかないブラウザで、予備の時計の 200ms おきだった）。
+//   比べるのは「>=」（「>」だと 200ms が次の描き替えの 217ms おきになる）。
+const SEND_MS = 200;
+// 遅れを測る合図（ping）を送る間隔。ping はほかの端末の数だけ pong が返るので、ほかの端末の数を掛けて広げる（2026-11-20。上と同じわけ。
+// 4人とも人のとき、前の形では pong だけで1秒に1.5通になった）。どの端末も ping と pong を合わせて1秒に約1通で、遅れの測り直しは何人でも1秒に約0.5回。
+// 2026-11-19 に 1000ms から 2000ms に広げた
+const PING_MS = 2000;
 // 2026-10-26 本人の声「3人だととても重い」への対策（Claude の判断。本物の中継サーバーでは測れていない）:
 //   パックを1つも持っていない端末は、マレットの位置を SEND_IDLE_MS おきにしか送らない（ほかの陣地のマレットは見た目だけで、当たりには使わないため）。
 //   3人では送る端末が3台になり、中継サーバーを通る数が2人の1.5倍以上になるので、まずそれを減らす。
 //   ほかの端末が持っているパックの位置は、届くたびに飛び移らず、なめらかに寄せる（2026-11-03 に「差の半分ずつ寄せる」から下の OFFSET_T の形に替えた）。
-const SEND_IDLE_MS = 200; // 2026-11-19 に 90ms から広げた（SEND_MS と同じわけ）
+const SEND_IDLE_MS = 250; // 2026-11-19 に 90ms から 200ms、11-20 に 250ms へ広げた（SEND_MS と同じわけ）
 // 2026-11-03 本人の声「まだラグい、パックがワープする」への対策（Claude の判断。本物の中継サーバーでは測れていない）:
 //   - ほかの端末から位置が届いて直すとき、計算に使う位置はすぐ直し、画面に描く位置だけを前の見た目から OFFSET_T 秒ほどでなめらかに寄せる（q.ox・q.oy）。
 //     前は差の半分ずつ寄せ、0.15 より離れていたら飛び移っていた（相手が打ったパックは遅れの分だけ大きくずれるので、飛び移って見えた）。SNAP_FAR より離れていたら飛び移る。
@@ -1385,7 +1391,7 @@ function mount(root, opts) {
     if (dv.length) {
       if (!net.started && now - net.lastHi > 500) { net.lastHi = now; opts.send({ k: 'hi', c: dv }); }
       // 遅れを測る合図の時刻は performance.now()（描き替えの時刻 now は古いことがあり、遅れが大きく出る）
-      if (now - net.lastPing > PING_MS) { net.lastPing = now; opts.send({ k: 'ping', t: performance.now(), id: net.id }); }
+      if (now - net.lastPing > PING_MS * Math.max(1, needed().length)) { net.lastPing = now; opts.send({ k: 'ping', t: performance.now(), id: net.id }); }
       const t = performance.now();
       const quiet = net.started && needed().some((p) => t - (net.heard[p] ?? 0) > 3000);
       if (quiet !== net.quietShown) { net.quietShown = quiet; showStatus(); }
@@ -1435,7 +1441,7 @@ function mount(root, opts) {
     }
     bumpSound(ev);
     const holding = net.owners.some((o, i) => dv.includes(o) || (net.handed[i] === o && net.said[o]?.[i] !== o));
-    if (dv.length && now - net.lastSend > (holding ? SEND_MS : SEND_IDLE_MS)) sendState(now, false, dv);
+    if (dv.length && now - net.lastSend >= (holding ? SEND_MS : SEND_IDLE_MS)) sendState(now, false, dv);
   }
 
   function sendState(now, handoff, dv) {

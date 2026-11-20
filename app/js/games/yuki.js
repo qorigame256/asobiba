@@ -11,7 +11,7 @@
 //   - CPU は弱め: 1.6〜3秒に1回（自分の陣地の壁でふさがれているときは投げずに場所を変える）、生きている相手を1人選んで横に ±0.13・縦に ±0.08 ずらして投げ、近づく雪玉を35%だけ横へよける。半分は壁の裏へ歩く。
 //   - 歩く速さ・雪玉の速さ・壁の置き場所は下の数のとおり。雪玉が自分の陣地の端から相手の陣地の端まで行くのに約1.4秒かかるので、見てからよけられる。
 // 作り（通信。弾幕回避・2色爆弾と同じ考え方で、ホストが有利にならないようにした）:
-//   - 自分の位置と投げた雪玉は見た目だけの中身として送りっぱなしにする（o.stream / onStream。位置は0.15秒ごと（SEND_MS）、雪玉は投げた瞬間）。
+//   - 自分の位置と投げた雪玉は見た目だけの中身として送りっぱなしにする（o.stream / onStream。0.2秒ごと（SEND_MS）。雪玉は投げた瞬間でなく、次の位置の知らせに相乗りさせる。SEND_MS の所のわけ）。
 //   - 当たったかは「当てられた人の端末」が自分の画面で決め、手 { t: 'hit', k, by, b } で送る（自分の画面でよけたら当たらない）。
 //     k は何回目の当たりか（局面の hits[p] と違う手は弾く。同じ当たりが2回届いても1回だけ数える）、by は投げた人、b は雪玉の印（ほかの画面でその雪玉を消す。同じ印の当たりは1人分だけ数える＝局面の used）。
 //     局面の当たりの数が端末の数より少ないあいだは0.5秒ごとに送り直す（2色爆弾・金魚すくいと同じわけ。ゲストの手がすれ違って消えることがある）。
@@ -38,8 +38,13 @@ export const SAFE_MS = 1500;
 const READY_MS = 3000;
 const GRACE_MS = 1500;
 // 位置を送る間隔。2026-11-19 に 100ms から広げた（本人の選択「送る数を上限より下げる」）: 中継サーバーは1つの接続から区切られた1秒に10通までしか配らず、
-// 超えた分は当たりの手ごと捨てる（net.js の「送る数の見張り」）。位置（1秒に約7通）と投げた雪玉の知らせで、net.js の QOS0_PER_WINDOW（8通）を大きく超えないようにする
-const SEND_MS = 150;
+// 超えた分は当たりの手ごと捨てる（net.js の「送る数の見張り」）。位置は1秒に5通にして、当たりの手・部屋の ping と重なってもどの1秒も net.js の QOS0_PER_WINDOW（8通）を超えないようにする。
+// 2026-11-20 に 150ms から 200ms に広げ、投げた雪玉を別に送るのをやめて位置の知らせに相乗りさせた（本人の承認「推奨どおり直す」）: 1秒に60回描き替える端末では
+// 位置だけで1秒に6通、ホストは CPU の雪玉も1つずつ送って直近1秒に13通まで送り、見張りが12秒に30通捨てていた（tools/send-rate.mjs）。捨てられた雪玉はほかの画面に出ず、当たらなかった。
+// 相乗りの雪玉は送る時のいまの位置で送る（投げた時の位置で送ると、待った分だけ相手の画面で遅れて届く。いまの位置なら届く時刻は前と同じで、
+// 相手の画面では投げた直後の最大0.2秒ぶんが見えず、少し進んだ所から出てくる）。待つ間に壁などで消えた雪玉は送らない。
+// 雪玉が乗った知らせだけは届くまで送り直す送り方（qos 1）にする（直した最初の形で、当たりの手・部屋の ping と重なった1秒に雪玉の乗った1通が捨てられたため）
+const SEND_MS = 200;
 const RESEND_MS = 500;
 export const TEAM = ['赤', '白'];
 const TEAM_COLOR = ['#e04b3c', '#f4f4f4'];
@@ -371,7 +376,7 @@ function addBall(b, send) {
   ui.ids.add(b.id);
   if (ui.ids.size > 600) ui.ids = new Set([...ui.ids].slice(-300));
   ui.balls.push(b);
-  if (send) ui.cur.o.stream({ t: [[b.from, b.id, +b.x.toFixed(3), +b.y.toFixed(3), +b.vx.toFixed(3), +b.vy.toFixed(3)]] });
+  if (send) ui.outBalls.push(b); // 次の位置の知らせに相乗りさせる（SEND_MS の所のわけ）
 }
 
 function step() {
@@ -421,13 +426,16 @@ function step() {
     g.dx += (g.x - g.dx) * 0.25;
     g.dy += (g.y - g.dy) * 0.25;
   }
-  // 位置を送る（自分と、ホストなら CPU の分も）
-  if (live && now - ui.lastSend > SEND_MS) {
+  // 位置を送る（自分と、ホストなら CPU の分も）。前の知らせのあとに投げた雪玉も、まだ盤にあればいまの位置で一緒に送る
+  if (live && now - ui.lastSend >= SEND_MS) {
     ui.lastSend = now;
     const a = [];
     if (ui.self && !ui.out) a.push([ui.me, +ui.self.x.toFixed(3), +ui.self.y.toFixed(3)]);
     for (const p of cpus) { const c = sims.get(simKey(s, p)); a.push([p, +c.x.toFixed(3), +c.y.toFixed(3)]); }
-    if (a.length) o.stream({ a });
+    const t = ui.outBalls.filter((b) => ui.balls.includes(b)).map((b) => [b.from, b.id, +b.x.toFixed(3), +b.y.toFixed(3), +b.vx.toFixed(3), +b.vy.toFixed(3)]);
+    ui.outBalls = [];
+    if (t.length) o.stream({ a, t }, true); // 雪玉が乗った知らせは届くまで送り直す（見張りに捨てられると、その雪玉はほかの画面に出ず当たらない）。数は位置の 200ms おきの中に収まる
+    else if (a.length) o.stream({ a });
   }
   if (now - ui.lastHitSend > RESEND_MS) sendHit(false);
 }
@@ -644,12 +652,12 @@ export default {
       key, canvas, ctx: canvas.getContext('2d'), chips, wrap, me, cur: { s, o }, scale: 300, team, flip: team === 1,
       self: me === null ? null : { ...spawnOf(me, s.n) }, out: me !== null && s.dead[me],
       hits: me === null ? [] : Array(s.hits[me]).fill(null), safeUntil: 0, lastThrow: 0, thrown: 0, tag: Math.random().toString(36).slice(2, 6), // 雪玉の印の頭（読み込み直しても前の印と重ならないように）
-      balls: [], ids: new Set(), puffs: [], ghosts: new Map(), blink: new Map(),
+      balls: [], outBalls: [], ids: new Set(), puffs: [], ghosts: new Map(), blink: new Map(),
       last: performance.now(), lastSend: 0, lastHitSend: 0,
       calm: !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
     };
     if (prev) {
-      for (const k of ['self', 'safeUntil', 'lastThrow', 'thrown', 'tag', 'balls', 'ids', 'ghosts', 'blink']) ui[k] = prev[k];
+      for (const k of ['self', 'safeUntil', 'lastThrow', 'thrown', 'tag', 'balls', 'outBalls', 'ids', 'ghosts', 'blink']) ui[k] = prev[k];
       if (prev.hits.length >= ui.hits.length) ui.hits = prev.hits;
       ui.out = ui.out || ui.hits.length >= livesOf(s);
     }

@@ -12621,7 +12621,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   t = 1000; // 最初の8通が1秒を過ぎた。残っているのは 0.5秒のときの qos 1 の2通
   for (let i = 0; i < 6; i++) assert.equal(allow(0), true, '見張り: 古い分が1秒を過ぎたら送る');
   assert.equal(allow(0), false, '見張り: qos 1 の2通も数に入るので、qos 0 は6通まで');
-  // 1秒に8通より少ない送り（エアホッケーの今の速さ 160ms）は1通も捨てない
+  // 1秒に8通より少ない送り（160ms おき＝1秒に6.25通。位置を続けて送るゲームは 2026-11-20 から 200ms おき）は1通も捨てない
   t = 0;
   allow = sendBudget(() => t);
   let dropped = 0;
