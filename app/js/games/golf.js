@@ -225,7 +225,7 @@ function draw() {
   s.pl.forEach((Q, p) => {
     if (p === me || Q.done || Q.h !== h) return;
     const live = ui.ghosts.get(p);
-    const pos = live && live.h === h && now() - live.at < 1500 ? live : { x: Q.x / U, y: Q.y / U };
+    const pos = live && live.h === h && now() - live.at < 1500 ? ghostPos(live) : { x: Q.x / U, y: Q.y / U };
     ball(ctx, k, pos.x, pos.y, SEAT_COLORS[p % SEAT_COLORS.length], 0.45);
   });
   // 自分の玉
@@ -267,6 +267,12 @@ function draw() {
   }
 }
 
+// ほかの人の玉を描く位置: 前の知らせの位置から今の知らせの位置へ 200ms でつなぐ
+function ghostPos(g) {
+  const t = Math.min(1, (now() - g.at) / 200);
+  return { x: g.px + (g.x - g.px) * t, y: g.py + (g.y - g.py) * t };
+}
+
 function ball(ctx, k, x, y, color, alpha) {
   ctx.globalAlpha = alpha;
   ctx.beginPath(); ctx.arc(x * k, y * k, BALL_R * k, 0, Math.PI * 2);
@@ -281,7 +287,8 @@ function loop(token) {
   if (ui.sim) {
     const { o } = ui.cur;
     const i = Math.min(ui.sim.frames.length - 1, Math.floor((now() - ui.sim.at) / (1000 / 30)));
-    if (now() - ui.lastStream > 120 && ui.sim.frames[i]) {
+    // 200ms おき（1秒に5通）。打った手・部屋の ping と重なっても中継サーバーの上限（1秒に10通・net.js の見張りは8通）に収めるため。ほかの位置を送るゲームと同じ間隔
+    if (now() - ui.lastStream >= 200 && ui.sim.frames[i]) {
       ui.lastStream = now();
       const [x, y] = ui.sim.frames[i];
       o.stream?.({ g: [ui.sim.h, +x.toFixed(3), +y.toFixed(3)] });
@@ -452,7 +459,11 @@ export default {
     if (!ui || from === ui.me || !Array.isArray(d?.g)) return;
     const [h, x, y] = d.g.map(Number);
     if (![h, x, y].every(Number.isFinite)) return;
-    ui.ghosts.set(from, { h, x: clamp(x, 0, 1), y: clamp(y, 0, H), at: now() });
+    // 前の知らせの位置（px, py）から 200ms かけて新しい位置へ動かして描く（送るのが 200ms おきなので、跳ばずにつながる）
+    const old = ui.ghosts.get(from);
+    const prev = old && old.h === h && now() - old.at < 1500 ? ghostPos(old) : null;
+    const nx = clamp(x, 0, 1), ny = clamp(y, 0, H);
+    ui.ghosts.set(from, { h, x: nx, y: ny, px: prev ? prev.x : nx, py: prev ? prev.y : ny, at: now() });
   },
 
   render(root, s, o) {
