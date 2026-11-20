@@ -20,6 +20,7 @@
 //     --size <幅x高さ>     画面の大きさ（既定 390x844）
 //     --timeout <秒>       全体の上限（既定 120）
 //     --name <名前>        部屋で名乗る名前（既定「かくにん」）
+//     --app <フォルダ>     見せるフォルダ（既定 app/。本体を触らずに、一部を書き換えた写しで確かめるとき。play-two.mjs の --app と同じ）
 //   node tools/play-shot.mjs --list [ゲーム]   ゲームの id と名前を出す。ゲームを付けると、そのゲームの詳細設定の鍵と選べる値を出す
 //
 // 続きの操作で使える目印: 盤は #board、下の段は #controls、「始める」「もう一回」などの大きなボタンは #dock、上の知らせは #status。
@@ -38,7 +39,7 @@ const HS = process.env.HEADLESS_SHOT || path.resolve(ROOT, '..', 'Claudeの使�
 
 // ---------- 引数 ----------
 const argv = process.argv.slice(2);
-const opt = { rules: [], cpus: 0, local: false, start: true, steps: null, out: null, size: null, timeout: null, name: 'かくにん', list: false };
+const opt = { rules: [], cpus: 0, local: false, start: true, steps: null, out: null, size: null, timeout: null, name: 'かくにん', app: null, list: false };
 const rest = [];
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i];
@@ -52,6 +53,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--size') opt.size = need();
   else if (a === '--timeout') opt.timeout = need();
   else if (a === '--name') opt.name = need();
+  else if (a === '--app') opt.app = need();
   else if (a === '--list') opt.list = true;
   else if (a.startsWith('--')) fail(`知らないオプションです: ${a}`);
   else rest.push(a);
@@ -80,7 +82,8 @@ const ruleSteps = ruleEvals(gameId, opt.rules);
 // ---------- 持ち主の印と確認用サーバー（play-common.mjs） ----------
 const { ownerKey, storeKey } = ownerMark();
 if (!fs.existsSync(HS)) { console.error(`headless-shot.js がありません: ${HS}\n別の場所にあるときは環境変数 HEADLESS_SHOT に入れます`); process.exit(3); }
-const { base, stop: stopServer } = await startServer();
+if (opt.app && !fs.existsSync(path.resolve(opt.app, 'index.html'))) fail(`--app のフォルダに index.html がありません: ${opt.app}`);
+const { base, stop: stopServer } = await startServer(opt.app ? path.resolve(opt.app) : null);
 
 // ---------- 操作を組み立てる ----------
 const steps = [

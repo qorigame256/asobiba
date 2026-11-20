@@ -84,7 +84,9 @@ const { base, stop: stopServer } = await startServer(opt.app ? path.resolve(opt.
 
 let browser = null;
 for (const channel of ['chrome', 'msedge']) {
-  try { browser = await pw.chromium.launch({ channel, headless: true, args: ['--mute-audio'] }); break; } catch { /* 次を試す */ }
+  // --disable-gpu-compositing: 無いと、この PC（GPU あり）の画面に出さない Chrome では canvas に描き続けるページの描き替えが1秒に約4.5回に落ちる
+  // （2026-11-20 に測った。白紙のページに canvas を1枚置いただけでも同じ。この設定で約61回）。エアホッケー・紙相撲などの動きが本物の端末の12分の1ほどの速さになっていた
+  try { browser = await pw.chromium.launch({ channel, headless: true, args: ['--mute-audio', '--disable-gpu-compositing'] }); break; } catch { /* 次を試す */ }
 }
 if (!browser) { stopServer(); console.error('Chrome も Edge も起こせません'); process.exit(3); }
 
