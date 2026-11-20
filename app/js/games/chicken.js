@@ -9,7 +9,8 @@
 //   - 回の始めに1.2秒止まって「よーい」を出してから走り出す。ブレーキの時刻は走り出してから測る（各自の端末で測って送る。通信の遅れで不利にならない）。
 //     止まる位置は時刻から計算する（全員の端末で同じ）。ブレーキを押さないまま崖に着いた車は落ちる。
 //   - 崖までの残りが同じ人どうしは同じ順位で、同じ点（ほとんど起きない。残りは 0.1m 単位で比べる）。
-//   - CPU は崖の手前1〜10mを狙い、押す時刻が±160msほどぶれる（4回に1回ほど落ちる）。
+//   - CPU は崖の手前0〜8mを狙い、押す時刻が±360msまでぶれる（4回に1回ほど落ちる。落ちなかった回の崖までの残りは平均6mほど）。
+//     2026-11-20 本人の決定: 前の「1〜10m・±160ms」は約6%しか落ちず説明と違ったので、4回に1回に合わせた（`cpuBrakeAt`。割合は tools/test-logic.mjs が見ている）。
 // 2026-11-19 の45回目の案（本人が選んだ。分かれ目は Claude の判断。action-games.md の「チキンレース」）:
 //   - 詳細設定「落ちたらマイナス」（minus）: 落ちた回は −2点（FALL_PTS。なしは今までどおり0点）。合計がマイナスになってもよい。
 //     落ちなかった人の 3・2・1点はそのまま。CPU の狙い方は変えない（弱めのまま。4回に1回ほど落ちる）。
@@ -64,6 +65,12 @@ export function racePoints(res, fall = 0) {
     const rank = left.filter((e) => e !== null && e < d).length;
     return PTS[rank] ?? 0;
   });
+}
+// CPU がブレーキを押す時刻（rnd = 0〜1 の乱数を返す関数）
+export function cpuBrakeAt(x, rnd = Math.random) {
+  const aim = rnd() * 8;
+  const noise = (rnd() + rnd() - 1) * 360;
+  return Math.max(300, Math.round((D - slideOf(x) - aim) / vOf(x) + noise));
 }
 const kmh = (x) => Math.round((D / x.T) * 3600); // m/ms → km/h
 
@@ -169,9 +176,7 @@ export default {
     const key = qKey(s) + ':' + p;
     let plan = cpuPlan.get(key);
     if (!plan) {
-      const aim = 1 + Math.random() * 9;
-      const noise = (Math.random() + Math.random() - 1) * 160;
-      plan = { tb: Math.max(300, Math.round((D - slideOf(x) - aim) / vOf(x) + noise)) };
+      plan = { tb: cpuBrakeAt(x) };
       cpuPlan.set(key, plan);
       if (cpuPlan.size > 200) cpuPlan.delete(cpuPlan.keys().next().value);
     }

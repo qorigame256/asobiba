@@ -12556,7 +12556,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
 // チキンレース: 止まる位置の計算・崖に着いたら落ちる・近い順に 3・2・1点（同じ残りは同じ点）・ブレーキは1回・CPU どうしで最後まで
 {
   const G = GAMES.chicken;
-  const { makeRounds, finalOf, posAt, racePoints, slideOf, vOf, D, ACC } = await import('../app/js/games/chicken.js');
+  const { makeRounds, finalOf, posAt, racePoints, slideOf, vOf, D, ACC, cpuBrakeAt } = await import('../app/js/games/chicken.js');
   for (let seed = 0; seed < 50; seed++) {
     for (const x of makeRounds(seed, 10)) {
       assert.ok(Number.isInteger(x.T) && x.T >= 1800 && x.T <= 4200, 'チキンレース: 崖まで 1.8〜4.2秒');
@@ -12601,10 +12601,20 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.ok(G.result(end) && end.scores.some((v) => v > 0), `チキンレース: CPU どうしで最後まで ${JSON.stringify(rules)}`);
     fell += end.log.flatMap((r) => r.res).filter((r) => r.fell).length;
   }
-  // CPU の1回が落ちるのは約6%で、上の3対局（108回）で1回も落ちないことが運で約0.2%ある（2026-11-20 に300組で測った。種 17 で落ちた）。
-  // CPU の狙いは `chicken.js` の cpuPlan に対局の種ごとに覚えられるので、同じ種で打ち直しても変わらない。落ちなかったら種を変えた10回の対局を5つまで見る
-  for (let k = 0; k < 5 && fell === 0; k++) fell += runCpus(G, 6, 40 + k, { rounds: 10 }, 50, 20000).log.flatMap((r) => r.res).filter((r) => r.fell).length;
+  // CPU の1回が落ちるのは約25%で、上の3対局（108回）で1回も落ちないことは運ではまず起きない
   assert.ok(fell > 0, 'チキンレース: CPU もときどき落ちる');
+  {
+    // CPU は4回に1回ほど落ちる（2026-11-20 本人の決定。前は約6%で、先頭の説明と違った）。乱数は種で決めるので毎回同じ数になる
+    const { mulberry32 } = await import('../app/js/games/util.js');
+    const rnd = mulberry32(2026);
+    let cf = 0;
+    const N = 4000;
+    for (let i = 0; i < N; i++) {
+      const x = { T: 1800 + Math.floor(rnd() * 2401) };
+      if (finalOf(x, cpuBrakeAt(x, rnd)).fell) cf++;
+    }
+    assert.ok(cf / N > 0.2 && cf / N < 0.3, `チキンレース: CPU は4回に1回ほど落ちる（${(cf / N * 100).toFixed(1)}%）`);
+  }
   // 落ちたらマイナス（2026-11-19 の45回目の案）
   assert.deepEqual(racePoints([{ pos: 99, fell: false }, { pos: null, fell: true }], -2), [3, -2], 'チキンレース: 落ちたらマイナスの点');
   {
