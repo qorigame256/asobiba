@@ -456,7 +456,8 @@ export default {
         const tries = [0.25, 0.18, 0.32, 0.12];
         from = null;
         for (const back of tries) {
-          const x = gx - (ex / ed) * back, y = gy - (ey / ed) * back;
+          // 手で送る位置（×10000 の整数）に丸めてから確かめる（丸める前に確かめると、丸めた位置がほかの玉に近すぎて手が弾かれることがあった。2026-11-20）
+          const x = Math.round((gx - (ex / ed) * back) * U) / U, y = Math.round((gy - (ey / ed) * back) * U) / U;
           if (canPlace(s, x, y)) { from = { id: 0, x, y }; break; }
         }
         if (!from) continue;
@@ -467,6 +468,11 @@ export default {
       if (cut > (75 * Math.PI) / 180) continue;
       const hit = aimHit(balls.filter((b) => b.id !== 0), from.x, from.y, ax / ad, ay / ad);
       if (hit.id !== low) continue; // ほかの玉にじゃまされる
+      // 当てる所までの道がポケットをかすめる筋は選ばない（手玉が先に落ちる。手玉を置ける番では局面が変わらず、CPU だけだと同じ置き方を永遠に繰り返した。2026-11-20）
+      if (POCKETS.some(([qx, qy]) => {
+        const t = clamp(((qx - from.x) * ax + (qy - from.y) * ay) / (ad * ad), 0, 1);
+        return Math.sqrt((from.x + ax * t - qx) ** 2 + (from.y + ay * t - qy) ** 2) < PR + BR;
+      })) continue;
       plans.push({ from, ax: ax / ad, ay: ay / ad, cost: cut * 1.5 + ad + ed, dist: ad + ed });
     }
     let plan = plans.sort((a, b) => a.cost - b.cost)[0];
