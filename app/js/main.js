@@ -736,10 +736,43 @@ function lobbyDock(btn) {
     p.textContent = `✋ ${ok}/${others.length}人`;
     p.title = `準備OK ${ok}/${others.length}人` + (wait.length ? `（まだ: ${wait.map(nameOf).join('・')}）` : '');
     parts.push(p);
+    if (wait.length && (S.isHost || okIds.includes(S.myId))) parts.push(nudgeButton(wait));
   }
   parts.push(btn);
   dock.replaceChildren(...parts);
   dock.hidden = false;
+}
+// 準備OK の催促（2026-11-22 本人の依頼「待機室、準備待ちの時催促を送れるようにする」。形は Claude の判断）:
+//   下に留めた段の人数の札の横に「📣 せかす」を出す。押せるのは、ホストと、もう準備OK を押した人（自分がまだなのに人をせかさないように）。
+//   まだの人（readyNeed のうち準備OK でない人）の id を type: 'nudge' で送る。受け取ったまだの人の画面では、「番が来た」と同じ音と振動を鳴らし、
+//   「📣 ○○が準備OKを待っています」を出して、自分の「準備OK」を揺らす。同じ人からの催促は10秒に1回まで（送る側のボタンも10秒押せない）。
+const NUDGE_MS = 10000;
+let nudgeAt = 0; // 自分が最後に催促した時刻
+const nudgeGot = new Map(); // 催促した人 → 最後に受け取った時刻
+function nudgeButton(wait) {
+  const b = makeButton('📣 せかす', () => {
+    if (Date.now() - nudgeAt < NUDGE_MS) return;
+    nudgeAt = Date.now();
+    send({ type: 'nudge', ids: wait, round: S.round });
+    toast(`📣 ${wait.map(nameOf).join('・')}に知らせました`);
+    b.disabled = true;
+    setTimeout(() => { if (b.isConnected) b.disabled = false; }, NUDGE_MS);
+  }, 'secondary dock-nudge');
+  b.disabled = Date.now() - nudgeAt < NUDGE_MS;
+  b.title = `まだの人（${wait.map(nameOf).join('・')}）に、準備OK を押すよう知らせる`;
+  return b;
+}
+function onNudge(msg) {
+  if (!Array.isArray(msg.ids) || !msg.ids.includes(S.myId) || msg.round !== S.round || S.order || !S.members.includes(msg.from)) return;
+  if (readyIds().includes(S.myId)) return;
+  const last = nudgeGot.get(msg.from) ?? 0;
+  if (Date.now() - last < NUDGE_MS - 500) return;
+  nudgeGot.set(msg.from, Date.now());
+  play('turn');
+  haptic('turn');
+  toast(`📣 ${nameOf(msg.from)}が準備OKを待っています`);
+  const btn = [...el('dock').querySelectorAll('.btn')].find((x) => x.textContent === '✋ 準備OK');
+  if (btn && !lessMotion()) { btn.classList.remove('nudged'); void btn.offsetWidth; btn.classList.add('nudged'); }
 }
 function readyButton() {
   const on = readyIds().includes(S.myId);
@@ -1324,7 +1357,7 @@ function rulesOf(gameId, rules) {
 // マルバツ・将棋の size は盤の大きさでなく遊び方（スーパー・消える・5五将棋）なので抽選する。
 // ビンゴの終わり方（until。長さ）・ことわざかるたの場の札の数（field。難しさ）も抽選しない（2026-10-29 の Codex の点検。本人承認）。
 // 綱引き連打の綱の重さ（weight。長さ）・ボウリングのガードレール（bumper。ハンデ）と向きの線（guide。手助け）も抽選しない。立体四目並べの重力なし（free）は遊び方なので抽選する（31回目の案。Claude の判断）。ミニゴルフのホールの数（holes。長さ）も抽選しない（2026-11-02。Claude の判断）。
-const KEEP_KEYS = new Set(['players', 'peek', 'danger', 'wide', 'cpu', 'speed', 'season', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'safe', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check', 'mallet', 'stones', 'diffs', 'kind', 'tries', 'until', 'field', 'frames', 'weight', 'bumper', 'guide', 'ask', 'holes', 'gap', 'teams', 'judge', 'drops', 'lives', 'flash', 'boxes', 'every', 'onis', 'games', 'face', 'type', 'clue']); // clue = ナンプレ早解きの時間でヒント（手伝いの好み。hint と同じ。2026-11-22 の Claude の判断）・type =数のきまり当ての答え方（難読漢字の答え方と同じく、難しさと好みなので抽選しない。2026-11-18 の Claude の判断）・face = 時計あわせの文字盤の数字（難しさ。2026-11-16 の Claude の判断）・danger = あぶない所の知らせ（好み。2026-11-12 の Claude の判断）・games = シーソーにのせるの何回戦（長さ。2026-11-12 の Claude の判断）・peek = 相手の迷いを見せる（好み。2026-11-11 の Claude の判断）・every = 見えない鬼ごっこの見える間隔（難しさ）・onis = 鬼の数（人数）（2026-11-11 の Claude の判断）・drops = 羽根つきの落とせる回数（長さ）・lives = 価値観ならべのライフの数（難しさ）（2026-11-05 の Claude の判断）・gap = ビンゴの数字の間・teams = 綱引きのチームの数（2026-11-03。時間の長さと人数なので抽選しない。Claude の判断）・judge = 大喜利の審査員が選ぶ（回数が人数で決まるので抽選しない。2026-11-03 の Claude の判断）・flash = 多いのはどっちの点の見える時間（難しさ）・boxes = 多いのはどっちの箱の数（答えの数。シルエットクイズの choice と同じ）（2026-11-09 の Claude の判断）・season = 流しそうめんの季節（見た目の好み。2026-11-10 の Claude の判断）
+const KEEP_KEYS = new Set(['players', 'peek', 'danger', 'wide', 'cpu', 'speed', 'season', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'safe', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check', 'mallet', 'stones', 'diffs', 'kind', 'tries', 'until', 'field', 'frames', 'weight', 'bumper', 'guide', 'ask', 'holes', 'gap', 'teams', 'judge', 'drops', 'lives', 'flash', 'boxes', 'every', 'onis', 'games', 'face', 'type', 'clue']); // clue = ナンプレ早解きの時間でヒント（手伝いの好み。hint と同じ。2026-11-22 の Claude の判断）・type = 数のきまり当ての答え方（難読漢字の答え方と同じく、難しさと好みなので抽選しない。2026-11-18 の Claude の判断）・face = 時計あわせの文字盤の数字（難しさ。2026-11-16 の Claude の判断）・danger = あぶない所の知らせ（好み。2026-11-12 の Claude の判断）・games = シーソーにのせるの何回戦（長さ。2026-11-12 の Claude の判断）・peek = 相手の迷いを見せる（好み。2026-11-11 の Claude の判断）・every = 見えない鬼ごっこの見える間隔（難しさ）・onis = 鬼の数（人数）（2026-11-11 の Claude の判断）・drops = 羽根つきの落とせる回数（長さ）・lives = 価値観ならべのライフの数（難しさ）（2026-11-05 の Claude の判断）・gap = ビンゴの数字の間・teams = 綱引きのチームの数（2026-11-03。時間の長さと人数なので抽選しない。Claude の判断）・judge = 大喜利の審査員が選ぶ（回数が人数で決まるので抽選しない。2026-11-03 の Claude の判断）・flash = 多いのはどっちの絵の見える時間（難しさ）・boxes = 多いのはどっちの箱の数（答えの数。シルエットクイズの choice と同じ）（2026-11-09 の Claude の判断）・season = 流しそうめんの季節（見た目の好み。2026-11-10 の Claude の判断）
 const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
 
 // 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、将棋・マンカラ・海戦ゲーム・五目並べ・立体四目並べ・はさみ将棋・エアホッケーは 2〜3。ほかは2）
@@ -6550,6 +6583,9 @@ function onMessage(msg) {
       }
       break;
     case 'rps': // 待合室でじゃんけんは 2026-11-16 にやめた。古い版の端末から届いても何もしない
+      return;
+    case 'nudge': // 準備OK の催促（2026-11-22）。描き直さない
+      onNudge(msg);
       return;
     case 'vote': // 次のゲームの投票
       if (S.isHost && msg.from !== S.myId && S.members.includes(msg.from) && (msg.g === null || typeof msg.g === 'string')) {

@@ -7034,7 +7034,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
 // 15パズル早解き: 混ぜた盤は逆にたどればそろう・送った動きで本当にそろうかを確かめる・CPU どうしで最後まで
 {
   const P = GAMES.slide;
-  const { scramble, undoPath, replay, isSolved, solvedBoard } = await import('../app/js/games/slide.js');
+  const { scramble, undoPath, undoOf, replay, isSolved, solvedBoard, countOk, solvePath, hintPath, moveBlank } = await import('../app/js/games/slide.js');
   const { mulberry32 } = await import('../app/js/games/util.js');
   for (const n of [3, 4]) {
     const rnd = mulberry32(n);
@@ -7060,7 +7060,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   s = P.apply(s, { p: 0, t: 'done', q: 0, seq: seq + 'UD', ms: 7000 }); // 寄り道してもそろえばよい（空きが右下にある間なら U・D で戻る）
   s = P.apply(s, { p: 2, t: 'pass', q: 0 });
   s = P.apply(s, { p: -1, t: 'close' });
-  assert.deepEqual(s.scores, [3, 2, 0]);
+  assert.deepEqual(s.scores, [15 + 3, 15 + 2, countOk(s.qs[0].board)], '15パズル: そろえた人は札の数＋速さの点、あきらめて枚数を送っていない人は最初の並びの合っている枚数（2026-11-22）');
   const st = runCpus(P, 4, 6, { size: '3', rounds: 3 }, 3000);
   assert.ok(P.result(st), '15パズル: CPU どうしで最後まで');
   assert.equal(st.log.length, 3);
@@ -7070,11 +7070,90 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.equal(f5.qs[0].board.length, 25);
   assert.equal(f5.qs[0].path.length, 70, '15パズル: 5×5 の軽めは70回混ぜる');
   assert.ok(f5.qs.every((x) => isSolved(replay(x.board, 5, undoPath(x.path)))), '15パズル: 5×5 も逆にたどればそろう');
-  assert.equal(P.referee(P.apply(f5, { p: -1, t: 'next' })).ms, 300000 + 1500, '15パズル: 5×5 の軽めは300秒');
+  assert.equal(P.referee(P.apply(f5, { p: -1, t: 'next' })).ms, 480000 + 1500, '15パズル: 5×5 の軽めは480秒（2026-11-22 本人の依頼で300秒から延ばした）');
+  assert.equal(P.referee(P.apply(P.init(2, 3, { rules: { size: '5', level: 'full' } }), { p: -1, t: 'next' })).ms, 720000 + 1500, '15パズル: 5×5 のしっかりは720秒');
   assert.equal(P.init(2, 3, { rules: { size: '5', level: 'full' } }).qs[0].path.length, 250);
   assert.equal(P.init(2, 3, { rules: {} }).qs[0].path.length, 40, '15パズル: 4×4 の軽めは前と同じ40回');
   assert.equal(P.init(2, 3, { rules: { size: '3', level: 'full' } }).qs[0].path.length, 60);
   assert.ok(P.result(runCpus(P, 3, 6, { size: '5', rounds: 1 }, 10000)), '15パズル: 5×5 も CPU どうしで最後まで');
+  // 2026-11-22 本人の依頼: 空きマス2つ・近道のヒント・部分点・CPU は人より先にそろえない
+  {
+    for (const n of [3, 4]) {
+      const rnd = mulberry32(n + 40);
+      for (let k = 0; k < 15; k++) {
+        const one = scramble(n, 40, rnd);
+        assert.equal(undoOf(n, one.path), undoPath(one.path), '15パズル: 空き1つなら undoOf は undoPath と同じ');
+        const two = scramble(n, 40, rnd, 2);
+        assert.equal(two.board.filter((v) => v === 0).length, 2, '15パズル: 空きマス2つ');
+        assert.ok(/[udlr]/.test(two.path) && /[UDLR]/.test(two.path), '15パズル: 空き2つは両方の空きが動く');
+        assert.ok(isSolved(replay(two.board, n, undoOf(n, two.path, 2))), '15パズル: 空き2つも逆にたどればそろう');
+      }
+    }
+    assert.ok(isSolved(solvedBoard(4, 2)) && solvedBoard(4, 2).slice(-2).every((v) => v === 0), '15パズル: 空き2つのそろった形は右下2マスが空き');
+    assert.equal(moveBlank(solvedBoard(4, 2), 4, 'R'), null, '15パズル: 空きどうしは入れ替えない');
+    assert.equal(moveBlank(solvedBoard(4), 4, 'u'), null, '15パズル: 空き1つなら小文字の動きは無い');
+    assert.equal(countOk(solvedBoard(4)), 15);
+    assert.equal(countOk([2, 1, 3, 4, 5, 6, 7, 8, 0]), 6, '15パズル: 合っている札を全部数える');
+    // 近道: 3×3 は手数のいちばん少ない道が必ず見つかり、混ぜた回数より長くない。4×4 はヒントの道（hintPath）が見つかればそれでそろう
+    for (const z of [1, 2]) {
+      const rnd = mulberry32(30 + z);
+      for (let k = 0; k < 6; k++) {
+        const q = scramble(3, 20, rnd, z);
+        const p = solvePath(q.board, 3);
+        assert.ok(p !== null && isSolved(replay(q.board, 3, p)) && p.length <= 20, `15パズル: 3×3 空き${z} の近道`);
+      }
+    }
+    let found = 0;
+    for (const z of [1, 2]) {
+      const rnd = mulberry32(40 + z);
+      for (let k = 0; k < 6; k++) {
+        const q = scramble(4, 40, rnd, z);
+        const p = hintPath(q.board, 4);
+        if (p === null) continue;
+        found += 1;
+        assert.ok(isSolved(replay(q.board, 4, p)), `15パズル: 4×4 空き${z} のヒントの道でそろう`);
+      }
+    }
+    assert.ok(found >= 8, `15パズル: 4×4 のヒントの道はたいてい見つかる（12問中 ${found}）`);
+    assert.equal(solvePath(scramble(5, 250, mulberry32(9)).board, 5, 1000), null, '15パズル: 調べる数の上限を越えたら null（置き場所のヒントに替える）');
+    // 部分点
+    let t = P.apply(P.init(3, 4, { rules: { size: '3' } }), { p: -1, t: 'next' });
+    t = P.apply(t, { p: 1, t: 'part', q: 0, c: 5 });
+    assert.equal(t.parts[1], 5);
+    assert.equal(P.apply(t, { p: 1, t: 'part', q: 0, c: 5 }), null, '15パズル: 同じ枚数は2回足さない');
+    assert.equal(P.apply(t, { p: 1, t: 'part', q: 0, c: 8 }), null, '15パズル: 全部合っている枚数は part では送れない（done で送る）');
+    assert.equal(P.apply(t, { p: 1, t: 'part', q: 1, c: 4 }), null, '15パズル: ちがう問題の枚数は弾く');
+    t = P.apply(t, { p: 2, t: 'pass', q: 0, c: 3 });
+    t = P.apply(t, { p: 0, t: 'done', q: 0, seq: undoPath(t.qs[0].path), ms: 8000 });
+    assert.equal(P.apply(t, { p: 1, t: 'part', q: 0, c: 6 }) !== null, true, '15パズル: そろえていない人は枚数を送り直せる');
+    t = P.apply(t, { p: -1, t: 'close' });
+    assert.deepEqual(t.scores, [8 + 3, 5, 3], '15パズル: そろえた人は 8＋3、ほかは送った枚数');
+    assert.deepEqual(t.log[0].pts, [11, 5, 3]);
+    // CPU は人がそろえるまでそろえない（0番の席が人。人がそろえたら CPU もそろえてよい）
+    const realNow = performance.now;
+    let clock = 9e8;
+    Object.defineProperty(performance, 'now', { value: () => clock, configurable: true, writable: true });
+    try {
+      let c = P.apply(P.init(10, 77, { rules: { size: '3' } }), { p: -1, t: 'next' });
+      let cpuDone = 0;
+      for (let k = 0; k < 400 && c.phase === 'open'; k++) {
+        clock += 300;
+        for (let p = 1; p < 10; p++) { const m = P.cpu(c, p); if (m) { if (m.t === 'done') cpuDone += 1; c = P.apply(c, { ...m, p }) ?? c; } }
+        if (k === 100) { assert.equal(cpuDone, 0, '15パズル: 人がそろえるまで CPU はそろえない'); c = P.apply(c, { p: 0, t: 'done', q: 0, seq: undoPath(c.qs[0].path), ms: 30300 }); }
+      }
+      assert.ok(c.solved.slice(1).some((v) => v !== null), '15パズル: 人がそろえたあとは CPU もそろえる');
+      assert.ok(c.solved.slice(1).every((v) => v === null || v > c.solved[0]), '15パズル: CPU は人より後');
+      // 人があきらめたら、CPU もだれもそろえずにあきらめる（待ち続けない）
+      let g = P.apply(P.init(3, 78, { rules: { size: '3' } }), { p: -1, t: 'next' });
+      g = P.apply(g, { p: 0, t: 'pass', q: 0, c: 2 });
+      for (let k = 0; k < 400 && !g.passed.every(Boolean); k++) { clock += 300; for (const p of [1, 2]) { const m = P.cpu(g, p); if (m) g = P.apply(g, { ...m, p }) ?? g; } }
+      assert.ok(g.passed.every(Boolean) && g.solved.every((v) => v === null), '15パズル: 人が全員あきらめたら CPU もあきらめる');
+      assert.ok(g.parts[1] !== null && g.parts[2] !== null, '15パズル: CPU も合っている枚数を送る');
+    } finally {
+      Object.defineProperty(performance, 'now', { value: realNow, configurable: true, writable: true });
+    }
+    assert.ok(P.result(runCpus(P, 3, 8, { size: '4', blanks: 2, rounds: 1 }, 3000)), '15パズル: 空き2つも CPU どうしで最後まで');
+  }
   console.log('slide OK');
 }
 
@@ -7241,6 +7320,24 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.equal(Z.referee(Z.apply(zd, { p: -1, t: 'next' })).ms, 112500 + 1500, '迷路: 暗やみは制限時間が1.5倍');
   assert.equal(Z.referee(Z.apply(Z.init(3, 9, { rules: { level: 's' } }), { p: -1, t: 'next' })).ms, 75000 + 1500);
   assert.ok(Z.result(runCpus(Z, 4, 5, { level: 'm', dark: true }, 500, 3000)), '迷路: 暗やみも CPU どうしで最後まで');
+  // 順位の決め方「歩数」（2026-11-22 本人の依頼）: 歩数の少ない順・同じなら早い方・早さのときの局面は前と同じ形
+  {
+    const { detour } = await import('../app/js/games/meiro.js');
+    assert.equal('walks' in Z.init(3, 9, { rules: { level: 's' } }), false, '迷路: 早さのときは walks を持たない（前と同じ形）');
+    let w = Z.apply(Z.init(4, 9, { rules: { level: 's', rank: 'steps' } }), { p: -1, t: 'next' });
+    const p0 = solve(w.qs[0], 9);
+    const long = detour(w.qs[0], 9, p0, 3, mulberry32(5));
+    assert.equal(long.length, p0.length + 6, '迷路: 寄り道1回で2歩ふえる');
+    assert.equal(walk(w.qs[0], 9, long), 80, '迷路: 寄り道を足してもゴールに着く');
+    w = Z.apply(w, { p: 0, t: 'done', q: 0, seq: long, ms: 3000 }); // 早いが遠回り
+    w = Z.apply(w, { p: 1, t: 'done', q: 0, seq: p0, ms: 9000 }); // 遅いが最短
+    w = Z.apply(w, { p: 2, t: 'done', q: 0, seq: p0, ms: 8000 }); // 最短で 1 より早い
+    w = Z.apply(w, { p: -1, t: 'close' });
+    assert.deepEqual(w.scores, [1, 2, 3, 0], '迷路: 歩数の少ない順、同じ歩数なら早い方が上');
+    assert.deepEqual(w.last.winners, [2]);
+    assert.deepEqual(w.log[0].walks, [long.length, p0.length, p0.length, null], '迷路: ふりかえりに歩数');
+    assert.ok(Z.result(runCpus(Z, 4, 5, { level: 's', rank: 'steps' }, 500, 3000)), '迷路: 歩数も CPU どうしで最後まで');
+  }
   // 締め切り: だれかが着いたら20秒。ただし1問の制限時間（小75秒）を越えては待たない（越えた答えは受け付けないため。2026-10-29 Codex の点検）
   {
     const { since } = await import('../app/js/games/party.js');
@@ -8659,7 +8756,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
 // 時計あわせ（2026-11-16）: 問題の形・針の向きと時刻の行き来・速すぎる手と遅すぎる手と2回目を弾く・速い順に点・CPU どうしで最後まで
 {
   const T = GAMES.tokei;
-  const { minOf, hourOf, minAngle, hourAngle, timeText } = await import('../app/js/games/tokei.js');
+  const { minOf, hourAt, minAngle, timeText } = await import('../app/js/games/tokei.js');
   for (const [level, step] of [['easy', 5], ['hard', 1]]) {
     for (let seed = 1; seed <= 30; seed++) {
       const s = T.init(3, seed, { rules: { level } });
@@ -8673,12 +8770,13 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.equal(T.init(2, 5, { rules: {} }).level, 'easy', '時計あわせ: 最初はふつう');
   for (let h = 1; h <= 12; h++) for (let m = 0; m < 60; m++) {
     assert.equal(minOf(minAngle(m), 1), m, `時計あわせ: 長い針 ${m}分`);
-    assert.equal(hourOf(hourAngle(h, m), m), h, `時計あわせ: 短い針 ${h}時${m}分`);
   }
   assert.equal(minOf(minAngle(43), 5), 45, '時計あわせ: 5分きざみに丸める');
   assert.equal(minOf(359, 5), 0, '時計あわせ: 12 の少し手前は0分');
-  assert.equal(hourOf(4 * 30, 40), 3, '時計あわせ: 40分のとき 4 の上に置いた短い針は3時（4 寄りの位置）');
-  assert.equal(hourOf(3 * 30, 40), 2, '時計あわせ: 40分のとき 3 の上に置いた短い針は2時');
+  for (let h = 1; h <= 12; h++) assert.equal(hourAt(h * 30), h, `時計あわせ: ${h} を指す短い針は${h}時`);
+  assert.equal(hourAt(4 * 30 + 14), 4, '時計あわせ: 短い針は一番近い数字（2026-11-22 本人の依頼で、長い針の分に合わせて寄せるのをやめた）');
+  assert.equal(hourAt(4 * 30 + 16), 5, '時計あわせ: 4 と 5 のまん中を越えたら5時');
+  assert.equal(hourAt(359), 12, '時計あわせ: 12 の少し手前は12時');
   assert.equal(timeText(3, 0), '3時ちょうど');
   let s = T.apply(T.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
   assert.equal(T.apply(s, { p: 0, t: 'done', q: 0, ms: 300 }), null, '時計あわせ: 速すぎる手は弾く');
@@ -10248,10 +10346,19 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   s = KC.apply(s, { p: -1, t: 'close' });
   assert.deepEqual(s.words, ['ライオン', 'アリ', ''], '価値観ならべ: 書かなかった人は言葉なし');
   const byNum = [0, 1, 2].sort((a, b) => s.nums[a] - s.nums[b]);
-  // いちばん大きい人が先に出すと、小さい2人の札が捨てられライフが1つ減る
+  // いちばん大きい人が先に出しても、その場では何も起きない。あとから小さい札が出たときに 💔、大きい札を先に出していた人が失点（2026-11-22 本人の依頼）
   let w = KC.apply(s, { p: byNum[2], t: 'play', r: 0 });
-  assert.equal(w.lives, LIVES - 1, '価値観ならべ: まちがえたらライフが1つ減る');
-  assert.deepEqual(w.order, [byNum[0], byNum[1], byNum[2]], '価値観ならべ: 小さかった札はめくって捨てる');
+  assert.equal(w.lives, LIVES, '価値観ならべ: 大きい札を先に出しても、その場ではライフは減らない');
+  assert.deepEqual(w.order, [byNum[2]], '価値観ならべ: 小さい札を捨てない');
+  w = KC.apply(w, { p: byNum[0], t: 'play', r: 0 });
+  assert.equal(w.lives, LIVES - 1, '価値観ならべ: あとから小さい札が出たらライフが1つ減る');
+  assert.equal(w.state[byNum[0]], 'late', '価値観ならべ: あとから出た小さい札に印');
+  assert.deepEqual(w.last.blamed, [byNum[2]], '価値観ならべ: 失点は大きい札を先に出していた人');
+  w = KC.apply(w, { p: byNum[1], t: 'play', r: 0 });
+  assert.equal(w.lives, LIVES - 2, '価値観ならべ: 1回の 💔 でライフは1つ');
+  assert.equal(w.pen[byNum[2]], 2, '価値観ならべ: 大きい札を先に出した人は2回失点');
+  assert.equal(w.pen[byNum[0]] + w.pen[byNum[1]], 0, '価値観ならべ: 後から出した人は失点しない');
+  assert.deepEqual(w.order, [byNum[2], byNum[0], byNum[1]], '価値観ならべ: 出した順に並ぶ');
   assert.equal(w.phase, 'done', '価値観ならべ: 全部出たらお題の終わり');
   assert.equal(w.cleared, 1, '価値観ならべ: ライフが残っていればクリア');
   assert.equal(w.perfect, 0, '価値観ならべ: まちがいがあればパーフェクトではない');
@@ -10268,7 +10375,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     for (let k = 0; k < 200 && t.phase !== 'end'; k++) {
       if (t.phase === 'done') t = KC.apply(t, { p: -1, t: 'next' });
       else if (t.phase === 'write') t = KC.apply(t, { p: -1, t: 'close' });
-      else { const big = [0, 1, 2].filter((p) => t.state[p] === 'hand').sort((a, b) => t.nums[b] - t.nums[a])[0]; t = KC.apply(t, { p: big, t: 'play', r: t.r }); } // いちばん大きい人から出して毎回まちがえる
+      else { const hand = [0, 1, 2].filter((p) => t.state[p] === 'hand').sort((a, b) => t.nums[a] - t.nums[b]); t = KC.apply(t, { p: hand.length === 2 ? hand[1] : hand[0], t: 'play', r: t.r }); } // 小さい順に出すが最後の2人だけ逆にして、お題ごとに1回まちがえる
     }
     assert.equal(t.phase, 'end', `価値観ならべ: ライフ ${lv}つでも終わる`);
     assert.equal(t.lives, 0, `価値観ならべ: ライフ ${lv}つを使い切って終わる`);
@@ -10276,7 +10383,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   }
   assert.equal(ok.perfect, 1, '価値観ならべ: 小さい順ならパーフェクト');
   assert.equal(KC.apply(ok, { p: byNum[0], t: 'play', r: 0 }), null, '価値観ならべ: 同じ手が2回届いても2回目は反則');
-  // ライフが0になったら終わり（引き分け・クリア数を持つ）
+  // ライフが0になったら終わり（失点の少ない人の勝ち・クリア数を持つ）
   let z = s;
   for (let k = 0; k < 20 && z.phase !== 'end'; k++) {
     if (z.phase === 'done') z = KC.apply(z, { p: -1, t: 'next' });
@@ -10287,7 +10394,10 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     }
   }
   const res = KC.result(z);
-  assert.ok(res && res.draw === true && res.winners.length === 0, '価値観ならべ: ライフが尽きたら引き分け');
+  assert.ok(res && !res.draw && res.winners.length >= 1, '価値観ならべ: ライフが尽きても失点の少ない人の勝ち');
+  assert.deepEqual(res.scores, z.pen.map((v) => -v), '価値観ならべ: 順位の欄は −失点');
+  const least = Math.min(...z.pen);
+  assert.deepEqual(res.winners, z.pen.map((v, p) => (v === least ? p : -1)).filter((p) => p >= 0), '価値観ならべ: 失点がいちばん少ない人の勝ち');
   assert.equal(z.lives, 0, '価値観ならべ: ライフ0で終わり');
   // 10こ全部クリアしたら全員の勝ち
   let a = KC.init(2, 3);
@@ -10296,7 +10406,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     else if (a.phase === 'write') a = KC.apply(a, { p: -1, t: 'close' });
     else a = KC.apply(a, { p: [0, 1].filter((p) => a.state[p] === 'hand').sort((x, y) => a.nums[x] - a.nums[y])[0], t: 'play', r: a.r });
   }
-  assert.deepEqual(KC.result(a).winners, [0, 1], '価値観ならべ: 10こ全部クリアしたら全員の勝ち');
+  assert.deepEqual(KC.result(a).winners, [0, 1], '価値観ならべ: 10こ全部クリアしてだれも失点しなければ同点で全員1位');
   assert.equal(a.cleared, KMAX, '価値観ならべ: クリアは10こまで');
   console.log('kachikan OK');
 }

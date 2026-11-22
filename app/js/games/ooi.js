@@ -94,17 +94,25 @@ const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice()
 const doneOf = (s, p) => s.solved[p] !== null || s.miss[p];
 const cpuPlan = new Map();
 
-function dotsSvg(dots) {
+// 2026-11-22 本人の依頼（「点が気持ち悪い、集合体恐怖症の人にはきつい」）と選択（Claude が並べた5つの見本から推奨の「動物の絵文字」）:
+// 丸い点をやめ、生き物の絵文字にした。1問の中は全部同じ生き物で、問題ごとに替わる（種と問題の番号で選ぶので全員同じ。局面と問題の作り方は前のまま）。
+// 置く位置と大きさ（dots の x・y・r）は前の点のまま使う。絵の幅は点の直径の1.15倍（点どうしの間をあけてあるので重ならない）。Claude の判断
+export const CRITTERS = ['🐟', '🐤', '🐞', '🐸', '🐢', '🦋', '🐝', '🐙'];
+export const critterOf = (seed, q) => CRITTERS[(((seed * 7 + q) % CRITTERS.length) + CRITTERS.length) % CRITTERS.length];
+function dotsSvg(dots, mark) {
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
   svg.setAttribute('viewBox', '0 0 1 1');
   svg.setAttribute('class', 'oi-dots');
   for (const d of dots) {
-    const c = document.createElementNS(ns, 'circle');
-    c.setAttribute('cx', d.x);
-    c.setAttribute('cy', d.y);
-    c.setAttribute('r', d.r);
-    svg.append(c);
+    const t = document.createElementNS(ns, 'text');
+    t.setAttribute('x', d.x);
+    t.setAttribute('y', d.y);
+    t.setAttribute('dy', '0.35em');
+    t.setAttribute('font-size', (d.r * 2.3).toFixed(3));
+    t.setAttribute('text-anchor', 'middle');
+    t.textContent = mark;
+    svg.append(t);
   }
   return svg;
 }
@@ -113,7 +121,7 @@ export default {
   id: 'ooi',
   name: '多いのはどっち',
   icon: '⚖️',
-  desc: '左右に点が一瞬だけ出る。多かった方を早く押すほど高い点',
+  desc: '左右に生き物の絵が一瞬だけ出る。多かった方を早く押すほど高い点',
   ready: true,
   multi: true,
   realtime: true,
@@ -121,9 +129,9 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 10, choices: ROUNDS },
-    { key: 'flash', label: '点の見える時間', desc: '点が出てから消えるまで。長いほどやさしい', def: FLASH_MS, choices: FLASHES },
+    { key: 'flash', label: '絵の見える時間', desc: '絵が出てから消えるまで。長いほどやさしい', def: FLASH_MS, choices: FLASHES },
     { key: 'boxes', label: '箱の数', desc: '3つでは、いちばん多い箱を押す', def: 2, choices: BOXES },
-    { key: 'rev', label: 'あまのじゃく', desc: 'ときどき「点が少ない方」を押す問題が混じる', def: false },
+    { key: 'rev', label: 'あまのじゃく', desc: 'ときどき「少ない方」を押す問題が混じる', def: false },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -231,12 +239,12 @@ export default {
     card.className = 'kj-card';
     wrap.append(card);
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">点が${s.qs[0].counts.length === 3 ? 'いちばん多い箱' : '多かった方'}を押そう・点は一瞬で消えます・全${s.qs.length}問${s.rules.rev ? '・👿 の問題は点が少ない方' : ''}</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">生き物が${s.qs[0].counts.length === 3 ? 'いちばん多い箱' : '多かった方'}を押そう・絵は一瞬で消えます・全${s.qs.length}問${s.rules.rev ? '・👿 の問題は少ない方' : ''}</div>`;
       return;
     }
     const x = s.qs[s.q];
     const key = qKey(s);
-    card.insertAdjacentHTML('beforeend', `<div class="ir-ask${x.rev ? ' rev' : ''}">${x.rev ? '👿 点が「少ない」のは' : '点が多いのは'}${x.counts.length === 3 ? 'どれ' : 'どっち'}？</div>`);
+    card.insertAdjacentHTML('beforeend', `<div class="ir-ask${x.rev ? ' rev' : ''}">${x.rev ? '👿 「少ない」のは' : '多いのは'}${x.counts.length === 3 ? 'どれ' : 'どっち'}？</div>`);
     if (s.phase === 'open') { since(key); card.append(timeBar(key, LIMIT)); }
     else {
       const t = document.createElement('div');
@@ -256,7 +264,7 @@ export default {
       b.className = 'oi-box' + (s.phase === 'shown' && c === x.side ? ' ans' : '');
       b.setAttribute('aria-label', `${sideName(x, c)}の箱`);
       b.disabled = !can;
-      if (showDots) b.append(dotsSvg(x.dots[c]));
+      if (showDots) b.append(dotsSvg(x.dots[c], critterOf(s.seed, s.q)));
       else b.insertAdjacentHTML('beforeend', '<span class="oi-q">？</span>');
       if (s.phase === 'shown') { // 答えのときだけ数を添える（問題の間は点に重ならないよう出さない）
         const label = document.createElement('span');

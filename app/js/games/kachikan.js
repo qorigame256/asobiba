@@ -1,4 +1,4 @@
-// 価値観ならべ（「ito」風。元の商品名は使わない）。協力ゲーム。全員に1〜100の数字がひそかに配られ、お題に合わせて自分の数字を言葉で書き、
+// 価値観ならべ（「ito」風。元の商品名は使わない）。ライフはみんなで共有し、勝ち負けは各自の失点で決める（2026-11-22 から）。全員に1〜100の数字がひそかに配られ、お題に合わせて自分の数字を言葉で書き、
 // 小さい順だと思う順に1人ずつ出していく。2〜10人・足りない分は CPU（弱め）。
 // 2026-11-05 本人の決定（Claude が出した案から本人が選んだ。分かれ目はすべて Claude の推奨を本人が承認）:
 //   - 協力ゲーム。まちがえたら（まだ出していない人に小さい数字が残っていたら）ライフが1つ減る。ライフは3つ。いくつのお題を続けて成功できたかを競う。
@@ -15,11 +15,16 @@
 // 2026-11-05 の35回目の案（本人が選んだ。分かれ目は Claude の判断）:
 //   - 詳細設定「ライフの数」（鍵は lives）: 1つ・3つ（最初）・5つ。難しさなので、おまかせでは抽選しない（main.js の KEEP_KEYS）。
 //     3つのときは局面に maxLives を持たない（前と全く同じ形）。
+// 2026-11-22 本人の依頼（「次のカードが出るまで不正解演出を出さない。間違えた人が失点」）と選択（Claude の推奨「本物の遊びに近い形」を承認）:
+//   - 大きい数字が先に出ても、その場では何も起きない（小さい札を捨てるのをやめた）。あとから、出ている札のどれかより小さい札が出たときに 💔 でライフ −1。
+//   - 失点（−1）は、その小さい札より大きい札を先に出していた人全員。名前の札に各自の失点を出し、最後は失点のいちばん少ない人の勝ち（同じなら同点で1位）。
+//     クリアしたお題の数は今までどおり数えて結果に出す（10こ全部クリアでも勝ち負けは失点で決める）。上の「まちがえたら」「全員の勝ち・引き分け」は、これに置き換わった。
+//   Claude の判断: 後から出た小さい札は赤い枠（late）。ライフは1回の 💔 で1つだけ減る。ライフが0になったらその場で終わり（前と同じ）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → write → close → play →（全部出た）→ done → next … → end
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'word', r: 何こ目のお題か, text } / { p, t: 'play', r }
 
 import { mulberry32, shuffle, esc, mayFocus } from './util.js';
-import { since, kana, scoreChips, timeBar } from './party.js';
+import { since, kana, scoreChips, timeBar, winnersText, leaders } from './party.js';
 import { TOPICS } from './kachikan-data.js';
 import { shown as filtered } from '../filter.js';
 
@@ -45,7 +50,7 @@ export function cpuWord(topic, v, shift = 0) {
 }
 const rKey = (s) => `kachikan:${s.seed}:${s.r}`;
 const pKey = (s) => `${rKey(s)}:p${s.order.length}`; // 出す場面の時計（札が1枚出るたびに替える）
-const clone = (s) => ({ ...s, words: s.words.slice(), state: s.state.slice(), order: s.order.slice() });
+const clone = (s) => ({ ...s, words: s.words.slice(), state: s.state.slice(), order: s.order.slice(), pen: s.pen.slice() });
 const handOf = (s) => s.state.map((x, p) => (x === 'hand' ? p : -1)).filter((p) => p >= 0);
 const cpuPlan = new Map();
 let ui = null; // { mount, wrap, chips, note, input }
@@ -54,7 +59,7 @@ export default {
   id: 'kachikan',
   name: '価値観ならべ',
   icon: '🔢',
-  desc: '協力ゲーム。ひみつの数字をお題に合わせた言葉で伝え、みんなで小さい順に出す',
+  desc: 'ひみつの数字をお題に合わせた言葉で伝え、みんなで小さい順に出す。大きい札を早く出しすぎると失点',
   ready: true,
   multi: true,
   realtime: true,
@@ -70,7 +75,7 @@ export default {
     const lives = max !== LIVES && LIFE_CHOICES.some(([v]) => v === max) ? max : LIVES;
     const s = {
       n, seed, topics, r: -1, phase: 'ready', lives, cleared: 0, perfect: 0, miss: 0,
-      nums: Array(n).fill(0), words: Array(n).fill(null), state: Array(n).fill('hand'), order: [], log: [], step: 0, last: null,
+      nums: Array(n).fill(0), words: Array(n).fill(null), state: Array(n).fill('hand'), order: [], log: [], step: 0, last: null, pen: Array(n).fill(0),
     };
     if (lives !== LIVES) s.maxLives = lives;
     return s;
@@ -78,23 +83,25 @@ export default {
 
   turn() { return null; },
   canAct(s, p) { return (s.phase === 'write' && s.words[p] === null) || (s.phase === 'play' && s.state[p] === 'hand'); },
+  // 失点のいちばん少ない人の勝ち（2026-11-22 本人の選択）。scores は −失点（成績表の順位で点に使う）
   result(s) {
     if (s.phase !== 'end') return null;
-    const all = s.cleared >= MAX_ROUNDS;
-    return all ? { winners: [...Array(s.n).keys()], cleared: s.cleared, perfect: s.perfect } : { winners: [], draw: true, cleared: s.cleared, perfect: s.perfect };
+    const scores = s.pen.map((v) => -v);
+    const top = Math.max(...scores);
+    return { winners: scores.map((v, p) => (v === top ? p : -1)).filter((p) => p >= 0), scores, cleared: s.cleared, perfect: s.perfect };
   },
   sound(a, b, m) {
     if (m.p === -1) return m.t === 'next' ? 'question' : m.t === 'close' ? 'card' : null;
     if (m.t === 'play') return b.lives < a.lives ? 'wrong' : 'card';
     return null;
   },
-  resultText(res) {
-    if (res.cleared >= MAX_ROUNDS) return `${MAX_ROUNDS}こ全部クリア！ みんなの勝ち！🎉`;
-    return `${res.cleared}このお題をクリア！（まちがえずに出せたのは ${res.perfect}こ）`;
+  resultText(res, me, pn) {
+    const head = res.cleared >= MAX_ROUNDS ? `${MAX_ROUNDS}こ全部クリア！ ` : `${res.cleared}このお題をクリア。`;
+    return `${head}失点がいちばん少ないのは… ${winnersText(res.winners, me, pn)}`;
   },
   phaseText(s) {
     if (s.phase === 'ready') return 'まもなく始まります…';
-    return `お題 ${s.r + 1} / ${MAX_ROUNDS}　ライフ ${'❤️'.repeat(Math.max(0, s.lives))}${'🖤'.repeat(Math.max(0, (s.maxLives ?? LIVES) - s.lives))}`;
+    return `お題 ${s.r + 1} / ${MAX_ROUNDS}　クリア ${s.cleared}　ライフ ${'❤️'.repeat(Math.max(0, s.lives))}${'🖤'.repeat(Math.max(0, (s.maxLives ?? LIVES) - s.lives))}`;
   },
 
   referee(s) {
@@ -147,12 +154,16 @@ export default {
     const s = clone(s0);
     s.step += 1;
     const v = s.nums[m.p];
-    const smaller = handOf(s0).filter((q) => s.nums[q] < v).sort((a, b) => s.nums[a] - s.nums[b]);
-    for (const q of smaller) { s.state[q] = 'skip'; s.order.push(q); }
-    s.state[m.p] = 'ok';
+    // 先に出ていた札のうち、いま出した札より大きいもの（その札を出した人が失点）
+    const blamed = s0.order.filter((q) => s.nums[q] > v);
+    s.state[m.p] = blamed.length ? 'late' : 'ok';
     s.order.push(m.p);
-    s.last = { p: m.p, skipped: smaller };
-    if (smaller.length) { s.lives -= 1; s.miss += 1; }
+    s.last = { p: m.p, blamed };
+    if (blamed.length) {
+      s.lives -= 1;
+      s.miss += 1;
+      for (const q of blamed) s.pen[q] += 1;
+    }
     if (s.lives <= 0) {
       s.log = [...s0.log, { topic: s.topics[s.r], nums: s.nums.slice(), words: s.words.slice(), order: s.order.slice(), ok: false }];
       s.phase = 'end';
@@ -193,11 +204,12 @@ export default {
     const mount = `${s.seed}:${s.r}:${s.phase}:${me}:${me !== null && s.words[me] !== null}:${s.phase === 'write' ? '' : (o.hidden ?? []).join()}:${s.order.length}`;
     const extra = (p) => {
       if (s.phase === 'write') return s.words[p] !== null ? '<span class="pt-ok">書いた</span>' : '';
-      if (s.phase === 'play' || s.phase === 'done') return s.state[p] === 'hand' ? '<span class="pt-extra">手札あり</span>' : s.state[p] === 'skip' ? '<span class="pt-ng">✗</span>' : '<span class="pt-ok">出した</span>';
+      if (s.phase === 'play' || s.phase === 'done') return s.state[p] === 'hand' ? '<span class="pt-extra">手札あり</span>' : s.last?.blamed.includes(p) ? '<span class="pt-ng">💔 −1</span>' : '<span class="pt-ok">出した</span>';
       return '';
     };
-    const chips = scoreChips(o, Array(s.n).fill(s.cleared), { extra, steady: true });
-    chips.querySelectorAll('.pt-score').forEach((x) => { x.innerHTML = `${s.cleared}<small>クリア</small>`; });
+    // 名前の札の数は各自の失点（2026-11-22 本人の選択。いちばん少ない人の勝ち）
+    const chips = scoreChips(o, s.pen.map((v) => -v), { extra, steady: true, won: s.phase === 'end' ? leaders(s.pen.map((v) => -v)) : [] });
+    chips.querySelectorAll('.pt-score').forEach((x, p) => { x.innerHTML = `${s.pen[p] ? `−${s.pen[p]}` : '0'}<small>失点</small>`; });
     if (ui?.mount === mount && root.contains(ui.wrap)) {
       ui.chips.replaceWith(chips);
       ui.chips = chips;
@@ -219,7 +231,7 @@ export default {
     card.className = 'kj-card';
     wrap.append(card);
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">みんなで協力！ ひみつの数字をお題に合わせた言葉で伝えて、小さい順に出そう（ライフ ${s.maxLives ?? LIVES}つ）</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">ひみつの数字をお題に合わせた言葉で伝えて、みんなで小さい順に出そう。大きい札を早く出しすぎると失点（ライフ ${s.maxLives ?? LIVES}つ）</div>`;
       root.append(wrap);
       return;
     }
@@ -275,7 +287,7 @@ export default {
     if (!s.order.length) row.innerHTML = '<div class="kc-empty">まだだれも出していません</div>';
     for (const p of s.order) {
       const c = document.createElement('div');
-      c.className = 'kc-card ' + (s.state[p] === 'skip' ? 'skip' : 'ok') + (s.last?.p === p ? ' new' : '');
+      c.className = 'kc-card ' + (s.state[p] === 'late' ? 'late' : 'ok') + (s.last?.p === p ? ' new' : '') + (s.last?.blamed.includes(p) ? ' blame' : '');
       c.innerHTML = '<b></b><span class="kc-w"></span><span class="kc-n"></span>';
       c.querySelector('b').textContent = String(s.nums[p]);
       c.querySelector('.kc-w').textContent = wordOf(p);
@@ -327,7 +339,7 @@ export default {
       else if (!note.textContent) note.textContent = '自分の数字の大きさが伝わる言葉を1つ（数字そのものは書かないでね）';
     } else if (s.phase === 'play') {
       const l = s.last;
-      if (l?.skipped.length) note.textContent = `💔 まちがい！ ${l.skipped.map(nameOf).join('・')} の方が小さかった（ライフ −1）`;
+      if (l?.blamed.length) note.textContent = `💔 まちがい！ ${nameOf(l.p)}の ${s.nums[l.p]} より大きい札を、${l.blamed.map(nameOf).join('・')}が先に出していた（ライフ −1・${l.blamed.map(nameOf).join('・')} は失点 −1）`;
       else if (me !== null && s.state[me] === 'hand') note.textContent = '言葉を見比べて、自分が一番小さいと思ったら出そう';
       else note.textContent = 'ほかの人が出すのを待っています…';
     } else if (s.phase === 'done') {

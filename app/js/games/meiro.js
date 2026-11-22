@@ -16,6 +16,11 @@
 //   - ほかの人の位置は見た目だけなので手の一覧に入れず、動くたびに送りっぱなしにする（o.stream。0.12秒より短い間は1回にまとめる）。CPU の位置は出さない。
 //   - なぞるときは、指のあるマスへ向かって、壁に当たるまで1マスずつ進む。
 //   - CPU は大きさごとの目安の時間（小28秒・中50秒・大90秒。2026-10-30 に 20・35・60秒から）の半分〜1.5倍で着く。1割の問題はあきらめる。
+// 2026-11-22 本人の依頼（「ほかの人について行って、ゴールが近づいたときだけ考える戦法が強すぎる。むだな道を行かないほど点が上がる設定を追加」）と選択（Claude の推奨を承認）:
+//   - 詳細設定「順位の決め方」（鍵は rank）: 早さ（最初）・歩数。歩数では、ゴールした人のうち歩いた数（送る動きの文字数。戻った分も数える）の少ない順に 3点・2点・それ以降は1点、
+//     同じ歩数なら早く着いた方が上。歩数のときは、ほかの人の位置を見せない（ついて行けないように。位置を送ること自体をやめる）。
+//   Claude の判断: 歩数の局面だけ walks（席ごとの歩数）を持つ（早さのときの局面は前と全く同じ形）。遊んでいる間は自分の歩いた数を出す。
+//   CPU は、歩数のときは最短の道に寄り道（行けるほうへ1歩出て戻る）を最短の 1〜6割ぶん足して送る（いつも最短だと人が勝てないため）。おまかせで抽選してよい。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（15パズル早解きと同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, seq, ms } / { p, t: 'pass', q }
 
@@ -38,7 +43,7 @@ const DARK_SEE = 2; // 暗やみで見える、自分のまわりのマスの数
 const levelOf = (r) => (SIZES[r.level] ? r.level : 'm');
 const limitOf = (s) => LIMITS[s.level] * (s.rules.dark ? 1.5 : 1);
 const qKey = (s, q = s.q) => `meiro:${s.seed}:${q}`;
-const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice(), passed: s.passed.slice() });
+const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice(), passed: s.passed.slice(), ...(s.walks ? { walks: s.walks.slice() } : {}) });
 const doneOf = (s, p) => s.solved[p] !== null || s.passed[p];
 
 // 種から迷路を作る。返り値はマスごとの開いている向きの印（上1・右2・下4・左8）の配列
@@ -91,6 +96,22 @@ export function solve(maze, n) {
   }
   return prev[n * n - 1];
 }
+// 最短の道に寄り道（行ける向きへ1歩出て戻る）を extra 回足す（歩数で順位を決めるときの CPU）
+export function detour(maze, n, path, extra, rnd) {
+  const cells = [0];
+  for (const d of path) cells.push(stepOf(maze, n, cells.at(-1), d));
+  const at = new Map(); // 道の何歩目のあとに、どの寄り道を入れるか
+  for (let k = 0; k < extra; k++) {
+    const i = Math.floor(rnd() * (cells.length - 1));
+    const opts = 'UDLR'.split('').filter((d) => stepOf(maze, n, cells[i], d) >= 0);
+    const d = opts[Math.floor(rnd() * opts.length)];
+    at.set(i, (at.get(i) ?? '') + d + BACK[d]);
+  }
+  let out = '';
+  for (let i = 0; i <= path.length; i++) out += (at.get(i) ?? '') + (path[i] ?? '');
+  return out;
+}
+const stepsMode = (s) => s.rules.rank === 'steps';
 
 let loc = null; // この端末で動かしているコマ { key, c, seq, sent, trail }
 let ui = null;
@@ -122,6 +143,7 @@ export default {
   settings: [
     { key: 'level', label: '迷路の大きさ', desc: '大きいほど時間がかかる', def: 'm', choices: [['s', '小（9×9）'], ['m', '中（13×13）'], ['l', '大（18×18）']] },
     { key: 'dark', label: '暗やみ', desc: '自分のまわり（と通った所）しか見えない。制限時間は1.5倍', def: false },
+    { key: 'rank', label: '順位の決め方', desc: '歩数: むだな道を歩かずにゴールした人ほど上（同じ歩数なら早い方）。ほかの人の位置は見えない', def: 'time', choices: [['time', '早さ'], ['steps', '歩数']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -130,10 +152,12 @@ export default {
     const size = SIZES[level];
     const rnd = mulberry32(seed);
     const qs = Array.from({ length: ROUNDS }, () => makeMaze(size, rnd));
-    return {
+    const s = {
       n, seed, rules: r, level, size, qs, q: -1, phase: 'ready',
       solved: Array(n).fill(null), passed: Array(n).fill(false), scores: Array(n).fill(0), last: null, log: [], step: 0,
     };
+    if (stepsMode(s)) s.walks = Array(n).fill(null);
+    return s;
   },
 
   turn() { return null; },
@@ -172,19 +196,22 @@ export default {
         s.phase = 'open';
         s.solved = Array(s.n).fill(null);
         s.passed = Array(s.n).fill(false);
+        if (s.walks) s.walks = Array(s.n).fill(null);
         return s;
       }
       if (m.t === 'close' && s0.phase === 'open') {
         const s = clone(s0);
         s.step += 1;
         s.phase = 'shown';
-        const times = s.solved.filter((v) => v !== null);
+        // 歩数のときは「歩数 → 早さ」の順で比べる（制限時間はどれも 1000万ms より短い）
+        const keys = s.walks ? s.solved.map((v, p) => (v === null ? null : s.walks[p] * 1e7 + v)) : s.solved;
+        const times = keys.filter((v) => v !== null);
         const best = times.length ? Math.min(...times) : null;
-        const winners = best === null ? [] : s.solved.map((v, p) => (v === best ? p : -1)).filter((p) => p >= 0);
-        const pts = pointsOf(s.solved);
+        const winners = best === null ? [] : keys.map((v, p) => (v === best ? p : -1)).filter((p) => p >= 0);
+        const pts = pointsOf(keys);
         pts.forEach((v, p) => { s.scores[p] += v; });
         s.last = { winners, pts };
-        s.log = [...s0.log, { solved: s.solved.slice(), winners }];
+        s.log = [...s0.log, { solved: s.solved.slice(), winners, ...(s.walks ? { walks: s.walks.slice() } : {}) }];
         return s;
       }
       return null;
@@ -196,6 +223,7 @@ export default {
     const s = clone(s0);
     s.step += 1;
     s.solved[m.p] = Math.round(m.ms);
+    if (s.walks) s.walks[m.p] = m.seq.length;
     return s;
   },
 
@@ -214,7 +242,9 @@ export default {
     if (plan.done || t < plan.at) return null;
     plan.done = true;
     if (!plan.ok) return { t: 'pass', q: s.q };
-    return { t: 'done', q: s.q, seq: solve(s.qs[s.q], s.size), ms: Math.round(t) };
+    const path = solve(s.qs[s.q], s.size);
+    const seq = s.walks ? detour(s.qs[s.q], s.size, path, Math.round(path.length * (0.05 + Math.random() * 0.25)), Math.random) : path;
+    return { t: 'done', q: s.q, seq, ms: Math.round(t) };
   },
 
   // ほかの人の位置（見た目だけ）
@@ -232,7 +262,7 @@ export default {
     const extra = (p) => {
       if (s.phase === 'open') return s.solved[p] !== null ? '<span class="pt-ok">ゴール！</span>' : s.passed[p] ? '<span class="pt-ng">あきらめ</span>' : '';
       if (s.phase !== 'shown' || !s.last) return '';
-      if (s.solved[p] !== null) return `<span class="pt-ok">○ ${secText(s.solved[p])} +${s.last.pts[p]}</span>`;
+      if (s.solved[p] !== null) return `<span class="pt-ok">○ ${s.walks ? `${s.walks[p]}歩` : secText(s.solved[p])} +${s.last.pts[p]}</span>`;
       return '<span class="pt-ng">―</span>';
     };
     const chips = scoreChips(o, s.scores, { won, extra, steady: true });
@@ -252,7 +282,7 @@ export default {
     wrap.append(card);
     const sizeText = `${s.size}×${s.size}`;
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">${sizeText}${s.rules.dark ? '・🔦 暗やみ' : ''}・全${s.qs.length}問・1問 ${limitOf(s) / 1000}秒まで</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">${sizeText}${s.rules.dark ? '・🔦 暗やみ' : ''}${s.walks ? '・👣 歩数の少ない人ほど高い点（ほかの人の位置は見えない）' : ''}・全${s.qs.length}問・1問 ${limitOf(s) / 1000}秒まで</div>`;
       return;
     }
     const key = qKey(s);
@@ -267,7 +297,7 @@ export default {
     } else {
       const t = document.createElement('div');
       t.className = 'kj-sub';
-      t.textContent = s.last.winners.length ? `いちばん速かったのは ${s.last.winners.map((p) => (p === me ? 'あなた' : o.names[p])).join('・')}` : 'だれもゴールできませんでした';
+      t.textContent = s.last.winners.length ? `${s.walks ? 'いちばん少ない歩数だったのは' : 'いちばん速かったのは'} ${s.last.winners.map((p) => (p === me ? 'あなた' : o.names[p])).join('・')}` : 'だれもゴールできませんでした';
       card.append(t);
     }
 
@@ -334,7 +364,7 @@ export default {
       }
       // ほかの人（小さい丸）と自分（大きい丸）
       for (const [p, v] of others) {
-        if (v.key !== key || p === me || p >= s.n || s.solved[p] !== null) continue;
+        if (v.key !== key || p === me || p >= s.n || s.solved[p] !== null || s.walks) continue;
         g.fillStyle = SEAT_COLORS[p % SEAT_COLORS.length];
         g.globalAlpha = 0.75;
         g.beginPath();
@@ -352,10 +382,11 @@ export default {
         g.stroke();
       }
       note.textContent = s.phase !== 'open' ? '' : me === null ? '観戦中' : s.solved[me] !== null ? `ゴール！（${secText(s.solved[me])}）ほかの人を待っています`
-        : s.passed[me] ? 'あきらめました。ほかの人を待っています' : '矢印・なぞる・矢印キーで動かす。🏁 を目指そう';
+        : s.passed[me] ? 'あきらめました。ほかの人を待っています' : s.walks ? `👣 歩いた数 ${loc.seq.length}` : '矢印・なぞる・矢印キーで動かす。🏁 を目指そう';
     };
     ui.paint = paint;
     const sendPos = () => {
+      if (s.walks) return; // 歩数のときは位置を送らない（ついて行けないように。2026-11-22 本人の選択）
       const go = () => { lastSend = performance.now(); sendTimer = null; o.stream?.({ key, c: loc.c }); };
       if (sendTimer) return;
       const wait = 120 - (performance.now() - lastSend);
@@ -439,8 +470,8 @@ export default {
     s.log.forEach((x, q) => {
       const li = document.createElement('li');
       const fast = x.winners.map((p) => (p === me ? 'あなた' : o.names?.[p] ?? ''));
-      const mine = me === null ? '' : x.solved[me] !== null ? `⭕ ${secText(x.solved[me])}` : '❌';
-      li.innerHTML = `<span class="mk-rv-n">${q + 1}</span><span>${mine}</span><span class="mk-rv-who">${fast.length ? '⚡' + esc(fast.join('・')) : '―'}</span>`;
+      const mine = me === null ? '' : x.solved[me] !== null ? `⭕ ${x.walks ? `${x.walks[me]}歩・` : ''}${secText(x.solved[me])}` : '❌';
+      li.innerHTML = `<span class="mk-rv-n">${q + 1}</span><span>${mine}</span><span class="mk-rv-who">${fast.length ? (x.walks ? '👣' : '⚡') + esc(fast.join('・')) : '―'}</span>`;
       list.append(li);
     });
     box.append(sum, list);

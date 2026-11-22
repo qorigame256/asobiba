@@ -3,9 +3,10 @@
 //   - 長い針・短い針を、それぞれ指でつまんで回す（本物の時計のように長い針につられて何周も回す形にはしない）。
 //   - 長い針は5分きざみで止まる。詳細設定「むずかしさ」の「むずかしい」だけ1分きざみ。
 //   - 1問ごとに、合わせた速い順に 3点・2点・それ以降は1点。全部で10問（難読漢字・10を作れと同じ形）。
+// 2026-11-22 本人の依頼（「長針を動かすと短針が動いてしまう」）と選択（Claude の推奨を承認）:
+//   - 合わせている間、短い針はいつも数字（3時なら「3」）をまっすぐ指し、長い針を回しても動かない。何時かは短い針の指す数字で決まる（向き/30 を丸める）。
+//     答えを見せる間（shown）だけ、本物の時計の位置（3時40分なら 3 と 4 の間）で出す。前は長い針に合わせて本物の時計の位置へ寄せていた。
 // Claude の判断:
-//   - 短い針は「何時か」だけを選ぶ。置いた位置は長い針に合わせて本物の時計と同じ所（3時40分なら 3 と 4 の間の 3分の2）へ寄せる。
-//     なので短い針を 3 と 4 のどちらに近く置いても、長い針が40分なら「3時」を選んだ位置から近い方の時にそろう（angle/30 − 分/60 を丸める）。
 //   - 合っているかは指を離したときに見る（回している途中で正しい時刻を通っても数えない）。合っていれば、問題が出てからの時間を送る。
 //   - 今の針の時刻を数字では出さない（出すと数字を合わせるだけになり、時計を読む遊びでなくなるため）。
 //   - 針のはじめの位置は問題ごとに種から決め、全員同じ。正しい時刻と同じにはしない。答えの時刻に 0分（「3時ちょうど」）も入る。
@@ -70,9 +71,9 @@ const qText = (Q) => { const t = questionText(Q); return t.sub ? `${t.sub} の${
 // 針の向き（度。12時が0、時計回り）
 export const minAngle = (m) => m * 6;
 export const hourAngle = (h, m) => ((h % 12) + m / 60) * 30;
-// 向きから時刻を選ぶ（step 分きざみ）。短い針は今の分に合わせた位置から一番近い「時」
+// 向きから時刻を選ぶ（step 分きざみ）。短い針は一番近い数字（合わせている間は数字をまっすぐ指すため）
 export const minOf = (deg, step) => (((Math.round(norm(deg) / 6 / step) * step) % 60) + 60) % 60;
-export const hourOf = (deg, m) => { const h = ((Math.round(norm(deg) / 30 - m / 60) % 12) + 12) % 12; return h === 0 ? 12 : h; };
+export const hourAt = (deg) => Math.round(norm(deg) / 30) % 12 || 12;
 const norm = (d) => ((d % 360) + 360) % 360;
 const gap = (a, b) => { const d = Math.abs(norm(a) - norm(b)); return Math.min(d, 360 - d); };
 
@@ -257,7 +258,7 @@ export default {
     const note = document.createElement('p');
     note.className = 'cc-log';
     const paint = () => {
-      clock.set(show.h, show.m);
+      clock.set(show.h, show.m, s.phase === 'shown');
       note.textContent = s.phase !== 'open' ? `正解は ${timeText(Q.h, Q.m)}` : me === null ? '観戦中'
         : doneOf(s, me) || loc.sent ? `あわせた！（${doneOf(s, me) ? secText(s.solved[me]) : '…'}）ほかの人を待っています`
         : '針をつまんで回そう（短い針と長い針は別々に動く）';
@@ -276,7 +277,7 @@ export default {
           const m = minOf(deg, step);
           if (m !== loc.m) { loc.m = m; play('chip', 0.15); }
         } else {
-          const h = hourOf(deg, loc.m);
+          const h = hourAt(deg);
           if (h !== loc.h) { loc.h = h; play('chip', 0.15); }
         }
         paint();
@@ -285,7 +286,7 @@ export default {
         if (!playing || loc.sent) return;
         e.preventDefault();
         const { deg, rad } = angleAt(e);
-        const dh = gap(deg, hourAngle(loc.h, loc.m)), dm = gap(deg, minAngle(loc.m));
+        const dh = gap(deg, loc.h * 30), dm = gap(deg, minAngle(loc.m));
         grab = dh < 20 && dm < 20 ? (rad < 60 ? 'h' : 'm') : dh < dm ? 'h' : 'm';
         clock.svg.classList.toggle('grab-h', grab === 'h');
         clock.svg.classList.toggle('grab-m', grab === 'm');
@@ -332,7 +333,7 @@ export default {
   },
 };
 
-// 時計の絵（SVG）。set(時, 分) で針を動かす
+// 時計の絵（SVG）。set(時, 分, 本物の位置か) で針を動かす。real でないときは短い針が数字をまっすぐ指す（合わせている間）
 function drawClock(withNums = true) {
   const box = document.createElement('div');
   box.className = 'tk-box';
@@ -353,8 +354,8 @@ function drawClock(withNums = true) {
   const hg = svg.querySelector('.tk-hour'), mg = svg.querySelector('.tk-min');
   return {
     box, svg,
-    set(h, m) {
-      hg.setAttribute('transform', `rotate(${hourAngle(h, m)})`);
+    set(h, m, real = false) {
+      hg.setAttribute('transform', `rotate(${real ? hourAngle(h, m) : (h % 12) * 30})`);
       mg.setAttribute('transform', `rotate(${minAngle(m)})`);
     },
   };

@@ -1,0 +1,96 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "app/fonts",
+    "app/voice",
+    "app/sounds",
+    "tools/test-logic.mjs",
+    "tools/font-chars.json",
+    "tools/font-texts.mjs",
+    "tools/voice-texts.mjs"
+  ],
+  "cwd": "copy",
+  "env": {
+    "QUICK": "1",
+    "SEED": "1"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 300,
+  "breaks": [
+    {
+      "name": "迷路の歩数の順位で歩数を見ない",
+      "file": "app/js/games/meiro.js",
+      "old": "s.walks[p] * 1e7 + v",
+      "new": "v",
+      "expect": ["迷路: 歩数の少ない順、同じ歩数なら早い方が上"]
+    },
+    {
+      "name": "迷路の CPU の寄り道で戻らない",
+      "file": "app/js/games/meiro.js",
+      "old": "at.set(i, (at.get(i) ?? '') + d + BACK[d]);",
+      "new": "at.set(i, (at.get(i) ?? '') + d + d);",
+      "expect": ["迷路: 寄り道を足してもゴールに着く"]
+    },
+    {
+      "name": "価値観ならべで小さい札を先に出した人を責める",
+      "file": "app/js/games/kachikan.js",
+      "old": "const blamed = s0.order.filter((q) => s.nums[q] > v);",
+      "new": "const blamed = s0.order.filter((q) => s.nums[q] < v);",
+      "expect": ["価値観ならべ: あとから小さい札が出たらライフが1つ減る"]
+    },
+    {
+      "name": "価値観ならべで失点を数えない",
+      "file": "app/js/games/kachikan.js",
+      "old": "for (const q of blamed) s.pen[q] += 1;",
+      "new": "for (const q of blamed) s.pen[q] += 0;",
+      "expect": ["価値観ならべ: 大きい札を先に出した人は2回失点"]
+    },
+    {
+      "name": "15パズルで枚数を送っていない人を0点にする",
+      "file": "app/js/games/slide.js",
+      "old": "s.parts[p] ?? countOk(start)",
+      "new": "s.parts[p] ?? 0",
+      "expect": ["15パズル: そろえた人は札の数＋速さの点、あきらめて枚数を送っていない人は最初の並びの合っている枚数（2026-11-22）"]
+    },
+    {
+      "name": "15パズルの CPU が人より先にそろえる",
+      "file": "app/js/games/slide.js",
+      "old": "if (plan.ok && first !== null && t >= Math.max(plan.at, first + plan.lag) && t < lim) {",
+      "new": "if (plan.ok && t >= Math.max(plan.at, (first ?? 0) + plan.lag) && t < lim) {",
+      "expect": ["15パズル: 人がそろえるまで CPU はそろえない"]
+    },
+    {
+      "name": "15パズルの2つ目の空きを小文字にしない",
+      "file": "app/js/games/slide.js",
+      "old": "indexOf(i) === 1 ? D.toLowerCase() : D);",
+      "new": "indexOf(i) === 1 ? D : D);",
+      "expect": ["15パズル: 空き2つは両方の空きが動く"]
+    },
+    {
+      "name": "15パズルの近道探しの目安を逆にする",
+      "file": "app/js/games/slide.js",
+      "old": "const dh = dist(v, i) - dist(v, j);",
+      "new": "const dh = dist(v, j) - dist(v, i);",
+      "expect": ["15パズル: 3×3 空き1 の近道"]
+    },
+    {
+      "name": "時計あわせの短い針を切り捨てで読む",
+      "file": "app/js/games/tokei.js",
+      "old": "Math.round(norm(deg) / 30) % 12 || 12",
+      "new": "Math.floor(norm(deg) / 30) % 12 || 12",
+      "expect": ["時計あわせ: 4 と 5 のまん中を越えたら5時"]
+    }
+  ]
+}
