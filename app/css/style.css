@@ -1061,6 +1061,8 @@ main.slow-zoom > section > #board { position: relative; z-index: 2; } /* 下へ�
 .dock .btn { min-width: 9em; }
 .dock-ready { font-size: .9rem; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dock-ready.all { color: #2e7d32; }
+.dock .btn.dock-nudge { min-width: 0; padding-left: 12px; padding-right: 12px; white-space: nowrap; } /* 準備OK の催促（2026-11-22。main.js の nudgeButton） */
+.btn.nudged { animation: ic-buzz .45s linear 3; }
 .btn.ready-go { animation: ready-go 1.2s ease-in-out infinite; } /* 全員の準備ができたら「始める」を目立たせる */
 @keyframes ready-go { 50% { box-shadow: 0 0 0 6px rgba(255, 170, 0, .45); } }
 @media (prefers-reduced-motion: reduce) { .btn.ready-go { animation: none; box-shadow: 0 0 0 3px rgba(255, 170, 0, .6); } }
@@ -1741,15 +1743,23 @@ main.slow-zoom > section > #board { position: relative; z-index: 2; } /* 下へ�
 .board .sl-tile.ok { border-color: #2f8a4a; }
 .board .sl-tile.blank { visibility: hidden; }
 .sl-grid.live { touch-action: none; cursor: grab; } /* なでて動かす間は、ページが動かないように（slide.js） */
+/* ヒント（2026-11-22）: 次に動かす札が光る。近道が見つからないときは、札と置き場所（点線） */
+.board .sl-tile.hint { border-color: #e8a913; box-shadow: 0 0 0 3px #e8a913; animation: sl-hint .9s ease-in-out infinite alternate; }
+.board .sl-tile.goal { outline: 3px dashed #e8a913; outline-offset: -4px; }
+.board .sl-tile.blank.goal { visibility: visible; background: transparent; border-color: transparent; }
+@keyframes sl-hint { from { box-shadow: 0 0 0 2px #e8a913; } to { box-shadow: 0 0 0 6px color-mix(in srgb, #e8a913 35%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .board .sl-tile.hint { animation: none; } }
 /* ほかの人の盤を小さく（2026-11-14 本人の依頼。slide.js の paintOthers） */
 .sl-others { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 10px; }
-.sl-mini { width: 96px; text-align: center; }
+.sl-mini { position: relative; width: 96px; text-align: center; }
 .sl-mini-grid { display: grid; grid-template-columns: repeat(var(--n, 4), 1fr); gap: 1px; padding: 2px; border-radius: 6px; background: var(--line); }
 .sl-mini-grid span { aspect-ratio: 1; display: grid; place-items: center; border-radius: 2px; background: var(--field); color: var(--ink); font-size: 11px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
 .sl-mini-grid span.ok { color: #2f8a4a; }
 .sl-mini-grid span.blank { background: transparent; }
 .sl-mini.done .sl-mini-grid { background: #2f8a4a; }
-.sl-mini.gave { opacity: .45; }
+.sl-mini.gave .sl-mini-grid, .sl-mini.gave .sl-mini-cap { opacity: .4; }
+/* あきらめた人の小さな盤に札を重ねる（2026-11-22 本人の依頼。前は薄くするだけだった） */
+.sl-mini.gave::after { content: "あきらめ"; position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%) rotate(-8deg); padding: 2px 7px; border-radius: 6px; background: #c0392b; color: #fff; font-size: .75rem; font-weight: 800; white-space: nowrap; box-shadow: 0 1px 3px rgba(0, 0, 0, .3); }
 .sl-mini-cap { font-size: .72rem; font-weight: 700; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sl-mini.done .sl-mini-cap::after { content: " ✓"; color: #2f8a4a; }
 .np-grid { --n: 9; display: grid; grid-template-columns: repeat(var(--n), 1fr); width: min(100%, 420px); margin: 0 auto; border: 2.5px solid var(--ink); touch-action: manipulation; }
@@ -3089,8 +3099,9 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .kc-card .kc-w { font-size: .85rem; font-weight: 700; overflow-wrap: anywhere; }
 .kc-card .kc-n { font-size: .72rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .kc-card.ok { border-color: #2f8a4a; }
-.kc-card.skip { border-color: #c0392b; opacity: .7; }
-.kc-card.skip b { text-decoration: line-through; color: #c0392b; }
+.kc-card.late { border-color: #c0392b; }
+.kc-card.late b { color: #c0392b; }
+.kc-card.blame { background: #fde8e4; color: #5a2a20; }
 .kc-card.new { box-shadow: 0 0 0 3px var(--accent); }
 .kc-card.hand.me { border-color: var(--accent); }
 .board button.kc-play { display: block; width: min(100%, 360px); min-height: 3.6rem; margin: 0 auto; font-size: 1.2rem; font-weight: 800; }
