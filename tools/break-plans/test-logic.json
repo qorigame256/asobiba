@@ -5,6 +5,7 @@
     "app/js",
     "app/fonts",
     "app/voice",
+    "app/sounds",
     "tools/test-logic.mjs",
     "tools/font-chars.json",
     "tools/font-texts.mjs",

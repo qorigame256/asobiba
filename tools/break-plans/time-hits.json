@@ -1,0 +1,69 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "app/fonts",
+    "app/voice",
+    "app/sounds",
+    "tools/test-logic.mjs",
+    "tools/font-chars.json",
+    "tools/font-texts.mjs",
+    "tools/voice-texts.mjs"
+  ],
+  "cwd": "copy",
+  "env": {
+    "QUICK": "1",
+    "SEED": "1"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 300,
+  "breaks": [
+    {
+      "name": "マルバツの時間切れの手をくじでなく最初の打てる所にする",
+      "file": "app/js/games/tictactoe.js",
+      "old": "return legal.length ? legal[Math.floor(Math.random() * legal.length)] : null;",
+      "new": "return legal.length ? legal[0] : null;"
+    },
+    {
+      "name": "マルバツの時間切れの手で打てるか確かめない（かぶせるの手を空いたマスで作る）",
+      "file": "app/js/games/tictactoe.js",
+      "old": "const legal = (s.gob ? gobLegal(s) : s.big ? bigLegal(s) : emptyCells(s)).filter((m) => this.apply(s, m));",
+      "new": "const legal = (s.big ? bigLegal(s) : s.gob ? s.stacks.map((_, i) => i) : emptyCells(s));"
+    },
+    {
+      "name": "マルバツの持ち時間で決めていない秒も通す",
+      "file": "app/js/games/tictactoe.js",
+      "old": "turnLimit(rules) { return [5, 10, 20].includes(rules?.time) ? rules.time : 0; },",
+      "new": "turnLimit(rules) { return Number(rules?.time) || 0; },"
+    },
+    {
+      "name": "海戦ゲームのヒット数で、もう当てられたマスも数える",
+      "file": "app/js/games/kaisen.js",
+      "old": "if (s.hitN && !shotOn(s, q, m)) t.hitN[p] += 1;",
+      "new": "if (s.hitN) t.hitN[p] += 1;"
+    },
+    {
+      "name": "海戦ゲームのヒット数で、生き残った人を勝ちにする",
+      "file": "app/js/games/kaisen.js",
+      "old": "return { winner: top.length === 1 ? top[0] : null, cells: [], place,",
+      "new": "return { winner: s.won, cells: [], place,"
+    },
+    {
+      "name": "海戦ゲームの2人にもヒット数を持たせる",
+      "file": "app/js/games/kaisen.js",
+      "old": "return { size: n, salvo, again:",
+      "new": "return { ...(rules.win === 'hits' ? { hitN: [0, 0] } : {}), size: n, salvo, again:"
+    }
+  ]
+}

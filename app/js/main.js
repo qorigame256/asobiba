@@ -505,8 +505,13 @@ document.addEventListener('contextmenu', (e) => { if (press) e.preventDefault();
 // Claude の判断: 人だけを出す（CPU は出さない）。引き分けはだれも勝ちにしない。同点の1位・チームの勝ちは全員を数える。
 // 部屋にいる人は0勝でも出し、出た人は勝ちがあれば出す。勝った回数の多い順。待合室と、対局の結果の画面に出す。
 function tallyHtml() {
+  const p = tallyParts();
+  return p ? `${p.head}: ${p.body}` : '';
+}
+// 成績表の見出し（head）と中身（body）。待合室では見出しだけを出して畳み、押すと中身が開く（tallyLine）
+function tallyParts() {
   const t = S.tally;
-  if (S.mode !== 'online' || !t?.games) return '';
+  if (S.mode !== 'online' || !t?.games) return null;
   const w = (id) => (Number.isInteger(t.wins[id]) ? t.wins[id] : 0); // 届いた数は整数だけ使う（外から来た値なので）
   // 順位で点（28回目の案）: ホストが選んだら点の多い順に「12点（4勝・10戦・40%）」。点を数える前の形の成績表なら一言添えて勝った回数のまま
   const usePts = ptsOn(t);
@@ -522,7 +527,7 @@ function tallyHtml() {
   const head = `🏆 この部屋の成績（${t.games}回${usePts ? '・順位で点' : ''}）`
     + (S.ptsMode && !usePts ? '<small>（点は「成績を0に戻す」のあとから数えます）</small>' : '');
   // 勝敗予想の当たり（2026-10-07。10回目の案）は 2026-11-16 本人の依頼で勝敗予想と一緒にやめた
-  return `${head}: ${list}` + roomBestHtml(t);
+  return { head, body: list + roomBestHtml(t) };
 }
 
 // 成績表を点で並べるか（ホストが「順位で点」を選んでいて、成績表が点を数えている形のとき）
@@ -585,12 +590,21 @@ function localTallyHtml(game) {
 }
 
 // 待合室に出す成績表の行。ホストには「成績を0に戻す」も付ける（2026-10-06 本人の決定。日をまたいで同じ部屋を使うときのため）
+// 2026-11-22 本人の依頼（「幅を取っていて邪魔。基本は閉じて、開いて見られるように」）: 見出しの「🏆 この部屋の成績（◯回）」だけを出して畳み、押すと開く。
+// 開いたかは端末ごとに S.tallyOpen に覚える（送らない・保存しない。「📜 この部屋の対局」の S.historyOpen と同じ形）。対局の結果の画面の成績は今までどおり開いたまま（tallyHtml）
 function tallyLine() {
-  const html = tallyHtml();
-  if (!html) return null;
+  const parts = tallyParts();
+  if (!parts) return null;
+  const box = document.createElement('details');
+  box.className = 'lobby-history lobby-tally';
+  box.open = !!S.tallyOpen;
+  box.ontoggle = () => { S.tallyOpen = box.open; };
+  const sum = document.createElement('summary');
+  sum.innerHTML = parts.head;
   const p = document.createElement('p');
   p.className = 'lobby-note tally';
-  p.innerHTML = html;
+  p.innerHTML = parts.body;
+  box.append(sum, p);
   if (S.isHost) {
     const b = makeButton('成績を0に戻す', () => {
       if (!confirm('この部屋の成績表・連勝・対局の履歴を0に戻しますか？')) return;
@@ -607,7 +621,7 @@ function tallyLine() {
     aw.classList.add('tally-reset');
     p.append(' ', aw, ' ', b);
   }
-  return p;
+  return box;
 }
 
 /* ---------- お開きの表彰（2026-10-07。20回目の案。Claude の案から本人が推奨どおり選んだ） ---------- */
@@ -704,33 +718,22 @@ function setReady(id, on) {
   saveRoom();
   if (S.isHost && !was && allReady()) toast('✋ 全員の準備ができました！');
 }
-// 待合室に出す「準備OK 2/3人」の一行（待つ人がいるときだけ）
-function readyLine() {
-  const others = readyNeed();
-  if (!others.length) return null;
-  const ok = readyIds().filter((id) => others.includes(id));
-  const p = document.createElement('p');
-  p.className = 'lobby-ready' + (allReady() ? ' all' : '');
-  const wait = others.filter((id) => !ok.includes(id));
-  p.innerHTML = `✋ 準備OK ${ok.length}/${others.length}人`
-    + (ok.length ? `: ${ok.map((id) => esc(nameOf(id))).join('・')}` : '')
-    + (wait.length ? `<small>（まだ: ${wait.map((id) => esc(nameOf(id))).join('・')}）</small>` : '');
-  return p;
-}
 // 「始める」を画面の下に固定（2026-11-17 本人の選択。room.md「UI・UX の8回目」）: 待合室で、ホストの「始める」・ゲストの「準備OK」を
 // 画面の下に留める（#dock は position: sticky。スマホでは「始める」が詳細設定の下、2画面ほど下にあった）。準備OK の人数も一緒に出す（待つ人がいるときだけ）。
 // Claude の判断: 留めるのはこのボタン1つだけ（CPU を増やす・ゲームを変える などは今の場所のまま。留める段が大きいと盤や一覧が隠れるため）。
-// 準備OK をだれが押したかの名前は、今までどおり待合室の中の「✋ 準備OK 2/3人: …」の行に出す
+// 待合室の中にあった「✋ 準備OK 2/3人: …」の行は 2026-11-22 本人の依頼でやめた。まだの人の名前は、この人数の札の title（PC で上にのせると出る）にだけ残した
 function lobbyDock(btn) {
   const dock = el('dock');
   const others = readyNeed();
   const parts = [];
   if (others.length) {
-    const ok = readyIds().filter((id) => others.includes(id)).length;
+    const okIds = readyIds().filter((id) => others.includes(id));
+    const ok = okIds.length;
+    const wait = others.filter((id) => !okIds.includes(id));
     const p = document.createElement('span');
     p.className = 'dock-ready' + (ok === others.length ? ' all' : '');
     p.textContent = `✋ ${ok}/${others.length}人`;
-    p.title = `準備OK ${ok}/${others.length}人`;
+    p.title = `準備OK ${ok}/${others.length}人` + (wait.length ? `（まだ: ${wait.map(nameOf).join('・')}）` : '');
     parts.push(p);
   }
   parts.push(btn);
@@ -1065,7 +1068,7 @@ setInterval(() => {
 // 待合室の下に出す、準備OK と投票の欄（ゲストはボタンと投票の一覧、ホストは数だけ）
 /* ---------- 部屋の名前（2026-10-07 本人の決定）: ホストが部屋に名前を付け、部屋の欄・招待の小窓に出す ---------- */
 // Claude の判断: 16文字まで。外から来た文字なので、出すときは textContent か esc() を通す。state の roomName で送る。空なら出さない。
-// 付けるのはホストの待合室だけ（ゲストには部屋の欄に出る）。
+// 付けるのはホストの待合室だけ（ゲストには部屋の欄に出る）。付ける欄は部屋の帯の中（renderRoomBar が置く。2026-11-22 本人の依頼で部屋コードの近くへ）。
 const cleanRoomName = (t) => String(t ?? '').replace(/\s+/g, ' ').trim().slice(0, 16);
 function roomNamePanel() {
   if (S.mode !== 'online' || !S.isHost) return null;
@@ -1118,10 +1121,7 @@ function changedRules(game) {
 
 function appendLobbyExtras(board) {
   board.append(meTools());
-  const nm = roomNamePanel();
-  if (nm) board.append(nm);
-  const r = readyLine();
-  if (r) board.append(r);
+  // 部屋の名前の欄は部屋の帯（部屋コードの横）へ移し、その下にあった「✋ 準備OK …人」の行はやめた（2026-11-22 本人の依頼。人数は下に留めた「始める」の横に出ている）
   const dp = drawPanel();
   const top = board.querySelector('.lobby-game');
   if (dp && S.draw && top) top.after(dp); // 抽選の間は、いまのゲームのすぐ下に大きく出す
@@ -1261,6 +1261,9 @@ function streakHtml() {
 function roundOrder() {
   return S.mode === 'online' ? S.order ?? [] : [];
 }
+// 盤のゲームにも席ごとの名前を渡す（2026-11-22。海戦ゲームの「○○の海」）。同じ画面の対局は名前が無いので渡さない（ゲームは席の呼び名を使う）。
+// 名前は外から来た文字なので、ゲームは textContent か esc() で出す
+const boardNames = () => (S.mode === 'online' && S.order ? S.order.map(nameOf) : undefined);
 
 // ゲームの詳細設定。決めていない項目・おかしな値は既定値。choices があれば選択肢、無ければ はい/いいえ
 function rulesOf(gameId, rules) {
@@ -1293,11 +1296,11 @@ const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.ha
 // 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、将棋・マンカラ・海戦ゲーム・五目並べ・立体四目並べ・はさみ将棋・エアホッケーは 2〜3。ほかは2）
 const boardSeats = (gameId, rules) => GAMES[gameId]?.seatCount?.(rulesOf(gameId, rules)) ?? 2;
 
-// 盤のゲームの席の書き添え。呼び名に「先手」「後手」が入っているゲーム（将棋）では重ねて書かない。3人以上は「◯番目」
-const seatNote = (game, p, n = 2) => {
-  if (n > 2) return `（${p + 1}番目）`;
-  return game.players[p].includes(p === 0 ? '先手' : '後手') ? '' : `（${p === 0 ? '先手' : '後手'}）`;
-};
+// 盤のゲームの席の呼び名。将棋の仲間（呼び名に「先手」が入るゲーム）だけ先手・後手、ほかは「1番手」「2番手」…（2026-11-22 本人の依頼。将棋は除くのを本人が選んだ。board-games.md）
+const isShogiLike = (game) => !!game?.players?.[0]?.includes('先手');
+const seatWord = (game, p) => (isShogiLike(game) && p < 2 ? (p === 0 ? '先手' : '後手') : `${p + 1}番手`);
+// 盤のゲームの席の書き添え。呼び名に「先手」「後手」「番手」が入っているゲーム（将棋・はさみ将棋・マンカラ・海戦ゲーム）では重ねて書かない
+const seatNote = (game, p) => (/先手|後手|番手/.test(game.players[p]) ? '' : `（${seatWord(game, p)}）`);
 
 // R = { gameId, seed, order, moves, rules, prev }（S でも、届いた state でもよい）
 // each(前の局面, 次の局面, 手, 何番目の手)（任意）: 手を1つ当てるたびに呼ぶ（あなたの番までに起きたこと・さっきの手をもう一度）
@@ -1968,6 +1971,14 @@ function renderRoomBar() {
   el('room-code').textContent = S.code + (S.lockPw || S.locked ? ' 🔒' : '');
   el('room-name').textContent = S.roomName ? '🏷 ' + S.roomName : '';
   el('room-name').hidden = !S.roomName;
+  // 部屋の名前を付ける欄（ホストの待合室だけ）: 2026-11-22 本人の依頼で待合室の中から部屋コードの上へ移した。帯は通信の具合が変わるたびに描き直すので、
+  // 欄は1回だけ作って残し、打っている間（フォーカスがある間）は中身を書き換えない
+  let edit = bar.querySelector('.lobby-roomname');
+  if (S.isHost && !playing) {
+    if (!edit) { edit = roomNamePanel(); el('room-name').after(edit); }
+    else if (document.activeElement !== edit.querySelector('input')) edit.querySelector('input').value = S.roomName ?? '';
+    el('room-name').hidden = true;
+  } else edit?.remove();
 
   const others = S.members.filter((id) => id !== S.myId);
   const lost = others.filter((id) => !alive(id)).length;
@@ -2201,7 +2212,50 @@ function thinkHtml(game) {
   // 1人ぶん（呼び名と時間）は途中で折り返さない（2026-11-17 見た目の点検。はさみ将棋の「後手（と） 0:00」が2行に割れた）
   const tot = used.map((_, p) => p).map((p) => `<span class="nowrap">${seatMark(game, p)} ${clockText(used[p])}</span>`).join(' ／ ');
   if (c.res) return `考えた時間 ${tot}`;
-  return `<span class="nowrap">⏱ ${seatMark(game, c.turn)}が考え中 <b>${clockText(live)}</b></span>　合計 ${tot}`;
+  const lim = turnLimitMs(game);
+  const sec = lim ? game.turnLimit(rulesOf(S.gameId, S.rules)) : 0; // 1手目の足した分（TURN_LIMIT_FIRST）は見せない（「5秒」の設定で「残り7秒」と出ないように）
+  const left = lim && seat(c.turn) ? Math.max(0, Math.min(sec, Math.ceil((lim - live) / 1000))) : null;
+  const leftHtml = left === null ? '' : `<span class="nowrap turn-left${left <= 3 ? ' low' : ''}">（残り <b>${left}秒</b>）</span>`;
+  return `<span class="nowrap">⏱ ${seatMark(game, c.turn)}が考え中 <b>${clockText(live)}</b></span>${leftHtml}　合計 ${tot}`;
+}
+
+/* ---------- 1手ごとの持ち時間（2026-11-22 本人の依頼「マルバツ、持ち時間制限のルールを作って」。形は Claude の推奨を本人が承認） ---------- */
+// ゲームが turnLimit(詳細設定) で秒数（0 は無し）を返すと、番の人が1手にその秒数より長くかかったら、ホストの端末がおまかせの手（ゲームの timeoutMove。
+// 打てる所からくじ）をその人の代わりに打って次の人の番にする。いまはマルバツだけ（詳細設定「持ち時間」。同じ画面の対局は詳細設定が無いのでオンラインだけ）。
+// 測り始めは、考えた時間と同じくこの端末が手を受け取った時刻（S.clock.at）。ホストはゲストの手が通信で遅れて届く分 TURN_LIMIT_GRACE だけ多く待つ
+// （そのあいだに届いたゲストの手はそのまま通る。時間切れの手のあとに届いた手は、いつもどおりホストの一覧に合わせて捨てられる）。
+// CPU の席（部屋を出た人の席を CPU が打っている間も）は数えない（CPU はすぐ打つ）。待ったで戻したときは、その時から測り直す（tickClock が at を進める）。
+// 時間切れは手の一覧に印を入れない（手はふつうの手と同じ形）。各端末が自分の残りが0になったときに一言（toast）を出す。
+const TURN_LIMIT_GRACE = 700;
+const TURN_LIMIT_FIRST = 2500; // 1手目だけ足す（始まりの顔合わせ（introFx。1.5〜2.5秒）が出ている間も時計は進むため）
+const turnLimitMs = (game) => {
+  const sec = S?.mode === 'online' && S.order ? game.turnLimit?.(rulesOf(S.gameId, S.rules)) ?? 0 : 0;
+  return sec ? sec * 1000 + (S.moves.length ? 0 : TURN_LIMIT_FIRST) : 0;
+};
+let limitKey = null;
+function watchTurnLimit(game, st, res) {
+  const lim = turnLimitMs(game);
+  if (!lim || res || !seatsFilled() || !S.clock) return;
+  const p = game.turn(st);
+  if (!Number.isInteger(p) || cpuPlays(S.order[p])) return;
+  const keyNow = () => `${S.code}:${S.gameId}:${S.round}:${S.undo ?? 0}:${S.moves.length}:${S.order?.[p]}:${S.clock?.at}`;
+  const key = keyNow();
+  if (limitKey === key) return;
+  limitKey = key;
+  const session = S;
+  const due = S.clock.at + lim - Date.now();
+  setTimeout(() => { // 各端末の一言（自分の画面の残りが0になったとき）
+    if (S !== session || keyNow() !== key) return;
+    toast(p === myPlayer() ? '⏰ 時間切れ！ おまかせで置きます' : `⏰ ${seatMark(game, p)}の時間切れ`);
+  }, Math.max(0, due));
+  if (!S.isHost) return;
+  setTimeout(() => {
+    if (S !== session || keyNow() !== key) return;
+    const now = replay(S);
+    if (!now || game.result(now) || game.turn(now) !== p) return;
+    const move = game.timeoutMove?.(now, p, rulesOf(S.gameId, S.rules)) ?? null;
+    if (move !== null && game.apply(now, move)) pushMove(move);
+  }, Math.max(0, due + TURN_LIMIT_GRACE));
 }
 
 setInterval(() => {
@@ -2510,7 +2564,7 @@ function renderPage() {
   if (S.shownKey !== key && !S.moves.length && !lessMotion()) flyDealNow = true; // 対局の始めに札を配る（2026-11-06。flyPlay）
   S.shownKey = key;
   S.shownLen = S.moves.length;
-  const opts = { canMove: canMove(game, st, res), onMove: onBoardMove, fresh, me: watchSeat(game), view: boardView(game) };
+  const opts = { canMove: canMove(game, st, res), onMove: onBoardMove, fresh, me: watchSeat(game), view: boardView(game), names: boardNames() };
   if (!game.multi) Object.assign(opts, { peek: opts.canMove ? sendPeek : null, peekIn: peekInNow() }); // 相手の迷いが見える（2026-11-11）
   if (!game.multi) opts.rules = rulesOf(S.gameId, S.rules); // あぶない所の知らせ（2026-11-12）など、描くときに詳細設定を見るゲームのため
   if (!game.multi) opts.feet = feetNow(game); // 盤の上の足あと（2026-11-17）
@@ -2578,6 +2632,7 @@ function renderPage() {
   showSendMark(); // 手が届いたかの印（2026-11-11）
   scheduleCpu(game, st, res);
   scheduleReferee(game, st, res);
+  if (!game.multi) watchTurnLimit(game, st, res);
   if (res) checkAgain();
 }
 
@@ -3260,7 +3315,7 @@ function replayLast(game) {
   if (!prev || !n) return;
   const board = el('board');
   const token = ++replayToken;
-  game.render(board, prev, { canMove: false, onMove: () => {}, fresh: false, me: watchSeat(game), view: boardView(game) });
+  game.render(board, prev, { canMove: false, onMove: () => {}, fresh: false, me: watchSeat(game), view: boardView(game), names: boardNames() });
   const before = cellsOf(board).map(cellSig);
   setTimeout(() => {
     if (token !== replayToken || !S || timerKey() !== key) return;
@@ -3312,7 +3367,7 @@ function ffwdNow(game) {
   const view = replay({ ...S, moves: S.moves.slice(0, k) });
   if (!view) { ffwStop(false); return false; }
   el('status').innerHTML = `<div class="status-main">ここまでの流れ</div><div class="status-sub">${k}手目 / ${S.moves.length}手</div><div class="ffw-bar"><i style="width:${(k / S.moves.length * 100).toFixed(1)}%"></i></div>`;
-  game.render(el('board'), view, { canMove: false, onMove: () => {}, fresh: false, me: watchSeat(game), view: boardView(game) });
+  game.render(el('board'), view, { canMove: false, onMove: () => {}, fresh: false, me: watchSeat(game), view: boardView(game), names: boardNames() });
   ctl().append(makeButton('⏭ 今の盤へ', ffwSkip, 'secondary'));
   return true;
 }
@@ -3347,7 +3402,7 @@ function renderReview(game) {
     + (extra ? `<div class="status-sub">${extra}</div>` : '') + judgeTurnNote(game, k);
   const chart = judgeChart(game, k); // ふりかえりの分かれ目（2026-11-12）
   if (chart) el('status').append(chart);
-  game.render(el('board'), view, { canMove: false, onMove: () => {}, fresh: false, me: myPlayer(), view: boardView(game) });
+  game.render(el('board'), view, { canMove: false, onMove: () => {}, fresh: false, me: myPlayer(), view: boardView(game), names: boardNames() });
   appendReview(game);
   ctl().append(makeButton('もう一回', rematch));
   openMenu();
@@ -3768,9 +3823,14 @@ function endStamp(game, res, me, end, delay) {
 // まわりを暗くして盤をその手へ少し寄せ、石がゆっくり落ちて盤が小さく揺れ、一拍おいてから線（util.js の lineHold）と判子・勝ち負けの音を出す。
 // どこかを押すとすぐ最後まで飛ばす。寄せる先はゲームが最後の手の物に付ける data-last（"still" は寄せるだけで落とさない。駒が滑ってくる将棋・はさみ将棋、
 // 列を落ちてくる四目並べ・立体四目並べ）。Claude の判断: 付けたのはマルバツ・四目並べ・立体四目並べ・リバーシ・五目並べ・はさみ将棋・将棋
-// （点と線・マンカラ・海戦ゲームは決め手が1つの石でないので付けない）。寄せるのは 1.04 倍まで（スマホ幅で盤が画面の外へはみ出さないように）。
+// （点と線・マンカラ・海戦ゲームは決め手が1つの石でないので付けない）。
+// 2026-11-22 本人の依頼（「決まった手が中央になるようにズームする、画面もその手が中央になるように移動させる」）: 前は手を中心に 1.04 倍しただけだったのを、
+//   画面をその手が縦のまんなかに来るまでスクロールし（ページの端で足りない分と横は盤を動かして）、その手を盤のまんなかへ寄せて SLOW_ZOOM 倍にする。
+//   はみ出した所は main の外へ出さない（main.slow-zoom の overflow: clip。横にスクロールできるようにならないように）。戻すときに盤は元の位置へ戻すが、スクロールはそのまま（その手が見える所）。
+//   横は画面のまんなかでなく盤のまんなか（スマホを横にしたときは盤が左の列にあるため。縦の画面では同じ所）。
 // 盤は描き直しで作り直されるので、途中で描き直されたら石の動きはそこで終わる（寄せと暗さは盤の入れ物と body に付けてあるので残る）
 const SLOW_GAMES = new Set(['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'hasami', 'shogi']);
+const SLOW_ZOOM = 1.3; // 決め手へ寄せる倍率（2026-11-22。本人に見本の絵で選んでもらう）
 const SLOW_LAND = 560; // 石が着くまで
 const SLOW_LINE = 900; // 線を引き始めるまで（winLine のいつもの 160ms を含む）
 const SLOW_HOLD = 1250; // 勝ち負けの音・判子まで
@@ -3786,19 +3846,36 @@ function slowFinish(board) {
   const target = board.querySelector('[data-last]');
   const r = target?.getBoundingClientRect();
   if (!r?.width) return 0;
-  const br = board.getBoundingClientRect();
-  const cx = r.left + r.width / 2;
-  const cy = r.top + r.height / 2;
   const dim = document.createElement('div');
   dim.className = 'slow-dim';
   dim.setAttribute('aria-hidden', 'true');
-  dim.style.setProperty('--x', cx.toFixed(0) + 'px');
-  dim.style.setProperty('--y', cy.toFixed(0) + 'px');
-  dim.style.setProperty('--r', Math.max(34, r.width * 1.2).toFixed(0) + 'px');
-  document.body.append(dim);
-  board.style.transformOrigin = `${(cx - br.left).toFixed(0)}px ${(cy - br.top).toFixed(0)}px`;
-  board.style.transition = 'transform .45s cubic-bezier(.3, .7, .3, 1)';
-  board.style.transform = 'scale(1.04)';
+  dim.style.setProperty('--r', Math.max(34, r.width * 1.2 * SLOW_ZOOM).toFixed(0) + 'px');
+  const shell = board.closest('main');
+  // 決め手の場所は、石が落ちる動きを付ける前に盤の中の位置として測っておく（動きの途中で測ると、浮いている分だけ真ん中がずれた）
+  const br0 = board.getBoundingClientRect();
+  const ox = r.left + r.width / 2 - br0.left;
+  const oy = r.top + r.height / 2 - br0.top;
+  // 寄せるのは描き直しが済んでから（render の途中はページの長さを固定しているので、スクロールできる幅をそこで測らない。CLAUDE.md の「描き直しの途中で測らない」）
+  const zoom = () => {
+    if (s.cleaned || !board.isConnected) return;
+    const br = board.getBoundingClientRect();
+    const cx = br.left + ox;
+    const cy = br.top + oy;
+    const midY = window.innerHeight / 2;
+    const maxY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    const toY = Math.min(maxY, Math.max(0, window.scrollY + cy - midY));
+    const scrolled = toY - window.scrollY; // 画面を動かせる分。足りない分は盤を動かす
+    const dx = br.left + br.width / 2 - cx;
+    const dy = midY - (cy - scrolled);
+    dim.style.setProperty('--x', (br.left + br.width / 2).toFixed(0) + 'px');
+    dim.style.setProperty('--y', midY.toFixed(0) + 'px');
+    document.body.append(dim);
+    shell?.classList.add('slow-zoom');
+    board.style.transformOrigin = `${(cx - br.left).toFixed(0)}px ${(cy - br.top).toFixed(0)}px`;
+    board.style.transition = 'transform .45s cubic-bezier(.3, .7, .3, 1)';
+    board.style.transform = `translate(${dx.toFixed(0)}px, ${dy.toFixed(0)}px) scale(${SLOW_ZOOM})`;
+    if (Math.abs(scrolled) > 1) window.scrollTo({ top: toY, behavior: 'smooth' });
+  };
   const drop = target.dataset.last !== 'still';
   let fall = null;
   if (drop) {
@@ -3817,11 +3894,12 @@ function slowFinish(board) {
     setTimeout(() => dim.remove(), 320);
     board.style.transition = 'transform .3s ease';
     board.style.transform = '';
-    setTimeout(() => { if (!board.style.transform) { board.style.transition = ''; board.style.transformOrigin = ''; } }, 340);
+    setTimeout(() => { if (!board.style.transform) { board.style.transition = ''; board.style.transformOrigin = ''; shell?.classList.remove('slow-zoom'); } }, 340);
     if (slowNow === s) slowNow = null;
     try { fall?.finish(); } catch { /* 盤が描き直されて、もう無い */ } // 押して飛ばしたとき、石が落ち続けないように
   };
   slowNow = s;
+  setTimeout(zoom, 0);
   document.addEventListener('pointerdown', slowSkip, true);
   if (drop) slowAt(SLOW_LAND, () => board.animate([{ translate: '0 0' }, { translate: '0 2px' }, { translate: '0 -1px' }, { translate: '0 0' }], { duration: 220, easing: 'ease-out' }), false);
   slowAt(SLOW_HOLD, s.clean, true, true);
@@ -4066,7 +4144,7 @@ function seatSwap(game, ids) {
   const me = ids.indexOf(S.myId);
   let note = '';
   if (me >= 0 && from[me] !== me) {
-    const seat = ids.length > 2 ? `${me + 1}番目` : me === 0 ? '先手' : '後手';
+    const seat = seatWord(game, me);
     note = `今度はあなたが${seat}（${game.players[col(me)]}のまま）`;
   }
   return { from, note };
@@ -4365,16 +4443,15 @@ function moveSound(game, st, res, prevLen, mine, hold = 0) {
 }
 
 /* ---------- 番が来たら名前を読み上げ・あいさつ（2026-10-08 の23回目の案。Claude の案から本人が推奨どおり選んだ） ---------- */
-// 番が来たら名前を読み上げ: オンラインで TURN_PING_MS（3秒。2026-11-06 に5秒から）より長く待ったあとに自分の番が来たとき（「番が来た」音と同じとき）、音のあとに「○○さんのターン」と言う。
-//   読むのは自分の端末に入れた自分の名前（マーク・🔰 は付けない）。名前が空なら「あなたのターン」（2026-10-26 本人の依頼で「番です」から替えた）。
+// 番が来たら読み上げ: オンラインで TURN_PING_MS（3秒。2026-11-06 に5秒から）より長く待ったあとに自分の番が来たとき（「番が来た」音と同じとき）、音のあとに「あなたのターン」と言う。
+//   前は自分の名前を「○○さんのターン」と読んでいた（2026-11-22 本人の依頼で、VOICEVOX の声にするため名前を読むのをやめた。下の sayTurn）。
 // あいさつ: 対局の始め（手がまだ無い局面を初めて描いたとき）に「よろしくお願いします」、決着した手が届いたときに勝ち負けの音のあとで「ありがとうございました」。
 //   画面の下に一言（toast）を出して読み上げる。オンラインも同じ画面の対局も。各自の端末が自分で出す（送らない）。
 //   途中から入った・再読み込みで手がある局面を開いたときは、始めのあいさつは出さない。エアホッケーは main.js で描かないので出ない。
 // 声は 🔇 なら出さない（一言は出す）。Claude の判断: 「番が来た」音は残し、そのあとに声を足した（声が出ない端末でも気づけるように）。
+// 2026-11-22 本人の依頼で、名前を読む「○○さんのターン」（ブラウザの読み上げ）をやめ、いつも VOICEVOX の声で「あなたのターン」と言う（言葉は sound.js の GREET.turn）
 function sayTurn() {
-  const name = myName();
-  // 読み上げだけ「たーん」とひらがなで書く（カタカナの「ターン」を「トーン」と読む声があった。2026-10-30 本人の報告）
-  speak(name ? `${name}さんの たーん` : 'あなたの たーん', 'turn-voice');
+  speak(GREET.turn, 'turn-voice');
 }
 
 function greet(kind, delay = 0) {
@@ -4464,7 +4541,7 @@ function renderBoardLobby(game) {
   status.innerHTML = S.isHost
     ? (game.live
       ? `<div class="status-main">待合室</div><div class="status-sub">対戦する${n}人を選んで「始める」を押してください。${cpuPickable(game) ? '人が足りなければ CPU を選べます。' : ''}<br>${readyNote || 'オンラインは試作です。'}</div>`
-      : `<div class="status-main">待合室</div><div class="status-sub">${n > 2 ? '打つ順番に人を選んで' : '先手と後手を選んで'}「始める」を押してください。<br>${readyNote || '相手がいなければ CPU と対局できます。'}</div>`)
+      : `<div class="status-main">待合室</div><div class="status-sub">${n > 2 ? '打つ順番に人を選んで' : `${seatWord(game, 0)}と${seatWord(game, 1)}を選んで`}「始める」を押してください。<br>${readyNote || '相手がいなければ CPU と対局できます。'}</div>`)
     : '<div class="status-main">待合室</div><div class="status-sub">部屋を作った人が始めるのを待っています…<br>準備ができたら「準備OK」を押してください。</div>';
   board.className = 'board lobby';
   board.innerHTML = `<p class="lobby-note">${n}人で対局します。ほかの人は観戦します。</p>`;
@@ -4491,7 +4568,7 @@ function renderBoardLobby(game) {
     const row = document.createElement('label');
     const head = document.createElement('span');
     const c = colsNext?.[i] ?? i; // 続けて遊ぶ間は、その人の色と形を変えない（2026-11-13）: 次の対局でこの席の人が使う色
-    head.innerHTML = `<b class="pl p${c}">${esc(game.players[c])}</b>${game.live ? '' : seatNote(game, i, n)}`;
+    head.innerHTML = `<b class="pl p${c}">${esc(game.players[c])}</b>${game.live ? '' : seatNote(game, i)}`;
     row.append(head);
     if (S.isHost) {
       const sel = document.createElement('select');
@@ -4559,7 +4636,7 @@ function renderBoardLobby(game) {
 // 席の順番だけをまぜる。何度でも引き直せる。結果はいつもの席の選び方と同じく pick に入れて state で送り、くじの合図（type: 'lot'。まぜた pick 付き）も
 // 送りっぱなしにして、全員の画面に結果を一言（toast）で出す。エアホッケーは席が打つ順番でないので出さない。席の顔ぶれが1つ（CPU だけ）なら押せない。
 function lotButton(game, pick) {
-  const b = makeButton(pick.length > 2 ? '🎲 順番をくじで決める' : `🎲 ${game.keepColor ? '先手' : game.players[0]}をくじで決める`, () => {
+  const b = makeButton(pick.length > 2 ? '🎲 順番をくじで決める' : `🎲 ${game.keepColor ? seatWord(game, 0) : game.players[0]}をくじで決める`, () => {
     const next = pick.slice();
     for (let i = next.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -4579,7 +4656,7 @@ function lotButton(game, pick) {
 
 function lotToast(game, pick) {
   const who = (v) => (v === 'cpu' ? 'CPU' : v === S.myId ? 'あなた' : nameOf(v));
-  toast(pick.length > 2 ? '🎲 くじの結果: ' + pick.map(who).join(' → ') : `🎲 くじの結果: ${game.keepColor ? '先手' : game.players[0]}は ${who(pick[0])}`);
+  toast(pick.length > 2 ? '🎲 くじの結果: ' + pick.map(who).join(' → ') : `🎲 くじの結果: ${game.keepColor ? seatWord(game, 0) : game.players[0]}は ${who(pick[0])}`);
 }
 
 // くじの合図を受け取った（ホストからだけ・待合室の間だけ。中身は部屋の人か cpu のときだけ使う）
@@ -5212,7 +5289,7 @@ function ghostOne(game, st, board, move, cls, at) {
   try { next = game.apply(st, move); } catch { next = null; }
   if (!next) return;
   const tmp = document.createElement('div');
-  try { game.render(tmp, next, { canMove: false, onMove() {}, fresh: false, me: watchSeat(game), view: boardView(game) }); } catch { return; }
+  try { game.render(tmp, next, { canMove: false, onMove() {}, fresh: false, me: watchSeat(game), view: boardView(game), names: boardNames() }); } catch { return; }
   const empty = (c) => !c.textContent.trim() && !c.children.length;
   // 中身を持たず印（class）だけで埋まったと描く物（点と線の線）は、ゲームが data-fill を付けて知らせる（2026-11-11 Codex の点検。前は相手の迷いが何も出なかった）
   const filled = (c) => c.dataset?.fill !== undefined;

@@ -524,6 +524,11 @@ export default {
       choices: [[2, '2人'], [3, '3人'], [4, '4人']],
     },
     {
+      key: 'time', label: '持ち時間', def: 0,
+      desc: '1手ごとに考えられる時間。過ぎると空いている所におまかせで置いて、次の人の番になる',
+      choices: [[0, 'なし'], [5, '5秒'], [10, '10秒'], [20, '20秒']],
+    },
+    {
       key: 'wide', label: '広い盤の大きさ', def: 'auto',
       desc: '3人・4人で遊ぶときと、2人で「盤」を「広い盤」にしたときの盤の大きさ。3人・4人は3つ並べ、2人は4つ並べたら勝ち',
       choices: WIDE_CHOICES,
@@ -567,6 +572,15 @@ export default {
     return boardCpu(this, s, rules, legal, () => 0, {
       depth: { weak: 1, normal: 2, strong: 9 }, mistake: { weak: 0.5, normal: 0.15, strong: 0 },
     });
+  },
+
+  // 1手ごとの持ち時間（2026-11-22 本人の依頼。秒。0 は無し）。数えるのと時間切れの手を打つのは main.js の watchTurnLimit。
+  // 時間切れの手は、打てる所（盤の種類ごとの打てる手の一覧）からくじで1つ（本人が承認した「おまかせで置く」。CPU の読みは使わない）。
+  // くじは手を決めるときだけで、決まった手は手の一覧に入るので、apply は今までどおり同じ手から同じ局面を作る
+  turnLimit(rules) { return [5, 10, 20].includes(rules?.time) ? rules.time : 0; },
+  timeoutMove(s) {
+    const legal = (s.gob ? gobLegal(s) : s.big ? bigLegal(s) : emptyCells(s)).filter((m) => this.apply(s, m));
+    return legal.length ? legal[Math.floor(Math.random() * legal.length)] : null;
   },
 
   init({ rules = {} } = {}) {
