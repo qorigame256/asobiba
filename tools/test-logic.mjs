@@ -33,6 +33,18 @@ for (const line of [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5
   const rest = [...Array(9).keys()].filter((i) => !line.includes(i));
   assert.deepEqual(T.result(play(T, [line[0], rest[0], line[1], rest[1], line[2]])), { winner: 0, cells: line }, `マルバツ: ${line} の並びで勝ち`);
 }
+// 持ち時間（2026-11-22）: 秒は決めた値だけ（無し・おかしな値は0）。時間切れの手は、どの盤でも打てる手で、何度引いても打てる所の中から（埋まったマスを選ばない）
+assert.deepEqual([undefined, 0, 5, 10, 20, 7, '5'].map((t) => T.turnLimit({ time: t })), [0, 0, 5, 10, 20, 0, 0], 'マルバツ: 持ち時間の秒');
+for (const rules of [{}, { size: 'super' }, { size: 'vanish' }, { size: 'gobble' }, { size: 'wide' }, { players: 3 }]) {
+  let x = T.init({ rules });
+  const seen = new Set(); // 最初の局面だけで引いた手（同じ局面で何度引いても同じ手なら、くじになっていない）
+  for (let k = 0; k < 6 && !T.result(x); k++) {
+    for (let j = 0; j < 20; j++) { const m = T.timeoutMove(x); assert.ok(T.apply(x, m), `マルバツ: 時間切れの手が打てる（${JSON.stringify(rules)}・${k}手目）`); if (!k) seen.add(JSON.stringify(m)); }
+    x = T.apply(x, T.timeoutMove(x));
+  }
+  assert.ok(seen.size > 1, `マルバツ: 時間切れの手はくじ（${JSON.stringify(rules)}）`);
+}
+assert.equal(T.timeoutMove(play(T, [0, 1, 2, 4, 3, 5, 7, 6, 8])), null, 'マルバツ: 打てる所が無ければ時間切れの手も無い');
 
 // スーパーマルバツ（詳細設定「盤」= スーパー）
 const big = (over = {}) => ({ ...T.init({ rules: { size: 'super' } }), ...over });
@@ -5911,6 +5923,29 @@ assert.ok(sonarUsed >= 40, 'CPU もソナーを使う: ' + sonarUsed);
     const r = KS.result(st);
     assert.equal(st.out.filter((x) => !x).length, 1, '残るのは1人');
     assert.equal(r.place[r.winner], 1);
+  }
+  // 勝ち方「ヒット数」（2026-11-22）: 生き残りのときは局面の形を変えない。ヒットは撃った人に、まだだれも当てていない船のマスの数だけ足す
+  assert.equal(KS.init({ rules: { players: 3 } }).hitN, undefined, '海戦: 生き残りの局面は前と同じ形');
+  assert.equal(KS.init({ rules: { win: 'hits' } }).hitN, undefined, '海戦: 2人ではヒット数を使わない');
+  {
+    let h = KS.init({ rules: { players: 3, win: 'hits' } });
+    for (const f of [fleet, fleet, other]) h = KS.apply(h, { t: 'place', ships: f });
+    h = KS.apply(h, 0); // 0 が (0,0): 1 の海に当たり（2 ははずれ）
+    assert.deepEqual(h.hitN, [1, 0, 0], '海戦: ヒット数は撃った人に足す');
+    h = KS.apply(h, 99); // 1 ははずれ
+    h = KS.apply(h, 0); // 2 が (0,0): 0 の海（まだだれも当てていない）は数え、1 の海（0 がもう当てた）は数えない
+    assert.deepEqual(h.hitN, [1, 0, 1], '海戦: もう当てられたマスは数えない');
+    // 最後の1人になったら終わり、ヒット数の多い人の勝ち（生き残った人でなくても）
+    const r = KS.result({ ...h, won: 2, out: [true, true, false], hitN: [9, 4, 6] });
+    assert.deepEqual([r.winner, r.place], [0, [1, 3, 2]], '海戦: ヒット数の多い人の勝ち');
+    const d = KS.result({ ...h, won: 2, out: [true, true, false], hitN: [6, 4, 6] });
+    assert.deepEqual([d.winner, d.place], [null, [1, 3, 1]], '海戦: 1位が並んだら引き分け');
+    assert.equal(KS.result(h), null, '海戦: 続いている間は決着しない');
+    // CPU どうしで最後まで打っても、ヒット数の合計 = ほかの人の海の船のマスのうち撃たれたマスの数
+    let st = h;
+    for (let steps = 0; !KS.result(st); steps++) { st = KS.apply(st, KS.cpu(st, st.turn, { cpu: 'normal' })); assert.ok(st && steps < 1000, '海戦（ヒット数）の CPU が最後まで打てる'); }
+    const hitCells = [0, 1, 2].reduce((a, q) => a + st.grid[q].filter((g, i) => g >= 0 && st.shots.some((sh, r2) => r2 !== q && sh[i])).length, 0);
+    assert.equal(st.hitN.reduce((a, b) => a + b, 0), hitCells, '海戦: ヒット数の合計が当たったマスの数と同じ');
   }
   // 4人（2026-11-13）: 1発で残っている3人の海の同じマスに当たる
   assert.equal(KS.seatCount({ players: 4 }), 4);

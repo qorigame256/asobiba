@@ -300,6 +300,9 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 /* 決め手のスロー（2026-11-10。main.js の slowFinish）: 決め手の石のまわりだけ明るく残して暗くする。押せない（押せば main.js が飛ばす） */
 .slow-dim { position: fixed; inset: 0; pointer-events: none; z-index: 45; background: radial-gradient(circle at var(--x) var(--y), transparent var(--r), rgba(20, 14, 8, .42) calc(var(--r) * 3.4)); animation: slow-dim-in .35s ease-out both; }
 .slow-dim.out { animation: fx-out .3s ease-in forwards; }
+/* 決め手へ寄せている間（2026-11-22）: 動かして大きくした盤が main の外へはみ出しても、横にスクロールできるようにならないよう切る（clip はスクロールの入れ物を作らないので、下に留めた段はそのまま動く） */
+main.slow-zoom { overflow: clip; }
+main.slow-zoom > section > #board { position: relative; z-index: 2; } /* 下へ動かした盤が、下の段のボタンの下に隠れないように（暗くする幕 .slow-dim の z-index 45 より下） */
 @keyframes slow-dim-in { from { opacity: 0; } }
 /* 決着の判子（main.js の endStamp）。傾けない（本人の指示）。紙の色の地に朱の判子なので、どのスキンでも同じ色のまま */
 .end-stamp {
@@ -449,7 +452,8 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 @keyframes final-q { from { transform: scale(.8); opacity: .2; } }
 @media (prefers-reduced-motion: reduce) { .final-q.new { animation: none; } }
 .status-sub { color: var(--muted); font-size: .92rem; }
-.status-sub.think { font-size: .85rem; font-variant-numeric: tabular-nums; }
+.turn-left { margin-left: 3px; font-size: .9em; }
+.turn-left.low b { color: var(--accent, #c0392b); } /* 1手ごとの持ち時間の残り（2026-11-22。main.js の turnTimeText。順番の帯の札の下）。残り3秒から字を朱色に */
 .pl.p0 { color: var(--p0); }
 .pl.p1 { color: var(--p1); }
 .pl.p2 { color: var(--p2); }
@@ -1010,7 +1014,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .m-wave { display: inline-block; transform-origin: 70% 80%; animation: m-wave .3s ease-in-out both; animation-delay: calc(0ms - var(--age, 0ms)); }
 @keyframes m-wave { 25% { transform: rotate(-20deg); } 50% { transform: rotate(14deg); } 75% { transform: rotate(-10deg); } }
 .lobby-total { font-weight: 700; text-align: center; margin-top: 8px; }
-.lobby-ready, .lobby-vote { margin: 8px 0 0; font-size: .9rem; } /* 準備OK・次のゲームの投票 */
+.lobby-vote { margin: 8px 0 0; font-size: .9rem; } /* 次のゲームの投票 */
 /* 待合室の「いま選んでいるゲーム」（2026-11-03）。ゲームが替わったら2秒光る */
 .lobby-game { margin: -2px 0 12px; padding: 12px 14px; border: 2px solid var(--accent); border-radius: var(--radius); background: var(--soft, #fff6ef); }
 .lobby-game-head { display: flex; gap: 12px; align-items: center; }
@@ -1055,8 +1059,6 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .vote-desc { font-size: .68rem; line-height: 1.3; color: var(--muted); text-align: center; }
 .draw-line { margin: 6px 0 0; font-size: .85rem; }
 .draw-line small { color: var(--muted); }
-.lobby-ready small { color: var(--muted); margin-left: 4px; }
-.lobby-ready.all { color: #2e7d32; font-weight: 700; }
 /* 「始める」を画面の下に固定（2026-11-17。main.js の lobbyDock）: 待合室で、画面の下に留める。広告の帯（--ad-h）と iPhone の下の帯の上に出す */
 .dock { position: sticky; bottom: calc(var(--ad-h, 0px) + env(safe-area-inset-bottom)); z-index: 4; display: flex; align-items: center; justify-content: center; gap: 12px;
   margin: 14px -16px 0; padding: 10px 16px; background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(6px); border-top: 1px solid var(--line); }
@@ -2311,7 +2313,7 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 
 /* 部屋の名前・いまのルール */
 .room-name { flex-basis: 100%; font-weight: 700; overflow-wrap: anywhere; }
-.lobby-roomname { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 10px; font-size: .9rem; }
+.lobby-roomname { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; flex-basis: 100%; font-size: .9rem; } /* 部屋の帯の一番上（部屋コードの上の行）に出す。2026-11-22 本人の依頼で待合室の中から移した */
 .lobby-roomname input { flex: 1 1 180px; min-width: 0; font: inherit; padding: 6px 10px; border: 1.5px solid var(--line); border-radius: 8px; background: var(--field); color: var(--ink); }
 .invite-room { font-weight: 700; margin: -4px 0 8px; overflow-wrap: anywhere; }
 .hf { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 6px; }

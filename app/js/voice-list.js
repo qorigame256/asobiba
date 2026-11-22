@@ -114,6 +114,7 @@ export const VOICE_IDS = new Set([
   'c3ab77c2',
   'c57aa4ae',
   'cb89832b',
+  'cbfb9ca8',
   'd11b3900',
   'd66d53e8',
   'da263583',

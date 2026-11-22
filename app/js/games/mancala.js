@@ -49,7 +49,7 @@ const game = {
   icon: '🫘',
   desc: '穴の石を1個ずつ配っていき、自分のゴールに多く集めた方の勝ち',
   ready: true,
-  players: ['先手', '後手', '三番手', '四番手'],
+  players: ['1番手', '2番手', '3番手', '4番手'],
   flip: true, // 盤の向きを変える（⇅）ボタンを出す（main.js）
   // 詳細設定の人数（2〜4人）。待合室の席の数になる
   seatCount(rules) { return rules?.players === 3 || rules?.players === 4 ? rules.players : 2; },

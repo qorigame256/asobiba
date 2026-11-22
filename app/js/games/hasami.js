@@ -255,7 +255,7 @@ export default {
   flip: true, // 盤の向きを変える（⇅）ボタンを出す（main.js）
   desc: '飛車のように動く駒で、相手の駒をたて・よこにはさんで取る。先に5個（7×7 は4個）取った方の勝ち。オンラインでは3人でも遊べる',
   ready: true,
-  players: ['先手（歩）', '後手（と）', '三番手（金）'],
+  players: ['1番手（歩）', '2番手（と）', '3番手（金）'],
   // 詳細設定の人数（2〜3人）。待合室の席の数になる
   seatCount(rules) { return rules?.players === 3 ? 3 : 2; },
   settings: [
