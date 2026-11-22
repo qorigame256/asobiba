@@ -311,10 +311,18 @@ export default {
         const pick = st && st.sel !== null && st.sel !== i;
         jar.className = 'wq-jar' + (amounts[i] === x.goal ? ' hit' : '') + (pick ? ' pick' : '') + (st && st.sel === i ? ' from' : '');
         jar.style.height = `${Math.round(60 + 120 * (cap / big))}px`;
-        jar.disabled = !can || !pick;
+        // 入れ物を押して、別の入れ物を押しても移せる（2026-11-22 本人の依頼）。1つ目に押した入れ物が「移す元」（もう一度押すとやめる）。
+        // 移せない組（元が空・先がいっぱい）は act の stepOf が null を返し、手数に数えずに選びを解く（「➡️ 移す」ボタンと同じ）
+        const canFrom = st && amounts[i] > 0;
+        jar.disabled = !can || !(pick || canFrom || st.sel === i);
         jar.setAttribute('aria-label', `${cap}Lの入れ物（いま${amounts[i]}L）`);
         jar.innerHTML = `<span class="wq-water" style="height:${(amounts[i] / cap) * 100}%"></span><span class="wq-amt">${amounts[i]}L</span>`;
-        jar.onclick = () => { if (pick) act(`p${st.sel}${i}`); };
+        jar.onclick = () => {
+          if (!can || !st) return;
+          if (pick) { act(`p${st.sel}${i}`); return; }
+          if (st.sel === i) { st.sel = null; draw(); return; }
+          if (canFrom) { st.sel = i; draw(); }
+        };
         const cap0 = document.createElement('div');
         cap0.className = 'wq-cap';
         cap0.textContent = `${cap}L`;

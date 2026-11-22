@@ -392,7 +392,7 @@ export default {
       return r.ok ? `<span class="pt-ok">○ ${r.rank}位 +${r.pt}</span>` : `<span class="pt-ng">×${isOut(s, p) ? ' 脱落' : ''}</span>`;
     };
     const won = s.phase === 'end' ? winnersOf(s) : [];
-    root.append(scoreChips(o, s.scores, { won, extra }));
+    root.append(scoreChips(o, s.scores, { won, extra, steady: true }));
 
     const card = document.createElement('div');
     card.className = 'fl-card';

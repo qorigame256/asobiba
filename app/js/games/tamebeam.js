@@ -189,8 +189,10 @@ export default {
     const lives = s.rules.lives;
     // 動き（開いた回の帯・揺れ）は、一斉に開いた直後だけ。だれかが選んだだけの描き直しでは動かさない（2026-10-26 本人の声）
     const anim = o.fresh && s.picks.every((x) => x === null);
-    // ためを隠す: 対局している人の画面では、ほかの人のためを「？」にする（観戦の人と決着後は見せる）
-    const chargeText = (p) => (s.rules.hide && me !== null && p !== me && !res ? '？' : String(s.charge[p]));
+    // ためを隠す: 対局している人の画面では、ほかの人のためを「？」にする（観戦の人と決着後は見せる）。
+    // 観戦の人が「👀 見る画面」でだれかの手元を選んでいると o.me にその席が入る（o.watching）ので、そのときも全員のためを見せる
+    // （2026-11-22 本人の依頼「観戦者が他プレイヤーのためを見れるようにする」。前は選んだ人以外が「？」になっていた）
+    const chargeText = (p) => (s.rules.hide && me !== null && !o.watching && p !== me && !res ? '？' : String(s.charge[p]));
 
     root.innerHTML = '';
     root.className = 'board tb';

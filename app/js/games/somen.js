@@ -28,6 +28,7 @@
 import { mulberry32 } from './util.js';
 import { scoreChips, since, leaders, winnersText, timeBar } from './party.js';
 import { seasonOf } from '../season.js';
+import { play } from '../sound.js';
 
 const READY_MS = 3000;
 const TIMES = [[60, '60秒'], [45, '45秒'], [90, '90秒']];
@@ -83,6 +84,14 @@ const cpuPlan = new Map();
 // この端末で押した品（`${seed}:${i}` → { seed, i, ms }）。返ってくる前に消すためと、手が消えたときに同じ ms で送り直すため
 const myTaps = new Map();
 const RESEND_MS = 500;
+// 流れ始めを連打するだけで勝てないようにする（2026-11-22 本人の依頼「流れてくるもとを連打するだけで簡単に勝ててしまい、非常につまらない」。形は Claude の推奨を本人が承認）:
+//   - といの上流は竹の葉でおおい、品が流れ切るまでの時間の最初の LEAF（2割）は隠れていて取れない（apply も、それより速い ms の手を弾く）。
+//   - 品の無い所（水・葉・もう取られた品）を押すと「おてつき」で MISS_MS（1秒）つまめない。自分の画面だけで決める（送る手は変わらない）。
+// Claude の判断: 葉の右の端は、品のまん中が LEAF の所に来たときに品の右の端がちょうど出る位置（style.css の .sm-leaf。品の幅 66px の半分を足す）。
+export const LEAF = 0.2;
+export const leafMs = (it) => Math.round(it.d * LEAF);
+const MISS_MS = 1000;
+let missUntil = 0; // おてつきで押せない間（performance.now の時刻）
 // 自分が押したのに局面に入っていない品の手（ゲストの手はホストの一覧とすれ違って消えることがある。金魚すくい・2色爆弾と同じわけ）。
 // 同じ手が2回届いても apply が「1つの品に1人1回」で弾くので、二重には数えない
 export function lostGrabs(s, me, taps = [...myTaps.values()]) {
@@ -149,6 +158,7 @@ export default {
     }
     if (m.t !== 'grab' || s0.phase !== 'play' || !Number.isInteger(m.p) || m.p < 0 || m.p >= s0.n) return null;
     if (!Number.isInteger(m.i) || m.i < 0 || m.i >= s0.items.length || typeof m.ms !== 'number' || !(m.ms >= 0) || m.ms > s0.items[m.i].d + 100) return null;
+    if (m.ms < leafMs(s0.items[m.i])) return null; // 葉に隠れている間は取れない（2026-11-22）
     if (s0.claims[m.i].some(([p]) => p === m.p)) return null;
     const s = clone(s0);
     s.step += 1;
@@ -169,7 +179,8 @@ export default {
       let plan = cpuPlan.get(key);
       if (!plan) {
         const want = Math.random() < ({ somen: 0.45, cherry: 0.6, chili: 0.05, gold: 0.7 }[it.k]);
-        plan = { want, rt: 450 + Math.random() * Math.min(950, it.d - 950) };
+        const from = Math.max(450, leafMs(it) + 150); // 葉から出てから押す（2026-11-22。ゆっくりの流れでは葉の時間が 0.68秒あるため）
+        plan = { want, rt: from + Math.random() * Math.max(100, Math.min(950, it.d - 500 - from)) };
         cpuPlan.set(key, plan);
         if (cpuPlan.size > 600) cpuPlan.delete(cpuPlan.keys().next().value);
       }
@@ -203,6 +214,8 @@ export default {
       + '<div class="sm-node" style="left:30%"></div><div class="sm-node" style="left:68%"></div>';
     const lane = document.createElement('div');
     lane.className = 'sm-lane';
+    // 上流をおおう竹の葉（2026-11-22。上の LEAF）。品より手前に重ね、ここを押すのもおてつき
+    lane.innerHTML = `<div class="sm-leaf" style="--leaf:${LEAF * 112 - 6}%" aria-hidden="true"><span>🎋</span></div><div class="sm-miss" aria-hidden="true">✋ おてつき</div>`;
     trough.append(lane);
     wrap.append(trough);
 
@@ -221,13 +234,29 @@ export default {
     const note = document.createElement('p');
     note.className = 'cc-log';
     note.textContent = s.phase === 'ready' ? `まもなく流れてきます。そうめん（1点）と${SI.cherry[1]}（3点）${s.rules.gold !== 'off' ? '、金のそうめん（5点）' : ''}を押してつまもう。${SI.chili[1]}（−2点）に注意！`
-      : s.phase === 'play' ? (me === null ? '観戦中' : '流れてくるものを押してつまもう（早い者勝ち）') : '';
+      : s.phase === 'play' ? (me === null ? '観戦中' : '流れてくるものを押してつまもう（早い者勝ち。空振りは1秒お休み）') : '';
     wrap.append(note);
     if (s.phase !== 'play') return;
 
     // 流れる品を、画面の描き替えに合わせて動かす
     const els = new Map();
     const can = me !== null && o.canMove;
+    // おてつき: 品の無い所を押したら MISS_MS つまめない（品の上で押してつまめたときは、品の pointerdown が止めるのでここに来ない）
+    const paintMiss = () => {
+      const on = performance.now() < missUntil;
+      lane.classList.toggle('sm-frozen', on);
+      if (on) setTimeout(() => { if (lane.isConnected) paintMiss(); }, missUntil - performance.now() + 20);
+    };
+    if (can) {
+      lane.onpointerdown = (e) => {
+        e.preventDefault();
+        if (performance.now() < missUntil) return;
+        missUntil = performance.now() + MISS_MS;
+        play('wrong', 0.25);
+        paintMiss();
+      };
+    }
+    paintMiss();
     const gone = (i, age) => myTaps.has(`${s.seed}:${i}`) || s.claims[i].some(([p, ms]) => p === me || ms <= age);
     let resendAt = performance.now() + RESEND_MS;
     const loop = () => {
@@ -256,7 +285,9 @@ export default {
           el.onpointerdown = (e) => {
             e.preventDefault();
             const a = since(startKey) - it.at;
-            if (!can || a < 0 || a > it.d || gone(i, a)) return;
+            if (performance.now() < missUntil) { e.stopPropagation(); return; } // おてつきの間は押せない（間をのばさない）
+            if (!can || a < leafMs(it) || a > it.d || gone(i, a)) return; // つまめない品はおてつき（lane へ伝わる）
+            e.stopPropagation();
             const ms = Math.round(a);
             myTaps.set(`${s.seed}:${i}`, { seed: s.seed, i, ms });
             if (myTaps.size > 500) myTaps.delete(myTaps.keys().next().value);

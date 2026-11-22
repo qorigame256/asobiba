@@ -1,0 +1,57 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "app/fonts",
+    "app/voice",
+    "app/sounds",
+    "tools/test-logic.mjs",
+    "tools/font-chars.json",
+    "tools/font-texts.mjs",
+    "tools/voice-texts.mjs"
+  ],
+  "cwd": "copy",
+  "env": {
+    "QUICK": "1",
+    "SEED": "1"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 300,
+  "breaks": [
+    {
+      "name": "流しそうめんの葉に隠れている間の手を弾かない",
+      "file": "app/js/games/somen.js",
+      "old": "    if (m.ms < leafMs(s0.items[m.i])) return null;",
+      "new": "    if (m.ms < 0) return null;"
+    },
+    {
+      "name": "見切りの速さの点を0.2秒でなく0.15秒から減らす",
+      "file": "app/js/games/mikiri.js",
+      "old": "(ms <= 200 ? 10 : Math.max(1, 10 - Math.ceil((ms - 200) / 100)))",
+      "new": "(ms <= 150 ? 10 : Math.max(1, 10 - Math.ceil((ms - 150) / 100)))"
+    },
+    {
+      "name": "見切りの速さで点のとき順位の点のままにする",
+      "file": "app/js/games/mikiri.js",
+      "old": "const g = s.rules.by === 'speed' ? speedPts(acts[p]) : PTS[rank] ?? 0;",
+      "new": "const g = PTS[rank] ?? 0;"
+    },
+    {
+      "name": "展開図あての円柱のふたが1つのまちがいだけ円を小さくする（大きさだけ違う形に戻す）",
+      "file": "app/js/games/tenkai.js",
+      "old": "    else if (v === 'one') items.push({ circle: [at(rr, W), rnd() < 0.5 ? -rr : h + rr, rr] });",
+      "new": "    else if (v === 'one') items.push({ circle: [at(rr, W), -rr, rr] }, { circle: [at(rr, W), h + 0.3, 0.3] });"
+    }
+  ]
+}

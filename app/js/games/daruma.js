@@ -168,7 +168,7 @@ export default {
     const me = o.me >= 0 && !o.watching ? o.me : null;
     const L = lenOf(s);
     const mount = `${s.seed}:${s.k}:${s.phase}:${me}`;
-    const chips = scoreChips(me === null ? { ...o, me: -1 } : o, s.pos.map(() => 0), { won: this.result(s)?.winners ?? [], extra: (p) => (s.phase === 'run' && s.sub[p] ? '<span class="pt-ok">✓</span>' : '') });
+    const chips = scoreChips(me === null ? { ...o, me: -1 } : o, s.pos.map(() => 0), { won: this.result(s)?.winners ?? [], extra: (p) => (s.phase === 'run' && s.sub[p] ? '<span class="pt-ok">✓</span>' : ''), steady: true });
     chips.querySelectorAll('.pt-score').forEach((x, p) => { x.innerHTML = `${Math.floor((Math.min(L, s.pos[p]) / L) * 100)}<small>%</small>`; });
     if (ui?.mount === mount && root.contains(ui.wrap)) {
       ui.chips.replaceWith(chips);

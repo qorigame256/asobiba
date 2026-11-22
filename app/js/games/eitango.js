@@ -256,7 +256,7 @@ export default {
       if (s.passed[p]) return '<span class="pt-ng">パス</span>';
       return s.tries[p] ? '<span class="pt-ng">×</span>' : '<span class="pt-ng">―</span>';
     };
-    const chips = scoreChips(o, s.scores, { won, extra });
+    const chips = scoreChips(o, s.scores, { won, extra, steady: true });
 
     if (ui?.mount === mount && root.contains(ui.wrap)) {
       ui.chips.replaceWith(chips);

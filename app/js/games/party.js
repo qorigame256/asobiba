@@ -67,8 +67,10 @@ export function scoreChips(o, scores, { turn = null, won = [], extra = null, ste
     chip.append(name, val);
     if (gain) showGain(chip, val, p, v);
     if (extra) {
+      // 札の下の行は、中身が無いときも空の行として必ず置く（2026-11-22 本人の依頼「名前の四角に『正解』などが足されると、下のボタンがずれて押し間違える」。
+      // 前は中身があるときだけ足していたので、札が高くなった瞬間に下のボタンが押し下げられた。高さは style.css の .pt-extra の min-height）
       const x = extra(p);
-      if (x || steady) {
+      {
         const e = document.createElement('div');
         e.className = 'pt-extra';
         e.innerHTML = x;

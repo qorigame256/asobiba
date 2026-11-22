@@ -89,7 +89,7 @@ function myDev() {
 
 /* ---------- 再読み込みしても部屋に戻れるよう、タブごとに覚えておく ---------- */
 
-const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName', 'cpuAuto', 'hidden', 'ptsMode', 'devs', 'bannedDevs', 'again', 'away', 'bench', 'draw', 'colors', 'colorKeep', 'lockPw', 'pw'];
+const SAVED_FIELDS = ['myId', 'isHost', 'gameId', 'round', 'first', 'seed', 'order', 'cpus', 'moves', 'members', 'names', 'rules', 'prev', 'carry', 'pick', 'banned', 'clock', 'undo', 'streak', 'beg', 'tally', 'stay', 'line', 'marks', 'timer', 'history', 'ready', 'votes', 'roomName', 'cpuAuto', 'hidden', 'ptsMode', 'freePick', 'devs', 'bannedDevs', 'again', 'away', 'bench', 'draw', 'colors', 'colorKeep', 'lockPw', 'pw'];
 const roomKey = (code) => 'bg2-room-' + code;
 function loadRoom(code) {
   try { return JSON.parse(sessionStorage.getItem(roomKey(code))); } catch { return null; }
@@ -149,6 +149,7 @@ function yieldRoom() {
   try { sessionStorage.removeItem(roomKey(S.code)); } catch { /* 無視 */ }
   setTimeout(() => net?.close(), 0);
   S = null;
+  syncDrawPop(); // 遊びの抽選の小窓が出ていれば消す
   setTurnTitle(false);
   setUrlRoom(null);
   showScreen('home');
@@ -1003,13 +1004,45 @@ function drawPanel() {
   line.className = 'draw-line';
   line.innerHTML = `選んだ: ${need.length - waitFor.length}/${need.length}人${waitFor.length ? `<small>（まだ: ${waitFor.map(who).join('・')}）</small>` : ''}`;
   box.append(head, note, list, line);
+  // 抽選の小窓（2026-11-22 本人の依頼「だれかが遊びの抽選を押したらポップアップ表示」）: 抽選の間は、この欄を全員の画面の真ん中に小窓で出す（syncDrawPop）。
+  // Claude の判断: 「閉じる」で待合室の中の欄に戻せる（その抽選の間だけ。次の抽選ではまた小窓で出る）。閉じた人には今までどおり待合室の中に出す
+  if (S.drawHide !== d.n) {
+    const close = makeButton('✕ 閉じる', () => { S.drawHide = d.n; render(); }, 'ghost small');
+    close.classList.add('draw-close');
+    box.prepend(close);
+    drawPopBox = box;
+  }
   clearInterval(drawTick);
   drawTick = setInterval(() => {
     const b = document.querySelector('.draw-left');
     if (!b || S?.draw?.n !== d.n) { clearInterval(drawTick); drawTick = null; return; }
     b.textContent = leftText();
   }, 500);
-  return box;
+  return drawPopBox === box ? null : box;
+}
+// 抽選の小窓を出す・中身を差し替える・消す（render が描き直しのあとに毎回呼ぶ）。小窓は抽選1回につき1つを使い回し、
+// 描き直しでは中身だけ替える（毎回作り直すと、出てくる動きが描き直しのたびに繰り返される）
+let drawPopBox = null;
+let drawPopEl = null;
+function syncDrawPop() {
+  const box = drawPopBox;
+  drawPopBox = null;
+  const d = S?.draw;
+  if (!box || !d) { // この描き直しで待合室の抽選の欄を作らなかった（決まった・対局が始まった・部屋を出た）
+    if (drawPopEl) { dropPop(drawPopEl); drawPopEl = null; }
+    return;
+  }
+  if (!drawPopEl || drawPopEl.dataset.n !== String(d.n) || !drawPopEl.isConnected) {
+    if (drawPopEl) dropPop(drawPopEl);
+    drawPopEl = document.createElement('div');
+    drawPopEl.className = 'invite-pop draw-pop';
+    drawPopEl.dataset.n = String(d.n);
+    drawPopEl.setAttribute('role', 'dialog');
+    drawPopEl.setAttribute('aria-label', '遊びの抽選');
+    drawPopEl.onclick = (e) => { if (e.target === drawPopEl) { S.drawHide = d.n; render(); } };
+    document.body.append(drawPopEl);
+  } else drawPopEl.classList.add('steady'); // 2回目からは中身だけ替え、出てくる動きをしない
+  drawPopEl.replaceChildren(box);
 }
 
 /* ---------- 待合室の「いま選んでいるゲーム」（2026-11-03 本人の依頼「選択中のゲームをもっとわかりやすく」） ---------- */
@@ -1128,6 +1161,7 @@ function appendLobbyExtras(board) {
   else if (dp) board.append(dp);
   const v = votePanel();
   if (v) board.append(v);
+  if (S.mode === 'online') board.append(freePickPanel());
 }
 
 /* ---------- 待合室でじゃんけん（2026-10-08。24回目の案）は 2026-11-16 本人の依頼「待機室のじゃんけんを廃止」でやめた（room.md）。古い版の端末が送る rps は受け取っても何もしない ---------- */
@@ -1287,7 +1321,7 @@ function rulesOf(gameId, rules) {
 // マルバツ・将棋の size は盤の大きさでなく遊び方（スーパー・消える・5五将棋）なので抽選する。
 // ビンゴの終わり方（until。長さ）・ことわざかるたの場の札の数（field。難しさ）も抽選しない（2026-10-29 の Codex の点検。本人承認）。
 // 綱引き連打の綱の重さ（weight。長さ）・ボウリングのガードレール（bumper。ハンデ）と向きの線（guide。手助け）も抽選しない。立体四目並べの重力なし（free）は遊び方なので抽選する（31回目の案。Claude の判断）。ミニゴルフのホールの数（holes。長さ）も抽選しない（2026-11-02。Claude の判断）。
-const KEEP_KEYS = new Set(['players', 'peek', 'danger', 'wide', 'cpu', 'speed', 'season', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'safe', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check', 'mallet', 'stones', 'diffs', 'kind', 'tries', 'until', 'field', 'frames', 'weight', 'bumper', 'guide', 'ask', 'holes', 'gap', 'teams', 'judge', 'drops', 'lives', 'flash', 'boxes', 'every', 'onis', 'games', 'face', 'type']); // type = 数のきまり当ての答え方（難読漢字の答え方と同じく、難しさと好みなので抽選しない。2026-11-18 の Claude の判断）・face = 時計あわせの文字盤の数字（難しさ。2026-11-16 の Claude の判断）・danger = あぶない所の知らせ（好み。2026-11-12 の Claude の判断）・games = シーソーにのせるの何回戦（長さ。2026-11-12 の Claude の判断）・peek = 相手の迷いを見せる（好み。2026-11-11 の Claude の判断）・every = 見えない鬼ごっこの見える間隔（難しさ）・onis = 鬼の数（人数）（2026-11-11 の Claude の判断）・drops = 羽根つきの落とせる回数（長さ）・lives = 価値観ならべのライフの数（難しさ）（2026-11-05 の Claude の判断）・gap = ビンゴの数字の間・teams = 綱引きのチームの数（2026-11-03。時間の長さと人数なので抽選しない。Claude の判断）・judge = 大喜利の審査員が選ぶ（回数が人数で決まるので抽選しない。2026-11-03 の Claude の判断）・flash = 多いのはどっちの点の見える時間（難しさ）・boxes = 多いのはどっちの箱の数（答えの数。シルエットクイズの choice と同じ）（2026-11-09 の Claude の判断）・season = 流しそうめんの季節（見た目の好み。2026-11-10 の Claude の判断）
+const KEEP_KEYS = new Set(['players', 'peek', 'danger', 'wide', 'cpu', 'speed', 'season', 'level', 'time', 'rounds', 'hands', 'length', 'points', 'voice', 'handicap', 'window', 'hint', 'goal', 'choice', 'pits', 'deal', 'waits', 'safe', 'autopromo', 'tsumogiri', 'digits', 'shanten', 'match', 'check', 'mallet', 'stones', 'diffs', 'kind', 'tries', 'until', 'field', 'frames', 'weight', 'bumper', 'guide', 'ask', 'holes', 'gap', 'teams', 'judge', 'drops', 'lives', 'flash', 'boxes', 'every', 'onis', 'games', 'face', 'type', 'clue']); // clue = ナンプレ早解きの時間でヒント（手伝いの好み。hint と同じ。2026-11-22 の Claude の判断）・type =数のきまり当ての答え方（難読漢字の答え方と同じく、難しさと好みなので抽選しない。2026-11-18 の Claude の判断）・face = 時計あわせの文字盤の数字（難しさ。2026-11-16 の Claude の判断）・danger = あぶない所の知らせ（好み。2026-11-12 の Claude の判断）・games = シーソーにのせるの何回戦（長さ。2026-11-12 の Claude の判断）・peek = 相手の迷いを見せる（好み。2026-11-11 の Claude の判断）・every = 見えない鬼ごっこの見える間隔（難しさ）・onis = 鬼の数（人数）（2026-11-11 の Claude の判断）・drops = 羽根つきの落とせる回数（長さ）・lives = 価値観ならべのライフの数（難しさ）（2026-11-05 の Claude の判断）・gap = ビンゴの数字の間・teams = 綱引きのチームの数（2026-11-03。時間の長さと人数なので抽選しない。Claude の判断）・judge = 大喜利の審査員が選ぶ（回数が人数で決まるので抽選しない。2026-11-03 の Claude の判断）・flash = 多いのはどっちの点の見える時間（難しさ）・boxes = 多いのはどっちの箱の数（答えの数。シルエットクイズの choice と同じ）（2026-11-09 の Claude の判断）・season = 流しそうめんの季節（見た目の好み。2026-11-10 の Claude の判断）
 const luckSettings = (game) => (game.settings ?? []).filter((x) => !KEEP_KEYS.has(x.key) && (x.key !== 'size' || ['tictactoe', 'shogi'].includes(game.id)));
 
 // 盤のゲームの席の数（詳細設定で人数が決まるマルバツ・コネクトフォー・リバーシ・点と線は 2〜4、将棋・マンカラ・海戦ゲーム・五目並べ・立体四目並べ・はさみ将棋・エアホッケーは 2〜3。ほかは2）
@@ -2147,7 +2181,7 @@ function statusHtml(game, st, res) {
   }
   let html = `<div class="status-main">${main}</div>`;
   if (sub) html += `<div class="status-sub">${sub}</div>`;
-  if (!game.multi && S.clock) html += `<div id="think" class="status-sub think">${thinkHtml(game)}</div>`;
+  // 考えた時間の行は 2026-11-22 本人の依頼でやめ、順番の帯の各席の四角の下に出す（turnBand の turnTime）
   const extra = game.info?.(st);
   if (extra) html += `<div class="status-sub">${extra}</div>`;
   const streak = streakHtml();
@@ -2191,23 +2225,30 @@ const clockText = (ms) => {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 };
 
-function thinkHtml(game) {
+// 席ごとの考えた時間の合計（ms）と、いまの番の人が考えている時間（ms）
+function thinkTimes(n) {
   const c = S.clock;
-  const used = Array(Math.max(2, roundOrder().length)).fill(0);
+  const used = Array(Math.max(2, n)).fill(0);
   const seat = (p) => Number.isInteger(p) && p >= 0 && p < used.length;
   for (const [p, ms] of c.log) if (seat(p)) used[p] += ms;
   const live = !c.res && seat(c.turn) ? Date.now() - c.at : 0;
   if (live) used[c.turn] += live;
-  // 1人ぶん（呼び名と時間）は途中で折り返さない（2026-11-17 見た目の点検。はさみ将棋の「後手（と） 0:00」が2行に割れた）
-  const tot = used.map((_, p) => p).map((p) => `<span class="nowrap">${seatMark(game, p)} ${clockText(used[p])}</span>`).join(' ／ ');
-  if (c.res) return `考えた時間 ${tot}`;
-  return `<span class="nowrap">⏱ ${seatMark(game, c.turn)}が考え中 <b>${clockText(live)}</b></span>　合計 ${tot}`;
+  return { used, live, turn: c.res ? null : c.turn };
+}
+// 順番の帯の四角の下に出す考えた時間（2026-11-22 本人の依頼「思考時間の行を消して、番手表記の四角の下に表示する」）。
+// Claude の判断: 出すのはその席の合計で、いまの番の席だけ太字で数え続け、「この手で考えている時間」を小さく添える（前の行の「考え中 0:05」の代わり）。
+// 決着のあとは合計だけ（帯は勝った人がいるときだけ出るので、引き分けでは出ない）。数え直しは下の setInterval が字だけ書き換える
+function turnTimeText(i, t) {
+  const live = t.turn === i && t.live >= 1000 ? `<small>（${clockText(t.live)}）</small>` : '';
+  return `⏱ ${t.turn === i ? `<b>${clockText(t.used[i])}</b>` : clockText(t.used[i])}${live}`;
 }
 
 setInterval(() => {
-  const box = el('think');
-  if (!S?.clock || !box?.isConnected || S.clock.res) return;
-  box.innerHTML = thinkHtml(GAMES[S.gameId]);
+  if (!S?.clock || S.clock.res) return;
+  const boxes = document.querySelectorAll('#screen-play .turn-time[data-seat]');
+  if (!boxes.length) return;
+  const t = thinkTimes(boxes.length);
+  boxes.forEach((b) => { b.innerHTML = turnTimeText(Number(b.dataset.seat), t); });
 }, 500);
 
 // 遊び方の図を作る（書き方は howto-fig.js の先頭）
@@ -2311,7 +2352,9 @@ function render() {
   const chipsX = [...document.querySelectorAll('.cc-steady')].map((x) => x.scrollLeft);
   const turnWas = S.myTurnNow && S.turnAt === timerKey(); // 盤へ戻る（下の「自分の番が来たら盤へ戻る」）
   S.myTurnNow = false;
+  drawPopBox = null;
   try { renderPage(); } finally {
+    syncDrawPop(); // 遊びの抽選の小窓（2026-11-22）
     body.style.minHeight = '';
     setTurnTitle(S?.myTurnNow);
     if (S) S.turnAt = timerKey();
@@ -2599,8 +2642,10 @@ function turnBand(game, st, res) {
   // あと一歩の人に印（2026-11-13 本人の選択。room.md「UI・UX の6回目」）: ゲームの reach(局面) → 席ごとの短い言葉（「あと1枚」）| null。
   // いまは大富豪・ダウト・七並べ（Claude の判断。いろあわせは「最後の1枚の宣言」の駆け引きを壊すので付けない）。印が付いたばかりの札は印を落として揺らす（動きを減らす設定の端末では揺らさない）
   const reach = res ? null : game.reach?.(st) ?? null;
+  // 考えた時間（盤のゲーム。2026-11-22 から状態の欄の行の代わりに、四角の下に出す。上の turnTimeText）
+  const times = !game.multi && S.clock?.key === S.gameId + ':' + S.round ? thinkTimes(n) : null;
   const band = document.createElement('div');
-  band.className = 'turn-band' + (said ? ' has-said' : '') + (!game.multi && n >= 3 ? ' seats34' : ''); // seats34: 色に形を添える（2026-11-11）
+  band.className = 'turn-band' + (said ? ' has-said' : '') + (!game.multi && n >= 3 ? ' seats34' : '') + (times ? ' has-time' : ''); // seats34: 色に形を添える（2026-11-11）
   const back = st?.dir === -1;
   const seats = [...Array(n).keys()];
   if (back) seats.reverse();
@@ -2639,6 +2684,13 @@ function turnBand(game, st, res) {
       b.className = 'turn-said';
       b.textContent = said[i];
       card.append(b);
+    }
+    if (times) {
+      const tm = document.createElement('span');
+      tm.className = 'turn-time';
+      if (!res) tm.dataset.seat = String(i); // 決着のあとは数え直さない
+      tm.innerHTML = turnTimeText(i, times);
+      card.append(tm);
     }
     if (typeof reach?.[i] === 'string') addReach(card, i, reach[i]);
     if (S.mode === 'online') addFlame(card, S.order[i]);
@@ -4437,7 +4489,7 @@ function renderLobby(game) {
   appendLobbyExtras(board);
   if (game.settings) board.append(rulesPanel(game));
 
-  if (!S.isHost) { lobbyDock(readyButton()); return; }
+  if (!S.isHost) { lobbyDock(readyButton()); if (S.freePick && !S.order) controls.append(gameSelect()); return; } // だれでもゲームを変えられる部屋（freePickPanel）
   const start = makeButton('始める', () => (readyDone(game) ? startRound() : render()));
   start.disabled = short || !readyDone(game);
   if (allReady(game) && !short) start.classList.add('ready-go');
@@ -4541,7 +4593,7 @@ function renderBoardLobby(game) {
   if (cpuLevels(game)) board.append(cpuAutoPanel(game));
   board.append(ptsPanel());
   if (game.settings) board.append(rulesPanel(game));
-  if (!S.isHost) { lobbyDock(readyButton()); return; }
+  if (!S.isHost) { lobbyDock(readyButton()); if (S.freePick && !S.order) controls.append(gameSelect()); return; } // だれでもゲームを変えられる部屋（freePickPanel）
   const start = makeButton('始める', () => (readyDone(game) ? startRound() : render()));
   start.disabled = !readyDone(game);
   if (allReady(game)) start.classList.add('ready-go');
@@ -4641,6 +4693,29 @@ function cpuAutoPanel() {
 /* ---------- 成績表を順位で点（2026-10-24 本人の決定。28回目の案）: ホストが待合室で選ぶと、成績表を点の多い順に並べ、お開きの表彰も点で決める ---------- */
 // 点はその対局で自分より下の順位になった人の数（games/index.js の seatPoints）。部屋の設定（S.ptsMode。state の ptsMode で送る）で、最初は勝った回数（今まで）。
 // Claude の判断: 点は選んでいなくてもいつも数える（途中で切り替えても点がそろっているように）。ゲームを変えても残る（勝ち残りと同じ）。
+/* ---------- だれでもゲームを変えられる部屋（2026-11-22 本人の依頼「ゲストが選んだ遊びに切り替わるモード」。形は Claude の推奨を本人が承認） ---------- */
+// ホストが待合室で付けると、ゲストの待合室にも「🔄 ゲームを変える」が出て、選んだらすぐその遊びに切り替わる（type: 'pickGame' をホストが受けて newRound。投票はそのまま）。
+// Claude の判断: 変えられるのは待合室にいる間だけ（対局の途中の「⚙ 部屋のメニュー」はホストだけのまま）。部屋の設定（S.freePick。state の freePick で送る）で、
+// ゲームを変えても残る（勝ち残り・順位で点と同じ）。最初は切ってある（今までどおりホストだけ）。だれが変えたかは出さない（「◯◯に変わりました」の帯は全員に出る）
+function freePickPanel() {
+  const box = document.createElement('div');
+  box.className = 'lobby-stay';
+  if (!S.isHost) {
+    if (S.freePick) box.innerHTML = '<p class="lobby-note">🔄 この部屋では、待合室でだれでもゲームを変えられます</p>';
+    return box;
+  }
+  const label = document.createElement('label');
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.checked = !!S.freePick;
+  input.onchange = () => { S.freePick = input.checked; saveRoom(); sendState(); render(); };
+  const text = document.createElement('span');
+  text.innerHTML = '<b>🔄 だれでもゲームを変えられる</b> <small>待合室で、ゲストも「ゲームを変える」で遊びを選べ、選んだらすぐ切り替わります</small>';
+  label.append(input, text);
+  box.append(label);
+  return box;
+}
+
 function ptsPanel() {
   const box = document.createElement('div');
   box.className = 'lobby-stay';
@@ -5009,6 +5084,7 @@ function onKicked(ban = true) {
   dropBack();
   stopLive(); // エアホッケー・紙相撲の時計と resize の登録を片付ける（2026-11-19 の Codex の点検）
   S = null;
+  syncDrawPop(); // 遊びの抽選の小窓が出ていれば消す
   setTurnTitle(false);
   setUrlRoom(null);
   showScreen('home');
@@ -5066,8 +5142,11 @@ function openGamePicker() {
   ];
   const pick = (id) => {
     closeInvite();
-    if (!S?.isHost && S?.mode === 'online') return; // 開いている間にホストでなくなった
     if (!S || id === S.gameId) return;
+    if (!S.isHost && S.mode === 'online') { // ゲストはホストに頼む（だれでもゲームを変えられる部屋の待合室だけ。freePickPanel）
+      if (S.freePick && !S.order) send({ type: 'pickGame', g: id, round: S.round });
+      return;
+    }
     const st = replay(S);
     const playing = st && S.moves.length && !GAMES[S.gameId].result(st);
     if (playing && !confirm('対局の途中です。ゲームを変えますか？')) return;
@@ -5640,6 +5719,7 @@ function leave(ask = true) {
     setTimeout(() => net?.close(), 500);
   }
   S = null;
+  syncDrawPop(); // 遊びの抽選の小窓が出ていれば消す
   setTurnTitle(false);
   setUrlRoom(null);
   showScreen('home');
@@ -6275,7 +6355,7 @@ document.addEventListener('visibilitychange', () => {
 function send(msg, qos) { S?.net?.send(msg, qos); }
 function sendState() {
   const { gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, undo, streak, beg } = S;
-  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {}, roomName: S.roomName ?? '', cpuAuto: !!S.cpuAuto, ptsMode: !!S.ptsMode, again: S.again ?? null, away: S.away ?? [], bench: S.bench ?? [], draw: S.draw ?? null, colors: S.colors ?? null, colorKeep: S.colorKeep ?? null, locked: !!S.lockPw });
+  send({ type: 'state', gameId, round, first, seed, order, cpus, moves, members, names, rules, prev, pick, u: undo ?? 0, streak: streak ?? null, beg: beg ?? [], tally: S.tally ?? null, stay: !!S.stay, line: S.line ?? [], marks: S.marks ?? {}, timer: S.timer ?? null, history: S.history ?? [], ready: S.ready ?? null, votes: S.votes ?? {}, roomName: S.roomName ?? '', cpuAuto: !!S.cpuAuto, ptsMode: !!S.ptsMode, freePick: !!S.freePick, again: S.again ?? null, away: S.away ?? [], bench: S.bench ?? [], draw: S.draw ?? null, colors: S.colors ?? null, colorKeep: S.colorKeep ?? null, locked: !!S.lockPw });
 }
 function sendMoves() { send({ type: 'move', gameId: S.gameId, round: S.round, moves: S.moves, u: S.undo ?? 0 }); }
 function askState() { send({ type: 'hello', isHost: false, name: myName(), beg: beginner, mark: myMark(), dev: myDev(), pw: S.pw || undefined, hid: isHidden() }); }
@@ -6396,6 +6476,12 @@ function onMessage(msg) {
         sendState();
       }
       break;
+    case 'pickGame': // ゲストが待合室でゲームを選んだ（だれでもゲームを変えられる部屋だけ。freePickPanel）
+      if (S.isHost && S.freePick && msg.from !== S.myId && S.members.includes(msg.from) && !S.order && msg.round === S.round
+        && typeof msg.g === 'string' && Object.hasOwn(GAMES, msg.g) && GAMES[msg.g].ready && msg.g !== S.gameId) {
+        newRound(msg.g, { lobby: true });
+      }
+      return;
     case 'drawStart': // 遊びの抽選を始めたい（だれでも）
       if (S.isHost && msg.from !== S.myId && S.members.includes(msg.from) && !S.order && !S.draw) startDraw(msg.from);
       return;
@@ -6486,6 +6572,7 @@ function adoptState(msg) {
   S.stay = msg.stay === true;
   S.cpuAuto = msg.cpuAuto === true;
   S.ptsMode = msg.ptsMode === true;
+  S.freePick = msg.freePick === true; // だれでもゲームを変えられる部屋（2026-11-22。freePickPanel）
   S.roomName = mask(cleanRoomName(msg.roomName));
   S.marks = msg.marks && typeof msg.marks === 'object' ? Object.fromEntries(Object.entries(msg.marks).filter(([id, m]) => typeof id === 'string' && MARKS.includes(m) && m)) : {};
   const tm = msg.timer;

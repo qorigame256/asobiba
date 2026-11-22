@@ -307,10 +307,19 @@ export default {
       const c = shown ? wanted(s, s.q) : me === null ? kinds.map(() => 0) : loc.c;
       paid.replaceChildren();
       paid.classList.toggle('answer', shown);
+      // 出したお金の欄は、お金の種類ごとに置き場所を決めておき、出していない種類は見えない形で場所だけ取る（2026-11-22 本人の依頼
+      // 「出したお金が多くなると改行されて、お金を選ぶボタンの位置がずれる」）。欄の高さは問題の間ずっと同じになる
       kinds.forEach((v, i) => {
-        if (!c[i]) return;
         const b = moneyEl(v, 'button');
         b.classList.add('ok-stack');
+        if (!c[i]) {
+          b.classList.add('ok-ghost');
+          b.disabled = true;
+          b.tabIndex = -1;
+          b.setAttribute('aria-hidden', 'true');
+          paid.append(b);
+          return;
+        }
         b.insertAdjacentHTML('beforeend', `<span class="ok-n">×${c[i]}</span>`);
         b.setAttribute('aria-label', `${yen(v)} ${c[i]}枚（押すと1枚戻す）`);
         b.disabled = !playing;
@@ -323,7 +332,7 @@ export default {
         };
         paid.append(b);
       });
-      if (!paid.children.length) paid.insertAdjacentHTML('beforeend', `<span class="ok-empty">${shown ? '' : 'ここに出したお金が並びます'}</span>`);
+      if (!pieces(c) && !shown) paid.insertAdjacentHTML('beforeend', '<span class="ok-empty">ここに出したお金が並びます</span>');
       tray.hidden = !playing;
       purse.hidden = !playing || !wallet;
       payBtn.hidden = !playing;

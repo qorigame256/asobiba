@@ -201,7 +201,7 @@ export default {
       }
       return heart(p);
     };
-    const chips = scoreChips(o, s.best, { won, extra });
+    const chips = scoreChips(o, s.best, { won, extra, steady: true });
     const mine = me !== null && s.phase === 'input' ? s.done[me] : null;
     const mount = `${s.seed}:${s.round}:${s.phase}:${me}:${mine}`;
     if (ui?.mount === mount && root.contains(ui.wrap)) {

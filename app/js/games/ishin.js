@@ -170,7 +170,7 @@ export default {
       return s.last.pts[p] ? '<span class="pt-ok flip-after">○ +1</span>' : '<span class="pt-ng flip-after">―</span>'; // 札が返ってから出す（一斉に裏返す。2026-11-16）
     };
     if (shownPhase) flipTimes(root, qKey(s) + ':shown', o.fresh); // 描き直しで札の段を作り直すときも、続きの時間で
-    const chips = scoreChips(o, s.scores, { won, extra, gainDelay: shownPhase ? FLIP_AFTER : 0 });
+    const chips = scoreChips(o, s.scores, { won, extra, steady: true, gainDelay: shownPhase ? FLIP_AFTER : 0 });
     if (ui?.mount === mount && root.contains(ui.wrap)) {
       ui.chips.replaceWith(chips);
       ui.chips = chips;

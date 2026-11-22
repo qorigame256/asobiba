@@ -1042,6 +1042,11 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .draw-start small { color: var(--muted); font-size: .78rem; flex: 1 1 200px; }
 .draw-box { margin-top: 10px; padding: 10px; border: 2px solid var(--accent); border-radius: 12px; background: var(--soft, #fff1e8); }
 .draw-head { margin: 0; font-weight: 700; }
+/* 抽選の小窓（2026-11-22。main.js の syncDrawPop）: 待合室の欄と同じ中身を、真ん中の箱に出す。描き直しで中身を替えるとき（.steady）は出てくる動きをしない */
+.draw-pop .draw-box { position: relative; width: 100%; max-width: 560px; margin-top: 0; background: var(--panel); box-shadow: 0 10px 30px rgba(0, 0, 0, .25); }
+.draw-pop .draw-head { padding-right: 84px; }
+.draw-pop.steady, .draw-pop.steady > * { animation: none; }
+.board button.draw-close, button.draw-close { position: absolute; top: 8px; right: 8px; }
 .draw-left { color: var(--accent); white-space: nowrap; }
 .draw-box .lobby-note { margin: 4px 0 0; }
 .draw-tiles { grid-template-columns: repeat(2, 1fr); }
@@ -1578,7 +1583,7 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .tg .pt-plus, .ac .pt-plus, .mg .pt-plus { --rise: -8px; top: 10%; font-size: 1rem; }
 @keyframes pt-plus { 0% { opacity: 0; transform: translate(-50%, 6px) scale(.6); } 25% { opacity: 1; transform: translate(-50%, -4px) scale(1.15); } 100% { opacity: 0; transform: translate(-50%, var(--rise)) scale(1); } }
 .pt-score small { font-size: .7rem; font-weight: 400; color: var(--muted); margin-left: 1px; }
-.pt-extra { font-size: .78rem; color: var(--muted); }
+.pt-extra { font-size: .78rem; color: var(--muted); line-height: 1.5; min-height: 1.5em; } /* 空でも1行ぶんの高さを取る（2026-11-22。party.js の scoreChips） */
 /* 札に字が入っても高さと段の数を変えない（party.js の scoreChips の steady）。真ん中寄せは端の札の margin で（はみ出したとき左が切れないように） */
 .cc-steady { flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; scrollbar-width: none; touch-action: pan-x; padding: 2px; }
 .cc-steady::-webkit-scrollbar { display: none; }
@@ -1751,7 +1756,11 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .sl-mini-cap { font-size: .72rem; font-weight: 700; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sl-mini.done .sl-mini-cap::after { content: " ✓"; color: #2f8a4a; }
 .np-grid { --n: 9; display: grid; grid-template-columns: repeat(var(--n), 1fr); width: min(100%, 420px); margin: 0 auto; border: 2.5px solid var(--ink); touch-action: manipulation; }
-.board button.np-cell { aspect-ratio: 1; padding: 0; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--field); color: var(--accent); font: inherit; font-size: clamp(1rem, 5vw, 1.5rem); font-weight: 700; cursor: pointer; min-width: 0; }
+.board button.np-cell { aspect-ratio: 1; padding: 0; border: 0; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--field); color: var(--np-ink, #2f66c4); font: inherit; font-size: clamp(1rem, 5vw, 1.5rem); font-weight: 700; cursor: pointer; min-width: 0; }
+/* 自分で入れた数字は青（2026-11-22 本人の依頼「数字の赤色の文字が、まちがえているのかと誤認する」。前は --accent で、いつもの色の組では朱色だった）。
+   まちがいの知らせ（.bad）の赤と、時間でヒントが埋めたマス（.clue）の緑と見分ける。暗い色の組では明るい青 */
+:root:is([data-skin="yoru"], [data-skin="sumi"], [data-skin="hoshi"]) { --np-ink: #8fb8ff; }
+.board button.np-cell.clue { color: #2f8a4a; background: color-mix(in srgb, #2f8a4a 14%, var(--field)); }
 .board button.np-cell.given { color: var(--ink); font-weight: 800; }
 .board button.np-cell.br { border-right: 2.5px solid var(--ink); }
 .board button.np-cell.bb { border-bottom: 2.5px solid var(--ink); }
@@ -1766,6 +1775,10 @@ body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-
 .np-memo { display: grid; grid-template-columns: repeat(var(--m, 3), 1fr); width: 100%; height: 100%; padding: 1px; font-size: clamp(.45rem, 1.9vw, .7rem); font-weight: 600; color: var(--muted); line-height: 1; }
 .np-memo i { font-style: normal; display: grid; place-items: center; }
 .np-memo-btn { display: block; margin: 8px auto 0; }
+/* 解き終わったあとにほかの人の盤を見る名前の札（2026-11-22。nanpure.js の canWatch） */
+.np-who-cap { text-align: center; font-size: .8rem; font-weight: 700; color: var(--muted); margin-top: 6px; }
+.np-who { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 4px 0 8px; }
+.board .np-who .btn.on { background: var(--accent); color: var(--accent-ink, #fff); border-color: var(--accent); }
 .np-pad { --n: 10; display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 5px; touch-action: manipulation; }
 .board .btn.np-key { min-width: 0; min-height: 48px; padding: 4px 0; font-size: 1.3rem; font-weight: 800; border-radius: 10px; }
 .board .btn.np-key.done, .board .btn.np-key.done:disabled { opacity: .3; background: var(--line); color: var(--muted); text-decoration: line-through; cursor: default; }
@@ -2438,6 +2451,11 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 @keyframes tr-drop { from { opacity: 0; transform: translate(-50%, -14px) scale(.6); } }
 @keyframes tr-beat { 50% { transform: translateX(-50%) scale(1.1); } }
 @media (prefers-reduced-motion: reduce) { .turn-reach, .turn-reach.new { animation: none; } }
+/* 考えた時間（2026-11-22。main.js の turnBand の turnTimeText）: 四角の下に重ねて出し、四角の大きさは変えない（下の「…」と重ならないよう少し離す）。帯の下に1行ぶんの余白を取る */
+.turn-band.has-time { padding-bottom: 1.35rem; }
+.turn-time { position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: .74rem; line-height: 1.2; color: var(--ink); font-variant-numeric: tabular-nums; pointer-events: none; }
+.turn-time small { font-size: .9em; color: var(--muted); margin-left: 2px; }
+.turn-card.now .turn-time { transform: translateX(-50%) scale(calc(1 / 1.08)); transform-origin: top center; } /* いまの番の四角は 1.08 倍なので、字の大きさをほかとそろえる */
 .turn-said { margin-top: 3px; max-width: 100%; padding: 2px 7px; border-radius: 8px; background: var(--field); border: 1px solid var(--line); color: var(--ink); font-size: .72rem; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- もう一回は全員の OK で（2026-10-26） ---------- */
@@ -2570,6 +2588,12 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 @keyframes sm-flow { to { background-position: 48px 0, 0 0; } }
 .sm-node { position: absolute; top: 0; height: 20px; width: 5px; border-radius: 3px; background: rgba(50, 80, 25, .55); }
 .sm-lane { position: absolute; inset: 20px 12px; }
+/* 上流の竹の葉とおてつき（2026-11-22。somen.js の LEAF・MISS_MS）: 葉は品より手前で、右の端は --leaf（品のまん中の位置）＋品の幅の半分 */
+.sm-leaf { position: absolute; z-index: 3; top: -20px; bottom: -20px; left: -12px; width: calc(var(--leaf) + 12px + 33px); border-radius: 0 46px 46px 0; background: radial-gradient(120% 90% at 0 50%, #2f5a1e 0 55%, #4a7f2c 75%, #5f9637); box-shadow: 4px 0 6px rgba(20, 40, 10, .35); display: grid; place-items: center; font-size: 1.8rem; pointer-events: auto; }
+.sm-leaf span { transform: rotate(-12deg); filter: drop-shadow(0 1px 1px rgba(0, 0, 0, .3)); }
+.sm-miss { position: absolute; z-index: 4; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 4px 14px; border-radius: 999px; background: rgba(192, 57, 43, .92); color: #fff; font-weight: 800; pointer-events: none; opacity: 0; transition: opacity .1s; }
+.sm-lane.sm-frozen .sm-miss { opacity: 1; }
+.sm-lane.sm-frozen .sm-item { opacity: .55; }
 .sm-item { position: absolute; width: 66px; height: 46px; transform: translate(-50%, -50%); display: flex; align-items: center; justify-content: center; font-size: 2rem; line-height: 1; cursor: pointer; touch-action: none; }
 .sm-item svg { width: 60px; height: 30px; overflow: visible; }
 .sm-item svg path { fill: none; stroke: #fffdf3; stroke-width: 2.8; stroke-linecap: round; }
@@ -3672,9 +3696,10 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .board button.mb-undo:disabled { opacity: .45; cursor: default; }
 /* お金ぴったり払い（2026-11-17。okane.js）。お金の絵は色と大きさで見分ける丸と四角（本物の図柄はまねない） */
 .okn .ok-price { font-size: clamp(2rem, 9vw, 2.8rem); font-weight: 900; letter-spacing: .02em; font-family: inherit; font-variant-numeric: tabular-nums; } /* 値段は明朝でなく本文の字体で（2026-11-17 見た目の点検。数字が明朝だと値札らしくなかった） */
-.ok-paid { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; min-height: 76px; width: min(100%, 560px); margin: 0 auto; padding: 10px; border: 2px dashed var(--line); border-radius: 14px; background: var(--field); }
+.ok-paid { position: relative; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; min-height: 76px; width: min(100%, 560px); margin: 0 auto; padding: 10px; border: 2px dashed var(--line); border-radius: 14px; background: var(--field); }
 .ok-paid.answer { border-style: solid; border-color: #2f8a4a; }
-.ok-empty { color: var(--muted); font-size: .9rem; }
+.ok-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: .9rem; pointer-events: none; }
+.board .ok-m.ok-ghost { visibility: hidden; } /* 出していない種類の置き場所（場所だけ取る。2026-11-22 okane.js の paint） */
 .ok-tray { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; width: min(100%, 560px); margin: 0 auto; }
 .ok-tray[hidden] { display: none; }
 .board .ok-m { position: relative; display: inline-grid; place-items: center; padding: 0; border: 2px solid rgba(0, 0, 0, .28); color: #2d2a26; font-weight: 900; cursor: pointer; touch-action: manipulation; box-shadow: 0 2px 0 rgba(0, 0, 0, .2); }
@@ -3759,6 +3784,7 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .wq-row { display: flex; justify-content: center; align-items: flex-end; gap: 14px; margin: 12px 0 4px; }
 .wq-col { display: flex; flex-direction: column; align-items: center; gap: 4px; width: min(30%, 140px); }
 .board button.wq-jar { position: relative; width: 72px; padding: 0; overflow: hidden; border: 3px solid var(--line); border-top-width: 0; border-radius: 0 0 14px 14px; background: var(--field); color: var(--ink); cursor: default; -webkit-tap-highlight-color: transparent; }
+.board button.wq-jar:not(:disabled) { cursor: pointer; } /* 入れ物を押して選べる（2026-11-22。mizu.js） */
 .board button.wq-jar.pick { border-color: #e8a913; cursor: pointer; }
 .board button.wq-jar.from { border-color: var(--accent); }
 .board button.wq-jar.hit { border-color: #2f8a4a; box-shadow: 0 0 0 3px #2f8a4a; }
@@ -3813,6 +3839,15 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .mch-north { position: absolute; top: -1.35em; right: 4px; font-size: .8rem; font-weight: 800; color: var(--muted); }
 .board button.mch-cell { position: relative; aspect-ratio: 1; display: grid; place-items: center; padding: 0; border: 2px solid transparent; border-radius: 8px; background: #f6f1e3; color: #333; font-size: clamp(1.05rem, 5.5vw, 1.7rem); cursor: pointer; }
 .board button.mch-cell:disabled { cursor: default; }
+/* 答え方の知らせ（2026-11-22。michi.js）: 指示の最後の「🏁 着いた建物をタップ」、押せる間はマスを浮き上がったボタンに、★ は光らせる */
+.mch-goal { padding: 4px 12px; border: 2px dashed #2f8a4a; border-radius: 999px; background: color-mix(in srgb, #2f8a4a 12%, var(--field)); color: #2f6b3e; font-weight: 800; font-size: clamp(.85rem, 3.8vw, 1rem); white-space: nowrap; }
+:root:is([data-skin="yoru"], [data-skin="sumi"], [data-skin="hoshi"]) .mch-goal { color: #9be0ad; }
+.mch-map.can .mch-cell:not(:disabled) { box-shadow: 0 3px 0 #b3a67f; }
+.mch-map.can .mch-cell:not(:disabled):active { transform: translateY(2px); box-shadow: none; }
+@media (hover: hover) { .mch-map.can .mch-cell:not(:disabled):hover { border-color: #2f8a4a; background: #eef8ef; } }
+.mch-map.can .mch-cell.start { animation: mch-star 1.4s ease-in-out infinite; }
+@keyframes mch-star { 50% { box-shadow: 0 3px 0 #b3a67f, 0 0 0 4px rgba(232, 169, 19, .55); } }
+@media (prefers-reduced-motion: reduce) { .mch-map.can .mch-cell.start { animation: none; box-shadow: 0 3px 0 #b3a67f, 0 0 0 3px rgba(232, 169, 19, .55); } }
 .board button.mch-cell.start { background: #ffe9a8; color: #c0392b; font-weight: 900; }
 .board button.mch-cell.path { background: #d6e9ff; }
 .board button.mch-cell.picked { border-color: #e8a913; }

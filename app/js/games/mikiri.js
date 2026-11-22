@@ -3,6 +3,7 @@
 // 2026-10-28 本人の決定（Claude の問いに本人が答えた）:
 //   - 詳細設定「遊び方」で 点数戦（最初）・勝ち抜き戦 を選ぶ。
 //   - 点数戦: 毎回、速い順に 3・2・1点。決まった回数（5回）で点の多い人の勝ち。フライングはその回だけ失格（点は減らない）。
+//     2026-11-22 本人の依頼で、詳細設定「点の付け方」（鍵は by。順位（最初）・速さ）を足した。速さの点は上の speedPts。遊び方なので、おまかせで抽選する。
 //   - 勝ち抜き戦: 毎回いちばん遅い人が抜け、最後の1人の勝ち。残り2人になったら先に2勝した方が残る。
 //     フライングは2回目で脱落。1回目のフライングの回はだれも抜けずにやり直し（フライングした人に警告が1つ付く）。
 //   - 詳細設定「フェイント」（最初はなし）: ときどき「！」の前に似た合図「？」が出る。それで押すとフライング。
@@ -37,6 +38,9 @@ const MAX_R = 60; // 勝ち抜き戦でこの回を過ぎたら残りの人の�
 const PTS = [3, 2, 1];
 
 const isSurvive = (s) => s.rules.mode === 'survive';
+// 速さで点（詳細設定「点の付け方」の speed。2026-11-22 本人の依頼「早押しの順番ではなく、はやさで点が変動する設定」。点の付け方は Claude の推奨を本人が承認）:
+// 「！」から 0.2秒以内なら10点、0.1秒遅れるごとに1点減り、いちばん低くて1点（押さなかった・フライングは今までどおり0点）。ms は整数なので全員の端末で同じ点になる
+export const speedPts = (ms) => (ms <= 200 ? 10 : Math.max(1, 10 - Math.ceil((ms - 200) / 100)));
 const roundsOf = (s) => Number(s.rules.rounds) || 5;
 const introOf = (r) => (r === 1 ? 1500 : 3000);
 const keyOf = (s) => `mikiri:${s.seed}:${s.r}`;
@@ -62,9 +66,11 @@ function resolve(s) {
   if (!isSurvive(s)) {
     const ok = A.filter((p) => acts[p] !== null && acts[p] >= 0);
     for (const p of ok) {
-      const g = PTS[ok.filter((q) => acts[q] < acts[p]).length] ?? 0;
+      const rank = ok.filter((q) => acts[q] < acts[p]).length;
+      const g = s.rules.by === 'speed' ? speedPts(acts[p]) : PTS[rank] ?? 0;
       L.gain[p] = g;
       s.pts[p] += g;
+      if (rank === 0 && s.rules.by === 'speed') (L.best ??= []).push(p); // 速さで点のときの、いちばん速かった人（「正解」の音。順位のときは今までどおり3点で見る。局面の形も今までと同じ）
     }
     L.flyers = A.filter((p) => acts[p] === -1);
   } else {
@@ -251,6 +257,7 @@ export default {
   settings: [
     { key: 'mode', label: '遊び方', desc: '点数戦: 速い順に3・2・1点／勝ち抜き戦: 毎回いちばん遅い人が抜ける', def: 'score', choices: [['score', '点数戦'], ['survive', '勝ち抜き戦']] },
     { key: 'rounds', label: '回数', desc: '点数戦の回数', def: 5, choices: [[3, '3回'], [5, '5回'], [10, '10回']] },
+    { key: 'by', label: '点の付け方', desc: '点数戦の点。順位: 速い順に3・2・1点／速さ: 「！」から0.2秒以内で10点、0.1秒遅いごとに1点減る（いちばん低くて1点）', def: 'rank', choices: [['rank', '順位'], ['speed', '速さ']] },
     { key: 'feint', label: 'フェイント', desc: 'ときどき「！」の前に「？」が出る。それで押すとフライング', def: false },
   ],
 
@@ -279,7 +286,7 @@ export default {
     if (b.last !== a.last) {
       const L = b.last;
       if (L.out.includes(me)) return 'wrong';
-      if (L.gain[me] === 3 || L.duelWin === me) return 'correct';
+      if (L.best?.includes(me) || L.gain[me] === 3 || L.duelWin === me) return 'correct'; // gain の 3 は前の版の局面（best が無い）のため
       return 'pop';
     }
     return null;
@@ -379,7 +386,7 @@ export default {
     note.className = 'mq-note';
     note.textContent = isSurvive(s)
       ? '毎回いちばん遅い人が抜ける。フライングは2回で脱落（1回目はやり直し）。残り2人は先に2勝'
-      : `速い順に3・2・1点。フライングはその回だけ0点。${roundsOf(s)}回で点の多い人の勝ち`;
+      : `${s.rules.by === 'speed' ? '0.2秒以内で10点、0.1秒遅いごとに1点減る' : '速い順に3・2・1点'}。フライングはその回だけ0点。${roundsOf(s)}回で点の多い人の勝ち`;
     root.append(note);
 
     if (s.phase !== 'wait') { sign.textContent = 'おしまい'; sign.className = 'mq-sign small'; return; }

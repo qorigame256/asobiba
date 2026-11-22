@@ -19,6 +19,9 @@
 //   本当の数字を入れたら、同じ段・列・枠の仮置きからその数字を消す（手で消す手間を省く）。
 // 2026-11-03 本人の依頼: 埋め終わった数字（その数字が入るマスが全部、正しい数字で埋まった）は、下の数字のボタンを灰色にして押せなくし、
 //   その数字の入ったマスも消したり書き換えたりできなくする（灰色の字）。まちがいが1つでも混じっていればそのまま（本人の選択）。自分の画面だけ（送らない）。
+// 2026-11-22 本人の依頼（3つ）: ①自分で入れた数字を朱色から青に（まちがいの赤と見分ける。style.css の --np-ink）
+//   ②解き終わったら・あきらめたら、ほかの人の盤を見られる（観戦の人も。render の canWatch）③詳細設定「時間でヒント」（鍵は clue。あり（最初）・なし）:
+//   10秒のあいだ正しい数字が1つも増えなかったら、1マス答えを入れる（render の ui.tick）。clue は手伝いの好みなので、おまかせで抽選しない（KEEP_KEYS）。
 // 進行: ready →（3秒）open →（全員済み1.5秒 / 制限時間）end
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', grid, ms, k?（3問のとき何問目か。0 から） } / { p, t: 'pass' }
 
@@ -114,6 +117,11 @@ let loc = null; // { key, cells, sel, sent }
 const locs = new Map(); // 問題ごとの loc（鍵は loc.key）
 let ui = null;
 const progress = new Map(); // 席 → 埋めたマスの数（見た目だけ）
+const boards = new Map(); // 席 → { k: 何問目か, g: 盤の数字の文字列 }（解き終わったあとにほかの人の盤を見るため。見た目だけ）
+let watch = { key: '', p: undefined }; // 解き終わった人・観戦の人がいま見ている席（undefined は最初の見え方）
+const CLUE_MS = 10000; // 時間でヒント: 正しい数字が増えないままこの時間がたったら、1マス答えを入れる
+// 時間でヒントを見る時計（1つだけ。描き直しでは増やさない）
+if (typeof setInterval === 'function' && typeof document !== 'undefined') setInterval(() => ui?.tick?.(), 500);
 const cpuPlan = new Map();
 let keysBound = false;
 function bindKeys() {
@@ -140,6 +148,7 @@ export default {
     { key: 'size', label: '大きさ', desc: '9×9 は1問10分前後。6×6 は数分で解ける短い版', def: '9', choices: [['9', '9×9'], ['6', '6×6（短い版）']] },
     { key: 'rounds', label: '問題の数', desc: '3問は 6×6 のときだけ。続けて解き、3問ぜんぶ解くまでの時間で順位', def: 1, choices: [[1, '1問'], [3, '3問（6×6 のとき）']] },
     { key: 'hint', label: 'まちがいの知らせ', desc: '答えとちがう数字を入れたら赤く出す', def: false },
+    { key: 'clue', label: '時間でヒント', desc: '10秒のあいだ正しい数字が1つも増えなかったら、空いているマスを1つ答えで埋める（緑の字）', def: true },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -219,7 +228,14 @@ export default {
     return { t: 'done', grid: qOf(s, k).answer.join(''), ms: Math.round(t), ...(s.qs ? { k } : {}) };
   },
 
-  onStream(d, from) { if (d && Number.isInteger(d.f)) { progress.set(from, d.f); if (ui?.refresh) ui.refresh(); } },
+  onStream(d, from) {
+    if (!d || !Number.isInteger(d.f)) return;
+    progress.set(from, d.f);
+    // 盤の数字（2026-11-22 から。前の版の端末は送らない）: 外から来た値なので、数字だけの文字列のときだけ使う
+    if (typeof d.g === 'string' && /^[0-9]{36,81}$/.test(d.g)) boards.set(from, { k: Number.isInteger(d.k) && d.k >= 0 && d.k < 3 ? d.k : 0, g: d.g });
+    if (ui?.refresh) ui.refresh();
+    ui?.paintBoard?.(from);
+  },
 
   render(root, s, o) {
     bindKeys();
@@ -242,7 +258,7 @@ export default {
         if (p === me || !progress.has(p)) return done ? `<span>${done}</span>` : '';
         return `<span>${done ? done + ' ' : ''}${Math.floor((Math.max(0, progress.get(p) - progOf(s, p) * blanks) / blanks) * 100)}%</span>`;
       };
-      const c = scoreChips(o, s.solved.map(() => 0), { won: res?.winners ?? [], extra });
+      const c = scoreChips(o, s.solved.map(() => 0), { won: res?.winners ?? [], extra, steady: true });
       c.querySelectorAll('.pt-score').forEach((x) => x.remove());
       return c;
     };
@@ -264,6 +280,7 @@ export default {
     wrap.append(card);
     if (s.phase === 'ready') {
       progress.clear();
+      boards.clear();
       card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">${N}×${N}${cnt > 1 ? `・${cnt}問続けて` : ''}・${limitOf(s) / 60000}分まで。たて・よこ・太い枠のどれにも 1〜${N} が1つずつ入るように埋める</div>`;
       return;
     }
@@ -278,7 +295,8 @@ export default {
     // 問題ごとに埋めた分を覚えておく（3問のとき、通信の行き違いで一度前の問題に戻ってからまた進むと、埋めた数字が消えていた。2026-10-28 Codex の点検の指摘）
     loc = locs.get(lkey);
     if (!loc) {
-      loc = { key: lkey, cells: q.puzzle.slice(), memo: q.puzzle.map(() => []), memoOn: false, sel: -1, sent: false };
+      // clue = 時間でヒントが埋めたマス・good = 正しく埋まっているマスの数・goodAt = 正しい数字が最後に増えた時刻（時間でヒント。2026-11-22）
+      loc = { key: lkey, cells: q.puzzle.slice(), memo: q.puzzle.map(() => []), memoOn: false, sel: -1, sent: false, clue: new Set(), good: 0, goodAt: Date.now() };
       locs.set(lkey, loc);
       if (locs.size > 30) locs.delete(locs.keys().next().value);
     }
@@ -286,6 +304,24 @@ export default {
     // あとでその席に入ると解いても送れなかった（2026-10-28 Codex の点検の指摘）
     const playing = s.phase === 'open' && me !== null && o.canMove && !doneOf(s, me) && !loc.sent;
     const showCells = s.phase === 'end' ? q.answer : me === null ? q.puzzle : loc.cells;
+    // 解き終わったら（あきらめたあとも）ほかの人の盤を見られる（2026-11-22 本人の依頼「解き終わったら他の人の盤面を観戦できるようにする」）。観戦の人も見られる。
+    // Claude の判断: 盤の上に名前の札を並べ、押した人の盤を自分の盤の場所に大きく出す。中身は各自が送りっぱなし（o.stream）で送る盤の数字で、届いていなければ問題のまま。
+    // 解き終わる前は見せない（写せてしまうため）。CPU の盤は送られないので並べない
+    const mineSeat = me !== null && !o.watching ? me : null; // この端末の人の席（観戦でほかの人の手元を見ているときは無し）
+    const canWatch = s.phase === 'open' && (mineSeat === null || doneOf(s, mineSeat) || loc.sent);
+    if (watch.key !== key) watch = { key, p: undefined };
+    const viewOf = () => (canWatch && watch.p !== undefined ? watch.p : me); // 見ている席（null は問題だけ）
+    // いま出す盤: { q: その盤の問題, cells, mine: この端末で埋めている盤か }
+    const viewBoard = () => {
+      const vp = viewOf();
+      if (s.phase !== 'open' || vp === mineSeat) return { q, cells: showCells, mine: showCells === loc.cells };
+      if (vp === null) return { q, cells: q.puzzle, mine: false };
+      if (s.solved[vp] !== null) { const vq = qOf(s, cnt - 1); return { q: vq, cells: vq.answer, mine: false }; }
+      const b = boards.get(vp);
+      if (!b || b.g.length !== N * N) return { q, cells: q.puzzle, mine: false };
+      const vq = qOf(s, Math.min(b.k, cnt - 1));
+      return { q: vq, cells: [...b.g].map(Number), mine: false };
+    };
     const grid = document.createElement('div');
     grid.className = 'np-grid';
     grid.style.setProperty('--n', N);
@@ -298,19 +334,23 @@ export default {
     const doneDigits = () => new Set(Array.from({ length: N }, (_, k) => k + 1).filter((d) => q.answer.every((a, i) => (a === d) === (loc.cells[i] === d))));
     const locked = (i) => !q.puzzle[i] && !!loc.cells[i] && doneDigits().has(loc.cells[i]);
     const draw = () => {
-      const sel = loc.sel;
+      const vb = viewBoard();
+      const vq = vb.q;
+      const cells = vb.cells;
+      const sel = vb.mine ? loc.sel : -1;
       const done = playing ? doneDigits() : new Set();
-      const sv = sel >= 0 ? showCells[sel] : 0;
+      const sv = sel >= 0 ? cells[sel] : 0;
       const sr = Math.floor(sel / N), sc = sel % N;
       tiles.forEach((t, i) => {
         const r = Math.floor(i / N), c = i % N;
-        const v = showCells[i];
-        const mm = !v && showCells === loc.cells ? loc.memo[i] : null;
+        const v = cells[i];
+        const mm = !v && vb.mine && cells === loc.cells ? loc.memo[i] : null;
         if (mm?.length) t.innerHTML = `<span class="np-memo" style="--m:${sh.bc}">${Array.from({ length: N }, (_, k) => `<i>${mm.includes(k + 1) ? k + 1 : ''}</i>`).join('')}</span>`;
         else t.textContent = v || '';
         const same = sel >= 0 && (r === sr || c === sc || (Math.floor(r / sh.br) === Math.floor(sr / sh.br) && Math.floor(c / sh.bc) === Math.floor(sc / sh.bc)));
-        t.className = 'np-cell' + (q.puzzle[i] ? ' given' : '') + (i === sel ? ' sel' : same ? ' near' : '') + (v && v === sv && i !== sel ? ' same' : '')
-          + (s.rules.hint && s.phase === 'open' && me !== null && v && !q.puzzle[i] && v !== q.answer[i] ? ' bad' : '')
+        t.className = 'np-cell' + (vq.puzzle[i] ? ' given' : '') + (i === sel ? ' sel' : same ? ' near' : '') + (v && v === sv && i !== sel ? ' same' : '')
+          + (s.rules.hint && s.phase === 'open' && vb.mine && me !== null && v && !vq.puzzle[i] && v !== vq.answer[i] ? ' bad' : '')
+          + (vb.mine && loc.clue.has(i) && s.phase === 'open' ? ' clue' : '')
           + (playing && v && !q.puzzle[i] && done.has(v) ? ' locked' : '')
           + (c % sh.bc === sh.bc - 1 && c < N - 1 ? ' br' : '') + (r % sh.br === sh.br - 1 && r < N - 1 ? ' bb' : '');
       });
@@ -332,8 +372,32 @@ export default {
       grid.append(t);
     }
     let lastSend = -1e9;
+    let sendT = 0;
+    // 進み具合と盤を送りっぱなしで送る（0.4秒に1回まで。間に合わなかった分は少しあとにまとめて送る。盤は解き終わった人・観戦の人が見る）
+    const sendProgress = (force = false) => {
+      if (!o.stream) return;
+      const now = performance.now();
+      const go = () => {
+        sendT = 0;
+        lastSend = performance.now();
+        const filled = loc.cells.filter((x, i) => x && !q.puzzle[i]).length;
+        o.stream({ f: mine * blanks + filled, k: mine, g: loc.cells.join('') });
+      };
+      if (force || now - lastSend > 400) { clearTimeout(sendT); go(); }
+      else if (!sendT) sendT = setTimeout(() => { if (wrap.isConnected) go(); else sendT = 0; }, 400 - (now - lastSend));
+    };
+    // 埋めたあとに: 送る・描く・そろったら完成を送る（put と時間でヒントから）
+    const changed = () => {
+      const filled = loc.cells.filter((x, i) => x && !q.puzzle[i]).length;
+      sendProgress(filled === blanks);
+      draw();
+      if (loc.cells.join('') === q.answer.join('')) {
+        const ms = Math.round(since(key));
+        if (ms < limitOf(s)) { loc.sent = true; o.onMove({ t: 'done', grid: loc.cells.join(''), ms, ...(s.qs ? { k: mine } : {}) }); }
+      }
+    };
     const put = (v) => {
-      if (!playing || loc.sent || loc.sel < 0 || q.puzzle[loc.sel] || locked(loc.sel)) return;
+      if (!playing || loc.sent || loc.sel < 0 || q.puzzle[loc.sel] || locked(loc.sel) || loc.clue.has(loc.sel)) return; // 時間でヒントが埋めたマスは動かせない
       if (v && doneDigits().has(v)) return; // 埋め終わった数字は押せない
       if (loc.memoOn) { // 仮置き: 小さく書く・消す（送らない）
         const m = loc.memo[loc.sel];
@@ -343,15 +407,55 @@ export default {
       }
       loc.cells[loc.sel] = v;
       if (v) for (const j of peersOf(sh)[loc.sel]) loc.memo[j] = loc.memo[j].filter((x) => x !== v);
-      const filled = loc.cells.filter((x, i) => x && !q.puzzle[i]).length;
-      const now = performance.now();
-      if (o.stream && (now - lastSend > 400 || filled === blanks)) { lastSend = now; o.stream({ f: mine * blanks + filled }); }
-      draw();
-      if (loc.cells.join('') === q.answer.join('')) {
-        const ms = Math.round(since(key));
-        if (ms < limitOf(s)) { loc.sent = true; o.onMove({ t: 'done', grid: loc.cells.join(''), ms, ...(s.qs ? { k: mine } : {}) }); }
-      }
+      changed();
     };
+    // 時間でヒント（詳細設定 clue。2026-11-22 本人の依頼「10秒間正しい答えが一つも入らなかったら、ランダムで一つ答えを埋める」。最初は あり は本人の選択）:
+    // 正しく埋まっているマスの数が増えたら時計を0に戻し、増えないまま10秒たったら、空いているかまちがっているマスを1つくじで選んで答えを入れる（緑の字・動かせない）。
+    // Claude の判断: 自分の画面だけで決める（送る手は今までと同じ「解いた盤」だけ。くじは Math.random でよい）。消して減ったときは時計を戻さない。仮置き中も数える
+    ui.tick = playing && s.rules.clue !== false ? () => {
+      if (!playing || loc.sent || !wrap.isConnected || since(key) >= limitOf(s)) return;
+      const now = Date.now();
+      const good = loc.cells.filter((v, i) => !q.puzzle[i] && v === q.answer[i]).length;
+      if (good > loc.good) { loc.good = good; loc.goodAt = now; return; }
+      loc.good = good;
+      if (now - loc.goodAt < CLUE_MS) return;
+      const open = q.answer.map((a, i) => i).filter((i) => !q.puzzle[i] && loc.cells[i] !== q.answer[i]);
+      if (!open.length) return;
+      const i = open[Math.floor(Math.random() * open.length)];
+      loc.cells[i] = q.answer[i];
+      loc.memo[i] = [];
+      for (const j of peersOf(sh)[i]) loc.memo[j] = loc.memo[j].filter((x) => x !== q.answer[i]);
+      loc.clue.add(i);
+      loc.good = good + 1;
+      loc.goodAt = now;
+      changed();
+    } : null;
+    // ほかの人の盤を見る名前の札（解き終わったあと・観戦の人）
+    if (canWatch) {
+      const seats = s.solved.map((_, p) => p).filter((p) => p !== mineSeat && (!o.cpu?.[p] || o.sub?.[p])); // 部屋を出た人の席（o.sub）は、出る前に届いた盤を見せる（15パズルのほかの人の盤と同じ）
+      const who = document.createElement('div');
+      who.className = 'np-who';
+      const btns = [];
+      const opts = [...(mineSeat !== null ? [[mineSeat, 'あなた']] : me !== null ? [[me, o.names[me]]] : [[null, '問題']]), ...seats.filter((p) => p !== me).map((p) => [p, o.names[p]])];
+      const paintWho = () => btns.forEach(([p, b]) => b.classList.toggle('on', viewOf() === p));
+      for (const [p, name] of opts) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn small ghost';
+        b.textContent = name;
+        b.onclick = () => { watch.p = p; paintWho(); draw(); };
+        btns.push([p, b]);
+        who.append(b);
+      }
+      if (opts.length > 1) {
+        const cap = document.createElement('div');
+        cap.className = 'np-who-cap';
+        cap.textContent = '👀 ほかの人の盤を見る';
+        wrap.append(cap, who);
+        paintWho();
+      }
+      ui.paintBoard = (from) => { if (viewOf() === from) draw(); };
+    } else ui.paintBoard = null;
     wrap.append(grid, note);
     if (playing) {
       const pad = document.createElement('div');

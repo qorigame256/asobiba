@@ -221,6 +221,9 @@ export default {
       e.textContent = t;
       steps.append(e);
     });
+    // 答え方の知らせ（2026-11-22 本人の依頼「解答方法がわかりずらかった。正解の位置を押すのが分かるように」。形は Claude の推奨を本人が承認）:
+    // 指示の列の最後に「🏁 着いた建物をタップ」の札を足し、地図のマスを押せるボタンの見た目にして、★ を光らせる（style.css の .mch-goal・.mch-map.can）
+    if (!shown) steps.insertAdjacentHTML('beforeend', '<span class="mch-arrow">→</span><span class="mch-goal">🏁 着いた建物をタップ</span>');
     card.append(steps);
     if (!shown) {
       since(key);
@@ -237,7 +240,7 @@ export default {
     const can = s.phase === 'open' && me !== null && o.canMove && !doneOf(s, me) && since(key) < LIMIT;
     const mine = me !== null ? s.said[me] : null;
     const map = document.createElement('div');
-    map.className = 'mch-map';
+    map.className = 'mch-map' + (can ? ' can' : '');
     map.insertAdjacentHTML('beforeend', '<span class="mch-north" aria-hidden="true">北↑</span>');
     const onPath = new Set(shown ? x.path : []);
     const cells = x.b.map((bld, c) => {

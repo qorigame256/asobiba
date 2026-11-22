@@ -9,7 +9,10 @@
 //     ちがう形が3つそろわないとき（正四面体など）は、面を1つ足りなくしたもの・1つ多くしたもので埋める。
 //     まちがいどうしは、面の中心どうしの距離の組でくらべて、回したり裏返したりして同じになるものは入れない。
 //   - 円柱・円すいの展開図は形を決めて作る: 円柱は長方形の上下にふたの円、円すいはおうぎ形に底の円。
-//     まちがいは、円柱は ふたが同じ側・長方形が短い・円が小さい・円が大きい・円が横の辺、円すいは おうぎが広すぎ・せますぎ・円が先っぽ・円が大きい・円が小さい から種で3つ。
+//     まちがいは、円柱は ふたが同じ側・ふたが横の辺・ふたが1つ・ふたが3つ、円すいは 円が先っぽ・円がまっすぐな辺・円が無い・円が2つ から種で3つ。
+//     2026-11-22 本人の依頼（「大きさが違うだけの同じ図形を出さないで」。どの選択肢のことかは本人が確かめた）で、大きさだけ違うまちがい
+//     （長方形が短い・円が小さい・大きい・おうぎが広すぎ・せますぎ）をやめた。そのため「むずかしい」の問題はその日より前の版と違う（同じ版どうしならずれない）。
+//     同じ日に、4つの選択肢を同じ縮尺で描くようにした（`netFrame`。前は絵ごとに枠いっぱいに広げていたので、同じ大きさの面や円が選択肢ごとに違う大きさに見えた）。
 //   - 問題の立体は、むずかしさの立体を順にまぜて出す（同じ立体ばかり続かない）。立体の名前も出す。紙の色は問題ごとに種で選ぶ。
 //   - 面の位置は足し算・かけ算・平方根だけで計算する（三角関数を使うと端末で末尾の桁がずれ、重なりの判定が割れて、端末ごとに選択肢が変わりうるため）。
 //     立体の絵だけは三角関数で描く（見た目だけで、選択肢には関わらない）。
@@ -320,34 +323,38 @@ const PI = Math.PI;
 function cylNet(kind, rnd) {
   const r = 0.5, h = 1.2, W = 2 * PI * r;
   const at = (rr, w = W) => rr + rnd() * (w - 2 * rr);
+  // まちがいは形で見分けられるものだけ（2026-11-22 本人の依頼「大きさが違うだけの同じ図形を出さないで」。前の「長方形が短い・円が小さい・円が大きい」は
+  // 札ごとに大きさをそろえて描くと、正しい展開図と大きさだけ違う同じ形に見えたのでやめた）: ふたが同じ側・ふたが横・ふたが1つ・ふたが3つ
   const make = (v) => {
-    let w = W, rr = r;
-    if (v === 'short') w = W * 0.62;
-    if (v === 'small') rr = 0.3;
-    if (v === 'big') rr = 0.78;
-    const items = [{ rect: [0, 0, w, h] }];
-    if (v === 'same') { const x = at(rr, w / 2 + rr); items.push({ circle: [x, -rr, rr] }, { circle: [Math.min(w - rr, x + 2 * rr + 0.2 + rnd() * 0.6), -rr, rr] }); }
-    else if (v === 'side') items.push({ circle: [at(rr, w), -rr, rr] }, { circle: [w + rr, h / 2, rr] });
-    else items.push({ circle: [at(rr, w), -rr, rr] }, { circle: [at(rr, w), h + rr, rr] });
+    const rr = r;
+    const items = [{ rect: [0, 0, W, h] }];
+    if (v === 'same') { const x = at(rr, W / 2 + rr); items.push({ circle: [x, -rr, rr] }, { circle: [Math.min(W - rr, x + 2 * rr + 0.2 + rnd() * 0.6), -rr, rr] }); }
+    else if (v === 'side') items.push({ circle: [at(rr, W), -rr, rr] }, { circle: [W + rr, h / 2, rr] });
+    else if (v === 'one') items.push({ circle: [at(rr, W), rnd() < 0.5 ? -rr : h + rr, rr] });
+    else if (v === 'three') { const x = at(rr, W / 2 + rr); items.push({ circle: [x, -rr, rr] }, { circle: [Math.min(W - rr, x + 2 * rr + 0.2 + rnd() * 0.6), -rr, rr] }, { circle: [at(rr, W), h + rr, rr] }); }
+    else items.push({ circle: [at(rr, W), -rr, rr] }, { circle: [at(rr, W), h + rr, rr] });
     return { items };
   };
-  const wrong = shuffle(['same', 'short', 'small', 'big', 'side'], rnd).slice(0, 3);
+  const wrong = shuffle(['same', 'side', 'one', 'three'], rnd).slice(0, 3);
   return { good: make('good'), wrong: wrong.map(make) };
 }
 function coneNet(kind, rnd) {
   const r = 0.5, L = 1.2, A = 360 * r / L; // 150度
+  // まちがいは形で見分けられるものだけ（2026-11-22。円柱と同じわけで「おうぎが広すぎ・せますぎ・円が大きい・小さい」をやめた）:
+  // 円が先っぽ・円がおうぎのまっすぐな辺・円が無い・円が2つ
   const make = (v) => {
-    let ang = A, rr = r;
-    if (v === 'wide') ang = 250;
-    if (v === 'narrow') ang = 85;
-    if (v === 'big') rr = 0.8;
-    if (v === 'small') rr = 0.28;
-    const items = [{ sector: [0, 0, L, ang] }];
+    const rr = r;
+    const items = [{ sector: [0, 0, L, A] }];
+    // おうぎの右のまっすぐな辺は、下向きから A/2 = 75度の向き。sin・cos は平方根で書く（三角関数を使わない。上の「面の位置」と同じわけ）。辺のまん中の外側に円を接して置く
+    const s75 = (Math.sqrt(6) + Math.sqrt(2)) / 4, c75 = (Math.sqrt(6) - Math.sqrt(2)) / 4;
+    const y2 = Math.sqrt((L + rr) * (L + rr) - rr * rr); // 円2つを弧の外に、たがいに接して並べる高さ
     if (v === 'tip') items.push({ circle: [0, -rr, rr] });
-    else items.push({ circle: [0, L + rr, rr] });
+    else if (v === 'edge') items.push({ circle: [(L / 2) * s75 + rr * c75, (L / 2) * c75 - rr * s75, rr] });
+    else if (v === 'two') items.push({ circle: [-rr, y2, rr] }, { circle: [rr, y2, rr] });
+    else if (v !== 'none') items.push({ circle: [0, L + rr, rr] });
     return { items };
   };
-  const wrong = shuffle(['wide', 'narrow', 'tip', 'big', 'small'], rnd).slice(0, 3);
+  const wrong = shuffle(['tip', 'edge', 'none', 'two'], rnd).slice(0, 3);
   return { good: make('good'), wrong: wrong.map(make) };
 }
 
@@ -566,13 +573,14 @@ export default {
     const can = s.phase === 'open' && me !== null && o.canMove && !doneOf(s, me) && since(key) < limit;
     const pad = document.createElement('div');
     pad.className = 'tn-pad';
+    const frame = netFrame(x.choices);
     x.choices.forEach((net, c) => {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'tn-choice' + (s.phase === 'shown' && c === x.side ? ' ans' : '') + (s.phase === 'shown' && c !== x.side ? ' dim' : '');
       b.setAttribute('aria-label', `${c + 1}番の展開図`);
       b.disabled = !can;
-      b.append(netSvg(net, x.color));
+      b.append(netSvg(net, x.color, frame));
       const hit = (e) => {
         if (!can || b.dataset.sent) return;
         e.preventDefault();
@@ -641,37 +649,47 @@ function tint(hex, k) {
   return '#' + v.map((c) => Math.round(k >= 0 ? c + (255 - c) * k : c * (1 + k)).toString(16).padStart(2, '0')).join('');
 }
 
-// 展開図の絵
-export function netSvg(net, color) {
-  if (net.items) return curvedSvg(net.items, color);
-  let faces = net.faces;
-  let [x0, y0, x1, y1] = bboxOf(faces.flat());
-  // たてに長いときは横に寝かせる（ボタンが横長なので）
-  if (y1 - y0 > (x1 - x0) * 1.15) {
-    faces = faces.map((f) => f.map(([x, y]) => [y, -x]));
-    [x0, y0, x1, y1] = bboxOf(faces.flat());
-  }
-  const pad = Math.max(x1 - x0, y1 - y0) * 0.04;
-  const svg = svgEl(box([x0, y0, x1, y1], pad), 'tn-net');
-  const sw = Math.max(x1 - x0, y1 - y0) * 0.012;
-  for (const f of faces) add(svg, 'polygon', { points: f.map((p) => p.map(f3).join(',')).join(' '), fill: color, stroke: '#4a3a2a', 'stroke-width': f3(sw), 'stroke-linejoin': 'round' });
-  return svg;
-}
-function curvedSvg(items, color) {
-  const pts = [];
-  for (const it of items) {
-    if (it.rect) { const [x, y, w, h] = it.rect; pts.push([x, y], [x + w, y + h]); }
-    if (it.circle) { const [cx, cy, r] = it.circle; pts.push([cx - r, cy - r], [cx + r, cy + r]); }
-    if (it.sector) {
-      const [cx, cy, R, ang] = it.sector;
-      pts.push([cx, cy]);
-      for (let a = -ang / 2; a <= ang / 2 + 0.01; a += ang / 24) { const t = (a * PI) / 180; pts.push([cx + R * Math.sin(t), cy + R * Math.cos(t)]); }
+// 展開図の形と外枠（たてに長い多角形の展開図は、ボタンが横長なので横に寝かせる）
+function netLayout(net) {
+  if (net.items) {
+    const pts = [];
+    for (const it of net.items) {
+      if (it.rect) { const [x, y, w, h] = it.rect; pts.push([x, y], [x + w, y + h]); }
+      if (it.circle) { const [cx, cy, r] = it.circle; pts.push([cx - r, cy - r], [cx + r, cy + r]); }
+      if (it.sector) {
+        const [cx, cy, R, ang] = it.sector;
+        pts.push([cx, cy]);
+        for (let a = -ang / 2; a <= ang / 2 + 0.01; a += ang / 24) { const t = (a * PI) / 180; pts.push([cx + R * Math.sin(t), cy + R * Math.cos(t)]); }
+      }
     }
+    return { items: net.items, bb: bboxOf(pts) };
   }
-  const bb = bboxOf(pts);
-  const sz = Math.max(bb[2] - bb[0], bb[3] - bb[1]);
-  const svg = svgEl(box(bb, sz * 0.04), 'tn-net');
+  let faces = net.faces;
+  let bb = bboxOf(faces.flat());
+  if (bb[3] - bb[1] > (bb[2] - bb[0]) * 1.15) {
+    faces = faces.map((f) => f.map(([x, y]) => [y, -x]));
+    bb = bboxOf(faces.flat());
+  }
+  return { faces, bb };
+}
+// 1問の選択肢をみな同じ縮尺で描くための枠（いちばん広い幅・いちばん高い高さ）
+export function netFrame(nets) {
+  let w = 0, h = 0;
+  for (const n of nets) { const { bb } = netLayout(n); w = Math.max(w, bb[2] - bb[0]); h = Math.max(h, bb[3] - bb[1]); }
+  return { w, h };
+}
+// 展開図の絵（frame を渡すと、その大きさの枠のまん中に描く。渡さなければ絵の外枠いっぱい）
+export function netSvg(net, color, frame) {
+  const { faces, items, bb } = netLayout(net);
+  const w = frame ? frame.w : bb[2] - bb[0], h = frame ? frame.h : bb[3] - bb[1];
+  const cx = (bb[0] + bb[2]) / 2, cy = (bb[1] + bb[3]) / 2;
+  const sz = Math.max(w, h);
+  const svg = svgEl(box([cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2], sz * 0.04), 'tn-net');
   const common = { fill: color, stroke: '#4a3a2a', 'stroke-width': f3(sz * 0.012), 'stroke-linejoin': 'round' };
+  if (faces) {
+    for (const f of faces) add(svg, 'polygon', { points: f.map((p) => p.map(f3).join(',')).join(' '), ...common });
+    return svg;
+  }
   for (const it of items) {
     if (it.rect) { const [x, y, w, h] = it.rect; add(svg, 'rect', { x: f3(x), y: f3(y), width: f3(w), height: f3(h), ...common }); }
     if (it.circle) { const [cx, cy, r] = it.circle; add(svg, 'circle', { cx: f3(cx), cy: f3(cy), r: f3(r), ...common }); }

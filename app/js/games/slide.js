@@ -231,7 +231,7 @@ export default {
       if (s.solved[p] !== null) return `<span class="pt-ok">○ ${secText(s.solved[p])} +${s.last.pts[p]}</span>`;
       return '<span class="pt-ng">―</span>';
     };
-    const chips = scoreChips(o, s.scores, { won, extra });
+    const chips = scoreChips(o, s.scores, { won, extra, steady: true });
     if (ui?.mount === mount && root.contains(ui.wrap)) { ui.chips.replaceWith(chips); ui.chips = chips; ui.s = s; ui.paintOthers?.(); return; }
 
     root.innerHTML = '';

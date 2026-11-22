@@ -6910,6 +6910,19 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   s = fly(fly(fly(fly(s, 0), 1), 2), 3);
   assert.equal(s.phase, 'end');
   assert.deepEqual(M.result(s).winners, [1]);
+  // 速さで点（2026-11-22 本人の依頼）: 0.2秒以内で10点、0.1秒遅いごとに1点減り、いちばん低くて1点。フライング・押さないは0点
+  {
+    const { speedPts } = await import('../app/js/games/mikiri.js');
+    assert.deepEqual([100, 200, 201, 300, 301, 450, 1000, 1100, 1101, 3000].map(speedPts), [10, 10, 9, 9, 8, 7, 2, 1, 1, 1], '見切り: 速さの点');
+    let v = M.init(4, 1, { rules: { rounds: 3, by: 'speed' } });
+    v = M.apply(fly(hit(hit(v, 0, 180), 1, 450), 2), { p: -1, t: 'close', r: 1 });
+    assert.deepEqual(v.pts, [10, 7, 0, 0], '見切り: 速さで点は順位でなく速さで決まる（フライングと押さないは0点）');
+    assert.deepEqual(v.last.best, [0], '見切り: 速さで点でも、いちばん速い人に「正解」の音');
+    assert.equal(M.sound(M.init(4, 1, { rules: { by: 'speed' } }), v, null, 0), 'correct');
+    assert.equal(M.sound(M.init(4, 1, { rules: { by: 'speed' } }), v, null, 1), 'pop');
+    const r0 = M.apply(hit(M.init(2, 1, { rules: {} }), 0, 300), { p: -1, t: 'close', r: 1 });
+    assert.equal(r0.last.best, undefined, '見切り: 順位のときの局面の形は前と同じ（best を持たない）');
+  }
   // 勝ち抜き戦（3人）
   let u = M.init(3, 2, { rules: { mode: 'survive' } });
   u = hit(hit(hit(u, 0, 300), 1, 400), 2, 500);
@@ -6938,7 +6951,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   let w = M.init(3, 3, { rules: { mode: 'survive' } });
   w = M.apply(w, { p: -1, t: 'close', r: 1 });
   assert.ok(w.last.redo && w.alive.every(Boolean));
-  for (const rules of [{}, { mode: 'survive' }, { mode: 'survive', feint: true }, { rounds: 10, feint: true }]) {
+  for (const rules of [{}, { mode: 'survive' }, { mode: 'survive', feint: true }, { rounds: 10, feint: true }, { by: 'speed' }]) {
     const st = runCpus(M, 5, 9, rules, 50, 20000);
     assert.ok(M.result(st), `見切り: CPU どうしで最後まで ${JSON.stringify(rules)}`);
     // 締め切りだけでも最後まで行くので、CPU が実際に押したことも見る（2026-10-28 Codex の点検の指摘）
@@ -7497,7 +7510,11 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.equal(G.apply(a, { p: 1, t: 'grab', i, ms: 600 }), null, '流しそうめん: 1つの品に1人1回');
   assert.equal(G.apply(s, { p: 2, t: 'grab', i, ms: 2600 + 500 }), null, '流しそうめん: 流れ切ったあとは弾く');
   const c = s.items.findIndex((x) => x.k === 'chili');
-  assert.deepEqual(G.apply(s, { p: 2, t: 'grab', i: c, ms: 500 }).scores, [0, 0, -2], '流しそうめん: 唐辛子は −2点');
+  assert.deepEqual(G.apply(s, { p: 2, t: 'grab', i: c, ms: 800 }).scores, [0, 0, -2], '流しそうめん: 唐辛子は −2点');
+  // 2026-11-22 本人の依頼（流れ始めを連打するだけで勝てる）: 上流の葉に隠れている間（流れ切るまでの2割）は取れない
+  assert.equal(S.leafMs(s.items[i]), 520, '流しそうめん: ふつうの流れの葉は 0.52秒');
+  assert.equal(G.apply(s, { p: 2, t: 'grab', i, ms: 519 }), null, '流しそうめん: 葉に隠れている間の手は弾く');
+  assert.ok(G.apply(s, { p: 2, t: 'grab', i, ms: 520 }), '流しそうめん: 葉から出たら取れる');
   // 2026-11-10 の Codex の点検: 押した手が一覧とすれ違って消えたら、同じ ms で送り直す（lostGrabs）
   {
     const taps = [{ seed: s.seed, i, ms: 700 }, { seed: s.seed, i: c, ms: 800 }, { seed: s.seed + 1, i: 0, ms: 300 }];
@@ -7524,7 +7541,8 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.ok(st.items.every((x) => x.d === (x.k === 'gold' ? Math.round(d * 0.6) : d)), `流しそうめん: 流れの速さ ${speed}`);
     const g = st.items.findIndex((x) => x.k === 'gold');
     assert.ok(g >= 0, '流しそうめん: 金のそうめんが流れてくる');
-    assert.deepEqual(G.apply(st, { p: 1, t: 'grab', i: g, ms: 300 }).scores, [0, 5, 0], '流しそうめん: 金のそうめんは5点');
+    assert.deepEqual(G.apply(st, { p: 1, t: 'grab', i: g, ms: S.leafMs(st.items[g]) + 50 }).scores, [0, 5, 0], '流しそうめん: 金のそうめんは5点');
+    assert.equal(G.apply(st, { p: 1, t: 'grab', i: g, ms: S.leafMs(st.items[g]) - 1 }), null, `流しそうめん: ${speed} の金のそうめんも葉に隠れている間は取れない`);
     assert.equal(G.apply(st, { p: 1, t: 'grab', i: g, ms: st.items[g].d + 200 }), null, '流しそうめん: 金のそうめんは早く流れ切る');
     const q = st.items.findIndex((x) => x.k === 'somen');
     assert.ok(G.apply(st, { p: 1, t: 'grab', i: q, ms: d - 50 }), `流しそうめん: ${speed} では ${d - 50}ms でもまだ取れる`);
@@ -9216,9 +9234,31 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   {
     // 43回目の案（2026-11-17）: 問題の数・仲間はずれ
     const { createHash } = await import('node:crypto');
-    const fp = [];
-    for (let seed = 1; seed <= 15; seed++) for (const lv of ['easy', 'normal', 'hard']) fp.push(JSON.stringify(T.init(3, seed, { rules: { level: lv } }).qs));
-    assert.equal(createHash('sha256').update(fp.join('|')).digest('hex').slice(0, 16), '9eb8e1642995d789', '展開図: 最初の値の問題は設定を足す前と全く同じ');
+    // 2026-11-22 に円柱・円すいの大きさだけ違うまちがいをやめたので、「むずかしい」は別の指紋にした（やさしい・ふつうはその前と同じ値のまま）
+    const fpOf = (lvs) => {
+      const fp = [];
+      for (let seed = 1; seed <= 15; seed++) for (const lv of lvs) fp.push(JSON.stringify(T.init(3, seed, { rules: { level: lv } }).qs));
+      return createHash('sha256').update(fp.join('|')).digest('hex').slice(0, 16);
+    };
+    assert.equal(fpOf(['easy', 'normal']), '6371b439432e767a', '展開図: 最初の値の問題は設定を足す前と全く同じ（やさしい・ふつう）');
+    // 円柱・円すいのまちがいは形で見分けられるものだけ（2026-11-22 本人の依頼「大きさが違うだけの同じ図形を出さないで」）: 円の大きさ・長方形の幅・おうぎの角が正しい展開図と同じで、円の数か置き場所が違う
+    for (let seed = 1; seed <= 30; seed++) {
+      for (const x of makeQuestions(seed, 'hard')) {
+        if (!x.choices[0].items) continue;
+        const sig = (c) => c.items.map((it) => (it.rect ? `r${it.rect[2].toFixed(3)}x${it.rect[3].toFixed(3)}` : it.sector ? `s${it.sector[3]}` : `c${it.circle[2]}`));
+        const good = sig(x.choices[x.side]);
+        x.choices.forEach((c, i) => {
+          if (i === x.side) return;
+          const g = sig(c);
+          assert.equal(g[0], good[0], `展開図: ${x.kind} のまちがいの長方形・おうぎは正しい形と同じ大きさ`);
+          assert.ok(g.slice(1).every((v) => v === good[1]), `展開図: ${x.kind} のまちがいの円は正しい円と同じ大きさ`);
+          const pos = (cc) => JSON.stringify(cc.items.slice(1).map((it) => it.circle.map((v) => Math.round(v * 1000))).sort());
+          assert.ok(g.length !== good.length || pos(c) !== pos(x.choices[x.side]), `展開図: ${x.kind} のまちがいは正しい展開図と円の数か場所が違う`);
+        });
+      }
+    }
+    // むずかしいの指紋は、上の形の確認のあとで見る（作り方をくずしたとき、何がくずれたかが先に分かるように）
+    assert.equal(fpOf(['hard']), '82120fe5237d35e2', '展開図: 最初の値の問題は設定を足す前と全く同じ（むずかしい。2026-11-22 の円柱・円すいのまちがいの作り直しから）');
     for (const n of [5, 20]) assert.equal(T.init(2, 3, { rules: { rounds: n } }).qs.length, n, `展開図: ${n}問`);
     let odd = 0;
     for (let seed = 1; seed <= 12; seed++) {

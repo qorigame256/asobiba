@@ -165,7 +165,7 @@ export default {
       const pt = s.last.pts[p];
       return `<span class="pt-ok">${secText(s.solved[p])}${pt ? ' +' + pt : ''}</span>`;
     };
-    const chips = scoreChips(o, s.scores, { won, extra });
+    const chips = scoreChips(o, s.scores, { won, extra, steady: true });
 
     // 対局（種）と自分の席が同じなら、入れ物と入力欄はそのまま使う
     const base = `${s.seed}:${me}`;

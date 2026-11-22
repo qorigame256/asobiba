@@ -293,7 +293,7 @@ export default {
       if (s.passed?.[p]) return '<span class="pt-ng">パス</span>';
       return s.tries[p] ? '<span class="pt-ng">×</span>' : '<span class="pt-ng">―</span>';
     };
-    const chips = scoreChips(o, s.scores, { won, extra });
+    const chips = scoreChips(o, s.scores, { won, extra, steady: true });
 
     // 同じ問題・同じ場面なら、点数の札と案内だけ差し替える
     if (ui?.mount === mount && root.contains(ui.wrap)) {
