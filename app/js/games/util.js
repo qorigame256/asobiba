@@ -265,6 +265,32 @@ export function footMark(cell, f) {
 // 人の名前など、外から来た文字を HTML に埋め込むときに使う
 export const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// 日本語の文を、言葉のまとまりの切れ目でだけ折り返す HTML にする（2026-11-23 本人の選択「E」。待合室のゲームの説明が「早／く」と言葉の途中で折れていた）。
+// 使う側は、出す要素に class="phrase"（style.css の word-break: keep-all）を付ける。keep-all で字の間では折れなくなり、ここで入れた <wbr> と句読点・空白でだけ折れる。
+// 折る所: ひらがなで始まらない言葉の前と、句読点・閉じかっこ・空白の後ろ。くっつける所: かっこの後ろの助詞（⁠）・カタカナどうし（スーパー|マル|バツ）・数字と「人」「×」（4|人・6×|6）。
+// 全120の説明を待合室の幅で数え、言葉の途中の切れが 64→0 になった。残るのは空白のあとで折れる2つ（○×クイズの「⭕ か」・エアホッケーの「CPU と」）。
+// Intl.Segmenter（言葉に区切る仕組み）が無い端末では null を返す（呼ぶ側は今までどおり esc した文を出し、class も付けない）。
+let phraseSeg;
+export function phraseHtml(text) {
+  if (phraseSeg === undefined) phraseSeg = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter('ja', { granularity: 'word' }) : null;
+  if (!phraseSeg) return null;
+  const hira = (c) => /[ぁ-ゟ]/.test(c ?? '');
+  const ws = [...phraseSeg.segment(String(text))].map((s) => s.segment);
+  let out = '';
+  ws.forEach((w, i) => {
+    const prev = ws[i - 1] ?? '';
+    const after = /[、。！？!?）」』\s]$/.test(prev);
+    const before = !hira(w[0]) && !/^[、。・）」』！？!?,.:：…ーっゃゅょ〜\s]/.test(w[0]) && !/[（「『・\s]$/.test(prev);
+    const glue = /[）」』]$/.test(prev) && hira(w[0]);
+    const kata = /[゠-ヿ]$/.test(prev) && /^[゠-ヿ]/.test(w);
+    const num = /[0-9０-９×〜～]$/.test(prev) || /^[×〜～]/.test(w);
+    if (glue) out += '⁠';
+    else if (out && !kata && !num && (after || before)) out += '<wbr>';
+    out += esc(w);
+  });
+  return out;
+}
+
 // そろった列に筆の線を引く（2026-11-06 の UI・演出・アニメーションの案。マルバツ・四目並べ・五目並べ。本人が決めたことは board-games.md）。
 // box（マスを並べた入れ物。style.css で position: relative にしてある）の上に SVG を重ね、
 // cells（そろったマス・石の要素。並びの順でなくてよい。どれも一直線に並ぶ）のうち、いちばん離れた2つの真ん中を結ぶ（両端は少しはみ出す）。

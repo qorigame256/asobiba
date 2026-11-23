@@ -446,7 +446,8 @@ main.slow-zoom > section > #board { position: relative; z-index: 2; } /* 下へ�
 /* 日本語は字の間のどこでも折り返せるので、行の長さをならす（text-wrap: balance）と「くだ／さい」「ゴ／ール」「ロ／ボ」のように言葉の途中で切れていた
    （2026-11-20 の見た目の点検。ためてビーム・じゃんけん階段・あっち向いてホイ・ヨット・マンカラ・図鑑）。keep-all で折り返す所を空白・句読点・かっこの前後にしぼり、
    そこで収まらない長い文だけ overflow-wrap: anywhere で字の間で切る（どちらも iPhone の Safari が対応している）。
-   句読点の少ない長い文では行の長さがそろわなくなるので、文の決まった所には付けない（待合室のゲームの説明 .lobby-game-head p に付けたら「…なくす。／革命・／8切りなど…」と「革命・」だけの行ができた） */
+   句読点の少ない長い文では行の長さがそろわなくなるので、文の決まった所には付けない（待合室のゲームの説明 .lobby-game-head p に付けたら「…なくす。／革命・／8切りなど…」と「革命・」だけの行ができた。
+   待合室の説明は、言葉の区切りに <wbr> を入れる util.js の phraseHtml と下の .phrase で直した） */
 .status, .cc-log, .zukan-box > .invite-note { word-break: keep-all; overflow-wrap: anywhere; }
 .status-main { font-size: 1.25rem; font-weight: 700; }
 .status-main.small { font-size: 1rem; font-weight: 400; }
@@ -1027,6 +1028,8 @@ main.slow-zoom > section > #board { position: relative; z-index: 2; } /* 下へ�
 .lobby-game-head small { display: block; color: var(--muted); font-size: .78rem; }
 .lobby-game-name { display: block; font-size: 1.45rem; line-height: 1.25; }
 .lobby-game-head p { margin: 2px 0 0; color: var(--muted); font-size: .88rem; line-height: 1.45; text-wrap: balance; } /* 「べる」だけが次の行に残らないように（2026-11-17 見た目の点検） */
+/* util.js の phraseHtml で <wbr> を入れた文: 字の間では折らず、<wbr> と句読点・空白でだけ折る（2026-11-23 本人の選択「E」）。収まらない長い言葉だけ字の間で切る */
+.phrase { word-break: keep-all; overflow-wrap: anywhere; }
 .lobby-game .hf { margin: 10px 0 0; }
 .lobby-game.changed { animation: lobby-game-flash 2s ease-out both; }
 @keyframes lobby-game-flash {

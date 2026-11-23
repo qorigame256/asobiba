@@ -35,7 +35,7 @@
 import { GAMES, GAME_ORDER, winnersOf, seatPoints, CATEGORIES, categoryOf } from './games/index.js';
 import { SEAT_COLORS } from './games/party.js';
 import { connectRoom } from './net.js';
-import { esc, lineHold, finishLine, col, setSeatColors } from './games/util.js';
+import { esc, lineHold, finishLine, col, setSeatColors, phraseHtml } from './games/util.js';
 import { isOwner, unlockOwner, forgetOwner } from './owner.js';
 import { IS_APP, WEB_URL } from './platform.js';
 import { isBad, mask, BAD_TEXT_NOTE } from './filter.js';
@@ -1094,8 +1094,9 @@ function lobbyGameCard(game) {
   box.className = 'lobby-game';
   const ago = Date.now() - (S.lobbyGameAt ?? 0);
   if (ago < 2000) { box.classList.add('changed'); box.style.animationDelay = `-${ago}ms`; }
+  const descHtml = phraseHtml(game.desc ?? ''); // 言葉のまとまりの切れ目でだけ折り返す（util.js の phraseHtml。言葉に区切れない端末では null で今までどおり）
   box.innerHTML = `<div class="lobby-game-head"><span class="lobby-game-icon" aria-hidden="true">${game.icon ?? ''}</span>`
-    + `<div><small>いま選んでいるゲーム</small><b class="lobby-game-name">${esc(game.name)}</b><p>${esc(game.desc ?? '')}</p></div></div>`;
+    + `<div><small>いま選んでいるゲーム</small><b class="lobby-game-name">${esc(game.name)}</b>${descHtml === null ? `<p>${esc(game.desc ?? '')}</p>` : `<p class="phrase">${descHtml}</p>`}</div></div>`;
   if (game.howtoFigs?.length) box.append(lobbyFigs(game.howtoFigs));
   return box;
 }
