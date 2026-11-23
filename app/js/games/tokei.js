@@ -345,11 +345,13 @@ function drawClock(withNums = true) {
     const h = i + 1, a = h * 30 * Math.PI / 180;
     return `<text x="${(Math.sin(a) * 70).toFixed(1)}" y="${(-Math.cos(a) * 70).toFixed(1)}" class="tk-n">${h}</text>`;
   }).join('');
+  // 長い針のつまみは数字の輪（半径70）の外の目盛りの所に置き、数字は針より上に文字盤の色のふちを付けて描く
+  // （2026-11-20 の見た目の点検「つまみが『3』を隠す」。前は針の先が半径76で、つまみが数字に重なっていた）
   box.innerHTML = `<svg viewBox="-100 -100 200 200" class="tk-clock" role="img" aria-label="時計">
-    <circle r="96" class="tk-rim"/><circle r="92" class="tk-face"/>${ticks}${nums}
+    <circle r="96" class="tk-rim"/><circle r="92" class="tk-face"/>${ticks}
     <g class="tk-hour"><line x1="0" y1="10" x2="0" y2="-46"/><circle cy="-46" r="7" class="tk-knob"/></g>
-    <g class="tk-min"><line x1="0" y1="14" x2="0" y2="-76"/><circle cy="-76" r="6" class="tk-knob"/></g>
-    <circle r="5" class="tk-pin"/></svg>`;
+    <g class="tk-min"><line x1="0" y1="14" x2="0" y2="-84"/><circle cy="-84" r="6" class="tk-knob"/></g>
+    ${nums}<circle r="5" class="tk-pin"/></svg>`;
   const svg = box.querySelector('svg');
   const hg = svg.querySelector('.tk-hour'), mg = svg.querySelector('.tk-min');
   return {

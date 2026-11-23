@@ -737,7 +737,7 @@ function renderPlace(root, s, o) {
 
   const head = document.createElement('p');
   head.className = 'cc-log';
-  head.textContent = plc.sel === null ? '全部並べました。よければ「これで決める」' : `${shipName(SHIPS[plc.sel])}を置くマス（左上のはし）を選ぶ。置いた船を押すと持ち上げます${s.apart ? '（船どうしは、ななめも含めてとなりに置けません）' : ''}`;
+  head.textContent = plc.sel === null ? '全部並べました。よければ「これで決める」' : `${shipName(SHIPS[plc.sel])}を置くマス（左上のはし）⁠を選ぶ。置いた船を押すと持ち上げます${s.apart ? '（船どうしは、ななめも含めてとなりに置けません）' : ''}`;
   root.append(head);
 
   const list = document.createElement('div');

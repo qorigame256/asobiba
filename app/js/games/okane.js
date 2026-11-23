@@ -345,7 +345,7 @@ export default {
       });
       note.textContent = shown ? `正解: ${pieces(c)}枚` : me === null ? '観戦中'
         : doneOf(s, me) || loc.sent ? `はらった！（${doneOf(s, me) ? secText(s.solved[me]) : '…'}）ほかの人を待っています`
-        : loc.msg || 'お金を押して出し、「払う」を押そう（出したお金を押すと1枚戻る）';
+        : loc.msg || 'お金を押して出し、「払う」⁠を押そう（出したお金を押すと1枚戻る）'; // ⁠ は「を」の前で折り返さない印（style.css の .cc-log の keep-all ではかっこの後ろで折れるため）
       // 1秒止まった後に押せるように戻す
       if (playing && locked() && !waitT) waitT = setTimeout(() => { waitT = 0; if (paid.isConnected) paint(); }, loc.lock - performance.now() + 30);
     };

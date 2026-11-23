@@ -516,7 +516,7 @@ export default {
         : doneOf(s, me) || loc.sent ? `${(mine ?? loc.sent).b + 1}番と答えました（はかった回数 ${mine?.w ?? loc.w}回）。ほかの人を待っています`
         : loc.pick ? `偽物だと思う玉を押してください（${loc.miss !== null ? '最後の1回。当たっても1点' : s.retry ? '外れたら1回だけ答え直せます' : '答えは1回だけ'}）`
         : loc.miss !== null ? `はずれ！ ${loc.miss + 1}番は本物でした。もう1回だけ答えられます（当たっても1点）${left}`
-        : `玉を押すと左の皿 → 右の皿 → 外 と移ります。左右同じ数にして「はかる」${left}`;
+        : `玉を押すと左の皿 → 右の皿 → 外 と移ります。左右同じ数にして「はかる」${left}`; // 外と「と」の間は折り返さない空白（ 。style.css の .cc-log の keep-all では空白で折れるため）
     };
     balls.forEach((b, i) => {
       b.onclick = () => {

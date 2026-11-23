@@ -407,8 +407,8 @@ function mount(root, opts) {
         g.beginPath(); g.moveTo(-r * 0.7, -r * 0.7); g.lineTo(r * 0.7, r * 0.7); g.moveTo(r * 0.7, -r * 0.7); g.lineTo(-r * 0.7, r * 0.7); g.stroke();
       }
       g.restore();
-      const nm = seatName(p);
-      tags.push([nm.length > 6 ? nm.slice(0, 6) + '…' : nm, x, y + r + 14]);
+      const nm = [...seatName(p)]; // 字の数で数える（.length では CPU の 🤖 が2字になり、5字の「🤖ロボたろう」が「…」で切れていた。2026-11-20 の見た目の点検）
+      tags.push([nm.length > 6 ? nm.slice(0, 6).join('') + '…' : nm.join(''), x, y + r + 14]);
     });
     // 名札は全部の駒を描いてから、白い下地を付けて手前に描く（2026-11-17 見た目の点検。近くの駒の上に名札が重なって読めなかった）
     g.font = 'bold 12px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif';

@@ -411,7 +411,7 @@ export default {
       row.className = 'rc-ctl';
       row.append(pad, go);
       wrap.append(row);
-      note.textContent = '矢印で、今の速さに足す向きを選ぶ（・は速さを変えない）。赤い点ははみ出す所';
+      note.textContent = '矢印で、今の速さに足す向きを選ぶ（・⁠は速さを変えない）。赤い点ははみ出す所'; // ⁠ は「・」の後ろで折り返さない印（style.css の .cc-log の keep-all）
     } else if (s.phase === 'ready') note.textContent = 'よーい…　速さと向きは1マスずつしか変えられない。先にゴールした人の勝ち';
     else if (s.phase === 'end') note.textContent = '';
     else if (me < 0) note.textContent = '観戦中';

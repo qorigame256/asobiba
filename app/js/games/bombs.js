@@ -331,7 +331,8 @@ function draw() {
   ctx.fillRect(0, 0, k, k * H);
   // 歩く場所と入り口
   ctx.fillStyle = '#3c4252';
-  ctx.fillRect(FIELD.x0 * k, FIELD.y0 * k, (FIELD.x1 - FIELD.x0) * k, (FIELD.y1 - FIELD.y0) * k);
+  roundRect(ctx, FIELD.x0 * k, FIELD.y0 * k, (FIELD.x1 - FIELD.x0) * k, (FIELD.y1 - FIELD.y0) * k, 10); // 角は枠と同じ丸み（2026-11-20 の見た目の点検。ここだけ直角だった）
+  ctx.fill();
   ctx.fillStyle = '#111';
   roundRect(ctx, (DOOR.x - 0.07) * k, (FIELD.y0 - 0.05) * k, 0.14 * k, 0.06 * k, 6);
   ctx.fill();

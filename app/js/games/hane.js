@@ -267,8 +267,8 @@ export default {
         g.fillStyle = '#555';
         g.font = '12px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif';
         g.textAlign = 'center';
-        const nm = p === me ? 'あなた' : String(o.names[p] ?? '');
-        g.fillText(nm.length > 7 ? nm.slice(0, 7) + '…' : nm, x, y + r + 15);
+        const nm = [...(p === me ? 'あなた' : String(o.names[p] ?? ''))]; // 字の数で数える（.length では 🤖 などの絵文字が2字になる。sumo.js の名札と同じ）
+        g.fillText(nm.length > 7 ? nm.slice(0, 7).join('') + '…' : nm.join(''), x, y + r + 15);
       }
       if (s.phase === 'fly') {
         const t = since(key);

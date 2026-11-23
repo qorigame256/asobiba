@@ -325,6 +325,7 @@ export default {
 
     /* 上: 自分の役・みんな・できごと・話し合い（毎回描き直す） */
     const top = document.createElement('div');
+    top.className = 'jr-top'; // 名前の札のすき間は style.css の .jr-top > .cc-opps
     if (me !== null) {
       const role = s.roles[me];
       const card = document.createElement('div');
