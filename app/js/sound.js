@@ -9,13 +9,14 @@
 // どの音も前後の無音を切り、役割ごとの目標の大きさにそろえてある（tools/level-sound.mjs。何度も鳴る手の音は小さめ・勝ち負けや正解は大きめ）。
 // 2026-10-31 の見直しで、全部の音を本人が試聴ページで聞いて選び直した（4回に分けた。★）:
 //   ★place impact-sounds / impactGeneric_light_002   ★card casino-audio / card-place-2   ★draw casino-audio / card-slide-8
-//   ★shuffle casino-audio / card-fan-1               ★flip casino-audio / chip-lay-2（リバーシ）   ★drop casino-audio / chips-collide-1（四目並べ）
+//   ★shuffle casino-audio / card-fan-1               ★flip（下の行）                                ★drop casino-audio / chips-collide-1（四目並べ）
 //   ★dice casino-audio / dice-throw-3                ★smack impact-sounds / impactPlate_medium_000   ★wall impact-sounds / impactWood_heavy_002
 //   ★boom 512 / Explosions / sfx_exp_short_hard2     ★stab rpg-audio / drawKnife1（海賊のたる）
 //   ★tile rubberduck 75 breaking / bfh1_rock_hit_01（麻雀）   ★stone rubberduck 80 RPG / stones_04
 //   ★line Claude がプログラムで作った「シュッ」（帯域を絞ったノイズ。点と線）
 //   ★pop OtoLogic / 弾ける Onoma-Pop04-2(Mid-Dry)   ★punch OtoLogic / 叩く Motion-Slam05-1(Strong)
 //   ★pins 効果音ラボ / bowling-pin1（ボウリングのピンを倒す・ストライク。ボウリング）   ★wrong 効果音ラボ / beep4（ビープ音「ブブー」）
+//   ★flip は 2026-11-23 に本人が選び直した: 効果音ラボ / go-piece1（碁石を打つ「パチッ」。リバーシ）。前の chip-lay-2 は風切りに聞こえ、石を置いた感じがしなかったため
 //   次の10個は前と同じ音を選んだ（大きさだけそろえた）:
 //   ★correct interface-sounds / confirmation_002   ★goal 512 / Coins / sfx_coin_cluster3   ★chip casino-audio / chips-stack-1
 //   ★hit interface-sounds / glass_001              ★turn 512 / Pause Sounds / sfx_sounds_pause1_in   ★question interface-sounds / question_002
