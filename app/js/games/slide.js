@@ -512,8 +512,10 @@ export default {
     };
     // 空きマス i を向き D へ動かす（i の となりの札が空きへ入る）
     const step = (i, D) => {
-      // 制限時間を過ぎたら動かさない（締め切りまでの間に動かした札が部分点に入っていた。2026-11-24 の Codex の点検）
+      // 制限時間を過ぎたら動かさない（締め切りまでの間に動かした札が部分点に入っていた。2026-11-24 の Codex の点検）。
+      // だれかがそろえたあとは、短くなった残り時間の帯（afterBar の ':after'）が0になったら動かさない（同日の2回目の点検）
       if (!playing || loc.sent || i < 0 || since(key) >= limit) return false;
+      if (s.solved.some((v) => v !== null) && since(key + ':after') >= AFTER_MS) return false;
       const d = letterFor(loc.board, i, D);
       const nb = moveBlank(loc.board, n, d);
       if (!nb) return false;

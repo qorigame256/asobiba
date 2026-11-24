@@ -62,6 +62,8 @@ export function makeQuestion(seed, q, level, k, color = false) {
   const r2 = mulberry32((seed * 211 + q * 37 + 3) >>> 0);
   const brown = 0.3 + 0.4 * r2();
   chicks.forEach((c) => { c.c = r2() < brown ? 1 : 0; });
+  // 全部が同じ色になったら1羽の色を替えて、いつも黄色と茶色がまざるようにする（やさしいで7%ほど1色だけの問題が出ていた。2026-11-24 の2回目の Codex の点検）
+  if (chicks.every((c) => c.c === chicks[0].c)) { const k = Math.floor(r2() * count); chicks[k].c = 1 - chicks[k].c; }
   const a = r2();
   const ask = a < 0.4 ? 'b' : a < 0.8 ? 'y' : 'all';
   const want = ask === 'b' ? 1 : 0;

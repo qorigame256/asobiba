@@ -314,7 +314,8 @@ function draw() {
       ctx.font = `bold ${Math.max(12, k * 0.04)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
       ctx.textAlign = 'center';
       const w = ctx.measureText(label).width + k * 0.03;
-      const lx = clamp(b[0] * k, w / 2 + 2, k - w / 2 - 2); const ly = (b[1] - PR - 0.05) * k;
+      // 上のふちにいる人の上では盤の外へ出るので、横と同じく盤の中へ寄せる（2026-11-24 の2回目の Codex の点検）
+      const lx = clamp(b[0] * k, w / 2 + 2, k - w / 2 - 2); const ly = Math.max(k * 0.034 + 2, (b[1] - PR - 0.05) * k);
       ctx.fillStyle = '#e8590c';
       ctx.fillRect(lx - w / 2, ly - k * 0.034, w, k * 0.048);
       ctx.fillStyle = '#fff';
@@ -648,11 +649,11 @@ export default {
     if (ui?.key === key && root.contains(ui.canvas)) {
       // 新しく届いた当たり: ほかの画面で当たった雪玉を消して、しぶきを出す
       const now = performance.now();
-      // 自分が当てた分（局面は投げた人を当てられた人ごとには覚えていないので、自分の当てた数が増えた分だけ、新しく当たった相手チームの人に割り当てる）
-      let mineNew = me !== null ? s.got[me] - ui.cur.s.got[me] : 0;
+      // 自分が当てた分: 当たった雪玉の id（s.hitB）の頭が投げた人の席なので、それが自分なら自分が当てた相手（局面の形は変えない）。
+      // 前は自分の当てた数が増えた分を新しく当たった人に順に割り当てていて、味方の当たりと一緒に届くと別の人の名前が出た（2026-11-24 の2回目の Codex の点検）
       s.hits.forEach((h, p) => {
         if (h <= ui.cur.s.hits[p] || p === me) return;
-        if (mineNew > 0 && teamOf(p) !== teamOf(me)) { ui.fx = { from: me, to: p, at: now }; mineNew -= 1; }
+        if (me !== null && String(s.hitB[p]).split(':')[0] === String(me)) ui.fx = { from: me, to: p, at: now };
         const b = ui.balls.find((x) => x.id === s.hitB[p]);
         ui.balls = ui.balls.filter((x) => x.id !== s.hitB[p]);
         const pl = posOf(p);

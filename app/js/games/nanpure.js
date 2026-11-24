@@ -410,10 +410,12 @@ export default {
         draw();
         return;
       }
+      const was = loc.cells[loc.sel];
       loc.cells[loc.sel] = v;
       if (v) for (const j of peersOf(sh)[loc.sel]) loc.memo[j] = loc.memo[j].filter((x) => x !== v);
-      // 正しい数字を入れたら、時間でヒントの時計をすぐ0に戻す（0.5秒ごとの数え直しの間に1つ消して1つ入れると、数が同じで戻らなかった。2026-11-24 の Codex の点検）
-      if (v && v === q.answer[loc.sel]) { loc.good = loc.cells.filter((x, i) => !q.puzzle[i] && x === q.answer[i]).length; loc.goodAt = Date.now(); }
+      // 正しい数字を入れたら、時間でヒントの時計をすぐ0に戻す（0.5秒ごとの数え直しの間に1つ消して1つ入れると、数が同じで戻らなかった。2026-11-24 の Codex の点検）。
+      // もう正しい数字が入っているマスに同じ数字を押し直しても戻さない（正しい数字が増えていないため。同日の2回目の点検）
+      if (v && v !== was && v === q.answer[loc.sel]) { loc.good = loc.cells.filter((x, i) => !q.puzzle[i] && x === q.answer[i]).length; loc.goodAt = Date.now(); }
       changed();
     };
     // 時間でヒント（詳細設定 clue。2026-11-22 本人の依頼「10秒間正しい答えが一つも入らなかったら、ランダムで一つ答えを埋める」。最初は あり は本人の選択）:

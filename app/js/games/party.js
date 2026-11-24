@@ -75,7 +75,7 @@ export function pickedBy(btn, said, c, me, o) {
     const t = document.createElement('span');
     t.className = 'pk-tok' + (p === me ? ' me' : '') + (fresh ? ' drop' : '');
     t.style.animationDelay = (i * 0.12) + 's';
-    t.textContent = p === me ? 'あなた' : String(o.names?.[p] ?? '').slice(0, 6);
+    t.textContent = p === me && !o.watching ? 'あなた' : String(o.names?.[p] ?? '').slice(0, 6); // 観戦で見ている人は、印だけ付けて名前で出す（scoreChips と同じ。2026-11-24 の2回目の Codex の点検）
     row.append(t);
   });
   btn.append(row);
@@ -530,10 +530,16 @@ export function flipCard(face, name, dup = false) {
 const HOLD_KEY = 'bg-hold-see';
 let holdOn = (() => { try { return typeof localStorage !== 'undefined' && localStorage.getItem(HOLD_KEY) === '1'; } catch { return false; } })();
 let holding = false;
+let holdPid = null; // 札を押している指の番号（ほかの指を離しても隠さない。2026-11-24 の2回目の Codex の点検）
 let holdCard = null;
 if (typeof window !== 'undefined') {
   for (const k of ['pointerup', 'pointercancel', 'blur']) {
-    window.addEventListener(k, () => { holding = false; if (holdCard?.isConnected && holdOn) holdCard.classList.add('hold-shut'); });
+    window.addEventListener(k, (e) => {
+      if (k !== 'blur' && holding && e.pointerId !== holdPid) return;
+      holding = false;
+      holdPid = null;
+      if (holdCard?.isConnected && holdOn) holdCard.classList.add('hold-shut');
+    });
   }
 }
 export function holdToSee(card) {
@@ -555,7 +561,7 @@ export function holdToSee(card) {
     try { localStorage.setItem(HOLD_KEY, holdOn ? '1' : '0'); } catch { /* 覚えられなくても遊べる */ }
     set();
   };
-  card.addEventListener('pointerdown', () => { if (!holdOn) return; holding = true; card.classList.remove('hold-shut'); });
+  card.addEventListener('pointerdown', (e) => { if (!holdOn) return; holding = true; holdPid = e.pointerId; card.classList.remove('hold-shut'); });
   card.addEventListener('contextmenu', (e) => { if (holdOn) e.preventDefault(); }); // 長押しのメニューを出さない
   card.append(tip, tgl);
   holdCard = card;
@@ -566,6 +572,7 @@ export function holdToSee(card) {
 // 生きている人の数が減った瞬間に、盤のまん中へ半透明の大きな字を1秒ほど出す。最後の1人（決着）では出さない。途中から開いた画面は、最初の1回は覚えるだけ。
 // 盤は描き直しで中身が消えるので、字は body に置いて盤のまん中の位置に重ねる。
 const leftSeen = new Map(); // 対局の鍵 → 前に見た数（いまの対局の分だけ持つ）
+let leftEl = null; // いま出ている「のこり◯人」の字
 export function leftFlash(host, key, alive) {
   const prev = leftSeen.get(key);
   leftSeen.clear();
@@ -573,7 +580,9 @@ export function leftFlash(host, key, alive) {
   if (prev === undefined || alive >= prev || alive < 2 || typeof document === 'undefined') return;
   const r = host.getBoundingClientRect();
   if (!r.width) return;
+  leftEl?.remove(); // 続けて減ったら前の字は消して、新しい数だけ出す（重なっていた。2026-11-24 の2回目の Codex の点検）
   const d = document.createElement('div');
+  leftEl = d;
   d.className = 'left-flash';
   d.textContent = 'のこり ' + alive + '人';
   d.style.left = (r.left + r.width / 2) + 'px';

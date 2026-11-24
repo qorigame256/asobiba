@@ -13205,6 +13205,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
           assert.equal(x.total, off.count, 'ひよこ: 色ちがいでも全部の羽数はなしと同じ');
           assert.deepEqual(x.chicks.map(({ x: a, y, vx, vy }) => [a, y, vx, vy]), off.chicks.map(({ x: a, y, vx, vy }) => [a, y, vx, vy]), 'ひよこ: 色ちがいでも動きはなしと同じ');
           assert.ok(x.chicks.every((c) => c.c === 0 || c.c === 1), 'ひよこ: 色は黄色か茶色');
+          assert.ok(x.chicks.some((c) => c.c === 0) && x.chicks.some((c) => c.c === 1), `ひよこ: 色ちがいでは黄色と茶色がいつもまざる ${level} ${seed} ${q}`);
           const want = x.ask === 'all' ? x.total : x.chicks.filter((c) => c.c === (x.ask === 'b' ? 1 : 0)).length;
           assert.equal(x.count, want, `ひよこ: 答えは数えるように言われた色の羽数 ${level} ${seed} ${q}`);
           assert.ok(x.count >= 1, 'ひよこ: 数える羽数は1羽以上');
@@ -13270,6 +13271,29 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
       const end = runCpus(G, 5, 21, rules, 250, 8000);
       assert.ok(G.result(end) && end.scores.some((v) => v > 0), `イライラ棒: CPU どうしで最後まで ${JSON.stringify(rules)}`);
     }
+  }
+  // 46回目の案の9つの設定: なしのときの問題・局面・点が、設定を足す前（13b1a55）と全く同じ。
+  // 前は「なし」と「設定を渡さない形」を今の版どうしで比べていて、なしの作りそのものを変えても通った（2026-11-24 の2回目の Codex の点検）。値は 13b1a55 の各ファイルで取った
+  {
+    const { createHash } = await import('node:crypto');
+    const h = (v) => createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0, 16);
+    const hg = await import('../app/js/games/hitogomi.js');
+    const hy = await import('../app/js/games/hiyoko.js');
+    const ir = await import('../app/js/games/iraira.js');
+    const ot = await import('../app/js/games/oto.js');
+    const kb = await import('../app/js/games/kaburi.js');
+    const lv3 = ['easy', 'normal', 'hard'];
+    const a1 = []; for (const lv of lv3) for (let s = 0; s < 30; s++) for (let q = 0; q < 10; q++) a1.push(hg.makeQuestion(s, q, lv, 10));
+    assert.equal(h(a1), 'c15c538bff455d4f', '人ごみ: なしの問題は設定を足す前と同じ');
+    const a2 = []; for (const lv of lv3) for (let s = 0; s < 40; s++) for (let q = 0; q < 5; q++) a2.push(hy.makeQuestion(s, q, lv, 5));
+    assert.equal(h(a2), '582a00278195adcf', 'ひよこ: なしの問題は設定を足す前と同じ');
+    const a3 = []; for (const lv of lv3) for (let s = 0; s < 20; s++) a3.push(ir.makeCourses(s, lv));
+    assert.equal(h(a3), '2195e4e802428b6b', 'イライラ棒: なしの道は設定を足す前と同じ');
+    const a4 = []; for (let s = 0; s < 50; s++) a4.push(ot.notesOf(s, 20));
+    assert.equal(h(a4), '53d25d170a331ed5', '音当て: なしの問題は設定を足す前と同じ');
+    assert.equal(h([GAMES.koori.init(2, 1), GAMES.koori.init(3, 7), GAMES.koori.init(4, 99)]), '0f62c452803e2951', '氷割り: 5×5 の局面は設定を足す前と同じ');
+    const a6 = []; for (const p of [[1, 2, 3], [3, 3, 1], [5, 5, 5], [2, 4, 4, 1], [7, 1, 7, 2, 6]]) a6.push(kb.scoreRound(p));
+    assert.equal(h(a6), '893832889863db96', 'かぶったら0点: かぶらなかった全員の点は設定を足す前と同じ');
   }
   // ペンギンの氷割り 7×7
   {

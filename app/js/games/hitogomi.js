@@ -162,13 +162,26 @@ function crowdSvg(x, onPick, walk = null) {
   svg.setAttribute('role', 'img');
   svg.setAttribute('aria-label', `${x.people.length}人の人ごみ`);
   const sc = (x.cw / 10) * 0.9;
+  // 押した所に何人かの押す範囲（透明な四角）が重なっていたら、体のまん中がいちばん近い人を選ぶ（人が歩くと重なり、奥の人の見えている所を押しても
+  // 手前の人になっていた。2026-11-24 の2回目の Codex の点検のあと本人が推奨を承認）
+  const pickAt = (e, i) => {
+    let best = i, bd = Infinity;
+    for (const el of document.elementsFromPoint?.(e.clientX, e.clientY) ?? []) {
+      const g = el.closest?.('.hg-p');
+      if (!g || !svg.contains(g)) continue;
+      const r = g.getBoundingClientRect();
+      const d = Math.hypot(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
+      if (d < bd) { bd = d; best = Number(g.dataset.i); }
+    }
+    return best;
+  };
   const gs = x.people.map((m, i) => {
     const g = document.createElementNS(ns, 'g');
     g.setAttribute('class', 'hg-p');
     g.dataset.i = i;
     g.setAttribute('transform', `translate(${m.x + x.cw * 0.05} ${m.y}) scale(${sc})`);
     g.innerHTML = `<rect class="hg-hit" x="0.6" y="0.2" width="8.8" height="13.8" rx="1.5"/>${personSvg(m)}`;
-    if (onPick) g.addEventListener('pointerdown', (e) => { if (e.button !== 0) return; e.preventDefault(); onPick(i); });
+    if (onPick) g.addEventListener('pointerdown', (e) => { if (e.button !== 0) return; e.preventDefault(); onPick(pickAt(e, i)); });
     svg.append(g);
     return g;
   });

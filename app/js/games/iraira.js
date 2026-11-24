@@ -131,12 +131,15 @@ export function barsOf(seed, q, c) {
   for (let i = can.length - 1; i > 0; i--) { const k = Math.floor(rnd() * (i + 1)); [can[i], can[k]] = [can[k], can[i]]; }
   return can.slice(0, q + 1).sort((a, b) => a - b).map((seg) => ({ seg, ph: Math.round(rnd() * 100) / 100 }));
 }
+// 棒の太さの半分（当たり判定）。画面の棒もこの2倍の太さで描く（2026-11-24 本人の選択「見た目を判定に合わせて太くする」。
+// 前は判定の約半分の太さで描いていて、すき間が見えているのに当たった）。判定と描き方のどちらかだけを変えないこと
+export const barHalf = (c) => Math.max(c.w * 0.2, c.w * 0.85 - 2 * c.r);
 // 棒の位置: 中心（cx, cy）・道の向き（dx, dy。長さ1）・太さの半分 rb
 export function barAt(c, b, sec) {
   const [ax, ay] = c.pts[b.seg], [bx, by] = c.pts[b.seg + 1];
   const dx = (bx - ax) / c.u, dy = (by - ay) / c.u;
   const off = (c.w / 2) * Math.sin(2 * Math.PI * (sec / BAR_PERIOD + b.ph));
-  return { cx: (ax + bx) / 2 - dy * off, cy: (ay + by) / 2 + dx * off, dx, dy, rb: Math.max(c.w * 0.2, c.w * 0.85 - 2 * c.r) };
+  return { cx: (ax + bx) / 2 - dy * off, cy: (ay + by) / 2 + dx * off, dx, dy, rb: barHalf(c) };
 }
 // 玉（中心 x, y）が棒にさわっているか
 export function hitsBar(c, bars, x, y, sec) {
@@ -167,6 +170,11 @@ const lensWanted = () => {
   } catch { return false; }
 };
 const dropLens = () => { lens?.box.remove(); lens = null; };
+// つかんだ指を離したら窓を消す。盤の離した合図（pointerup）は、つかんでいる間に盤が作り直された・待合室へ移ったときには届かないので、
+// 画面全体でも受ける（窓が待合室に残っていた。2026-11-24 の2回目の Codex の点検）
+if (typeof window !== 'undefined') {
+  for (const k of ['pointerup', 'pointercancel']) window.addEventListener(k, (e) => { if (lens && e.pointerId === lens.pid) dropLens(); });
+}
 let ui = null;
 const others = new Map(); // 席 → { key, x, y }（ほかの人の玉）
 const cpuPlan = new Map();
@@ -366,7 +374,7 @@ export default {
       + `<path class="irb-road" d="${d}" stroke-width="${c.w.toFixed(2)}"/>`
       + `<circle class="irb-start" cx="${sx}" cy="${sy}" r="${(c.w * 0.42).toFixed(2)}"/>`
       + flags.map((i) => flag(c.pts[i][0], c.pts[i][1], '🚩', 'irb-cp')).join('')
-      + bars.map(() => `<line class="irb-bar" stroke-width="${(c.w / 2).toFixed(2)}"/>`).join('')
+      + bars.map(() => `<line class="irb-bar" stroke-width="${(2 * barHalf(c)).toFixed(2)}"/>`).join('')
       + flag(gx, gy, '🏁', 'irb-goal')
       + '<g class="irb-others"></g>'
       + `<circle class="irb-ball" r="${c.r.toFixed(2)}"/>`;
@@ -500,7 +508,7 @@ export default {
           view.setAttribute('class', 'irb-lens-view');
           box.append(view);
           document.body.append(box);
-          lens = { box, view, ball: view.querySelector('.irb-ball'), bars: [...view.querySelectorAll('.irb-bar')] };
+          lens = { box, view, pid: e.pointerId, ball: view.querySelector('.irb-ball'), bars: [...view.querySelectorAll('.irb-bar')] };
           placeLens(e);
         }
         paintBall();
@@ -532,7 +540,8 @@ export default {
           barEls[i].setAttribute('y2', (p.cy + p.dy * h).toFixed(2));
           if (lens?.bars[i]) for (const a of ['x1', 'y1', 'x2', 'y2']) lens.bars[i].setAttribute(a, barEls[i].getAttribute(a));
         });
-        if (playing && loc.grab && !loc.sent && since(key) < limit && hitsBar(c, bars, loc.x, loc.y, sec)) { crash(); paintBall(); }
+        // 戻った位置も送る（指を止めたまま棒に当たると、ほかの人の画面で玉が当たる前の位置に残っていた。2026-11-24 の2回目の Codex の点検）
+        if (playing && loc.grab && !loc.sent && since(key) < limit && hitsBar(c, bars, loc.x, loc.y, sec)) { crash(); paintBall(); sendPos(); }
         requestAnimationFrame(tick);
       };
       tick();
