@@ -13,6 +13,13 @@
 //   - 前半は問題の数の半分（切り上げ）まで。5問なら 1〜3問目が特徴2つ、4〜5問目が3つ。
 //   - 1問の制限時間は やさしい20秒・ふつう25秒・むずかしい35秒。だれかが正解したら5秒で締め切る。全員が答えたら1.5秒。答えを見せる間は3.5秒。
 //   - CPU は 3秒〜制限時間の7割で押し、6割当てる（まちがえるときは、おしい人を押す）。
+// 2026-11-24 の46回目の案（本人が選んだ。分かれ目は Claude の判断）:
+//   - 詳細設定「人が歩く」（鍵 walk。なし（最初）・あり）: 人が自分の段のまま左右に歩き、絵のふちで向きを変える（同じ段の人と重なったり離れたりする）。
+//     歩く向きと速さ（1秒にます目の 0.35〜0.8 個ぶん）は問題とは別の乱数で決め、位置は「画面に出てからの時間」だけで決まる（ひよこかぞえと同じ）。
+//     問題（人の特徴・お題）は歩かないときと同じ。答えを見せるときは、その場面で最初に描いた時刻で止める。
+//   - 詳細設定「〜していない」お題（鍵 neg。なし（最初）・あり）: お題に「帽子をかぶっていない」「めがねをかけていない」を必ず1つ入れる
+//     （お題の人に帽子もめがねもあるときは、どちらかを外す）。おしい人の作り方は同じなので、「ない」を読み落とすと、帽子やめがねのあるおしい人を押してしまう。
+//     なしのときの問題は前と全く同じ（あり のときだけ乱数の使い方が変わる）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（抜けた数さがしと同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q, c: 押した人の番号, ms }
 
@@ -41,12 +48,15 @@ const KEYS = ['hat', 'glasses', 'shirt', 'hair'];
 const SIZES = { hat: HATS.length, glasses: 2, shirt: SHIRTS.length, hair: 2 };
 
 // お題に使える特徴（打ち消しは使わない）
+const OFFON = [['off', 'なし'], ['on', 'あり']];
+export const negOn = (r) => r.neg === 'on';
+const walkOn = (r) => r.walk === 'on';
 const sayable = (m) => KEYS.filter((k) => (k === 'hat' ? m.hat > 0 : k === 'glasses' ? m.glasses === 1 : true));
 export const matches = (m, clue) => Object.keys(clue).every((k) => m[k] === clue[k]);
 export function clueText(clue) {
   const out = [];
-  if ('hat' in clue) out.push(HATS[clue.hat][0]);
-  if ('glasses' in clue) out.push('めがね');
+  if ('hat' in clue) out.push(clue.hat ? HATS[clue.hat][0] : '帽子をかぶっていない');
+  if ('glasses' in clue) out.push(clue.glasses ? 'めがね' : 'めがねをかけていない');
   if ('shirt' in clue) out.push(SHIRTS[clue.shirt][0]);
   if ('hair' in clue) out.push(HAIRS[clue.hair]);
   return out;
@@ -54,7 +64,7 @@ export function clueText(clue) {
 export const featureCount = (q, k) => (q < Math.ceil(k / 2) ? 2 : 3);
 
 // 1問を作る。people = [{ hat, glasses, shirt, hair, x, y }]（x・y は人の左上。幅は cw）、target = お題の人の番号、clue = { 特徴: 値 }
-export function makeQuestion(seed, q, level, k) {
+export function makeQuestion(seed, q, level, k, neg = false) {
   const rnd = mulberry32((seed * 131 + q * 61 + 7) >>> 0);
   const pick = (n) => Math.floor(rnd() * n);
   const [cols, rows] = GRID[level] ?? GRID.normal;
@@ -62,12 +72,23 @@ export function makeQuestion(seed, q, level, k) {
   const want = featureCount(q, k);
   const random = () => ({ hat: pick(SIZES.hat), glasses: pick(2), shirt: pick(SIZES.shirt), hair: pick(2) });
   const t = random();
-  // 言える特徴が足りなければ、帽子かめがねを足す
-  while (sayable(t).length < want) { if (t.hat === 0) t.hat = 1 + pick(SIZES.hat - 1); else t.glasses = 1; }
-  const can = sayable(t);
-  for (let i = can.length - 1; i > 0; i--) { const j = pick(i + 1); [can[i], can[j]] = [can[j], can[i]]; }
   const clue = {};
-  for (const key of can.slice(0, want)) clue[key] = t[key];
+  if (neg) {
+    // 「〜していない」を1つ必ず入れる。帽子もめがねもあれば、どちらかを外す。ほかの特徴は「ない」もふくめて4つからくじ
+    if (t.hat > 0 && t.glasses === 1) { if (pick(2)) t.hat = 0; else t.glasses = 0; }
+    const nots = ['hat', 'glasses'].filter((key) => t[key] === 0);
+    const nk = nots[pick(nots.length)];
+    clue[nk] = 0;
+    const can = KEYS.filter((key) => key !== nk);
+    for (let i = can.length - 1; i > 0; i--) { const j = pick(i + 1); [can[i], can[j]] = [can[j], can[i]]; }
+    for (const key of can.slice(0, want - 1)) clue[key] = t[key];
+  } else {
+    // 言える特徴が足りなければ、帽子かめがねを足す
+    while (sayable(t).length < want) { if (t.hat === 0) t.hat = 1 + pick(SIZES.hat - 1); else t.glasses = 1; }
+    const can = sayable(t);
+    for (let i = can.length - 1; i > 0; i--) { const j = pick(i + 1); [can[i], can[j]] = [can[j], can[i]]; }
+    for (const key of can.slice(0, want)) clue[key] = t[key];
+  }
   const people = [t];
   while (people.length < count) {
     let m;
@@ -116,7 +137,24 @@ function personSvg(m) {
   return g;
 }
 
-function crowdSvg(x, onPick) {
+// lo〜hi の間を行き来する（ふちで向きを変える）位置（ひよこかぞえの bounce と同じ形）
+function bounce(p, lo, hi) {
+  const span = hi - lo;
+  let m = (p - lo) % (2 * span);
+  if (m < 0) m += 2 * span;
+  return m <= span ? lo + m : lo + 2 * span - m;
+}
+// 歩く向きと速さ・上下にゆれる間（問題とは別の乱数。全員の画面で同じ）
+function walkers(seed, q, x) {
+  const rnd = mulberry32((seed * 197 + q * 23 + 5) >>> 0);
+  return x.people.map(() => ({ v: x.cw * (0.35 + rnd() * 0.45) * (rnd() < 0.5 ? -1 : 1), ph: rnd() * Math.PI * 2 }));
+}
+export function walkPos(x, m, w, sec) {
+  return { x: bounce(m.x + w.v * sec, 0, W - x.cw), y: m.y - Math.abs(Math.sin(sec * 6 + w.ph)) * x.cw * 0.03 };
+}
+
+// walk = { ws: 歩き方, key: 問題の鍵, freeze: 止める時刻（ms）か null }。null なら歩かない
+function crowdSvg(x, onPick, walk = null) {
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
   svg.setAttribute('viewBox', `0 0 ${W} ${x.h}`);
@@ -124,7 +162,7 @@ function crowdSvg(x, onPick) {
   svg.setAttribute('role', 'img');
   svg.setAttribute('aria-label', `${x.people.length}人の人ごみ`);
   const sc = (x.cw / 10) * 0.9;
-  x.people.forEach((m, i) => {
+  const gs = x.people.map((m, i) => {
     const g = document.createElementNS(ns, 'g');
     g.setAttribute('class', 'hg-p');
     g.dataset.i = i;
@@ -132,15 +170,32 @@ function crowdSvg(x, onPick) {
     g.innerHTML = `<rect class="hg-hit" x="0.6" y="0.2" width="8.8" height="13.8" rx="1.5"/>${personSvg(m)}`;
     if (onPick) g.addEventListener('pointerdown', (e) => { if (e.button !== 0) return; e.preventDefault(); onPick(i); });
     svg.append(g);
+    return g;
   });
+  if (!walk) return svg;
+  const place = (sec) => {
+    x.people.forEach((m, i) => {
+      const p = walkPos(x, m, walk.ws[i], sec);
+      gs[i].setAttribute('transform', `translate(${(p.x + x.cw * 0.05).toFixed(2)} ${p.y.toFixed(2)}) scale(${sc})`);
+    });
+  };
+  if (walk.freeze !== null) { place(walk.freeze / 1000); return svg; }
+  const tick = () => {
+    if (!svg.isConnected && svg.dataset.on) return;
+    svg.dataset.on = '1';
+    place(since(walk.key) / 1000);
+    requestAnimationFrame(tick);
+  };
+  tick();
   return svg;
 }
 
-const qKey = (s, q = s.q) => `hitogomi:${s.seed}:${levelOf(s.rules)}:${s.qs.length}:${q}`; // むずかしさと問題の数も入れる（どちらでも問題が変わるため。数のきまり当てと同じ理由）
+const qKey = (s, q = s.q) => `hitogomi:${s.seed}:${levelOf(s.rules)}:${s.qs.length}:${q}${negOn(s.rules) ? ':neg' : ''}`; // むずかしさと問題の数・「〜していない」お題も入れる（どれでも問題が変わるため。数のきまり当てと同じ理由）
 const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice(), miss: s.miss.slice(), said: s.said.slice() });
 const doneOf = (s, p) => s.solved[p] !== null || s.miss[p];
 const limitOf = (s) => LIMITS[levelOf(s.rules)];
 const cpuPlan = new Map();
+const frozen = new Map(); // 問題の鍵 → 答えを見せるときに止めた時刻（ms。人が歩くとき。ひよこかぞえと同じ）
 
 export default {
   id: 'hitogomi',
@@ -155,12 +210,14 @@ export default {
   settings: [
     { key: 'level', label: 'むずかしさ', desc: '画面に出る人の数', def: 'normal', choices: LEVELS },
     { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 5, choices: ROUNDS },
+    { key: 'walk', label: '人が歩く', desc: '人がゆっくり左右に歩き回り、重なったり離れたりする', def: 'off', choices: OFFON },
+    { key: 'neg', label: '「〜していない」お題', desc: '「めがねをかけていない」「帽子をかぶっていない」のような、ないことを言うお題が必ず入る', def: 'off', choices: OFFON },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const r = { rounds: 5, level: 'normal', ...rules };
     const k = roundsOf(r);
-    const qs = Array.from({ length: k }, (_, q) => makeQuestion(seed, q, levelOf(r), k));
+    const qs = Array.from({ length: k }, (_, q) => makeQuestion(seed, q, levelOf(r), k, negOn(r)));
     return {
       n, seed, rules: r, qs, q: -1, phase: 'ready',
       solved: Array(n).fill(null), miss: Array(n).fill(false), said: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0,
@@ -287,6 +344,16 @@ export default {
     for (const w of clueText(x.clue)) head.append(Object.assign(document.createElement('span'), { className: 'hg-tag', textContent: w }));
     head.append(Object.assign(document.createElement('span'), { className: 'hg-q', textContent: 'の人は？' }));
     card.append(head);
+    let walk = null;
+    if (walkOn(s.rules)) {
+      let freeze = null;
+      if (shown) {
+        if (!frozen.has(key)) frozen.set(key, Math.min(since(key), limit));
+        if (frozen.size > 50) frozen.delete(frozen.keys().next().value);
+        freeze = frozen.get(key);
+      }
+      walk = { ws: walkers(s.seed, s.q, x), key, freeze };
+    }
     let sent = false;
     const canNow = () => !shown && me !== null && o.canMove && !doneOf(s, me) && !sent && since(key) < limit;
     const fig = crowdSvg(x, shown ? null : (i) => {
@@ -297,7 +364,7 @@ export default {
       fig.querySelector(`.hg-p[data-i="${i}"]`)?.classList.add('picked');
       fig.classList.add('locked');
       o.onMove({ t: 'ans', q: s.q, c: i, ms });
-    });
+    }, walk);
     // 自分が押した人・答え合わせ
     if (mine !== null) fig.querySelector(`.hg-p[data-i="${mine}"]`)?.classList.add(mine === x.target ? 'ok' : 'ng');
     if (shown) fig.querySelector(`.hg-p[data-i="${x.target}"]`)?.classList.add('ans');

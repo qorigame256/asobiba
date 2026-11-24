@@ -10,28 +10,36 @@
 //   - 氷を押すと選び（もう一度押すと外す。2枚まで）、選んだらどこが落ちるかを薄く見せる。「たたく」で決める。ペンギンが落ちる選び方でもたたける。
 //   - 先にたたくのは席0の人から順番。
 //   - CPU は、ペンギンが落ちないたたき方の中からでたらめに選ぶ。ただし2割はどのたたき方からでもでたらめに選ぶ（落とすこともある）。
-// 手: { p, t: 'hit', c: [たたくマスの番号（0〜24。小さい順・1〜2個）] }
+// 2026-11-24 の46回目の案（本人が選んだ。分かれ目は Claude の判断）:
+//   - 詳細設定「氷の広さ」（鍵 size。5×5（最初）・7×7）。7×7 でもペンギンはまん中（24番）で、たたけるのは1〜2枚のまま。
+//     盤の広さは局面の氷の数（ice.length）から決める（5×5 のときの局面は前と全く同じ形。広さを局面に別に持たない）。
+// 手: { p, t: 'hit', c: [たたくマスの番号（0〜24（7×7 は 0〜48）。小さい順・1〜2個）] }
 
 import { SEAT_COLORS, winnersText } from './party.js';
 
 export const N = 5;
 export const CENTER = 12;
-const isEdge = (i) => i < N || i >= N * (N - 1) || i % N === 0 || i % N === N - 1;
-const nbrs = (i) => {
-  const r = Math.floor(i / N);
-  const c = i % N;
-  return [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]].filter(([y, x]) => y >= 0 && y < N && x >= 0 && x < N).map(([y, x]) => y * N + x);
+const SIZES = [[5, '5×5'], [7, '7×7']];
+const sizeOf = (r) => (Number(r?.size) === 7 ? 7 : 5);
+export const sideOf = (ice) => Math.round(Math.sqrt(ice.length)); // 盤の1辺（5 か 7）
+export const centerOf = (ice) => (ice.length - 1) / 2; // ペンギンのいるまん中
+const isEdge = (i, n) => i < n || i >= n * (n - 1) || i % n === 0 || i % n === n - 1;
+const nbrs = (i, n) => {
+  const r = Math.floor(i / n);
+  const c = i % n;
+  return [[r - 1, c], [r + 1, c], [r, c - 1], [r, c + 1]].filter(([y, x]) => y >= 0 && y < n && x >= 0 && x < n).map(([y, x]) => y * n + x);
 };
-// 氷 ice（25個の true/false）から、枠とつながっていない氷（落ちるもの）の番号の一覧
+// 氷 ice（25個（7×7 は49個）の true/false）から、枠とつながっていない氷（落ちるもの）の番号の一覧
 export function falling(ice) {
+  const n = sideOf(ice);
   const keep = new Set();
   const st = [];
-  for (let i = 0; i < N * N; i++) if (ice[i] && isEdge(i)) { keep.add(i); st.push(i); }
+  for (let i = 0; i < ice.length; i++) if (ice[i] && isEdge(i, n)) { keep.add(i); st.push(i); }
   while (st.length) {
     const i = st.pop();
-    for (const j of nbrs(i)) if (ice[j] && !keep.has(j)) { keep.add(j); st.push(j); }
+    for (const j of nbrs(i, n)) if (ice[j] && !keep.has(j)) { keep.add(j); st.push(j); }
   }
-  return [...Array(N * N).keys()].filter((i) => ice[i] && !keep.has(i));
+  return [...Array(ice.length).keys()].filter((i) => ice[i] && !keep.has(i));
 }
 // たたいたあとの氷と、落ちる氷
 export function hitResult(ice, cells) {
@@ -39,13 +47,13 @@ export function hitResult(ice, cells) {
   for (const i of cells) next[i] = false;
   const fell = falling(next);
   for (const i of fell) next[i] = false;
-  return { ice: next, fell, drop: fell.includes(CENTER) };
+  return { ice: next, fell, drop: fell.includes(centerOf(ice)) };
 }
-const validCells = (ice, c) => Array.isArray(c) && c.length >= 1 && c.length <= 2 && c.every((i) => Number.isInteger(i) && i >= 0 && i < N * N && i !== CENTER && ice[i])
+const validCells = (ice, c) => Array.isArray(c) && c.length >= 1 && c.length <= 2 && c.every((i) => Number.isInteger(i) && i >= 0 && i < ice.length && i !== centerOf(ice) && ice[i])
   && (c.length === 1 || c[0] < c[1]);
 // たたける組み合わせの全部（1枚と2枚）
 export function movesOf(ice) {
-  const one = [...Array(N * N).keys()].filter((i) => i !== CENTER && ice[i]);
+  const one = [...Array(ice.length).keys()].filter((i) => i !== centerOf(ice) && ice[i]);
   const out = one.map((i) => [i]);
   for (let a = 0; a < one.length; a++) for (let b = a + 1; b < one.length; b++) out.push([one[a], one[b]]);
   return out;
@@ -62,9 +70,13 @@ export default {
   multi: true,
   minPlayers: 2,
   maxPlayers: 10,
+  settings: [
+    { key: 'size', label: '氷の広さ', desc: '7×7 は氷が多く、どこから崩れるかの読み合いが長くなる', def: 5, choices: SIZES },
+  ],
 
-  init(n, seed) {
-    return { n, seed, ice: Array(N * N).fill(true), turn: 0, phase: 'play', last: null, step: 0, hits: 0 };
+  init(n, seed, { rules = {} } = {}) {
+    const side = sizeOf(rules);
+    return { n, seed, ice: Array(side * side).fill(true), turn: 0, phase: 'play', last: null, step: 0, hits: 0 };
   },
 
   turn(s) { return s.phase === 'play' ? s.turn : null; },
@@ -109,7 +121,9 @@ export default {
     const pre = sel.length ? hitResult(s.ice, sel) : null;
     const draw = () => this.render(root, s, { ...o, fresh: false }); // 選び直しで描き直すときは、さっき落ちた氷の動きを流し直さない
     root.innerHTML = '';
-    root.className = 'board koori';
+    const side = sideOf(s.ice);
+    const mid = centerOf(s.ice);
+    root.className = 'board koori' + (side === 7 ? ' k7' : '');
 
     const chips = document.createElement('div');
     chips.className = 'cc-opps';
@@ -131,8 +145,8 @@ export default {
     const grid = document.createElement('div');
     grid.className = 'koori-grid';
     const fresh = o.fresh && s.last;
-    for (let i = 0; i < N * N; i++) {
-      const cell = document.createElement(can && i !== CENTER && s.ice[i] ? 'button' : 'div');
+    for (let i = 0; i < side * side; i++) {
+      const cell = document.createElement(can && i !== mid && s.ice[i] ? 'button' : 'div');
       const gone = !s.ice[i];
       const justHit = fresh && s.last.c.includes(i);
       const justFell = fresh && s.last.fell.includes(i);
@@ -142,9 +156,9 @@ export default {
       else if (justFell) cls += ' fell';
       if (sel.includes(i)) cls += ' sel';
       else if (pre?.fell.includes(i)) cls += ' warn';
-      if (i === CENTER) cls += ' mid';
+      if (i === mid) cls += ' mid';
       cell.className = cls;
-      if (i === CENTER) {
+      if (i === mid) {
         const pg = document.createElement('span');
         pg.className = 'koori-peng' + (s.phase === 'end' ? ' sink' : '');
         pg.textContent = '🐧';
@@ -153,7 +167,7 @@ export default {
       if (justHit && !gone) cell.style.setProperty('--hit', SEAT_COLORS[s.last.p % SEAT_COLORS.length]);
       if (cell.tagName === 'BUTTON') {
         cell.type = 'button';
-        cell.setAttribute('aria-label', `${Math.floor(i / N) + 1}行${(i % N) + 1}列の氷`);
+        cell.setAttribute('aria-label', `${Math.floor(i / side) + 1}行${(i % side) + 1}列の氷`);
         cell.addEventListener('click', () => {
           const cur = picked?.cells ?? [];
           let next;
@@ -172,12 +186,12 @@ export default {
     msg.className = 'cc-log';
     const lastText = () => {
       if (!s.last) return '';
-      const more = s.last.fell.filter((i) => i !== CENTER).length;
+      const more = s.last.fell.filter((i) => i !== mid).length;
       return `${nameP(s.last.p)}が${s.last.c.length}枚たたいた${more ? `（${more}枚いっしょに落ちた）` : ''}。`;
     };
     if (s.phase === 'end') msg.textContent = `${lastText()}ペンギンが落ちた！`;
     else if (pre) {
-      const more = pre.fell.filter((i) => i !== CENTER).length;
+      const more = pre.fell.filter((i) => i !== mid).length;
       msg.textContent = pre.drop ? '💦 これをたたくとペンギンが落ちる！' : `${sel.length}枚えらんだ${more ? `（ほかに${more}枚落ちる）` : ''}。「たたく」で決める`;
     } else msg.textContent = `${lastText()}${can ? '氷を1〜2枚えらぶ' : ''}`; // だれのターンかは上の見出しと順番の帯に出ている
     root.append(msg);

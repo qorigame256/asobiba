@@ -2905,6 +2905,7 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .kb-row { display: grid; grid-template-columns: 2.4em 1fr auto; gap: 8px; align-items: center; padding: 6px 10px; border-radius: 10px; border: 1.5px solid var(--line); }
 .kb-row.ok { border-color: #2f8a4a; }
 .kb-row.hit { opacity: .75; }
+.kb-row.low { opacity: .75; } /* いちばん大きい人だけ（kaburi.js の top）で、かぶらなかったが届かなかった数字 */
 .kb-row.hit .kb-v { text-decoration: line-through; color: #c0392b; }
 .kb-v { font-size: 1.6rem; font-weight: 900; text-align: center; }
 .kb-who { overflow-wrap: anywhere; }
@@ -3938,6 +3939,7 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .irb-ball.grab { stroke: #222; stroke-width: .7; }
 .irb-fig.live .irb-ball { cursor: grab; }
 .irb-others circle { opacity: .45; }
+.irb-bar { stroke: #8e44ad; stroke-linecap: round; } /* 動くじゃま（壁と見分けがつくよう紫） */
 .irb-fig.crash .irb-wall { animation: irb-crash .45s ease-out; }
 @keyframes irb-crash { from { fill: #d9342b; } to { fill: #3a3550; } }
 @media (prefers-reduced-motion: reduce) { .irb-fig.crash .irb-wall { animation: none; } }
@@ -3953,6 +3955,11 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .ot-keys { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; width: min(100%, 480px); margin: 4px auto 0; touch-action: manipulation; user-select: none; -webkit-user-select: none; }
 .board button.ot-key { height: clamp(110px, 32vw, 160px); background: #fff; border: 1.5px solid #8a8f99; border-radius: 0 0 9px 9px; box-shadow: inset 0 -6px 0 #e3e5ea; color: #222;
   display: flex; align-items: flex-end; justify-content: center; padding: 0 0 12px; font: inherit; font-weight: 800; font-size: clamp(.85rem, 3.6vw, 1.1rem); cursor: pointer; }
+/* 黒い鍵盤も（oto.js の black）: 白い鍵盤の間の上に重ねる。.ok・.ng より前に置く（同じ強さなので、後ろの色が勝つ） */
+.ot-keys.blk { position: relative; }
+.board button.ot-key.bk { position: absolute; top: 0; z-index: 1; width: 10%; height: 62%; transform: translateX(-50%); background: #2a2a30; border-color: #111; border-radius: 0 0 6px 6px;
+  box-shadow: inset 0 -5px 0 #000; color: #fff; padding: 0 0 8px; font-size: clamp(.6rem, 2.5vw, .8rem); white-space: nowrap; }
+.board button.ot-key.bk:active:not(:disabled) { background: #45454d; box-shadow: inset 0 -2px 0 #000; }
 .board button.ot-key:active:not(:disabled) { background: #f0f1f4; box-shadow: inset 0 -2px 0 #e3e5ea; }
 .board button.ot-key:disabled { cursor: default; }
 .board button.ot-key.off { opacity: .55; }
@@ -3965,6 +3972,8 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .board.koori { width: min(100%, 460px); }
 .koori-pond { background: radial-gradient(circle at 50% 40%, #5aa9d6, #2c6f9e); border: 6px solid #8b6a43; border-radius: 14px; padding: 8px; margin: 8px auto 0; box-shadow: inset 0 0 18px rgba(0, 0, 0, .35); }
 .koori-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; touch-action: manipulation; }
+.board.koori.k7 .koori-grid { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; } /* 氷の広さ 7×7（minmax(0, …) でないと、ボタンの最小の幅で右へはみ出す） */
+.board.koori.k7 .koori-peng { font-size: clamp(1.2rem, 6.5vw, 1.8rem); }
 .koori-cell { aspect-ratio: 1; border-radius: 6px; background: linear-gradient(145deg, #ffffff, #cfeaf7 60%, #a9d4ea); border: 1.5px solid #e9f6fc; box-shadow: 0 3px 0 #7fb3cf;
   display: grid; place-items: center; position: relative; padding: 0; font: inherit; }
 .board button.koori-cell { background: linear-gradient(145deg, #ffffff, #cfeaf7 60%, #a9d4ea); border: 1.5px solid #e9f6fc; box-shadow: 0 3px 0 #7fb3cf; border-radius: 6px; cursor: pointer; }

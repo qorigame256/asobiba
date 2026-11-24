@@ -1,5 +1,6 @@
 // 音当て（oto.js）の「ド〜シ」の音をプログラムで作り、app/sounds/o_<音>.wav に置く（2026-11-20。素材をダウンロードせずに作るのは本人の承認）。
-// 使い方: node tools/make-notes.mjs <piano|musicbox|marimba> [出す先のフォルダ（既定 app/sounds）]
+// 使い方: node tools/make-notes.mjs <piano|musicbox|marimba> [出す先のフォルダ（既定 app/sounds）] [--black]
+//   --black を付けると、白い鍵盤の7つの代わりに黒い鍵盤の5つ（o_dos・o_res・o_fas・o_sos・o_ras。音当ての「黒い鍵盤も」。2026-11-24）を作る。
 //   1. 音色の式で 44.1kHz の WAV を一時フォルダに作る → 2. tools/level-sound.mjs で片耳・22050Hz・目標の大きさ（normal -18）にそろえて出す先に置く。
 //   ffmpeg が要る（level-sound.mjs と同じ）。どの音色にしたかは oto.js の先頭に書く（本人が試聴して選ぶ）。
 // 音の高さは ド=C4（261.63Hz）〜 シ=B4 の白い鍵盤の7つ（平均律）。
@@ -9,6 +10,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 export const NOTES = [['do', 261.63], ['re', 293.66], ['mi', 329.63], ['fa', 349.23], ['so', 392.0], ['ra', 440.0], ['si', 493.88]];
+export const SHARPS = [['dos', 277.18], ['res', 311.13], ['fas', 369.99], ['sos', 415.3], ['ras', 466.16]]; // ド♯=C#4 〜 ラ♯=A#4
 const RATE = 44100;
 const LEN = 1.4; // 秒
 
@@ -73,12 +75,14 @@ function render(kind, f) {
 }
 
 if (import.meta.url === `file:///${process.argv[1].replace(/\\/g, '/')}` || process.argv[1]?.endsWith('make-notes.mjs')) {
-  const kind = process.argv[2];
-  const dest = process.argv[3] ?? 'app/sounds';
+  const args = process.argv.slice(2).filter((a) => a !== '--black');
+  const black = process.argv.includes('--black');
+  const kind = args[0];
+  const dest = args[1] ?? 'app/sounds';
   if (!TIMBRES[kind]) { console.error(`音色は ${Object.keys(TIMBRES).join(' / ')} のどれか`); process.exit(1); }
   const tmp = mkdtempSync(join(tmpdir(), 'notes-'));
   try {
-    for (const [name, f] of NOTES) {
+    for (const [name, f] of black ? SHARPS : NOTES) {
       const raw = join(tmp, `${name}.wav`);
       writeFileSync(raw, wav(render(kind, f)));
       execFileSync('node', ['tools/level-sound.mjs', raw, join(dest, `o_${name}.wav`), 'normal', String(LEN)], { stdio: 'inherit' });

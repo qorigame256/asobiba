@@ -13147,6 +13147,226 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('iraira OK');
 }
 
+// 2026-11-24 の46回目の案の9つの設定: 人ごみさがし（人が歩く・〜していない）・ひよこかぞえ（色ちがい・小屋）・イライラ棒（動くじゃま・戻る場所）・
+// ペンギンの氷割り（7×7）・音当て（黒い鍵盤も）・かぶったら0点（いちばん大きい人だけ）。なしのときの問題が前と同じことも見る
+{
+  // 人ごみさがし
+  {
+    const G = GAMES.hitogomi;
+    const { makeQuestion, matches, featureCount, walkPos, W } = await import('../app/js/games/hitogomi.js');
+    let negs = 0;
+    for (const level of ['easy', 'normal', 'hard']) {
+      for (let seed = 0; seed < 30; seed++) {
+        for (let q = 0; q < 10; q++) {
+          const x = makeQuestion(seed, q, level, 10, true);
+          const hit = x.people.map((m, i) => i).filter((i) => matches(x.people[i], x.clue));
+          assert.deepEqual(hit, [x.target], `人ごみ: 「〜していない」でもお題に合う人はちょうど1人 ${level} ${seed} ${q}`);
+          assert.equal(Object.keys(x.clue).length, featureCount(q, 10), '人ごみ: 「〜していない」でも前半は特徴2つ・後半は3つ');
+          assert.ok(x.clue.hat === 0 || x.clue.glasses === 0, '人ごみ: 「〜していない」のお題が必ず1つ入る');
+          // 帽子もめがねも無い、おしい人（「ない」を読み落とすと押す人）がいる
+          const near = x.people.filter((m, i) => i !== x.target && Object.keys(x.clue).filter((k) => m[k] !== x.clue[k]).length === 1);
+          if (near.some((m) => (x.clue.hat === 0 && m.hat > 0) || (x.clue.glasses === 0 && m.glasses === 1))) negs++;
+          // なしのときの問題は前と同じ（第5引数を渡さない形と同じ）
+          if (level === 'normal' && q < 3) assert.deepEqual(makeQuestion(seed, q, level, 10, false), makeQuestion(seed, q, level, 10), '人ごみ: なしの問題は前と同じ');
+        }
+      }
+    }
+    assert.ok(negs > 800, `人ごみ: 「ない」を読み落とすと押してしまうおしい人がたいていいる（${negs}/900）`);
+    assert.ok(G.init(3, 4, { rules: { neg: 'on' } }).qs.every((x) => x.clue.hat === 0 || x.clue.glasses === 0), '人ごみ: 詳細設定で「〜していない」になる');
+    assert.deepEqual(G.init(3, 4, { rules: { walk: 'on' } }).qs, G.init(3, 4, { rules: {} }).qs, '人ごみ: 人が歩くでも問題は同じ');
+    // 歩く人は絵の横幅から出ず、止まらない
+    const x = makeQuestion(2, 0, 'normal', 5);
+    for (const m of x.people) {
+      const w = { v: x.cw * 0.5, ph: 0 };
+      let moved = 0, prev = walkPos(x, m, w, 0);
+      for (let t = 0.1; t < 30; t += 0.1) {
+        const p = walkPos(x, m, w, t);
+        assert.ok(p.x >= -1e-9 && p.x + x.cw <= W + 1e-9, '人ごみ: 歩いても絵の横幅から出ない');
+        moved += Math.abs(p.x - prev.x);
+        prev = p;
+      }
+      assert.ok(moved > x.cw * 0.5 * 30 * 0.9, '人ごみ: 歩く人は止まらない');
+    }
+    for (const rules of [{ neg: 'on' }, { walk: 'on', neg: 'on', level: 'hard', rounds: 3 }]) {
+      const end = runCpus(G, 5, 21, rules, 250, 8000);
+      assert.ok(G.result(end) && end.scores.some((v) => v > 0), `人ごみ: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+    }
+  }
+  // ひよこかぞえ
+  {
+    const G = GAMES.hiyoko;
+    const { makeQuestion, RANGE } = await import('../app/js/games/hiyoko.js');
+    const asks = { b: 0, y: 0, all: 0 };
+    for (const level of ['easy', 'normal', 'hard']) {
+      for (let seed = 0; seed < 40; seed++) {
+        for (let q = 0; q < 5; q++) {
+          const x = makeQuestion(seed, q, level, 5, true);
+          const off = makeQuestion(seed, q, level, 5);
+          assert.equal(x.total, off.count, 'ひよこ: 色ちがいでも全部の羽数はなしと同じ');
+          assert.deepEqual(x.chicks.map(({ x: a, y, vx, vy }) => [a, y, vx, vy]), off.chicks.map(({ x: a, y, vx, vy }) => [a, y, vx, vy]), 'ひよこ: 色ちがいでも動きはなしと同じ');
+          assert.ok(x.chicks.every((c) => c.c === 0 || c.c === 1), 'ひよこ: 色は黄色か茶色');
+          const want = x.ask === 'all' ? x.total : x.chicks.filter((c) => c.c === (x.ask === 'b' ? 1 : 0)).length;
+          assert.equal(x.count, want, `ひよこ: 答えは数えるように言われた色の羽数 ${level} ${seed} ${q}`);
+          assert.ok(x.count >= 1, 'ひよこ: 数える羽数は1羽以上');
+          asks[x.ask]++;
+          assert.ok(!('c' in off.chicks[0]) && !('ask' in off), 'ひよこ: なしのときは色を持たない（局面は前と同じ）');
+        }
+      }
+    }
+    assert.ok(asks.b > 150 && asks.y > 150 && asks.all > 50, `ひよこ: 茶色・黄色・ぜんぶがどれも出る ${JSON.stringify(asks)}`);
+    let s = G.apply(G.init(2, 3, { rules: { color: 'on' } }), { p: -1, t: 'next' });
+    s = G.apply(s, { p: 0, t: 'ans', q: 0, c: s.qs[0].count, ms: 500 });
+    assert.notEqual(s.solved[0], null, 'ひよこ: 色ちがいでは言われた色の羽数で正解');
+    assert.deepEqual(G.init(2, 3, { rules: { hut: 'on' } }).qs, G.init(2, 3, { rules: {} }).qs, 'ひよこ: 小屋でも問題は同じ');
+    for (const rules of [{ color: 'on' }, { color: 'on', hut: 'on', level: 'easy', rounds: 3 }]) {
+      const end = runCpus(G, 5, 21, rules, 250, 8000);
+      assert.ok(G.result(end) && end.scores.some((v) => v > 0), `ひよこ: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+    }
+    void RANGE;
+  }
+  // イライラ棒
+  {
+    const G = GAMES.iraira;
+    const { makeCourses, barsOf, barAt, hitsBar, hitsWall } = await import('../app/js/games/iraira.js');
+    for (const level of ['easy', 'normal', 'hard']) {
+      let open = 0, all = 0;
+      for (let seed = 0; seed < 6; seed++) {
+        makeCourses(seed, level).forEach((c, q) => {
+          const bars = barsOf(seed, q, c);
+          assert.equal(bars.length, q + 1, `イライラ棒: 動くじゃまは ${q + 1}問目に${q + 1}本 ${level} ${seed}`);
+          assert.equal(new Set(bars.map((b) => b.seg)).size, bars.length, 'イライラ棒: 同じ区間に2本置かない');
+          for (const b of bars) {
+            assert.ok(b.seg >= 1 && b.seg + 1 < c.pts.length - 1, 'イライラ棒: スタート・ゴールに続く区間には置かない');
+            const [ax, ay] = c.pts[b.seg], [bx, by] = c.pts[b.seg + 1];
+            const dx = (bx - ax) / c.u, dy = (by - ay) / c.u;
+            // 棒の区間を横切れる線（道の中心からのずれ o を決めて区間の端から端まで進む）が、その時刻にあるか
+            const passable = (sec) => {
+              for (let o = -c.w / 2; o <= c.w / 2; o += c.w / 30) {
+                let ok = true;
+                for (let a = -c.u / 2; a <= c.u / 2 && ok; a += c.u / 20) {
+                  const x = (ax + bx) / 2 + dx * a - dy * o, y = (ay + by) / 2 + dy * a + dx * o;
+                  if (hitsWall(c, x, y) || hitsBar(c, [b], x, y, sec)) ok = false;
+                }
+                if (ok) return true;
+              }
+              return false;
+            };
+            for (let k = 0; k < 20; k++) { all++; if (passable((k / 20) * 3.2)) open++; }
+            // 棒がまん中にいる時刻は通れない
+            const mid = barAt(c, b, 0);
+            const t0 = (((1 - b.ph) % 1) * 3.2) % 3.2; // sin の中が 0 になる時刻
+            const p0 = barAt(c, b, t0);
+            assert.ok(Math.hypot(p0.cx - (ax + bx) / 2, p0.cy - (ay + by) / 2) < 1e-6, 'イライラ棒: 棒がまん中に来る時刻');
+            assert.equal(passable(t0), false, 'イライラ棒: 棒がまん中にいる間は通れない');
+            void mid;
+          }
+        });
+      }
+      assert.ok(open / all > 0.35 && open / all < 0.65, `イライラ棒: 棒のある所を通れるのは1往復のおよそ半分の時間 ${level} ${(open / all).toFixed(2)}`);
+    }
+    assert.deepEqual(G.init(3, 4, { rules: { bar: 'on', back: 'start' } }).qs, G.init(3, 4, { rules: {} }).qs, 'イライラ棒: 動くじゃま・戻る場所でも道は同じ');
+    // 種は上の確認（8）と変える。CPU の予定は種とむずかしさの鍵で覚えるので、同じ種だと上の対局で済んだ予定が残って CPU が動かない
+    for (const rules of [{ bar: 'on' }, { bar: 'on', back: 'start', level: 'hard' }]) {
+      const end = runCpus(G, 5, 21, rules, 250, 8000);
+      assert.ok(G.result(end) && end.scores.some((v) => v > 0), `イライラ棒: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+    }
+  }
+  // ペンギンの氷割り 7×7
+  {
+    const G = GAMES.koori;
+    const { falling, hitResult, movesOf, sideOf, centerOf } = await import('../app/js/games/koori.js');
+    assert.equal(G.init(2, 1, { rules: {} }).ice.length, 25, '氷割り: 最初は 5×5');
+    assert.deepEqual(G.init(2, 1), G.init(2, 1, { rules: {} }), '氷割り: 5×5 の局面は前と同じ形');
+    let s = G.init(3, 1, { rules: { size: 7 } });
+    assert.equal(s.ice.length, 49, '氷割り: 7×7 は49枚');
+    assert.equal(sideOf(s.ice), 7, '氷割り: 7×7 の1辺');
+    assert.equal(centerOf(s.ice), 24, '氷割り: 7×7 のまん中は24');
+    assert.equal(G.apply(s, { p: 0, t: 'hit', c: [24] }), null, '氷割り: 7×7 でもまん中はたたけない');
+    assert.equal(G.apply(s, { p: 0, t: 'hit', c: [49] }), null, '氷割り: 7×7 で盤の外はたたけない');
+    assert.equal(movesOf(s.ice).length, 48 + (48 * 47) / 2, '氷割り: 7×7 の1枚と2枚の組み合わせ');
+    const full = s.ice;
+    assert.deepEqual(falling(full), [], '氷割り: 7×7 も最初はどれも落ちない');
+    // まん中のまわり4つを抜くとペンギンが落ちる。外の列（0〜6）は落ちない
+    assert.equal(hitResult(hitResult(full, [17, 23]).ice, [25, 31]).drop, true, '氷割り: 7×7 でもまわり4つが無くなるとペンギンが落ちる');
+    {
+      const ring = full.slice();
+      for (const i of [8, 9, 10, 11, 12, 15, 19, 22, 26, 29, 33, 36, 37, 38, 39, 40]) ring[i] = false; // 内側の 3×3 を囲む輪を抜く
+      assert.deepEqual(falling(ring).sort((a, b) => a - b), [16, 17, 18, 23, 24, 25, 30, 31, 32], '氷割り: 7×7 で囲まれた 3×3 はまとめて落ちる');
+      assert.ok(!falling(ring).includes(0), '氷割り: 7×7 の外の列は落ちない');
+    }
+    s = G.apply(s, { p: 0, t: 'hit', c: [17, 23] });
+    s = G.apply(s, { p: 1, t: 'hit', c: [25] });
+    s = G.apply(s, { p: 2, t: 'hit', c: [31] });
+    assert.deepEqual(G.result(s), { winners: [0, 1], loser: 2 }, '氷割り: 7×7 でもペンギンを落とした人の負け');
+    const realRandom = Math.random;
+    try {
+      let r = 7;
+      Math.random = () => { r = (r * 1103515245 + 12345) % 2147483648; return r / 2147483648; };
+      for (let seed = 0; seed < 10; seed++) {
+        let st = G.init(3, seed, { rules: { size: 7 } });
+        for (let guard = 0; guard < 80 && !G.result(st); guard++) st = G.apply(st, { ...G.cpu(st, st.turn), p: st.turn });
+        assert.ok(G.result(st), '氷割り: 7×7 でも CPU どうしで最後まで');
+      }
+    } finally {
+      Math.random = realRandom;
+    }
+  }
+  // 音当て 黒い鍵盤も
+  {
+    const G = GAMES.oto;
+    const { notesOf, timesOf, CHROMA, BLACK_FILES } = await import('../app/js/games/oto.js');
+    assert.deepEqual([...CHROMA].sort((a, b) => a - b), [...Array(12).keys()], '音当て: 低い順の並びに12の音が1回ずつ');
+    for (let seed = 0; seed < 50; seed++) {
+      const ns = notesOf(seed, 20, true);
+      assert.ok(ns.every((x) => Number.isInteger(x) && x >= 0 && x <= 11), '音当て: 黒い鍵盤もでは 0〜11');
+      assert.ok(ns.every((x, i) => i === 0 || x !== ns[i - 1]), '音当て: 黒い鍵盤もでも同じ音は続けない');
+      assert.deepEqual(notesOf(seed, 20, false), notesOf(seed, 20), '音当て: なしの問題は前と同じ');
+    }
+    const many = notesOf(3, 600, true);
+    assert.equal(new Set(many).size, 12, '音当て: 黒い鍵盤もでは12の音がどれも出る');
+    assert.ok(many.filter((x) => x >= 7).length > 600 * 0.3, '音当て: 黒い鍵盤の音もよく出る');
+    const ask = timesOf('mid').q[0];
+    let s = G.apply(G.init(2, 5, { rules: {} }), { p: -1, t: 'next' });
+    assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, c: 8, ms: ask + 100 }), null, '音当て: なしでは黒い鍵盤は押せない');
+    s = G.apply(G.init(2, 5, { rules: { black: 'on' } }), { p: -1, t: 'next' });
+    assert.ok(G.apply(s, { p: 0, t: 'ans', q: 0, c: 8, ms: ask + 100 }), '音当て: 黒い鍵盤もでは黒い鍵盤を押せる');
+    assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, c: 12, ms: ask + 100 }), null, '音当て: 12 より上は押せない');
+    const end = runCpus(G, 5, 9, { black: 'on' }, 50, 40000);
+    assert.ok(G.result(end) && end.scores.some((v) => v > 0), '音当て: 黒い鍵盤もで CPU どうしで最後まで');
+    // 黒い鍵盤の音のファイル: 鳴る高さが ド♯=C#4〜ラ♯=A#4（白い鍵盤の確かめ方と同じ。2% 以内）
+    const HZ = [277.18, 311.13, 369.99, 415.3, 466.16];
+    const { readFileSync } = await import('node:fs');
+    BLACK_FILES.forEach((name, i) => {
+      const b = readFileSync(new URL(`../app/sounds/${name}.wav`, import.meta.url));
+      const rate = b.readUInt32LE(24);
+      assert.equal(b.readUInt16LE(22), 1, `音当て: ${name} は片耳`);
+      const at = b.indexOf('data') + 8;
+      const x = Array.from({ length: Math.floor(0.25 * rate) }, (_, j) => b.readInt16LE(at + (Math.floor(0.1 * rate) + j) * 2));
+      let best = 0, bestLag = 0;
+      for (let lag = Math.floor(rate / 560); lag <= Math.ceil(rate / 240); lag++) {
+        let c = 0;
+        for (let j = 0; j + lag < x.length; j++) c += x[j] * x[j + lag];
+        if (c > best) { best = c; bestLag = lag; }
+      }
+      const hz = rate / bestLag;
+      assert.ok(Math.abs(hz / HZ[i] - 1) < 0.02, `音当て: ${name} の高さ ${hz.toFixed(1)}Hz（${HZ[i]}Hz のはず）`);
+    });
+  }
+  // かぶったら0点 いちばん大きい人だけ
+  {
+    const K = GAMES.kaburi;
+    const { scoreRound } = await import('../app/js/games/kaburi.js');
+    assert.deepEqual(scoreRound([5, 3, 5, 1], true), [0, 3, 0, 0], 'かぶり: いちばん大きい人だけでは、かぶらなかった中で最大の3の人だけ');
+    assert.deepEqual(scoreRound([4, 4, 4], true), [0, 0, 0], 'かぶり: いちばん大きい人だけでも全員かぶったらだれも点なし');
+    assert.deepEqual(scoreRound([2, null, 1], true), [2, 0, 0], 'かぶり: いちばん大きい人だけでも決めなかった人は0点');
+    let s = K.apply(K.init(4, 1, { rules: { top: true } }), { p: -1, t: 'next' });
+    for (const [p, v] of [[0, 5], [1, 5], [2, 4], [3, 2]]) s = K.apply(s, { p, t: 'pick', r: 0, v });
+    s = K.apply(s, { p: -1, t: 'close' });
+    assert.deepEqual(s.scores, [0, 0, 4, 0], 'かぶり: いちばん大きい人だけを詳細設定で選べる');
+  }
+  console.log('46th settings OK');
+}
+
 // 送る数の見張り（net.js の sendBudget。2026-11-19）: 中継サーバーの上限（1つの接続から区切られた1秒に10通）を超えないよう、直近1秒に8通送ったら qos 0 は送らない。qos 1 はいつも送る
 {
   const { sendBudget } = await import('../app/js/net.js');

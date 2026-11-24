@@ -9,6 +9,13 @@
 //   - 答えを見せるときは、ひよこを止めて1羽ずつ番号を付ける。
 //   - 1問の制限時間は やさしい20秒・ふつう25秒・むずかしい35秒。だれかが正解したら8秒で締め切る（抜けた数さがしと同じ）。全員が答えたら1.5秒。答えを見せる間は3.5秒。
 //   - CPU は 4秒〜制限時間の6割で答え、6割当てる（まちがえるときは1つ多いか少ない数）。
+// 2026-11-24 の46回目の案（本人が選んだ。分かれ目は Claude の判断）:
+//   - 詳細設定「色ちがいのひよこ」（鍵 color。なし（最初）・あり）: 黄色と茶色のひよこがまざり（茶色は3〜7割）、問題ごとに
+//     「茶色だけ」（4割）・「黄色だけ」（4割）・「ぜんぶ」（2割）のどれを数えるかを出す。数える羽数が0にならないよう、0なら1羽の色を替える。
+//     色はひよこの置き場所・動きとは別の乱数で決める（置き場所・動き・全部の羽数は なし のときと同じ）。絵文字は色を替えられないので、ありのときは Claude が描いたひよこにする。
+//     答えを見せるときは、数えるひよこだけに番号を付け、ほかは薄くする。
+//   - 詳細設定「小屋」（鍵 hut。なし（最初）・あり）: 柵の右下に小屋があり、その後ろを通るひよこは見えなくなる。答えは小屋の中もふくめた数。
+//     ひよこの動きは なし のときと同じ（小屋を上に重ねて描くだけ）。答えを見せるときは小屋を薄くする。問題は変わらないので qKey に入れない。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（抜けた数さがしと同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q, c: 打った数, ms }
 
@@ -33,7 +40,7 @@ export const W = 100;
 export const H = 70;
 
 // 1問を作る。chicks = [{ x, y, vx, vy }]（x・y は 0 秒の位置、vx・vy は1秒に進む長さ）、count = 羽数、size = 字の高さ
-export function makeQuestion(seed, q, level, k) {
+export function makeQuestion(seed, q, level, k, color = false) {
   const rnd = mulberry32((seed * 173 + q * 41 + 11) >>> 0);
   const [lo, hi] = RANGE[level] ?? RANGE.normal;
   const count = lo + Math.floor(rnd() * (hi - lo + 1));
@@ -50,7 +57,40 @@ export function makeQuestion(seed, q, level, k) {
       vy: Math.round(Math.sin(a) * v * 100) / 100,
     };
   });
-  return { count, size, chicks };
+  if (!color) return { count, size, chicks };
+  // 色と何を数えるか（置き場所・動きとは別の乱数）
+  const r2 = mulberry32((seed * 211 + q * 37 + 3) >>> 0);
+  const brown = 0.3 + 0.4 * r2();
+  chicks.forEach((c) => { c.c = r2() < brown ? 1 : 0; });
+  const a = r2();
+  const ask = a < 0.4 ? 'b' : a < 0.8 ? 'y' : 'all';
+  const want = ask === 'b' ? 1 : 0;
+  if (ask !== 'all' && !chicks.some((c) => c.c === want)) chicks[Math.floor(r2() * count)].c = want;
+  const n = ask === 'all' ? count : chicks.filter((c) => c.c === want).length;
+  return { count: n, total: count, size, chicks, ask };
+}
+const counted = (x, c) => !x.ask || x.ask === 'all' || c.c === (x.ask === 'b' ? 1 : 0);
+export const ASK_TEXT = { b: '茶色のひよこは', y: '黄色のひよこは', all: 'ひよこは ぜんぶで' };
+// 小屋（柵の右下。この中を通るひよこは見えない）
+export const HUT = { x: 72, y: 47, w: 26, h: 23 };
+const COLORS = [['#f6d33c', '#dcb21c'], ['#9a6332', '#764a22']]; // [体, 羽]
+
+// Claude が描いたひよこ（左を向く。大きさ1）
+function chickSvg(c) {
+  const [body, wing] = COLORS[c];
+  return `<ellipse cx="0.06" cy="0.12" rx="0.5" ry="0.4" fill="${body}" stroke="rgba(0,0,0,.35)" stroke-width=".04"/>`
+    + `<circle cx="-0.24" cy="-0.24" r="0.27" fill="${body}" stroke="rgba(0,0,0,.35)" stroke-width=".04"/>`
+    + `<ellipse cx="0.14" cy="0.12" rx="0.22" ry="0.15" fill="${wing}"/>`
+    + '<path d="M-0.49,-0.29 L-0.66,-0.22 L-0.48,-0.16 Z" fill="#f08a1c"/>'
+    + '<circle cx="-0.31" cy="-0.3" r="0.05" fill="#222"/>';
+}
+function hutSvg(shown) {
+  const { x, y, w, h } = HUT;
+  return `<g class="hy-hut"${shown ? ' opacity=".3"' : ''}>`
+    + `<rect x="${x}" y="${y}" width="${w}" height="${h + 2}" fill="#c08a52" stroke="#6b4423" stroke-width=".8"/>`
+    + `<path d="M${x - 3},${y + 1} L${x + w / 2},${y - 11} L${x + w + 3},${y + 1} Z" fill="#a8432f" stroke="#6b2a1c" stroke-width=".8"/>`
+    + `<path d="M${x + w / 2 - 5},${y + h + 2} L${x + w / 2 - 5},${y + h - 7} Q${x + w / 2},${y + h - 13} ${x + w / 2 + 5},${y + h - 7} L${x + w / 2 + 5},${y + h + 2} Z" fill="#4a2c16"/>`
+    + '</g>';
 }
 
 // lo〜hi の間を行き来する（跳ね返る）位置と、いま進んでいる向き（+1 / -1）
@@ -70,7 +110,10 @@ export function posAt(x, c, t) {
 const typed = new Map(); // 打ちかけ（qKey + 席 → 文字）。送らない
 let keyHandler = null;
 let keysHooked = false;
-const qKey = (s, q = s.q) => `hiyoko:${s.seed}:${levelOf(s.rules)}:${s.qs.length}:${q}`; // むずかしさと問題の数も入れる（数のきまり当てと同じ理由）
+const OFFON = [['off', 'なし'], ['on', 'あり']];
+export const colorOn = (r) => r.color === 'on';
+const hutOn = (r) => r.hut === 'on';
+const qKey = (s, q = s.q) => `hiyoko:${s.seed}:${levelOf(s.rules)}:${s.qs.length}:${q}${colorOn(s.rules) ? ':color' : ''}`; // むずかしさと問題の数・色ちがいも入れる（どれでも問題が変わるため。数のきまり当てと同じ理由）
 const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice(), miss: s.miss.slice(), said: s.said.slice() });
 const doneOf = (s, p) => s.solved[p] !== null || s.miss[p];
 const limitOf = (s) => LIMITS[levelOf(s.rules)];
@@ -78,14 +121,23 @@ const cpuPlan = new Map();
 const frozen = new Map(); // 問題の鍵 → 答えを見せるときに止めた時刻（ms）
 
 // 柵とひよこ。動いている間は画面の描き替えごとに位置を直す（止める時刻 freeze を渡すと、その時刻で止めて番号を付ける）
-function fieldSvg(x, key, freeze) {
+function fieldSvg(x, key, freeze, hut = false) {
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
   svg.setAttribute('class', 'hy-fig');
   svg.setAttribute('role', 'img');
   svg.setAttribute('aria-label', freeze === null ? '動き回るひよこ' : `ひよこ ${x.count}羽`);
-  const els = x.chicks.map(() => {
+  const drawn = 'ask' in x; // 色ちがいのときは描いたひよこ
+  const els = x.chicks.map((c) => {
+    if (drawn) {
+      const g = document.createElementNS(ns, 'g');
+      g.setAttribute('class', 'hy-c');
+      g.innerHTML = chickSvg(c.c);
+      if (freeze !== null && !counted(x, c)) g.setAttribute('opacity', '.35');
+      svg.append(g);
+      return g;
+    }
     const t = document.createElementNS(ns, 'text');
     t.setAttribute('class', 'hy-c');
     t.setAttribute('font-size', x.size);
@@ -95,16 +147,21 @@ function fieldSvg(x, key, freeze) {
     svg.append(t);
     return t;
   });
+  if (hut) svg.insertAdjacentHTML('beforeend', hutSvg(freeze !== null));
   const place = (sec) => {
     x.chicks.forEach((c, i) => {
       const p = posAt(x, c, sec);
-      // 🐤 は左を向いた絵なので（Windows で確かめた。ほかの端末は未確認）、右へ進むときは左右を返す
-      els[i].setAttribute('transform', `translate(${p.x.toFixed(2)} ${p.y.toFixed(2)})${p.left ? '' : ' scale(-1 1)'}`);
+      // 🐤 は左を向いた絵なので（Windows で確かめた。ほかの端末は未確認）、右へ進むときは左右を返す。描いたひよこも左を向いている
+      if (drawn) els[i].setAttribute('transform', `translate(${p.x.toFixed(2)} ${p.y.toFixed(2)}) scale(${p.left ? x.size : -x.size} ${x.size})`);
+      else els[i].setAttribute('transform', `translate(${p.x.toFixed(2)} ${p.y.toFixed(2)})${p.left ? '' : ' scale(-1 1)'}`);
     });
   };
   if (freeze !== null) {
     place(freeze / 1000);
+    let no = 0;
     x.chicks.forEach((c, i) => {
+      if (!counted(x, c)) return;
+      no += 1;
       const p = posAt(x, c, freeze / 1000);
       const n = document.createElementNS(ns, 'text');
       n.setAttribute('class', 'hy-n');
@@ -112,7 +169,7 @@ function fieldSvg(x, key, freeze) {
       // 番号はひよこの上に出す。柵の上のふちに近いひよこは下に出す（上に出すと柵の外で切れる）
       n.setAttribute('y', (p.y < x.size * 1.2 ? p.y + x.size * 0.85 : p.y - x.size * 0.55).toFixed(2));
       n.setAttribute('text-anchor', 'middle');
-      n.textContent = i + 1;
+      n.textContent = no;
       svg.append(n);
     });
     return svg;
@@ -140,12 +197,14 @@ export default {
   settings: [
     { key: 'level', label: 'むずかしさ', desc: 'ひよこの数', def: 'normal', choices: LEVELS },
     { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 5, choices: ROUNDS },
+    { key: 'color', label: '色ちがいのひよこ', desc: '黄色と茶色のひよこがまざり、問題ごとに「茶色だけ」「黄色だけ」「ぜんぶ」のどれを数えるかが出る', def: 'off', choices: OFFON },
+    { key: 'hut', label: '小屋', desc: '柵のすみに小屋があり、その後ろを通るひよこは見えなくなる。小屋の中のひよこも数える', def: 'off', choices: OFFON },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const r = { rounds: 5, level: 'normal', ...rules };
     const k = roundsOf(r);
-    const qs = Array.from({ length: k }, (_, q) => makeQuestion(seed, q, levelOf(r), k));
+    const qs = Array.from({ length: k }, (_, q) => makeQuestion(seed, q, levelOf(r), k, colorOn(r)));
     return {
       n, seed, rules: r, qs, q: -1, phase: 'ready',
       solved: Array(n).fill(null), miss: Array(n).fill(false), said: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0,
@@ -268,7 +327,7 @@ export default {
     head.className = 'nk-head';
     const ansBox = document.createElement('span');
     ansBox.className = 'sq-n q nk-ans' + (shown ? ' ans' : '');
-    head.append(Object.assign(document.createElement('span'), { textContent: 'ひよこは' }), ansBox, Object.assign(document.createElement('span'), { textContent: '羽' }));
+    head.append(Object.assign(document.createElement('span'), { textContent: x.ask ? ASK_TEXT[x.ask] : 'ひよこは' }), ansBox, Object.assign(document.createElement('span'), { textContent: '羽' }));
     card.append(head);
     // 答えを見せるときは、締め切った時刻あたりで止める（止める時刻は自分の画面に出てからの時間。制限時間より先には進めない）
     // 止める時刻は、答えを見せる場面で最初に描いたときの1回だけ取る（描き直しのたびに取ると、止まったひよこが動いて番号とずれる。2026-11-24 の Codex の点検）
@@ -278,7 +337,7 @@ export default {
       if (frozen.size > 50) frozen.delete(frozen.keys().next().value);
       freeze = frozen.get(key);
     }
-    card.append(fieldSvg(x, key, freeze));
+    card.append(fieldSvg(x, key, freeze, hutOn(s.rules)));
     if (!shown) {
       since(key);
       const anySolved = s.solved.some((v) => v !== null);
@@ -362,7 +421,7 @@ export default {
     else if (shown) note.textContent = mine !== null ? `あなたの答え ${mine}羽${s.solved[me] !== null ? ' ⭕' : ' ❌'}` : '';
     else if (s.solved[me] !== null) note.textContent = `⭕ 正解！（${secText(s.solved[me])}）`;
     else if (s.miss[me]) note.textContent = '❌ ざんねん。次の問題を待とう';
-    else note.textContent = '数を打って「答える」（答えられるのは1回だけ）';
+    else note.textContent = hutOn(s.rules) ? '小屋の中のひよこも数えて「答える」（1回だけ）' : '数を打って「答える」（答えられるのは1回だけ）';
     wrap.append(note);
     if (shown) wrap.append(speedLine(o, s.solved, key)); // 早押しの速さの線（2026-11-17。party.js の speedLine）
     if (canNow()) {
@@ -387,7 +446,7 @@ export default {
       const fast = x.winners.map((p) => (p === me ? 'あなた' : o.names?.[p] ?? ''));
       const mine = me === null ? '' : x.solved[me] !== null ? `⭕ ${secText(x.solved[me])}` : x.said[me] !== null ? `❌ ${x.said[me]}羽` : '―';
       const sp = (t, c = '') => { const e = document.createElement('span'); e.textContent = t; if (c) e.className = c; return e; };
-      li.append(sp(String(q + 1), 'mk-rv-n'), sp(`ひよこは ${g.count}羽`), sp(mine), sp(fast.length ? '⚡' + fast.join('・') : '―', 'mk-rv-who'));
+      li.append(sp(String(q + 1), 'mk-rv-n'), sp(`${g.ask ? ASK_TEXT[g.ask] : 'ひよこは'} ${g.count}羽`), sp(mine), sp(fast.length ? '⚡' + fast.join('・') : '―', 'mk-rv-who'));
       list.append(li);
     });
     box.append(sum, list);

@@ -1,0 +1,99 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "app/fonts",
+    "app/voice",
+    "app/sounds",
+    "tools/test-logic.mjs",
+    "tools/font-chars.json",
+    "tools/font-texts.mjs",
+    "tools/voice-texts.mjs"
+  ],
+  "cwd": "copy",
+  "env": {
+    "QUICK": "1",
+    "SEED": "1"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 300,
+  "breaks": [
+    {
+      "name": "人ごみさがし: 「〜していない」をお題に入れない",
+      "file": "app/js/games/hitogomi.js",
+      "old": "    clue[nk] = 0;",
+      "new": "    void nk;"
+    },
+    {
+      "name": "人ごみさがし: 歩く人が絵の右はしからはみ出す",
+      "file": "app/js/games/hitogomi.js",
+      "old": "bounce(m.x + w.v * sec, 0, W - x.cw)",
+      "new": "bounce(m.x + w.v * sec, 0, W)"
+    },
+    {
+      "name": "ひよこかぞえ: 色ちがいでも全部の羽数を答えにする",
+      "file": "app/js/games/hiyoko.js",
+      "old": "  const n = ask === 'all' ? count : chicks.filter((c) => c.c === want).length;",
+      "new": "  const n = count;"
+    },
+    {
+      "name": "ひよこかぞえ: 数える色が0羽でも直さない",
+      "file": "app/js/games/hiyoko.js",
+      "old": "  if (ask !== 'all' && !chicks.some((c) => c.c === want))",
+      "new": "  if (false && ask !== 'all' && !chicks.some((c) => c.c === want))"
+    },
+    {
+      "name": "イライラ棒: 棒を細くして、まん中でも通れる",
+      "file": "app/js/games/iraira.js",
+      "old": "rb: Math.max(c.w * 0.2, c.w * 0.85 - 2 * c.r)",
+      "new": "rb: c.w * 0.2"
+    },
+    {
+      "name": "イライラ棒: スタートに続く区間にも棒を置く",
+      "file": "app/js/games/iraira.js",
+      "old": "  for (let j = 1; j + 1 < last; j++) can.push(j);",
+      "new": "  for (let j = 0; j + 1 < last; j++) can.push(j);"
+    },
+    {
+      "name": "氷割り: 7×7 でもまん中を12番と見る",
+      "file": "app/js/games/koori.js",
+      "old": "drop: fell.includes(centerOf(ice))",
+      "new": "drop: fell.includes(12)"
+    },
+    {
+      "name": "氷割り: 氷の広さを見ない",
+      "file": "app/js/games/koori.js",
+      "old": "    const side = sizeOf(rules);",
+      "new": "    const side = 5;"
+    },
+    {
+      "name": "音当て: なしでも黒い鍵盤を押せる",
+      "file": "app/js/games/oto.js",
+      "old": "m.c > (blackOn(s0.rules) ? 11 : 6)",
+      "new": "m.c > 11"
+    },
+    {
+      "name": "音当て: 黒い鍵盤もで同じ音が続く",
+      "file": "app/js/games/oto.js",
+      "old": "      if (i > 0 && CHROMA[x] === out[i - 1])",
+      "new": "      if (false && i > 0 && CHROMA[x] === out[i - 1])"
+    },
+    {
+      "name": "かぶったら0点: いちばん大きい人だけでも全員に点",
+      "file": "app/js/games/kaburi.js",
+      "old": "  return pts.map((v) => (v === best ? v : 0));",
+      "new": "  return pts;"
+    }
+  ]
+}

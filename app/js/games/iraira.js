@@ -16,6 +16,14 @@
 //   - 送るのはゴールした時間だけ（道筋を通ったかは確かめない。ほかの早押しと同じく各自の端末で測った ms を信じる）。
 //   - ほかの人の玉の位置は手の一覧に入れず、送りっぱなし（o.stream）。0.2秒より短い間は1回にまとめる。CPU の玉は出さない。
 //   - CPU は 1問目12秒・2問目18秒・3問目25秒を目安に（やさしい0.8倍・むずかしい1.4倍）、その0.6〜1.5倍でゴールする。1割の問題はあきらめる。
+// 2026-11-24 の46回目の案（本人が選んだ。分かれ目は Claude の判断）:
+//   - 詳細設定「動くじゃま」（鍵 bar。なし（最初）・あり）: 道の途中に、道を横切って左右へゆっくり動く棒（1問目1本・2問目2本・3問目3本）を置く。
+//     棒は道の向きに長い丸い棒（長さ ます1つの幅の 0.24）。太さの半分は 道の太さ×0.85 − 玉の直径 で、棒が片側へ寄り切る前後（1往復のおよそ半分の時間）だけ反対側を玉が通れる。
+//     置き場所は道の折れ線の1区間のまん中（いつもまっすぐな所）で、スタート・ゴールのますに続く区間には置かない（4×4 の短い道では旗のとなりの区間しか残らないことがあるので、旗のとなりにも置く）。置き場所と動き始めは道とは別の乱数で決める（道は なし のときと同じ）。
+//     動きは「画面に出てからの時間」だけで決まる（1往復 3.2秒）。棒にさわったら壁と同じく戻る。指でつかんでいる玉に棒が来ても戻る。
+//     指を離して止めている玉には当たらない（旗へ戻った玉に棒が重なると、つかむ前から何度も戻り続けるため。棒が離れてからつかめばよい）。CPU は1.15倍かかる。
+//   - 詳細設定「戻る場所」（鍵 back。途中の旗（最初）・スタート）: 前に本人が承認した「旗まで戻る」を設定で外す案（最初の値は前の決まりのまま）。
+//     スタートのときは旗を出さない（通っても意味がないため）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（迷路早抜けと同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, ms } / { p, t: 'pass', q }
 
@@ -32,6 +40,8 @@ export const GRIDS = [4, 5, 6];
 const LIMITS = [45000, 60000, 75000];
 const CPU_BASE = [12000, 18000, 25000];
 const LEVELS = [['easy', 'やさしい（道が太い）'], ['normal', 'ふつう'], ['hard', 'むずかしい（道が細い）']];
+const barOn = (r) => r.bar === 'on';
+const toStart = (r) => r.back === 'start';
 export const levelOf = (r) => (LEVELS.some(([v]) => v === r.level) ? r.level : 'normal');
 export const WIDTH = { easy: 0.62, normal: 0.5, hard: 0.38 };
 export const BALL = 0.09;
@@ -39,6 +49,8 @@ const GRAB = 0.45;
 const STEP = 0.4;
 export const W = 100;
 const SEND_MS = 200;
+const BAR_PERIOD = 3.2; // 動くじゃまの1往復（秒）
+const BAR_LEN = 0.12; // 棒の半分の長さ（ます1つの幅に対して）
 
 // 迷路の左上から右下への道筋（ますの番号の並び）
 function pathOf(n, rnd) {
@@ -110,6 +122,32 @@ export function distTo(c, x, y) {
 }
 export const hitsWall = (c, x, y) => distTo(c, x, y) > c.w / 2 - c.r;
 
+// 動くじゃまの棒。seg = 置く区間（pts[seg] → pts[seg + 1] のまん中）、ph = 動き始め（0〜1）
+export function barsOf(seed, q, c) {
+  const rnd = mulberry32((seed * 151 + q * 29 + 13) >>> 0);
+  const last = c.pts.length - 1;
+  const can = [];
+  for (let j = 1; j + 1 < last; j++) can.push(j); // スタートとゴールのますに続く区間には置かない
+  for (let i = can.length - 1; i > 0; i--) { const k = Math.floor(rnd() * (i + 1)); [can[i], can[k]] = [can[k], can[i]]; }
+  return can.slice(0, q + 1).sort((a, b) => a - b).map((seg) => ({ seg, ph: Math.round(rnd() * 100) / 100 }));
+}
+// 棒の位置: 中心（cx, cy）・道の向き（dx, dy。長さ1）・太さの半分 rb
+export function barAt(c, b, sec) {
+  const [ax, ay] = c.pts[b.seg], [bx, by] = c.pts[b.seg + 1];
+  const dx = (bx - ax) / c.u, dy = (by - ay) / c.u;
+  const off = (c.w / 2) * Math.sin(2 * Math.PI * (sec / BAR_PERIOD + b.ph));
+  return { cx: (ax + bx) / 2 - dy * off, cy: (ay + by) / 2 + dx * off, dx, dy, rb: Math.max(c.w * 0.2, c.w * 0.85 - 2 * c.r) };
+}
+// 玉（中心 x, y）が棒にさわっているか
+export function hitsBar(c, bars, x, y, sec) {
+  return bars.some((b) => {
+    const p = barAt(c, b, sec);
+    const h = c.u * BAR_LEN;
+    const t = Math.max(-h, Math.min(h, (x - p.cx) * p.dx + (y - p.cy) * p.dy));
+    return Math.hypot(x - p.cx - t * p.dx, y - p.cy - t * p.dy) < p.rb + c.r;
+  });
+}
+
 const qKey = (s, q = s.q) => `iraira:${s.seed}:${levelOf(s.rules)}:${q}`;
 const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice(), passed: s.passed.slice() });
 const doneOf = (s, p) => s.solved[p] !== null || s.passed[p];
@@ -133,6 +171,8 @@ export default {
   maxPlayers: 10,
   settings: [
     { key: 'level', label: 'むずかしさ', desc: '道の太さ。細いほど壁にさわりやすい', def: 'normal', choices: LEVELS },
+    { key: 'bar', label: '動くじゃま', desc: '道の途中に、道を横切って左右へ動く棒がある。棒が片側へ寄ったすきに通る', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
+    { key: 'back', label: '戻る場所', desc: '壁にさわったときに戻る所。スタートにすると途中の旗が無くなる', def: 'flag', choices: [['flag', '途中の旗'], ['start', 'スタート']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -212,7 +252,7 @@ export default {
     const key = qKey(s) + ':' + p;
     let plan = cpuPlan.get(key);
     if (!plan) {
-      const lv = { easy: 0.8, normal: 1, hard: 1.4 }[levelOf(s.rules)];
+      const lv = { easy: 0.8, normal: 1, hard: 1.4 }[levelOf(s.rules)] * (barOn(s.rules) ? 1.15 : 1);
       plan = { at: Math.min(limitOf(s) * 0.9, CPU_BASE[s.q] * lv * (0.6 + Math.random() * 0.9)), ok: Math.random() < 0.9, done: false };
       cpuPlan.set(key, plan);
       if (cpuPlan.size > 200) cpuPlan.delete(cpuPlan.keys().next().value);
@@ -266,7 +306,7 @@ export default {
     card.className = 'kj-card';
     wrap.append(card);
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">玉を引っぱって 🏁 へ。壁にさわったら 🚩 まで戻る・全${s.qs.length}問</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">玉を引っぱって 🏁 へ。壁にさわったら ${toStart(s.rules) ? 'スタート' : '🚩'} まで戻る・全${s.qs.length}問</div>`;
       return;
     }
     const key = qKey(s);
@@ -300,6 +340,8 @@ export default {
     loc.grab = false; // 作り直した道では、もう一度玉に触れてから動かす
     const playing = s.phase === 'open' && me !== null && o.canMove && !doneOf(s, me) && !loc.sent;
     const ns = 'http://www.w3.org/2000/svg';
+    const bars = barOn(s.rules) ? barsOf(s.seed, s.q, c) : [];
+    const flags = toStart(s.rules) ? [] : c.cps;
     const svg = document.createElementNS(ns, 'svg');
     svg.setAttribute('viewBox', `0 0 ${W} ${W}`);
     svg.setAttribute('class', 'irb-fig' + (playing ? ' live' : ''));
@@ -309,11 +351,13 @@ export default {
       + `<path class="irb-edge" d="${d}" stroke-width="${(c.w + 1.2).toFixed(2)}"/>`
       + `<path class="irb-road" d="${d}" stroke-width="${c.w.toFixed(2)}"/>`
       + `<circle class="irb-start" cx="${sx}" cy="${sy}" r="${(c.w * 0.42).toFixed(2)}"/>`
-      + c.cps.map((i) => flag(c.pts[i][0], c.pts[i][1], '🚩', 'irb-cp')).join('')
+      + flags.map((i) => flag(c.pts[i][0], c.pts[i][1], '🚩', 'irb-cp')).join('')
+      + bars.map(() => `<line class="irb-bar" stroke-width="${(c.w / 2).toFixed(2)}"/>`).join('')
       + flag(gx, gy, '🏁', 'irb-goal')
       + '<g class="irb-others"></g>'
       + `<circle class="irb-ball" r="${c.r.toFixed(2)}"/>`;
     const ball = svg.querySelector('.irb-ball');
+    const barEls = [...svg.querySelectorAll('.irb-bar')];
     const othersG = svg.querySelector('.irb-others');
     if (me !== null) ball.setAttribute('fill', SEAT_COLORS[me % SEAT_COLORS.length]);
     else ball.style.display = 'none';
@@ -368,7 +412,7 @@ export default {
     const crash = () => {
       loc.hits += 1;
       loc.grab = false;
-      const back = loc.cp >= 0 ? c.pts[c.cps[loc.cp]] : c.pts[0];
+      const back = loc.cp >= 0 && flags.length ? c.pts[c.cps[loc.cp]] : c.pts[0];
       loc.x = back[0];
       loc.y = back[1];
       svg.classList.remove('crash');
@@ -383,7 +427,7 @@ export default {
       const x0 = loc.x, y0 = loc.y;
       for (let i = 1; i <= k; i++) {
         const x = x0 + ((tx - x0) * i) / k, y = y0 + ((ty - y0) * i) / k;
-        if (hitsWall(c, x, y)) { crash(); return; }
+        if (hitsWall(c, x, y) || (bars.length && hitsBar(c, bars, x, y, since(key) / 1000))) { crash(); return; }
         loc.x = x;
         loc.y = y;
         c.cps.forEach((pi, j) => { if (j > loc.cp && near(x, y, ...c.pts[pi])) loc.cp = j; });
@@ -417,6 +461,25 @@ export default {
       const stop = (e) => { if (loc.grab && e.pointerId === loc.pid) { loc.grab = false; paintBall(); } };
       svg.addEventListener('pointerup', stop);
       svg.addEventListener('pointercancel', stop);
+    }
+    // 動くじゃまの棒を描き替えごとに動かす。つかんでいる玉に棒が来たら戻る（止めている玉には当たらない）
+    if (bars.length) {
+      const tick = () => {
+        if (!svg.isConnected && svg.dataset.on) return;
+        svg.dataset.on = '1';
+        const sec = since(key) / 1000;
+        bars.forEach((b, i) => {
+          const p = barAt(c, b, sec);
+          const h = c.u * BAR_LEN;
+          barEls[i].setAttribute('x1', (p.cx - p.dx * h).toFixed(2));
+          barEls[i].setAttribute('y1', (p.cy - p.dy * h).toFixed(2));
+          barEls[i].setAttribute('x2', (p.cx + p.dx * h).toFixed(2));
+          barEls[i].setAttribute('y2', (p.cy + p.dy * h).toFixed(2));
+        });
+        if (playing && loc.grab && !loc.sent && since(key) < limit && hitsBar(c, bars, loc.x, loc.y, sec)) { crash(); paintBall(); }
+        requestAnimationFrame(tick);
+      };
+      tick();
     }
     card.append(svg);
     wrap.append(note);

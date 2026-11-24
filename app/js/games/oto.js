@@ -2,7 +2,7 @@
 // 2026-11-20 本人の決定（Claude が出した案「音の高さくらべ」を、本人が「ドレミファソラシからどの音かあてる」に変えて選んだ。分かれ目はすべて Claude の推奨を本人が承認「推奨どおりで」）:
 //   - 7つのボタン（ド〜シ）から1つ押す。1問に1回だけ。正解した速い順に 3・2・1点。10問（詳細設定で 5・20問）。
 //   - 問題の音の前に、手がかりの「ド」を鳴らす。詳細設定「手がかり」で「ドを鳴らさない（むずかしい）」も選べる（鍵は level）。
-//   - 音は白い鍵盤の1オクターブ（ド=C4〜シ=B4）だけ。黒い鍵盤の音は出さない。問題の音は2回続けて鳴らす。
+//   - 音は白い鍵盤の1オクターブ（ド=C4〜シ=B4）だけ。黒い鍵盤の音は出さない（2026-11-24 から詳細設定「黒い鍵盤も」で出せる。下）。問題の音は2回続けて鳴らす。
 //   - 音色は Claude がプログラムで作る（tools/make-notes.mjs → app/sounds/o_<do|re|mi|fa|so|ra|si>.wav）。音色はピアノ風（`node tools/make-notes.mjs piano`。2026-11-23 に本人が試聴して選んだ）。
 // Claude の判断:
 //   - 鳴らす時刻（問題が出てからの ms）: 手がかりありは ド 0.3秒 → 問題の音 1.5秒・2.5秒、なしは問題の音 0.3秒・1.3秒。
@@ -11,16 +11,26 @@
 //   - 問題の音は種と何問目かからくじで決める（全員同じ）。前の問題と同じ音は続けない。
 //   - CPU は押せるようになってから 1.5〜6秒で答え、5割当てる。外すときは正しい音のとなりの音を押す（聞きまちがいらしく）。
 //   - 音を消している人には「🔇 音が消えています」と出す（リズムまねの「耳だけ」と同じ）。
+// 2026-11-24 の46回目の案（本人が選んだ。分かれ目は Claude の判断）:
+//   - 詳細設定「黒い鍵盤も」（鍵 black。なし（最初）・あり）: ド♯・レ♯・ファ♯・ソ♯・ラ♯（C#4〜A#4）も問題に出て、12の音から当てる。
+//     鍵盤は本物と同じく白い鍵盤の間の上に黒い鍵盤を重ねる。音は `node tools/make-notes.mjs piano app/sounds --black` で作ったピアノ風（白い鍵盤と同じ式）。
+//     音の番号は 0〜6 が ド〜シ のまま、7〜11 が ド♯〜ラ♯（なしのときの問題と手は前と全く同じ）。ありのときは12の音から同じくじ（前と同じ音は続けない）で、別の乱数を使う。
+//     手がかりの「ド」はそのまま。CPU の外し方は、鍵盤で となりの音（黒い鍵盤もふくめて半音となり）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（なぞなぞ早押しと同じ）
-// 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q, c: 0〜6（ド〜シ）, ms }
+// 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q, c: 0〜6（ド〜シ）・7〜11（ド♯〜ラ♯。黒い鍵盤もありのとき）, ms }
 
 import { mulberry32, esc } from './util.js';
 import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText, speedLine } from './party.js';
 import { pointsOf } from './make10.js';
 import { play, isMuted, wantSounds } from '../sound.js';
 
-export const NOTE_NAMES = ['ド', 'レ', 'ミ', 'ファ', 'ソ', 'ラ', 'シ'];
+export const NOTE_NAMES = ['ド', 'レ', 'ミ', 'ファ', 'ソ', 'ラ', 'シ', 'ド♯', 'レ♯', 'ファ♯', 'ソ♯', 'ラ♯'];
 export const NOTE_FILES = ['o_do', 'o_re', 'o_mi', 'o_fa', 'o_so', 'o_ra', 'o_si'];
+export const BLACK_FILES = ['o_dos', 'o_res', 'o_fas', 'o_sos', 'o_ras'];
+const ALL_FILES = [...NOTE_FILES, ...BLACK_FILES];
+export const CHROMA = [0, 7, 1, 8, 2, 3, 9, 4, 10, 5, 11, 6]; // 低い順（ド ド♯ レ レ♯ ミ ファ ファ♯ ソ ソ♯ ラ ラ♯ シ）の音の番号
+const BLACK_AT = [1, 2, 4, 5, 6]; // 黒い鍵盤（7〜11）が、左から何番目の白い鍵盤の左ふちに乗るか
+export const blackOn = (r) => r.black === 'on';
 const ROUNDS = [[10, '10問'], [5, '5問'], [20, '20問']];
 const LEVELS = [['mid', 'ドを鳴らしてから'], ['hard', 'ドを鳴らさない（むずかしい）']];
 const roundsOf = (r) => (ROUNDS.some(([v]) => v === r.rounds) ? r.rounds : 10);
@@ -34,12 +44,23 @@ export const timesOf = (level) => (level === 'hard' ? { ref: null, q: [300, 1300
 export const askOf = (s) => timesOf(s.rules.level).q[0]; // 押せるようになる時刻
 const limitOf = (s) => askOf(s) + ANSWER_MS;
 
-const qKey = (s, q = s.q) => `oto:${s.seed}:${s.rules.level}:${q}`; // 手がかりの有無で鳴らす時刻が変わるので鍵に入れる（数のきまり当ての qKey と同じ理由）
+const qKey = (s, q = s.q) => `oto:${s.seed}:${s.rules.level}:${q}${blackOn(s.rules) ? ':b' : ''}`; // 手がかりの有無で鳴らす時刻が変わるので鍵に入れる（数のきまり当ての qKey と同じ理由）。黒い鍵盤もでは問題が変わるので入れる
 const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice(), miss: s.miss.slice(), said: s.said.slice() });
 const doneOf = (s, p) => s.solved[p] !== null || s.miss[p];
 
 // 全部の問題の音（0〜6）。種から作るので全員同じ。前の問題と同じ音は続けない
-export function notesOf(seed, n) {
+export function notesOf(seed, n, black = false) {
+  if (black) {
+    // 12の音から（なしのときとは別の乱数）
+    const rnd = mulberry32((seed * 149 + 19) >>> 0);
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      let x = Math.floor(rnd() * 12);
+      if (i > 0 && CHROMA[x] === out[i - 1]) x = (x + 1 + Math.floor(rnd() * 11)) % 12;
+      out.push(CHROMA[x]);
+    }
+    return out;
+  }
   const rnd = mulberry32((seed * 131 + 7) >>> 0);
   const out = [];
   for (let i = 0; i < n; i++) {
@@ -62,7 +83,7 @@ function ring(key, plan, qkey = key) {
   const t0 = since(key);
   for (const [at, note] of plan) {
     if (at < t0 - 50) continue;
-    setTimeout(() => { if (live.wrap?.isConnected && live.key === qkey) play(NOTE_FILES[note]); }, Math.max(0, at - t0));
+    setTimeout(() => { if (live.wrap?.isConnected && live.key === qkey) play(ALL_FILES[note]); }, Math.max(0, at - t0));
   }
 }
 const cpuPlan = new Map();
@@ -80,13 +101,14 @@ export default {
   settings: [
     { key: 'rounds', label: '問題の数', desc: '1回の対局で出る問題の数', def: 10, choices: ROUNDS },
     { key: 'level', label: '手がかり', desc: '問題の音の前に「ド」を鳴らすか。鳴らさないと、音だけで当てる', def: 'mid', choices: LEVELS },
+    { key: 'black', label: '黒い鍵盤も', desc: 'ド♯・レ♯・ファ♯・ソ♯・ラ♯ も出て、12の音から当てる（むずかしい）', def: 'off', choices: [['off', 'なし'], ['on', 'あり']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
     const r = { rounds: 10, level: 'mid', ...rules };
     if (!LEVELS.some(([v]) => v === r.level)) r.level = 'mid';
     return {
-      n, seed, rules: r, notes: notesOf(seed, roundsOf(r)), q: -1, phase: 'ready',
+      n, seed, rules: r, notes: notesOf(seed, roundsOf(r), blackOn(r)), q: -1, phase: 'ready',
       solved: Array(n).fill(null), miss: Array(n).fill(false), said: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0,
     };
   },
@@ -146,7 +168,7 @@ export default {
       return null;
     }
     if (m.t !== 'ans' || s0.phase !== 'open' || m.q !== s0.q || !Number.isInteger(m.p) || m.p < 0 || m.p >= s0.n || doneOf(s0, m.p)) return null;
-    if (!Number.isInteger(m.c) || m.c < 0 || m.c > 6) return null;
+    if (!Number.isInteger(m.c) || m.c < 0 || m.c > (blackOn(s0.rules) ? 11 : 6)) return null;
     if (typeof m.ms !== 'number' || !(m.ms >= askOf(s0)) || m.ms > limitOf(s0) + 300) return null;
     const s = clone(s0);
     s.step += 1;
@@ -163,7 +185,9 @@ export default {
     let plan = cpuPlan.get(key);
     if (!plan) {
       const right = s.notes[s.q];
-      const near = [right - 1, right + 1].filter((x) => x >= 0 && x <= 6);
+      const near = blackOn(s.rules)
+        ? [CHROMA.indexOf(right) - 1, CHROMA.indexOf(right) + 1].filter((x) => x >= 0 && x < 12).map((x) => CHROMA[x])
+        : [right - 1, right + 1].filter((x) => x >= 0 && x <= 6);
       plan = { at: askOf(s) + 1500 + Math.random() * 4500, c: Math.random() < 0.5 ? right : near[Math.floor(Math.random() * near.length)] };
       cpuPlan.set(key, plan);
       if (cpuPlan.size > 300) cpuPlan.delete(cpuPlan.keys().next().value);
@@ -173,7 +197,7 @@ export default {
   },
 
   render(root, s, o) {
-    wantSounds(NOTE_FILES);
+    wantSounds(blackOn(s.rules) ? ALL_FILES : NOTE_FILES);
     const me = o.me >= 0 && !o.watching ? o.me : null;
     const won = s.phase === 'end' ? leaders(s.scores) : [];
     const extra = (p) => {
@@ -249,14 +273,16 @@ export default {
     const canNow = s.phase === 'open' && me !== null && o.canMove && !doneOf(s, me) && t < limitOf(s);
     const open = canNow && t >= askOf(s);
     const keys = document.createElement('div');
-    keys.className = 'ot-keys';
+    const black = blackOn(s.rules);
+    keys.className = 'ot-keys' + (black ? ' blk' : '');
     const mine = me !== null ? s.said[me] : null;
-    const btns = NOTE_NAMES.map((nm, c) => {
+    const btns = NOTE_NAMES.slice(0, black ? 12 : 7).map((nm, c) => {
       const b = document.createElement('button');
       b.type = 'button';
       const ok = c === right && (shown || mine === c);
       const ng = c === mine && c !== right;
-      b.className = 'ot-key' + (ok ? ' ok' : ng ? ' ng' : !canNow ? ' off' : '');
+      b.className = 'ot-key' + (c >= 7 ? ' bk' : '') + (ok ? ' ok' : ng ? ' ng' : !canNow ? ' off' : '');
+      if (c >= 7) b.style.left = `${(BLACK_AT[c - 7] / 7) * 100}%`; // 白い鍵盤の間の上に重ねる
       b.innerHTML = `<span>${nm}</span>`;
       b.disabled = !open;
       const hit = (e) => {

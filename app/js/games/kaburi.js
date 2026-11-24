@@ -12,6 +12,9 @@
 // 2026-11-02 の32回目の案（本人がおすすめどおり選んだ。分かれ目は Claude の判断）: 詳細設定「前と同じ数字」（出せる（最初）・出せない。鍵は norepeat）。
 //   出せないでは、前の回に自分が決めた数字をその回は選べない（ボタンを押せなくして 🚫 を付ける。前の回に決めなかった人は全部選べる）。CPU もよける。
 //   前の回の数字は局面の log から取るので、局面の形は「出せる」のときと同じ。
+// 2026-11-24 の46回目の案（本人が選んだ。分かれ目は Claude の判断）: 詳細設定「点をもらう人」（かぶらなかった全員（最初）・いちばん大きい人だけ。鍵は top）。
+//   いちばん大きい人だけでは、かぶらなかった数字のうちいちばん大きい数字を出した1人だけがその数の点をもらい、ほかは0点。かぶらなかった人がいなければだれも点なし。
+//   局面の形は「全員」のときと同じ（点の数え方だけが変わる）。見せる場面では、かぶらなかったが小さかった数字に「届かず 0点」と出す。CPU の選び方は変えない。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next … → end
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'pick', r: 何回目（0 から）, v: 数字 }
 //   r が今の回と同じで、その人がまだ決めていないときだけ受け付けるので、同じ手が2回届いても2回目は反則になる。
@@ -26,9 +29,12 @@ const READY_MS = 3000;
 const SHOWN_MS = 3500;
 const GRACE_MS = 800;
 
-// 1回ぶんの点: かぶらなかった数字だけがその数の点。決めなかった人（null）は0点
-export function scoreRound(picks) {
-  return picks.map((v) => (v !== null && picks.filter((w) => w === v).length === 1 ? v : 0));
+// 1回ぶんの点: かぶらなかった数字だけがその数の点。決めなかった人（null）は0点。top のときは、かぶらなかった中でいちばん大きい数字の人だけ
+export function scoreRound(picks, top = false) {
+  const pts = picks.map((v) => (v !== null && picks.filter((w) => w === v).length === 1 ? v : 0));
+  if (!top) return pts;
+  const best = Math.max(0, ...pts);
+  return pts.map((v) => (v === best ? v : 0));
 }
 
 // その回に選べない数字（「前と同じ数字」が出せないのときの、前の回に自分が決めた数字）。無ければ null
@@ -55,6 +61,7 @@ export default {
   settings: [
     { key: 'rounds', label: '回数', desc: '1回の対局で数字を出す回数', def: 8, choices: ROUNDS },
     { key: 'norepeat', label: '前と同じ数字', desc: '出せないにすると、前の回に自分が出した数字はその回に選べない', def: false, choices: [[false, '出せる'], [true, '出せない']] },
+    { key: 'top', label: '点をもらう人', desc: 'いちばん大きい人だけにすると、かぶらなかった数字のうちいちばん大きい数字を出した1人だけが点をもらう', def: false, choices: [[false, 'かぶらなかった全員'], [true, 'いちばん大きい人だけ']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -107,7 +114,7 @@ export default {
         const s = clone(s0);
         s.step += 1;
         s.phase = 'shown';
-        const pts = scoreRound(s.picks);
+        const pts = scoreRound(s.picks, !!s.rules.top);
         pts.forEach((v, p) => { s.scores[p] += v; });
         s.last = { pts };
         s.log = [...s0.log, { picks: s.picks.slice(), pts }];
@@ -149,7 +156,8 @@ export default {
       if (s.phase !== 'shown' || !s.last) return '';
       const v = s.picks[p];
       if (v === null) return '<span class="pt-ng flip-after">―</span>';
-      return s.last.pts[p] ? `<span class="pt-ok flip-after">${v} → +${v}</span>` : `<span class="pt-ng flip-after">${v} かぶり</span>`; // 札が返ってから出す（一斉に裏返す。2026-11-16）
+      if (s.last.pts[p]) return `<span class="pt-ok flip-after">${v} → +${v}</span>`;
+      return `<span class="pt-ng flip-after">${v} ${s.picks.filter((x) => x === v).length > 1 ? 'かぶり' : '届かず'}</span>`; // 札が返ってから出す（一斉に裏返す。2026-11-16）
     };
     root.innerHTML = '';
     root.className = 'board kj kb';
@@ -162,7 +170,7 @@ export default {
     card.className = 'kj-card';
     wrap.append(card);
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">1〜${s.max} から1つ選ぼう。ほかの人とかぶらなければ、その数が点・全${s.total}回${s.rules.norepeat ? '・前の回と同じ数字は出せない' : ''}</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">1〜${s.max} から1つ選ぼう。${s.rules.top ? 'かぶらなかった中でいちばん大きい人だけ、その数が点' : 'ほかの人とかぶらなければ、その数が点'}・全${s.total}回${s.rules.norepeat ? '・前の回と同じ数字は出せない' : ''}</div>`;
       return;
     }
     const key = rKey(s);
@@ -238,7 +246,8 @@ export default {
       const who = s.picks.map((x, p) => (x === v ? p : -1)).filter((p) => p >= 0);
       if (!who.length) continue;
       const row = document.createElement('div');
-      row.className = 'kb-row' + (who.length > 1 ? ' hit' : ' ok');
+      const got = s.last?.pts[who[0]] > 0;
+      row.className = 'kb-row' + (who.length > 1 ? ' hit' : got ? ' ok' : ' low');
       const num = document.createElement('span');
       num.className = 'kb-v';
       num.textContent = String(v);
@@ -247,7 +256,7 @@ export default {
       names.textContent = who.map((p) => (p === me ? 'あなた' : o.names[p])).join('・');
       const tag = document.createElement('span');
       tag.className = 'kb-tag';
-      tag.textContent = who.length > 1 ? 'かぶり 0点' : `+${v}点`;
+      tag.textContent = who.length > 1 ? 'かぶり 0点' : got ? `+${v}点` : '届かず 0点';
       row.append(num, names, tag);
       box.append(row);
     }
