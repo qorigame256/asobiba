@@ -13437,4 +13437,84 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('net OK');
 }
 
+// かべ置きレース（2026-11-25。kabe.js）
+{
+  const KB = GAMES.kabe;
+  const { seatPoints } = await import('../app/js/games/index.js');
+  // 9×9 の2人: マス = 段*9+列。壁 = 81 + 向き*64 + 段*8+列（よこ 0・たて 1）
+  const H = (r, c) => 81 + r * 8 + c;
+  const V = (r, c) => 81 + 64 + r * 8 + c;
+  let s = KB.init({ rules: {} });
+  assert.deepEqual([s.pos, s.left, s.turn], [[76, 4], [10, 10], 0], 'かべ置きレース: 2人は下と上のまん中から・壁10枚ずつ');
+  assert.equal(KB.apply(s, 75 - 9), null, 'かべ置きレース: ななめには動けない');
+  assert.equal(KB.apply(s, 58), null, 'かべ置きレース: 2マスは動けない');
+  s = KB.apply(s, 67);
+  assert.deepEqual([s.pos[0], s.turn], [67, 1], 'かべ置きレース: 1マス上へ動いて交代');
+  // 飛び越し: 赤 (4,4)・青 (3,4)。赤の番
+  let j = { ...KB.init({ rules: {} }), pos: [40, 31] };
+  assert.ok(KB.apply(j, 22), 'かべ置きレース: 前の丸を飛び越せる');
+  assert.equal(KB.apply(j, 31), null, 'かべ置きレース: 丸のいるマスには入れない');
+  assert.equal(KB.apply(j, 30), null, 'かべ置きレース: まっすぐ飛び越せるときはななめに移れない');
+  j = KB.apply(j, H(2, 4)); // 青の後ろ（2段と3段の間の4・5列）に赤が壁を置く
+  j = { ...j, turn: 0 };
+  assert.equal(KB.apply(j, 22), null, 'かべ置きレース: 飛び越す先が壁なら飛び越せない');
+  assert.ok(KB.apply(j, 30) && KB.apply(j, 32), 'かべ置きレース: 飛び越せないときはその丸の左右へ移れる');
+  const edge = { ...KB.init({ rules: {} }), pos: [9 + 4, 4] }; // 青が上の辺にいて、その後ろは盤の外
+  assert.ok(KB.apply(edge, 3) && KB.apply(edge, 5) && !KB.apply(edge, 4), 'かべ置きレース: 飛び越す先が盤の外ならその丸の左右へ');
+  // 壁: 壁でふさいだ向きには動けない・重なる／十字に交わる置き方はできない・数が減る
+  let w = KB.apply(KB.init({ rules: {} }), H(7, 3)); // 7段と8段の間の3・4列（赤の丸の上）
+  assert.deepEqual(w.left, [9, 10], 'かべ置きレース: 壁を置くと1枚減る');
+  w = { ...w, turn: 0 };
+  assert.equal(KB.apply(w, 67), null, 'かべ置きレース: 壁の向こうへは動けない');
+  assert.equal(KB.apply(w, H(7, 4)), null, 'かべ置きレース: よこの壁は半分重ねられない');
+  assert.equal(KB.apply(w, H(7, 3)), null, 'かべ置きレース: 同じ所に2枚は置けない');
+  assert.equal(KB.apply(w, V(7, 3)), null, 'かべ置きレース: 十字に交わる壁は置けない');
+  assert.ok(KB.apply(w, H(7, 5)), 'かべ置きレース: となりに並べるのは置ける');
+  assert.ok(KB.apply(w, V(6, 3)), 'かべ置きレース: 端どうしが触れるたての壁は置ける');
+  assert.equal(KB.apply({ ...w, left: [0, 10] }, H(0, 0)), null, 'かべ置きレース: 壁が残っていなければ置けない');
+  // 道を全部ふさぐ壁は置けない（7×7。青（上のまん中）を 0〜1段・0〜5列に閉じこめる形の最後の1枚）
+  const S7 = KB.init({ rules: { size: 7 } });
+  assert.deepEqual([S7.pos, S7.left], [[45, 3], [6, 6]], 'かべ置きレース: 7×7 の2人は壁6枚ずつ');
+  const walls = S7.walls.slice();
+  for (const k of [1 * 6 + 0, 1 * 6 + 2, 1 * 6 + 4]) walls[k] = 1; // よこの壁 (1,0)(1,2)(1,4): 1段と2段の間の0〜5列
+  const closed = { ...S7, walls };
+  assert.equal(KB.apply(closed, 49 + 36 + 0 * 6 + 5), null, 'かべ置きレース: 道を全部ふさぐ壁は置けない');
+  const open = { ...S7, walls: walls.map((v, k) => (k === 10 ? 0 : v)) }; // (1,4) を外すと 4・5列が空く
+  assert.ok(KB.apply(open, 49 + 36 + 0 * 6 + 5), 'かべ置きレース: 道が残るなら同じ壁を置ける');
+  // 勝ち: 向かいの辺に着いたら
+  const g = KB.apply({ ...KB.init({ rules: {} }), pos: [13, 76] }, 4);
+  assert.deepEqual([KB.result(g)?.winner, KB.apply(g, 76 - 9)], [0, null], 'かべ置きレース: 向かいの辺に着いたら勝ち・そのあとは打てない');
+  // 3〜4人: 辺・壁の数・順番・順位
+  const s3 = KB.init({ rules: { players: 3 } });
+  assert.deepEqual([s3.sides, s3.left, s3.pos], [['B', 'R', 'L'], [7, 7, 7], [76, 44, 36]], 'かべ置きレース: 3人は下・右・左から・壁7枚ずつ');
+  const s4 = KB.init({ rules: { players: 4, size: 7 } });
+  assert.deepEqual([s4.sides, s4.left, KB.seatCount({ players: 4 })], [['B', 'R', 'T', 'L'], [3, 3, 3, 3], 4], 'かべ置きレース: 4人は4つの辺から・7×7 は壁3枚ずつ');
+  let t4 = KB.init({ rules: { players: 4 } });
+  const order = [];
+  for (let k = 0; k < 5; k++) { order.push(t4.turn); t4 = KB.apply(t4, KB.cpu(t4, t4.turn, { cpu: 'weak' })); } // CPU の手で進める（順番が違っても反則にならず、下の確認まで届く）
+  assert.deepEqual(order, [0, 1, 2, 3, 0], 'かべ置きレース: 4人は 下 → 右 → 上 → 左 の順');
+  // 4人: 飛び越す先にほかの丸がいるときは、その丸の左右へ
+  const crowd = { ...KB.init({ rules: { players: 4 } }), pos: [40, 31, 22, 0] };
+  assert.ok(!KB.apply(crowd, 22) && KB.apply(crowd, 30) && KB.apply(crowd, 32), 'かべ置きレース: 飛び越す先に丸がいれば左右へ');
+  const end4 = KB.apply({ ...KB.init({ rules: { players: 4 } }), pos: [13, 44, 20, 37] }, 4); // ゴールまで 青8・緑6・紫7
+  assert.deepEqual(KB.result(end4).place, [1, 4, 2, 3], 'かべ置きレース: 4人の順位はゴールした人が1位、ほかはゴールまでの近さの順');
+  assert.deepEqual(seatPoints(KB.result(end4), 4), [3, 0, 2, 1], 'かべ置きレース: 4人の成績表は順位で点');
+  // CPU どうしで最後まで（反則を出さない・道がいつも残る）
+  for (const [rules, n] of [[{}, 2], [{ size: 7 }, 2], [{ players: 3 }, 3], [{ players: 4 }, 4], [{ players: 4, size: 7 }, 4]]) {
+    for (let k = 0; k < quick(4, 1); k++) {
+      let x = KB.init({ rules });
+      for (let i = 0; !KB.result(x); i++) {
+        const p = KB.turn(x);
+        const m = KB.cpu(x, p, { ...rules, cpu: ['weak', 'normal', 'strong'][(p + k) % 3] });
+        const nx = KB.apply(x, m);
+        assert.ok(nx, `かべ置きレース: CPU が反則の手 ${m} を出した（${JSON.stringify(rules)}）`);
+        x = nx;
+        assert.ok(i < 700, 'かべ置きレース: 終わらない');
+      }
+      assert.ok(x.left.every((v) => v >= 0) && n === x.pos.length, 'かべ置きレース: 壁の数が負にならない');
+    }
+  }
+  console.log('kabe OK');
+}
+
 console.log(QUICK ? 'QUICK OK（軽い流し方。コミットの前は QUICK を付けずに全部を流す）' : 'ALL OK');

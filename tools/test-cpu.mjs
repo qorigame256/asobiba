@@ -236,7 +236,9 @@ for (const [g, sn, nn] of [[C, 20, 26], [R, 12, 20], [RS, 16, 24], [RC, 12, 20],
     // 3人（2026-10-30）。200〜300局の実測で、強い方の勝ち／弱い2人の勝ち: 五目並べ（4つ並べ）ふつう 28%／35%・つよい 30%／34%（引き分けが多く差が小さいので多め）、
     // 立体四目 72%／24%・つよい 82%／14%（重力なし 66%／11%・75%／5%）、はさみ将棋 70%／30%・つよい 100%／0%（7×7 もほぼ同じ）
     [G, { players: 3 }, 3, [480, 300], 'gomoku-3'], [GAMES.cube4, { players: 3 }, 3, 30, 'cube4-3'], [GAMES.cube4, { players: 3, free: true }, 3, 30, 'cube4-3-free'],
-    [GAMES.hasami, { players: 3 }, 3, 30, 'hasami-3'], [GAMES.hasami, { players: 3, size: 7 }, 3, 30, 'hasami-3-7']]) {
+    [GAMES.hasami, { players: 3 }, 3, 30, 'hasami-3'], [GAMES.hasami, { players: 3, size: 7 }, 3, 30, 'hasami-3-7'],
+    // かべ置きレース（2026-11-25）。120局の実測で強い方の勝ち: 2人 ふつう-よわい 78%・つよい-ふつう 82%（7×7 は 77%・78%）、3人 84%・88%、4人 52%・60%（4人の勝ち越しの線は約27%）
+    [GAMES.kabe, {}, 2, 30, 'kabe'], [GAMES.kabe, { size: 7 }, 2, 30, 'kabe-7'], [GAMES.kabe, { players: 3 }, 3, 30, 'kabe-3'], [GAMES.kabe, { players: 4 }, 4, 40, 'kabe-4']]) {
     // 3人以上の点と線は、つよいとふつうの差が小さい（適当に引く1割だけ）ので、よわいとの差だけを見る
     for (const [i, [a, b]] of (n === 2 ? [['normal', 'weak'], ['strong', 'normal']] : [['normal', 'weak'], ['strong', 'weak']]).entries()) {
       const games = Array.isArray(counts) ? counts[i] : counts;

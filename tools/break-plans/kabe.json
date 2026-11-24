@@ -1,0 +1,89 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "app/fonts",
+    "app/voice",
+    "app/sounds",
+    "tools/test-logic.mjs",
+    "tools/font-chars.json",
+    "tools/font-texts.mjs",
+    "tools/voice-texts.mjs"
+  ],
+  "cwd": "copy",
+  "env": {
+    "QUICK": "1",
+    "SEED": "1"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 300,
+  "breaks": [
+    {
+      "name": "かべ置きレース: 前の丸を飛び越せなくする",
+      "file": "app/js/games/kabe.js",
+      "old": "if (over >= 0 && !taken(over)) { out.add(over); continue; }",
+      "new": "if (false) { out.add(over); continue; }",
+      "expect": ["かべ置きレース: 前の丸を飛び越せる"]
+    },
+    {
+      "name": "かべ置きレース: ななめ前に移れなくする",
+      "file": "app/js/games/kabe.js",
+      "old": "for (const d2 of d < 2 ? [2, 3] : [0, 1]) {",
+      "new": "for (const d2 of []) {",
+      "expect": ["かべ置きレース: 飛び越せないときはその丸の左右へ移れる"]
+    },
+    {
+      "name": "かべ置きレース: よこの壁の半分重なりを見ない",
+      "file": "app/js/games/kabe.js",
+      "old": "if (o === 0) return !(c > 0 && walls[w - 1])",
+      "new": "if (o === 0) return !(c > 0 && walls[w - 2])",
+      "expect": ["かべ置きレース: よこの壁は半分重ねられない"]
+    },
+    {
+      "name": "かべ置きレース: 道を全部ふさぐ壁も置ける",
+      "file": "app/js/games/kabe.js",
+      "old": "return allReach(s, walls) ? null : 'block';",
+      "new": "return true ? null : 'block';",
+      "expect": ["かべ置きレース: 道を全部ふさぐ壁は置けない"]
+    },
+    {
+      "name": "かべ置きレース: 壁を置いても数が減らない",
+      "file": "app/js/games/kabe.js",
+      "old": "left[p]--;",
+      "new": "left[p] -= 0;",
+      "expect": ["かべ置きレース: 壁を置くと1枚減る"]
+    },
+    {
+      "name": "かべ置きレース: 3〜4人の順番を逆回りにする",
+      "file": "app/js/games/kabe.js",
+      "old": "let turn = (p + 1) % s.np;",
+      "new": "let turn = (p + s.np - 1) % s.np;",
+      "expect": ["かべ置きレース: 4人は 下 → 右 → 上 → 左 の順"]
+    },
+    {
+      "name": "かべ置きレース: 3〜4人の順位を全員1位にする",
+      "file": "app/js/games/kabe.js",
+      "old": "return d.map((v) => 1 + d.filter((x) => x < v).length);",
+      "new": "return d.map(() => 1);",
+      "expect": ["かべ置きレース: 4人の順位はゴールした人が1位、ほかはゴールまでの近さの順"]
+    },
+    {
+      "name": "かべ置きレース: 下から始めた人のゴールを1段ずらす",
+      "file": "app/js/games/kabe.js",
+      "old": "return { B: r === 0, T: r === N - 1,",
+      "new": "return { B: r === 1, T: r === N - 1,",
+      "expect": ["かべ置きレース: 向かいの辺に着いたら勝ち・そのあとは打てない"]
+    }
+  ]
+}

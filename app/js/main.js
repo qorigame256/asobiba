@@ -1818,7 +1818,7 @@ const READING = {
   kanjiplus: 'かんじたしざん かんじ たしざん ぶしゅ くいず はやおし',
   jigsaw: 'じぐそーはやとき じぐそー ぱずる え はやとき',
   hitofude: 'ひとふでがきはやとき ひとふでがき ひとふで せん ぱずる はやとき',
-  hasami: 'はさみしょうぎ ばん', shogi: 'しょうぎ ばん', mahjong: 'まーじゃん',
+  kabe: 'かべおきれーす かべ れーす ばん', hasami: 'はさみしょうぎ ばん', shogi: 'しょうぎ ばん', mahjong: 'まーじゃん',
 };
 const toHira = (t) => String(t ?? '').toLowerCase().replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60)).replace(/\s+/g, '');
 const gameHay = (id) => toHira(`${GAMES[id].name}${READING[id] ?? ''}${GAMES[id].desc ?? ''}`);

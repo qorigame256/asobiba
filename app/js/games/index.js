@@ -1,6 +1,6 @@
 // 遊べるゲームの一覧。新しいゲームはここに足す。
 //
-// 盤のゲーム（2人用。マルバツ・コネクトフォー・リバーシ・点と線は詳細設定で3〜4人、将棋・マンカラ・海戦ゲーム・五目並べ・立体四目並べ・はさみ将棋は3人）が持つもの: id / name / icon / desc / ready / players（[先手の呼び名, 後手の呼び名]）
+// 盤のゲーム（2人用。マルバツ・コネクトフォー・リバーシ・点と線・かべ置きレースは詳細設定で3〜4人、将棋・マンカラ・海戦ゲーム・五目並べ・立体四目並べ・はさみ将棋は3人）が持つもの: id / name / icon / desc / ready / players（[先手の呼び名, 後手の呼び名]）
 //   init({ rules, seed }) → 最初の局面（rules = 詳細設定の値。使わないゲームは無視してよい。seed = 対局ごとの種。始めの盤をばらばらにするときだけ使う（コネクトフォーのじゃま石））, turn(局面) → 0|1, apply(局面, 手) → 次の局面（反則なら null）,
 //   result(局面) → null（続行中）| { winner: 0|1|null(引き分け), cells: [光らせるマス] },
 //   render(要素, 局面, { canMove, onMove, fresh, me: 自分のプレイヤー番号（観戦は -1、同じ画面の対局は null）, names: 席ごとの名前（オンラインだけ。外から来た文字なので textContent か esc() で出す） }),
@@ -8,7 +8,7 @@
 //   turnLimit(詳細設定) → 秒（任意。1手ごとの持ち時間。0 は無し）と timeoutMove(局面, 席, 詳細設定) → 時間切れのときに代わりに打つ手（オンラインだけ。main.js の watchTurnLimit。マルバツ）,
 //   noLocal: true（任意。相手に見せない情報があるので「この画面で2人で」を出さない。海戦ゲーム）,
 //   noUndo: true（任意。オンラインの「待った」を出さない。海戦ゲーム）,
-//   seatCount(rules)（任意。詳細設定で人数が決まる盤のゲーム（マルバツ・コネクトフォー・リバーシ・点と線の3〜4人、将棋・マンカラ・海戦ゲーム・五目並べ・立体四目並べ・はさみ将棋の3人）。待合室の席の数・turn と winner の番号が 0〜人数-1 になる。
+//   seatCount(rules)（任意。詳細設定で人数が決まる盤のゲーム（マルバツ・コネクトフォー・リバーシ・点と線・かべ置きレースの3〜4人、将棋・マンカラ・海戦ゲーム・五目並べ・立体四目並べ・はさみ将棋の3人）。待合室の席の数・turn と winner の番号が 0〜人数-1 になる。
 //     players はその人数ぶんの呼び名を持つ。無ければ2人）
 //
 // カードゲーム（multi: true。オンラインのみ・足りない席は CPU）が持つもの: id / name / icon / desc / ready /
@@ -113,6 +113,7 @@ import kaisen from './kaisen.js';
 import pittari from './pittari.js';
 import typing from './typing.js';
 import hasami from './hasami.js';
+import kabe from './kabe.js';
 import hitai from './hitai.js';
 import kioku from './kioku.js';
 import danmaku from './danmaku.js';
@@ -207,16 +208,16 @@ import { withGiveUp } from './util.js';
 // 準備中のゲームを一覧に出すとき: soon('id', '名前', '絵文字')
 export const soon = (id, name, icon) => ({ id, name, icon, desc: 'じゅんび中', ready: false });
 
-export const GAME_ORDER = ['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'oni', 'race', 'colors', 'daifugo', 'poker', 'speed', 'babanuki', 'doubt', 'sevens', 'blackjack', 'hitai', 'hitblow', 'sensou', 'yubisuma', 'tamebeam', 'heitai', 'acchi', 'kaidan', 'memory', 'yacht', 'sugoroku', 'bingo', 'seri', 'nim', 'taru', 'seesaw', 'koori', 'hanabi', 'fusen', 'amida', 'kaburi', 'fukuwarai', 'flags', 'kanji', 'mannaka', 'kanjiplus', 'goji', 'oxquiz', 'nazo', 'nearpin', 'kakudo', 'kage', 'todofuken', 'michi', 'kirigami', 'tenkai', 'eitango', 'karuta', 'make10', 'anzan', 'suretsu', 'numtouch', 'nukekazu', 'kotoba', 'narabe', 'slide', 'jigsaw', 'nanpure', 'tsunagi', 'hitofude', 'iromizu', 'tokei', 'tenbin', 'mizu', 'matchbo', 'okane', 'meiro', 'targets', 'mikiri', 'isutori', 'iroji', 'ooi', 'sakkaku', 'hitogomi', 'hiyoko', 'cup', 'atodashi', 'tataite', 'pittari', 'meoshi', 'rhythm', 'oto', 'kioku', 'typing', 'danmaku', 'tamaire', 'yuki', 'tsuna', 'nawa', 'hane', 'sumo', 'bowling', 'golf', 'darts', 'katachi', 'kingyo', 'somen', 'tower', 'chicken', 'iraira', 'billiards', 'machigai', 'bombs', 'daruma', 'umigame', 'wordwolf', 'ishin', 'kachikan', 'oogiri', 'jinro', 'oekaki', 'hockey', 'hasami', 'shogi', 'mahjong'];
+export const GAME_ORDER = ['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'oni', 'race', 'kabe', 'colors', 'daifugo', 'poker', 'speed', 'babanuki', 'doubt', 'sevens', 'blackjack', 'hitai', 'hitblow', 'sensou', 'yubisuma', 'tamebeam', 'heitai', 'acchi', 'kaidan', 'memory', 'yacht', 'sugoroku', 'bingo', 'seri', 'nim', 'taru', 'seesaw', 'koori', 'hanabi', 'fusen', 'amida', 'kaburi', 'fukuwarai', 'flags', 'kanji', 'mannaka', 'kanjiplus', 'goji', 'oxquiz', 'nazo', 'nearpin', 'kakudo', 'kage', 'todofuken', 'michi', 'kirigami', 'tenkai', 'eitango', 'karuta', 'make10', 'anzan', 'suretsu', 'numtouch', 'nukekazu', 'kotoba', 'narabe', 'slide', 'jigsaw', 'nanpure', 'tsunagi', 'hitofude', 'iromizu', 'tokei', 'tenbin', 'mizu', 'matchbo', 'okane', 'meiro', 'targets', 'mikiri', 'isutori', 'iroji', 'ooi', 'sakkaku', 'hitogomi', 'hiyoko', 'cup', 'atodashi', 'tataite', 'pittari', 'meoshi', 'rhythm', 'oto', 'kioku', 'typing', 'danmaku', 'tamaire', 'yuki', 'tsuna', 'nawa', 'hane', 'sumo', 'bowling', 'golf', 'darts', 'katachi', 'kingyo', 'somen', 'tower', 'chicken', 'iraira', 'billiards', 'machigai', 'bombs', 'daruma', 'umigame', 'wordwolf', 'ishin', 'kachikan', 'oogiri', 'jinro', 'oekaki', 'hockey', 'hasami', 'shogi', 'mahjong'];
 export const GAMES = {
   tictactoe, connect4, reversi, colors, daifugo, poker, speed, hitblow, sensou, yubisuma, memory, nim, flags, kanji, targets, umigame, shogi, mahjong, hockey,
   gomoku, dots, babanuki, doubt, yacht, wordwolf, jinro, sevens, mancala, oekaki, seri, blackjack, kaisen, pittari, typing, danmaku, tamaire, machigai, bombs, hasami, hitai, kioku, tamebeam, make10, ishin, karuta, acchi, daruma, slide, nanpure, mikiri, bingo, meiro, iroji, sugoroku, taru,
-  isutori, cube4, kaidan, atodashi, bowling, tsuna, eitango, kaburi, anzan, golf, billiards, numtouch, mannaka, oxquiz, kotoba, oogiri, fukuwarai, nawa, darts, amida, narabe, kingyo, tower, fusen, kage, hane, kachikan, tsunagi, sumo, nearpin, kanjiplus, jigsaw, hitofude, ooi, yuki, hanabi, somen, kirigami, iromizu, heitai, oni, race, cup, seesaw, katachi, rhythm, todofuken, meoshi, tokei, tenbin, matchbo, okane, tenkai, nazo, goji, suretsu, mizu, tataite, sakkaku, michi, kakudo, nukekazu, chicken, oto, koori, hitogomi, hiyoko, iraira,
+  isutori, cube4, kaidan, atodashi, bowling, tsuna, eitango, kaburi, anzan, golf, billiards, numtouch, mannaka, oxquiz, kotoba, oogiri, fukuwarai, nawa, darts, amida, narabe, kingyo, tower, fusen, kage, hane, kachikan, tsunagi, sumo, nearpin, kanjiplus, jigsaw, hitofude, ooi, yuki, hanabi, somen, kirigami, iromizu, heitai, oni, race, kabe, cup, seesaw, katachi, rhythm, todofuken, meoshi, tokei, tenbin, matchbo, okane, tenkai, nazo, goji, suretsu, mizu, tataite, sakkaku, michi, kakudo, nukekazu, chicken, oto, koori, hitogomi, hiyoko, iraira,
 };
 // 参りました（2026-11-12 本人の選択。room.md「UI・UX の5回目」）を付ける2人で打つ盤のゲーム（util.js の withGiveUp で apply と result を包む）。
 // 将棋はもとから投了があるので入れない。見えない鬼ごっこ・方眼紙レースは全員が遊ぶ形（multi）なので入れない（Claude の判断）。
 // 3〜4人にできるゲームも入れてあるが、ボタンを出すのは2人のときだけ（main.js の canGiveUp）
-export const GIVE_UP = ['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'hasami'];
+export const GIVE_UP = ['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'hasami', 'kabe'];
 for (const id of GIVE_UP) withGiveUp(GAMES[id]);
 // 遊び方（howto.js）。対局画面の「？遊び方」で出す（main.js の renderHowto）
 for (const [id, lines] of Object.entries(HOWTO)) if (GAMES[id]) GAMES[id].howto = lines;
@@ -228,7 +229,7 @@ for (const [id, figs] of Object.entries(FIGS)) if (GAMES[id]) GAMES[id].howtoFig
 // 分け方は rules のファイルにほぼ合わせた（Claude の判断。extra-games の手遊び・ヒット＆ブローはパーティー、戦争・神経衰弱はトランプなのでカード・牌）。
 // main.js の始まりの顔合わせ（introFx）は、quick と action のゲームには出さない
 export const CATEGORIES = [
-  { key: 'board', name: '盤のゲーム', ids: ['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'oni', 'race', 'hasami', 'shogi'] },
+  { key: 'board', name: '盤のゲーム', ids: ['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'oni', 'race', 'kabe', 'hasami', 'shogi'] },
   { key: 'card', name: 'カード・牌', ids: ['colors', 'daifugo', 'poker', 'speed', 'babanuki', 'doubt', 'sevens', 'blackjack', 'hitai', 'sensou', 'memory', 'mahjong'] },
   {
     key: 'party', name: 'パーティー',
