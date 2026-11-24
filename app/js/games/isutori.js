@@ -31,7 +31,7 @@
 //   ありのときだけ局面に chair・seat（席ごとの椅子）・tried・bump（はじかれた椅子・だれに・何回目）を持つ（なしでは今までと全く同じ局面）。
 
 import { mulberry32 } from './util.js';
-import { since } from './party.js';
+import { since, leftFlash } from './party.js';
 import { play } from '../sound.js';
 
 const LIMIT = 4000; // 止まってから押せる時間
@@ -360,6 +360,7 @@ export default {
   },
 
   render(root, s, o) {
+    leftFlash(root, 'isutori:' + s.seed, alives(s).length); // だれかが脱落したら「のこり◯人」（2026-11-24。party.js の leftFlash）
     const me = seatOf(o);
     const mount = `${s.seed}:${s.r}:${s.phase}:${me}`;
     const fresh = ui?.mount !== mount || !root.contains(ui.field);

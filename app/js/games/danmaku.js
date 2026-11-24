@@ -23,7 +23,7 @@
 //   脱落した人・観戦の人は暗くしない（全部見られる）。CPU は暗やみでは近くの弾に気づくのが遅い（気づく距離 CPU_SENSE → CPU_SENSE_DARK）。
 
 import { mulberry32 } from './util.js';
-import { since, scoreChips, esc } from './party.js';
+import { since, scoreChips, esc, leftFlash } from './party.js';
 import { SEAT_COLORS, fitCanvas, toBoard, clamp, centerInView } from './action.js';
 
 const READY_MS = 3000;
@@ -237,6 +237,8 @@ function draw() {
   const ctx = ui.ctx;
   const k = ui.scale;
   const sec = s.phase === 'ready' ? 0 : Math.min(since(goKey(s)) / 1000, durOf(s));
+  // あと1回でおしまいのとき、盤のふちが赤く光る（2026-11-24 本人の選択「もっと控えめに」。style.css の .ac-canvas.pinch）。残機が2機以上の設定のときだけ
+  ui.canvas.classList.toggle('pinch', s.phase === 'play' && sec < durOf(s) && livesOf(s) > 1 && ui.me !== null && s.dead[ui.me] === null && !ui.hit && livesOf(s) - ui.hits === 1);
   const slowAt = mySlow();
   const bt = slowClock(sec, slowAt); // 弾の時計（自分がスローを使ったあとは遅れる）
   const slowing = s.phase === 'play' && slowAt !== null && sec >= slowAt && sec < slowAt + SLOW_SEC;
@@ -571,6 +573,7 @@ export default {
   },
 
   render(root, s, o) {
+    leftFlash(root, 'danmaku:' + s.seed, aliveSeats(s).length); // だれかが脱落したら「のこり◯人」（2026-11-24。party.js の leftFlash）
     const me = o.me >= 0 ? o.me : null;
     const sc = s.dead.map((v) => (v === null ? '' : (v / 1000).toFixed(1)));
     const lives = livesOf(s);

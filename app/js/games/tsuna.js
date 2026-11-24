@@ -22,7 +22,7 @@
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready →(3秒)→ go → play →(30秒＋待ち)→ end（途中で端まで来たらそこで end）
 // 手: { p: -1, t: 'go' | 'end' } / { p, t: 'tap', n: その人がこれまでに押した合計 }（n が前より大きいときだけ受け付ける）
 
-import { since, scoreChips } from './party.js';
+import { since, scoreChips, teamIntro } from './party.js';
 
 const READY_MS = 3000;
 const PLAY_MS = 30000;
@@ -243,6 +243,7 @@ export default {
     const me = o.me >= 0 && !o.watching ? o.me : null;
     const K = teamsOf(s);
     const tm = (p) => teamOf(p, K);
+    if (s.phase === 'ready') teamIntro(root, 'tsuna:' + s.seed, o, s.taps.length, tm, K); // 始まる前に名前の札がチームへ分かれる（2026-11-24。party.js の teamIntro）
     const chips = scoreChips(o, s.taps, {
       gain: false, // 押した回数は点でない（押すたびに出るとうるさい）
       extra: (p) => `<span style="color:${['var(--red-ink, #c0392b)', '#777', '#2f6fb3'][tm(p)]}">${TEAM[tm(p)]}</span>`,

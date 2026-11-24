@@ -17,7 +17,7 @@
 // 手: { p: -1, t: 'go' | 'end' } / { p, t: 'in', n: その人がこれまでに入れた合計, b: そのうち2点の玉の合計（ラスト10秒は2点のときだけ） }
 //     （n が前より大きいときだけ受け付ける。b は減らず、増えた分は n の増えた分まで）
 
-import { since, scoreChips } from './party.js';
+import { since, scoreChips, teamIntro } from './party.js';
 import { fitCanvas, toBoard, clamp } from './action.js';
 
 const READY_MS = 3000;
@@ -405,6 +405,7 @@ export default {
   },
 
   render(root, s, o) {
+    if (s.phase === 'ready') teamIntro(root, 'tamaire:' + s.seed, o, s.n, (p) => teamOf(p), 2); // 始まる前に名前の札がチームへ分かれる（2026-11-24。party.js の teamIntro）
     const me = o.me >= 0 ? o.me : null;
     const chips = scoreChips(o, pointsOf(s), {
       gain: false, // 玉が入るたびに出るとうるさい

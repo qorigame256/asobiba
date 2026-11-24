@@ -34,7 +34,7 @@
 // 手: { p: -1, t: 'go' } / { p, t: 'boom', n: その人の何回目の爆発か } / { p, t: 'send', n: 何回目の送りか, k: 5 | 10, to?: ねらった席（送る相手が「選べる」のときだけ） }
 
 import { mulberry32 } from './util.js';
-import { since, scoreChips } from './party.js';
+import { since, scoreChips, leftFlash } from './party.js';
 import { fitCanvas, toBoard, clamp } from './action.js';
 
 const READY_MS = 3000;
@@ -585,6 +585,7 @@ export default {
   },
 
   render(root, s, o) {
+    leftFlash(root, 'bombs:' + s.seed, aliveOf(s).length); // だれかが脱落したら「のこり◯人」（2026-11-24。party.js の leftFlash）
     const me = o.me >= 0 ? o.me : null;
     const chips = scoreChips(o, s.boom.map(() => 0), {
       extra: (p) => (s.out[p] !== null ? '脱落' : `${'❤'.repeat(Math.max(0, livesOf(s) - s.boom[p]))}`),

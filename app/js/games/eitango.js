@@ -20,7 +20,7 @@
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'try', q: 問題番号, text: 答え, ms, n: その問題で何回目の答えか } / { p, t: 'pass', q }
 
 import { mulberry32, shuffle, esc, mayFocus } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, secText, speedLine } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, secText, speedLine, pickedBy } from './party.js';
 import { EITANGO } from './eitango-data.js';
 import { REVIEW_CSS } from './kanji.js';
 
@@ -256,7 +256,7 @@ export default {
       if (s.passed[p]) return '<span class="pt-ng">パス</span>';
       return s.tries[p] ? '<span class="pt-ng">×</span>' : '<span class="pt-ng">―</span>';
     };
-    const chips = scoreChips(o, s.scores, { won, extra, steady: true });
+    const chips = scoreChips(o, s.scores, { won, extra, steady: true, log: s.log });
 
     if (ui?.mount === mount && root.contains(ui.wrap)) {
       ui.chips.replaceWith(chips);
@@ -420,6 +420,7 @@ export default {
         for (const x of btns) x.disabled = true;
         o.onMove({ t: 'try', q: s.q, text, ms, n: 1 });
       };
+      if (s.phase === 'shown') pickedBy(b, s.said, text, me, o); // みんなの答えが選択肢に並ぶ（2026-11-24。party.js の pickedBy）
       return b;
     });
     grid.append(...btns);

@@ -153,7 +153,20 @@ const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice()
 const doneOf = (s, p) => s.solved[p] !== null || s.passed[p];
 const limitOf = (s, q = s.q) => LIMITS[q] * (levelOf(s.rules) === 'hard' ? 1.3 : 1);
 
-let loc = null; // この端末で動かしている玉 { key, x, y, cp, hits, grab, sent }
+let loc = null; // この端末で動かしている玉 { key, x, y, cp, hits, grab, sent, marks }
+// 指で隠れる所を、指の上の丸い窓に映す（2026-11-24 本人の選択。UI・UX の11回目。action-games.md）: 指で玉をつかんでいる間だけ、指の少し上に、玉のまわりを
+// LENS_ZOOM 倍にした丸い窓を出す。盤のゲームの「小さいマスの拡大鏡」と同じ端末ごとの設定（main.js の viewPref.loupe。localStorage の bg-view）に従い、
+// 指で触ったときだけ働く（マウスでは玉が隠れないので出さない）。窓の中身は、つかんだ時の道の写し（玉・棒・× だけ動かす）。
+const LENS = 112; // 窓の直径（px）
+const LENS_ZOOM = 2;
+let lens = null; // { box, view, ball, bars }
+const lensWanted = () => {
+  try {
+    const v = JSON.parse(localStorage.getItem('bg-view') || '{}').loupe;
+    return typeof v === 'boolean' ? v : !!window.matchMedia?.('(pointer: coarse)').matches;
+  } catch { return false; }
+};
+const dropLens = () => { lens?.box.remove(); lens = null; };
 let ui = null;
 const others = new Map(); // 席 → { key, x, y }（ほかの人の玉）
 const cpuPlan = new Map();
@@ -336,7 +349,8 @@ export default {
     const c = s.qs[s.q];
     const [sx, sy] = c.pts[0];
     const [gx, gy] = c.pts[c.pts.length - 1];
-    if (loc?.key !== key) loc = { key, x: sx, y: sy, cp: -1, hits: 0, grab: false, sent: false };
+    if (loc?.key !== key) loc = { key, x: sx, y: sy, cp: -1, hits: 0, grab: false, sent: false, marks: [] };
+    dropLens();
     loc.grab = false; // 作り直した道では、もう一度玉に触れてから動かす
     const playing = s.phase === 'open' && me !== null && o.canMove && !doneOf(s, me) && !loc.sent;
     const ns = 'http://www.w3.org/2000/svg';
@@ -357,6 +371,21 @@ export default {
       + '<g class="irb-others"></g>'
       + `<circle class="irb-ball" r="${c.r.toFixed(2)}"/>`;
     const ball = svg.querySelector('.irb-ball');
+    // さわった所に × が残る（2026-11-24 本人の選択。UI・UX の11回目）: 壁や棒にさわった場所に薄い × を残す（自分の画面だけ。その問題の間）
+    const marksG = document.createElementNS(ns, 'g');
+    marksG.setAttribute('class', 'irb-marks');
+    svg.insertBefore(marksG, ball);
+    const markEl = (m) => {
+      const t = document.createElementNS(ns, 'text');
+      t.setAttribute('x', m[0].toFixed(2));
+      t.setAttribute('y', m[1].toFixed(2));
+      t.setAttribute('font-size', (c.u * 0.34).toFixed(2));
+      t.setAttribute('text-anchor', 'middle');
+      t.setAttribute('dominant-baseline', 'central');
+      t.textContent = '×';
+      return t;
+    };
+    for (const m of loc.marks ?? []) marksG.append(markEl(m));
     const barEls = [...svg.querySelectorAll('.irb-bar')];
     const othersG = svg.querySelector('.irb-others');
     if (me !== null) ball.setAttribute('fill', SEAT_COLORS[me % SEAT_COLORS.length]);
@@ -376,6 +405,7 @@ export default {
       ball.setAttribute('cx', (done ? gx : loc.x).toFixed(2));
       ball.setAttribute('cy', (done ? gy : loc.y).toFixed(2));
       ball.classList.toggle('grab', loc.grab);
+      if (lens) { if (!loc.grab) dropLens(); else { lens.ball.setAttribute('cx', loc.x.toFixed(2)); lens.ball.setAttribute('cy', loc.y.toFixed(2)); } }
       note.textContent = says();
     };
     const paintOthers = () => {
@@ -409,9 +439,11 @@ export default {
       loc.grab = false;
       o.onMove({ t: 'done', q: s.q, ms });
     };
-    const crash = () => {
+    const crash = (hx = loc.x, hy = loc.y) => {
       loc.hits += 1;
       loc.grab = false;
+      (loc.marks ??= []).push([hx, hy]);
+      marksG.append(markEl([hx, hy]));
       const back = loc.cp >= 0 && flags.length ? c.pts[c.cps[loc.cp]] : c.pts[0];
       loc.x = back[0];
       loc.y = back[1];
@@ -427,7 +459,7 @@ export default {
       const x0 = loc.x, y0 = loc.y;
       for (let i = 1; i <= k; i++) {
         const x = x0 + ((tx - x0) * i) / k, y = y0 + ((ty - y0) * i) / k;
-        if (hitsWall(c, x, y) || (bars.length && hitsBar(c, bars, x, y, since(key) / 1000))) { crash(); return; }
+        if (hitsWall(c, x, y) || (bars.length && hitsBar(c, bars, x, y, since(key) / 1000))) { crash(x, y); return; }
         loc.x = x;
         loc.y = y;
         c.cps.forEach((pi, j) => { if (j > loc.cp && near(x, y, ...c.pts[pi])) loc.cp = j; });
@@ -437,6 +469,17 @@ export default {
     const at = (e) => {
       const r = svg.getBoundingClientRect();
       return [((e.clientX - r.left) / r.width) * W, ((e.clientY - r.top) / r.height) * W];
+    };
+    // 丸い窓を指の少し上に置く（上に入らなければ指の横）。映すのは玉のまわり
+    const placeLens = (e) => {
+      if (!lens) return;
+      const r = svg.getBoundingClientRect();
+      const v = (W * LENS) / r.width / LENS_ZOOM;
+      lens.view.setAttribute('viewBox', `${(loc.x - v / 2).toFixed(2)} ${(loc.y - v / 2).toFixed(2)} ${v.toFixed(2)} ${v.toFixed(2)}`);
+      let left = e.clientX - LENS / 2; let top = e.clientY - LENS - 46;
+      if (top < 4) { top = Math.max(4, e.clientY - LENS / 2); left = e.clientX > window.innerWidth / 2 ? e.clientX - LENS - 56 : e.clientX + 56; }
+      lens.box.style.left = Math.max(4, Math.min(window.innerWidth - LENS - 4, left)) + 'px';
+      lens.box.style.top = top + 'px';
     };
     if (playing) {
       // 玉をつかんだ指（pointerId）だけで動かす。ほかの指が触れても動かさず、ほかの指を離してもつかみは切らない（2026-11-24 の Codex の点検）。
@@ -449,12 +492,24 @@ export default {
         loc.grab = true;
         loc.pid = e.pointerId;
         try { svg.setPointerCapture?.(e.pointerId); } catch { /* 指の番号が古いときは捕まえずに続ける */ }
+        dropLens();
+        if (e.pointerType === 'touch' && lensWanted()) {
+          const box = document.createElement('div');
+          box.className = 'irb-lens';
+          const view = svg.cloneNode(true);
+          view.setAttribute('class', 'irb-lens-view');
+          box.append(view);
+          document.body.append(box);
+          lens = { box, view, ball: view.querySelector('.irb-ball'), bars: [...view.querySelectorAll('.irb-bar')] };
+          placeLens(e);
+        }
         paintBall();
       });
       svg.addEventListener('pointermove', (e) => {
         if (!loc.grab || loc.sent || e.pointerId !== loc.pid) return;
         if (since(key) >= limit) { loc.grab = false; paintBall(); return; }
         moveTo(...at(e));
+        placeLens(e);
         paintBall();
         sendPos();
       });
@@ -475,6 +530,7 @@ export default {
           barEls[i].setAttribute('y1', (p.cy - p.dy * h).toFixed(2));
           barEls[i].setAttribute('x2', (p.cx + p.dx * h).toFixed(2));
           barEls[i].setAttribute('y2', (p.cy + p.dy * h).toFixed(2));
+          if (lens?.bars[i]) for (const a of ['x1', 'y1', 'x2', 'y2']) lens.bars[i].setAttribute(a, barEls[i].getAttribute(a));
         });
         if (playing && loc.grab && !loc.sent && since(key) < limit && hitsBar(c, bars, loc.x, loc.y, sec)) { crash(); paintBall(); }
         requestAnimationFrame(tick);

@@ -51,7 +51,37 @@ export function winnersText(winners, me, pn) {
 // gain = false: 点が増えても「+3」を出さない（数が点でないゲーム。綱引き連打の回数・ミニゴルフの打数・羽根つきの墨・玉入れの玉）
 // 逆転の知らせ・勝ちまでの見通し（2026-11-13）は 2026-11-14 本人の依頼でやめた（「逆転！」と「1位まで あと◯点」「2位と◯点差」）
 // gainDelay = 「+3」を何 ms 遅らせて出すか（一斉に裏返す場面で、札が返る前に点が分からないように。2026-11-16）
-export function scoreChips(o, scores, { turn = null, won = [], extra = null, steady = false, gain = true, gainDelay = 0 } = {}) {
+// 連続で正解している人に炎（2026-11-24 本人の選択。UI・UX の11回目。quick-games.md）: 問題ごとの記録（log。各回の solved）を渡すと、
+// いちばん新しい回から続けて正解している数が2以上の人の札に「🔥2」を付ける。数が変わったときだけふくらむ。
+export function streakOf(log, p) {
+  let k = 0;
+  for (let i = (log?.length ?? 0) - 1; i >= 0 && log[i].solved?.[p] != null; i--) k++;
+  return k;
+}
+const fireSeen = new Map(); // 席 → 前に出した数（描き直しのたびにふくらませないため）
+
+// みんなの答えが選択肢に並ぶ（2026-11-24 本人の選択。UI・UX の11回目。quick-games.md）: 答えを出している間、選択肢のボタンの中に、
+// それを選んだ人の名前を並べる。落ちてくる動きは、その答えの組を初めて描いたときだけ。
+let pickSig = ''; let pickAt = 0;
+export function pickedBy(btn, said, c, me, o) {
+  const who = said.map((v, p) => (v === c ? p : -1)).filter((p) => p >= 0);
+  if (!who.length) return;
+  const sig = said.join('|');
+  if (sig !== pickSig) { pickSig = sig; pickAt = performance.now(); }
+  const fresh = performance.now() - pickAt < 300;
+  const row = document.createElement('span');
+  row.className = 'pk-who';
+  who.forEach((p, i) => {
+    const t = document.createElement('span');
+    t.className = 'pk-tok' + (p === me ? ' me' : '') + (fresh ? ' drop' : '');
+    t.style.animationDelay = (i * 0.12) + 's';
+    t.textContent = p === me ? 'あなた' : String(o.names?.[p] ?? '').slice(0, 6);
+    row.append(t);
+  });
+  btn.append(row);
+}
+
+export function scoreChips(o, scores, { turn = null, won = [], extra = null, steady = false, gain = true, gainDelay = 0, log = null } = {}) {
   if (gain) noteGains(o, scores, gainDelay);
   const box = document.createElement('div');
   box.className = 'cc-opps' + (steady ? ' cc-steady' : '');
@@ -76,6 +106,14 @@ export function scoreChips(o, scores, { turn = null, won = [], extra = null, ste
         e.innerHTML = x;
         chip.append(e);
       }
+    }
+    if (log) {
+      const k = streakOf(log, p);
+      if (k >= 2) {
+        const f = tag('pt-fire' + (fireSeen.get(p) !== k ? ' pop' : ''), '🔥' + k);
+        chip.append(f);
+      }
+      fireSeen.set(p, k);
     }
     if (o.away[p]) chip.append(tag('away', '応答なし'));
     else if (o.sub?.[p]) chip.append(tag('away', 'CPU が代わりに'));
@@ -484,4 +522,104 @@ export function flipCard(face, name, dup = false) {
   d.querySelector('.fc-front').textContent = face;
   d.querySelector('.fc-name').textContent = name;
   return d;
+}
+
+// 役とお題は、押している間だけ見える（2026-11-24 本人の選択。UI・UX の11回目。party-games.md）: 同じ部屋に集まって遊ぶとき、となりの人に見えないように。
+// 端末ごとの設定（localStorage の bg-hold-see。最初は今までどおり出したまま）。札の右上のボタンで切り替える。
+// 札は描き直しのたびに作り直されるので、押している最中かどうかはここで覚える（押したまま描き直されても見えたままにする）。
+const HOLD_KEY = 'bg-hold-see';
+let holdOn = (() => { try { return typeof localStorage !== 'undefined' && localStorage.getItem(HOLD_KEY) === '1'; } catch { return false; } })();
+let holding = false;
+let holdCard = null;
+if (typeof window !== 'undefined') {
+  for (const k of ['pointerup', 'pointercancel', 'blur']) {
+    window.addEventListener(k, () => { holding = false; if (holdCard?.isConnected && holdOn) holdCard.classList.add('hold-shut'); });
+  }
+}
+export function holdToSee(card) {
+  const tgl = document.createElement('button');
+  tgl.type = 'button';
+  tgl.className = 'hold-tgl';
+  const tip = document.createElement('div');
+  tip.className = 'hold-tip';
+  tip.textContent = '押している間だけ見えます';
+  const set = () => {
+    tgl.textContent = holdOn ? '👁 いつも見せる' : '🙈 かくす';
+    card.classList.toggle('hold', holdOn);
+    card.classList.toggle('hold-shut', holdOn && !holding);
+  };
+  tgl.onpointerdown = (e) => e.stopPropagation();
+  tgl.onclick = (e) => {
+    e.stopPropagation();
+    holdOn = !holdOn;
+    try { localStorage.setItem(HOLD_KEY, holdOn ? '1' : '0'); } catch { /* 覚えられなくても遊べる */ }
+    set();
+  };
+  card.addEventListener('pointerdown', () => { if (!holdOn) return; holding = true; card.classList.remove('hold-shut'); });
+  card.addEventListener('contextmenu', (e) => { if (holdOn) e.preventDefault(); }); // 長押しのメニューを出さない
+  card.append(tip, tgl);
+  holdCard = card;
+  set();
+}
+
+// だれかが脱落したら「のこり◯人」（2026-11-24 本人の選択「文字を透過させる」。UI・UX の11回目。action-games.md・quick-games.md）: 生き残りを競う遊びで、
+// 生きている人の数が減った瞬間に、盤のまん中へ半透明の大きな字を1秒ほど出す。最後の1人（決着）では出さない。途中から開いた画面は、最初の1回は覚えるだけ。
+// 盤は描き直しで中身が消えるので、字は body に置いて盤のまん中の位置に重ねる。
+const leftSeen = new Map(); // 対局の鍵 → 前に見た数（いまの対局の分だけ持つ）
+export function leftFlash(host, key, alive) {
+  const prev = leftSeen.get(key);
+  leftSeen.clear();
+  leftSeen.set(key, alive);
+  if (prev === undefined || alive >= prev || alive < 2 || typeof document === 'undefined') return;
+  const r = host.getBoundingClientRect();
+  if (!r.width) return;
+  const d = document.createElement('div');
+  d.className = 'left-flash';
+  d.textContent = 'のこり ' + alive + '人';
+  d.style.left = (r.left + r.width / 2) + 'px';
+  d.style.top = Math.max(60, Math.min(window.innerHeight - 60, r.top + r.height / 2)) + 'px';
+  document.body.append(d);
+  setTimeout(() => d.remove(), 1300);
+}
+
+// 始まる前に名前の札がチームへ分かれる（2026-11-24 本人の選択「2回光る演出のみ消す」。UI・UX の11回目。action-games.md）: チームで分かれる遊びの「よーい」の間、
+// 全員の名前の札がまん中から自分のチームの側へ滑り、チームの色になる（味方を光らせる動きは付けない）。対局ごとに1回だけ。
+// 盤は描き直しで中身が消えるので、札は body に置いて盤の上に重ねる（押せない。2.6秒で消える）。点数の札に重ならないよう、盤の上から3割ほど下げる。
+const TEAM_INTRO = [['#e04b3c', '#fff', '赤'], ['#f4f4f4', '#333', '白'], ['#2f6fb3', '#fff', '青']];
+let introKey = null;
+export function teamIntro(host, key, o, n, teamOf, k) {
+  if (introKey === key || typeof document === 'undefined') return;
+  introKey = key;
+  requestAnimationFrame(() => {
+    const r = host.getBoundingClientRect();
+    if (!r.width) return;
+    const box = document.createElement('div');
+    box.className = 'team-intro';
+    box.style.cssText = 'left:' + r.left + 'px;top:' + (Math.max(0, r.top) + Math.min(r.height * 0.3, 170)) + 'px;width:' + r.width + 'px;';
+    const rows = Array(k).fill(0);
+    const chips = [];
+    for (let p = 0; p < n; p++) {
+      const t = teamOf(p);
+      const c = document.createElement('div');
+      c.className = 'team-chip';
+      c.textContent = p === o.me && !o.watching ? 'あなた' : String(o.names?.[p] ?? '').slice(0, 8);
+      c.style.top = (rows[t] * 34) + 'px';
+      c.style.left = '50%';
+      rows[t] += 1;
+      box.append(c);
+      chips.push([c, t]);
+    }
+    box.style.height = (Math.max(...rows) * 34) + 'px';
+    document.body.append(box);
+    setTimeout(() => {
+      for (const [c, t] of chips) {
+        c.style.left = (((t + 0.5) / k) * 100) + '%';
+        c.style.background = TEAM_INTRO[t][0];
+        c.style.color = TEAM_INTRO[t][1];
+        c.dataset.team = TEAM_INTRO[t][2];
+      }
+    }, 350);
+    setTimeout(() => box.classList.add('bye'), 2300);
+    setTimeout(() => box.remove(), 2650);
+  });
 }

@@ -244,6 +244,20 @@ function drawLane() {
     ctx.fillStyle = g;
     ctx.fill();
   }
+  // 1投目の通り道（2026-11-24 本人の選択。UI・UX の11回目。action-games.md）: そのフレームの1投目に玉が通った線を、2投目をねらう間だけ薄い点線で残す
+  //（自分の画面だけ。玉が転がっている間は出さない。画面を作り直したら消える）
+  const myP = ui.me !== null ? s.pl[ui.me] : null;
+  if (ui.trail && myP && !ui.sim && !myP.done && myP.f === ui.trail.f && (myP.frames[myP.f]?.length ?? 0) === 1 && ui.trail.pts.length > 1) {
+    ctx.save();
+    ctx.setLineDash([k * 0.008, k * 0.022]);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'rgba(60, 40, 20, .38)';
+    ctx.lineWidth = Math.max(2, k * 0.008);
+    ctx.beginPath();
+    ui.trail.pts.forEach(([x, y], i) => (i ? ctx.lineTo(x * k, y * k) : ctx.moveTo(x * k, y * k)));
+    ctx.stroke();
+    ctx.restore();
+  }
   // 向きの線（詳細設定）: なでている間、玉がそのまま進む道
   if (ui.aim && s.rules.guide && ui.aim.y < 0) {
     ctx.save();
@@ -549,6 +563,7 @@ export default {
       const standing = P.standing;
       const res = simulate(standing, ui.ballX, vx, vy, { record: true, bumper: !!cs.rules.bumper });
       ui.sim = { ...res, standing, f: P.f, b: P.frames[P.f]?.length ?? 0, at: performance.now() };
+      if (ui.sim.b === 0) ui.trail = { f: P.f, pts: res.frames.map((q) => [q.bx, q.by]) }; // 1投目の通り道（drawLane）
       ui.ballY = START_Y;
       play('draw');
     };

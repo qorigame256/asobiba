@@ -18,7 +18,7 @@
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → start → play → end
 // 手: { p: -1, t: 'start' | 'end' } / { p, t: 'miss', k }
 
-import { scoreChips, since, SEAT_COLORS } from './party.js';
+import { scoreChips, since, SEAT_COLORS, leftFlash } from './party.js';
 import { play } from '../sound.js';
 
 const READY_MS = 3000;
@@ -154,6 +154,7 @@ export default {
   },
 
   render(root, s, o) {
+    leftFlash(root, 'nawa:' + s.seed, s.out.filter((v) => v === null).length); // だれかが脱落したら「のこり◯人」（2026-11-24。party.js の leftFlash）
     bindKeys();
     const me = o.me >= 0 && !o.watching ? o.me : null;
     const tk = key(s) + ':play';

@@ -22,7 +22,7 @@ const NONE = -1; // 投票の「ウルフはいない」
 // 手: { p, t: 'tovote' }（p = -1 はホストの時間切れ）/ { p, t: 'vote', to（-1 は「ウルフはいない」）, v: 何回目の投票か } / { p, t: 'guess', text } / { p, t: 'giveup' } / { p, t: 'judge', ok }
 
 import { mulberry32, esc } from './util.js';
-import { kana, timeBar, since, voteArrows, pointTalk, pointStream } from './party.js';
+import { kana, timeBar, since, voteArrows, pointTalk, pointStream, holdToSee } from './party.js';
 import { PAIRS } from './wordwolf-data.js';
 import { shown } from '../filter.js';
 
@@ -224,6 +224,7 @@ export default {
       card.className = 'ww-card';
       const tip = this.tipText(s, me);
       card.innerHTML = `<div class="um-label">あなたのお題</div><div class="ww-word">${esc(this.wordOf(s, me))}</div><small>${tip}</small>`;
+      holdToSee(card); // 押している間だけ見える（2026-11-24。party.js。端末ごとの設定で、最初は出したまま）
       root.append(card);
     }
 

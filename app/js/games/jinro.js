@@ -22,7 +22,7 @@
 //   k・v・d で、同じ手が2回届いても2回目は反則になる（realtime。main.js の rebase）。
 
 import { mulberry32, shuffle, esc } from './util.js';
-import { timeBar, voteArrows, pointTalk, pointStream } from './party.js';
+import { timeBar, voteArrows, pointTalk, pointStream, holdToSee } from './party.js';
 import { shown } from '../filter.js';
 
 const MAX_TEXT = 60;
@@ -345,6 +345,7 @@ export default {
         html += `<div class="jr-role-sub">投票で追放された人が人狼だったかどうかが分かります。${ms.length ? '<br>' + ms.map((x) => `${x.d}日目に追放: ${esc(nameP(x.to))} は <b>${x.wolf ? '人狼 🐺' : '人狼ではない'}</b>`).join('<br>') : ''}</div>`;
       } else html += '<div class="jr-role-sub">特別な力はありません。話し合いで人狼を見つけましょう</div>';
       card.innerHTML = html;
+      if (!over) holdToSee(card); // 押している間だけ見える（2026-11-24。party.js。端末ごとの設定で、最初は出したまま）
       top.append(card);
     }
 

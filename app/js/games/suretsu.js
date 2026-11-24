@@ -20,7 +20,7 @@
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q, c: 選んだ数, ms }
 
 import { mulberry32, shuffle } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText, speedLine } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText, speedLine, pickedBy } from './party.js';
 import { pointsOf } from './make10.js';
 
 const ROUNDS = [[10, '10問'], [15, '15問'], [20, '20問']];
@@ -246,7 +246,7 @@ export default {
     root.className = 'board kj sq';
     const wrap = document.createElement('div');
     wrap.className = 'kj-wrap';
-    wrap.append(scoreChips(o, s.scores, { won, extra, steady: true }));
+    wrap.append(scoreChips(o, s.scores, { won, extra, steady: true, log: s.log }));
     root.append(wrap);
     if (s.phase === 'end') { wrap.append(this.review(s, me, o)); return; }
     const card = document.createElement('div');
@@ -317,6 +317,7 @@ export default {
       };
       b.onpointerdown = hit; // 押した瞬間に測る
       b.onclick = (e) => { if (e.detail === 0) hit(e); }; // キーボードで押したとき
+      if (s.phase === 'shown') pickedBy(b, s.said, c, me, o); // みんなの答えが選択肢に並ぶ（2026-11-24。party.js の pickedBy）
       return b;
     });
     grid.append(...btns);

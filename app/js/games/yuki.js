@@ -24,7 +24,7 @@
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready →(3秒)→ go → play →(時間＋待ち)→ end。片方のチームが全員脱落したら、その手で end。
 // 手: { p: -1, t: 'go' | 'end' } / { p, t: 'hit', k, by, b }
 
-import { since, scoreChips } from './party.js';
+import { since, scoreChips, teamIntro } from './party.js';
 import { fitCanvas, toBoard, clamp } from './action.js';
 
 export const H = 1.3;
@@ -174,6 +174,8 @@ function draw() {
   const ctx = ui.ctx;
   const k = ui.scale;
   const now = performance.now();
+  // あと1回でおしまいのとき、盤のふちが赤く光る（2026-11-24 本人の選択「もっと控えめに」。style.css の .ac-canvas.pinch）。ライフが2つ以上の設定のときだけ
+  ui.canvas.classList.toggle('pinch', playing(s) && ui.me !== null && !ui.out && !s.dead[ui.me] && livesOf(s) > 1 && livesOf(s) - ui.hits.length === 1);
   // 雪原
   ctx.fillStyle = '#eef6fb';
   ctx.fillRect(0, 0, k, k * H);
@@ -286,6 +288,39 @@ function draw() {
       ctx.fill();
     }
     ctx.globalAlpha = 1;
+  }
+  // だれの雪玉か（2026-11-24 本人の選択。UI・UX の11回目。action-games.md）: 自分が当てられたとき・自分が当てたときに、投げた人と当てられた人を
+  // 点線で結び、「◯◯の雪玉！」「◯◯に当てた！」を 1.3秒出す。出すのは当てられた人と投げた人の画面だけ。
+  if (ui.fx && now - ui.fx.at < 1300) {
+    const at = (p) => { const pl = posOf(p); if (!pl) return null; return view(pl.dx !== undefined ? pl.dx : pl.x, pl.dy !== undefined ? pl.dy : pl.y); };
+    const a = at(ui.fx.from); const b = at(ui.fx.to);
+    if (a && b) {
+      const hitMe = ui.fx.to === ui.me;
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, (1300 - (now - ui.fx.at)) / 300);
+      ctx.strokeStyle = '#e8590c';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([k * 0.02, k * 0.014]);
+      ctx.beginPath();
+      ctx.moveTo(a[0] * k, a[1] * k);
+      ctx.lineTo(b[0] * k, b[1] * k);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.arc(a[0] * k, a[1] * k, (PR + 0.012) * k, 0, Math.PI * 2);
+      ctx.stroke();
+      const nm = String(o.names?.[hitMe ? ui.fx.from : ui.fx.to] ?? '').slice(0, 6);
+      const label = hitMe ? nm + 'の雪玉！' : nm + 'に当てた！';
+      ctx.font = `bold ${Math.max(12, k * 0.04)}px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif`;
+      ctx.textAlign = 'center';
+      const w = ctx.measureText(label).width + k * 0.03;
+      const lx = clamp(b[0] * k, w / 2 + 2, k - w / 2 - 2); const ly = (b[1] - PR - 0.05) * k;
+      ctx.fillStyle = '#e8590c';
+      ctx.fillRect(lx - w / 2, ly - k * 0.034, w, k * 0.048);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(label, lx, ly);
+      ctx.restore();
+    }
   }
   // 上の文字: 残りのライフの合計と時間
   const sums = lifeSums(s);
@@ -400,6 +435,7 @@ function step() {
       // 自分に当たったか（自分の画面で決める）
       if (ui.self && !ui.out && live && teamOf(b.from) !== ui.team && now >= ui.safeUntil && touches(b, ui.self)) {
         ui.hits.push({ by: b.from, b: b.id });
+        ui.fx = { from: b.from, to: ui.me, at: now }; // だれの雪玉に当たったか（2026-11-24。draw の「だれの雪玉か」）
         ui.safeUntil = now + SAFE_MS;
         ui.puffs.push({ x: b.x, y: b.y, at: now, hit: true });
         if (ui.hits.length >= livesOf(s)) ui.out = true;
@@ -600,6 +636,7 @@ export default {
   },
 
   render(root, s, o) {
+    if (s.phase === 'ready') teamIntro(root, 'yuki:' + s.seed, o, s.n, (p) => teamOf(p), 2); // 始まる前に名前の札がチームへ分かれる（2026-11-24。party.js の teamIntro）
     useWalls(s.rules);
     const me = o.me >= 0 && !o.watching ? o.me : null;
     const lives = livesOf(s);
@@ -611,8 +648,11 @@ export default {
     if (ui?.key === key && root.contains(ui.canvas)) {
       // 新しく届いた当たり: ほかの画面で当たった雪玉を消して、しぶきを出す
       const now = performance.now();
+      // 自分が当てた分（局面は投げた人を当てられた人ごとには覚えていないので、自分の当てた数が増えた分だけ、新しく当たった相手チームの人に割り当てる）
+      let mineNew = me !== null ? s.got[me] - ui.cur.s.got[me] : 0;
       s.hits.forEach((h, p) => {
         if (h <= ui.cur.s.hits[p] || p === me) return;
+        if (mineNew > 0 && teamOf(p) !== teamOf(me)) { ui.fx = { from: me, to: p, at: now }; mineNew -= 1; }
         const b = ui.balls.find((x) => x.id === s.hitB[p]);
         ui.balls = ui.balls.filter((x) => x.id !== s.hitB[p]);
         const pl = posOf(p);
