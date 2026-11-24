@@ -579,7 +579,10 @@ export default {
   // くじは手を決めるときだけで、決まった手は手の一覧に入るので、apply は今までどおり同じ手から同じ局面を作る
   turnLimit(rules) { return [5, 10, 20].includes(rules?.time) ? rules.time : 0; },
   timeoutMove(s) {
-    const legal = (s.gob ? gobLegal(s) : s.big ? bigLegal(s) : emptyCells(s)).filter((m) => this.apply(s, m));
+    let legal = (s.gob ? gobLegal(s) : s.big ? bigLegal(s) : emptyCells(s)).filter((m) => this.apply(s, m));
+    // かぶせる: 空いているマスに手持ちの駒を置く手からくじ（遊び方の「空いている所におまかせで置かれます」）。その手が無いときだけ、かぶせる・動かす手も入れる
+    // （2026-11-24 の Codex の点検のあと本人が推奨を承認。前はかぶせる・動かす手もくじに入っていた）
+    if (s.gob) { const put = legal.filter((m) => m < 27 && !gobTop(s.stacks[m % 9])); if (put.length) legal = put; }
     return legal.length ? legal[Math.floor(Math.random() * legal.length)] : null;
   },
 

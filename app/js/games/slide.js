@@ -27,9 +27,11 @@
 //   - あきらめた人の小さな盤に「あきらめ」の札を重ねる（前は薄くするだけで分かりにくかった）。
 //   - CPU は、人がだれかそろえるまでは最初にそろえない（だれかがそろえてから 1.5〜8秒あとより前にはそろえない）。CPU は最初にそろえないので、
 //     だれかがそろえていれば、それは人。人が全員あきらめた・そろえられないまま終わるときは、CPU もあきらめる（部分点は手で送る）。
-//     どの席が CPU かは、ホストの端末で cpu() が呼ばれた席を覚えて見分ける（cpuSeats）。
+//     どの席が CPU かは、ホストの端末で cpu() がこの2秒の間に呼ばれた席で見分ける（cpuSeats。代打から人が戻った席は呼ばれなくなるので人に戻る）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（10を作れと同じ）
-// 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, seq, ms } / { p, t: 'pass', q, c? } / { p, t: 'part', q, c }
+// 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, seq, ms } / { p, t: 'pass', q, c? } / { p, t: 'part', q, c, n }
+//   part の n はその人のその問題の何回目の知らせか（1から）。前に受け取った n 以下は弾く（通信の行き違いで同じ・古い知らせが後から当たっても、古い枚数に戻らないように。
+//   2026-11-24 の Codex の点検のあと本人が推奨を承認。局面の partN に人ごとの最後の n を持つ）
 
 import { mulberry32, esc } from './util.js';
 import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText } from './party.js';
@@ -56,7 +58,7 @@ const full = (s) => (s.rules.level === 'full' ? 1 : 0);
 const limitOf = (s) => LIMITS[s.size][full(s)];
 export const blanksOfRules = (r) => (Number(r?.blanks) === 2 ? 2 : 1);
 const qKey = (s, q = s.q) => `slide:${s.seed}:${q}`;
-const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice(), passed: s.passed.slice(), parts: s.parts.slice() });
+const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice(), passed: s.passed.slice(), parts: s.parts.slice(), partN: s.partN.slice() });
 const doneOf = (s, p) => s.solved[p] !== null || s.passed[p];
 export const solvedBoard = (n, z = 1) => [...Array(n * n - z).keys()].map((i) => i + 1).concat(Array(z).fill(0));
 const zerosOf = (b) => b.reduce((a, v) => a + (v === 0 ? 1 : 0), 0);
@@ -197,7 +199,9 @@ let sendTimer = null;
 const packBoard = (b) => b.map((v) => v.toString(36)).join('');
 const unpackBoard = (t, n) => (typeof t === 'string' && t.length === n * n && /^[0-9a-o]+$/.test(t) ? [...t].map((c) => parseInt(c, 36)) : null);
 const cpuPlan = new Map();
-const cpuSeats = new Map(); // 種 → cpu() が呼ばれた席（ホストの端末でだけ使う。どの席が CPU か）
+const cpuSeats = new Map(); // 種 → (cpu() が呼ばれた席 → 最後に呼ばれた時刻)（ホストの端末でだけ使う。どの席が CPU か）
+// しばらく cpu() が呼ばれていない席は人と見る（代打の CPU から人が戻った席。CPU の席は 0.3秒ごとに呼ばれる。2026-11-24 の Codex の点検）
+const CPU_SEEN_MS = 2000;
 let keysBound = false;
 function bindKeys() {
   if (keysBound || typeof document === 'undefined') return;
@@ -237,7 +241,7 @@ export default {
     const qs = Array.from({ length: roundsOf(r) }, () => scramble(size, moves, rnd, blanksOfRules(r)));
     return {
       n, seed, rules: r, size, qs, q: -1, phase: 'ready',
-      solved: Array(n).fill(null), passed: Array(n).fill(false), parts: Array(n).fill(null), scores: Array(n).fill(0), last: null, log: [], step: 0,
+      solved: Array(n).fill(null), passed: Array(n).fill(false), parts: Array(n).fill(null), partN: Array(n).fill(0), scores: Array(n).fill(0), last: null, log: [], step: 0,
     };
   },
 
@@ -279,6 +283,7 @@ export default {
         s.solved = Array(s.n).fill(null);
         s.passed = Array(s.n).fill(false);
         s.parts = Array(s.n).fill(null);
+        s.partN = Array(s.n).fill(0);
         return s;
       }
       if (m.t === 'close' && s0.phase === 'open') {
@@ -304,10 +309,11 @@ export default {
     const start = s0.qs[s0.q].board;
     const okCount = (c) => Number.isInteger(c) && c >= 0 && c < start.length - zerosOf(start);
     if (m.t === 'part') {
-      if (!okCount(m.c) || s0.parts[m.p] === m.c) return null;
+      if (!okCount(m.c) || !Number.isInteger(m.n) || m.n <= s0.partN[m.p]) return null;
       const s = clone(s0);
       s.step += 1;
       s.parts[m.p] = m.c;
+      s.partN[m.p] = m.n;
       return s;
     }
     if (m.t === 'pass') {
@@ -332,8 +338,9 @@ export default {
   cpu(s, p) {
     if (s.phase !== 'open' || doneOf(s, p)) return null;
     let seen = cpuSeats.get(s.seed);
-    if (!seen) { seen = new Set(); cpuSeats.set(s.seed, seen); if (cpuSeats.size > 20) cpuSeats.delete(cpuSeats.keys().next().value); }
-    seen.add(p);
+    if (!seen) { seen = new Map(); cpuSeats.set(s.seed, seen); if (cpuSeats.size > 20) cpuSeats.delete(cpuSeats.keys().next().value); }
+    const nowT = performance.now();
+    seen.set(p, nowT);
     const key = qKey(s) + ':' + p;
     const lim = limitOf(s);
     let plan = cpuPlan.get(key);
@@ -357,9 +364,10 @@ export default {
       return { t: 'done', q: s.q, seq: undoOf(s.size, q.path, zerosOf(q.board)), ms: Math.round(t) };
     }
     // 人（cpu() が呼ばれていない席）が全員終わり、だれもそろえていなければ、CPU もあきらめる（だれかがそろえるのを待ち続けないように）
-    const humansDone = [...Array(s.n).keys()].every((x) => seen.has(x) || doneOf(s, x));
-    if (t >= plan.at && (!plan.ok || (first === null && humansDone))) return { t: 'pass', q: s.q, c };
-    if (!plan.part && t >= plan.partAt) { plan.part = true; return { t: 'part', q: s.q, c }; }
+    // 人が全員終わってだれもそろえていなければ、予定の時刻を待たずにあきらめる（2026-11-24 の Codex の点検。前は予定の時刻まで待っていた）
+    const humansDone = [...Array(s.n).keys()].every((x) => nowT - (seen.get(x) ?? -Infinity) < CPU_SEEN_MS || doneOf(s, x));
+    if ((first === null && humansDone) || (t >= plan.at && !plan.ok)) return { t: 'pass', q: s.q, c };
+    if (!plan.part && t >= plan.partAt) { plan.part = true; return { t: 'part', q: s.q, c, n: s.partN[p] + 1 }; }
     return null;
   },
 
@@ -422,7 +430,7 @@ export default {
     const n = s.size;
     const start = s.qs[s.q].board;
     const z = zerosOf(start);
-    if (loc?.key !== key) loc = { key, board: start.slice(), seq: '', sent: false, part: countOk(start), partTimer: null, hint: null };
+    if (loc?.key !== key) loc = { key, board: start.slice(), seq: '', sent: false, part: countOk(start), partN: 0, partTimer: null, hint: null };
     // o.canMove も見る: 観戦の人がほかの人の画面を選ぶと me にその席が来るので、見ているだけで動かせて「送った」が残り、
     // あとでその席に入るとそろえても送れなかった（2026-10-28 Codex の点検の指摘）
     const playing = s.phase === 'open' && me !== null && o.canMove && !doneOf(s, me) && !loc.sent;
@@ -498,12 +506,14 @@ export default {
         const c = countOk(loc.board);
         if (loc.key !== key || loc.sent || c === loc.part || !ui?.wrap?.isConnected || ui.s.phase !== 'open' || doneOf(ui.s, me) || isSolved(loc.board)) return;
         loc.part = c;
-        o.onMove({ t: 'part', q: s.q, c });
+        loc.partN = Math.max(loc.partN, ui.s.partN[me]) + 1; // 再読み込みで loc が作り直されても、届いている番号より大きくする
+        o.onMove({ t: 'part', q: s.q, c, n: loc.partN });
       }, PART_MS);
     };
     // 空きマス i を向き D へ動かす（i の となりの札が空きへ入る）
     const step = (i, D) => {
-      if (!playing || loc.sent || i < 0) return false;
+      // 制限時間を過ぎたら動かさない（締め切りまでの間に動かした札が部分点に入っていた。2026-11-24 の Codex の点検）
+      if (!playing || loc.sent || i < 0 || since(key) >= limit) return false;
       const d = letterFor(loc.board, i, D);
       const nb = moveBlank(loc.board, n, d);
       if (!nb) return false;

@@ -75,6 +75,7 @@ const clone = (s) => ({ ...s, scores: s.scores.slice(), solved: s.solved.slice()
 const doneOf = (s, p) => s.solved[p] !== null || s.miss[p];
 const limitOf = (s) => LIMITS[levelOf(s.rules)];
 const cpuPlan = new Map();
+const frozen = new Map(); // 問題の鍵 → 答えを見せるときに止めた時刻（ms）
 
 // 柵とひよこ。動いている間は画面の描き替えごとに位置を直す（止める時刻 freeze を渡すと、その時刻で止めて番号を付ける）
 function fieldSvg(x, key, freeze) {
@@ -270,7 +271,14 @@ export default {
     head.append(Object.assign(document.createElement('span'), { textContent: 'ひよこは' }), ansBox, Object.assign(document.createElement('span'), { textContent: '羽' }));
     card.append(head);
     // 答えを見せるときは、締め切った時刻あたりで止める（止める時刻は自分の画面に出てからの時間。制限時間より先には進めない）
-    card.append(fieldSvg(x, key, shown ? Math.min(since(key), limit) : null));
+    // 止める時刻は、答えを見せる場面で最初に描いたときの1回だけ取る（描き直しのたびに取ると、止まったひよこが動いて番号とずれる。2026-11-24 の Codex の点検）
+    let freeze = null;
+    if (shown) {
+      if (!frozen.has(key)) frozen.set(key, Math.min(since(key), limit));
+      if (frozen.size > 50) frozen.delete(frozen.keys().next().value);
+      freeze = frozen.get(key);
+    }
+    card.append(fieldSvg(x, key, freeze));
     if (!shown) {
       since(key);
       const anySolved = s.solved.some((v) => v !== null);

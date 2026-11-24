@@ -154,7 +154,10 @@ const finish = async (exitCode) => {
   stopServer();
   process.exit(exitCode);
 };
+// 上限の時計が走ったら、すぐ印を付ける（失敗の絵を撮っている間に続きの関数が返っても、成功の側で終わらないように。2026-11-24 の Codex の点検）
+let timedOut = false;
 const timer = setTimeout(async () => {
+  timedOut = true;
   result.error = `全体の上限（${opt.timeout} 秒）を超えた`;
   for (const [name, page] of pages) { try { await shot(page, `failed-${name}`); } catch { /* 撮れなくても続ける */ } }
   finish(2);
@@ -192,11 +195,13 @@ try {
   const mod = await import(pathToFileURL(path.resolve(opt.script)).href);
   if (typeof mod.default !== 'function') throw new Error('--script のファイルに export default の関数が無い');
   result.value = (await mod.default({ host, guests, join, readyAll, menu, shot, sleep, base, code })) ?? null;
+  if (timedOut) await new Promise(() => {}); // 上限の側が終わらせる（finish(2)）
   result.ok = true;
   clearTimeout(timer);
   await finish(0);
 } catch (e) {
   clearTimeout(timer);
+  if (timedOut) await new Promise(() => {}); // 上限の側が理由を書いて終わらせる
   result.error = String(e?.stack ?? e).slice(0, 1500);
   for (const [name, page] of pages) { try { await shot(page, `failed-${name}`); } catch { /* 撮れなくても続ける */ } }
   await finish(2);

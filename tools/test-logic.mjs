@@ -45,6 +45,15 @@ for (const rules of [{}, { size: 'super' }, { size: 'vanish' }, { size: 'gobble'
   assert.ok(seen.size > 1, `マルバツ: 時間切れの手はくじ（${JSON.stringify(rules)}）`);
 }
 assert.equal(T.timeoutMove(play(T, [0, 1, 2, 4, 3, 5, 7, 6, 8])), null, 'マルバツ: 打てる所が無ければ時間切れの手も無い');
+// かぶせる: 空いたマスがあれば、手持ちの駒をそこへ置く（かぶせる・盤の駒を動かす手は選ばない。2026-11-24）
+{
+  let x = T.init({ rules: { size: 'gobble' } });
+  for (const m of [4 + 18, 0 + 18, 8, 2]) x = T.apply(x, m); // 大を真ん中・左上、小を右下・右上
+  for (let j = 0; j < 60; j++) {
+    const m = T.timeoutMove(x);
+    assert.ok(m < 27 && x.stacks[m % 9].length === 0, `マルバツ（かぶせる）: 時間切れは空いたマスに手持ちの駒を置く（${m}）`);
+  }
+}
 
 // スーパーマルバツ（詳細設定「盤」= スーパー）
 const big = (over = {}) => ({ ...T.init({ rules: { size: 'super' } }), ...over });
@@ -5942,10 +5951,14 @@ assert.ok(sonarUsed >= 40, 'CPU もソナーを使う: ' + sonarUsed);
     assert.deepEqual([d.winner, d.place], [null, [1, 3, 1]], '海戦: 1位が並んだら引き分け');
     assert.equal(KS.result(h), null, '海戦: 続いている間は決着しない');
     // CPU どうしで最後まで打っても、ヒット数の合計 = ほかの人の海の船のマスのうち撃たれたマスの数
-    let st = h;
+    // 3人とも違う並びにする（同じ並びの2人は同じ1発で一緒に脱落し、「最初の脱落で終わる」まちがいを見分けられなかった。2026-11-24 の Codex の点検）
+    let st = KS.init({ rules: { players: 3, win: 'hits' } });
+    for (const f of [fleet, other, fleet.map(([r, c, v]) => [r, c + 5, v]).slice(0, 4).concat([[5, 0, true]])]) st = KS.apply(st, { t: 'place', ships: f });
+    assert.equal(st.phase, 'fire', '海戦（ヒット数）: 3人とも並べられた');
     for (let steps = 0; !KS.result(st); steps++) { st = KS.apply(st, KS.cpu(st, st.turn, { cpu: 'normal' })); assert.ok(st && steps < 1000, '海戦（ヒット数）の CPU が最後まで打てる'); }
     const hitCells = [0, 1, 2].reduce((a, q) => a + st.grid[q].filter((g, i) => g >= 0 && st.shots.some((sh, r2) => r2 !== q && sh[i])).length, 0);
     assert.equal(st.hitN.reduce((a, b) => a + b, 0), hitCells, '海戦: ヒット数の合計が当たったマスの数と同じ');
+    assert.equal(st.out.filter((x) => !x).length, 1, '海戦（ヒット数）: 最後の1人になるまで続ける'); // 2026-11-24 の Codex の点検
   }
   // 4人（2026-11-13）: 1発で残っている3人の海の同じマスに当たる
   assert.equal(KS.seatCount({ players: 4 }), 4);
@@ -6955,6 +6968,9 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.deepEqual(v.last.best, [0], '見切り: 速さで点でも、いちばん速い人に「正解」の音');
     assert.equal(M.sound(M.init(4, 1, { rules: { by: 'speed' } }), v, null, 0), 'correct');
     assert.equal(M.sound(M.init(4, 1, { rules: { by: 'speed' } }), v, null, 1), 'pop');
+    const v3 = M.apply(fly(hit(hit(M.init(4, 1, { rules: { rounds: 3, by: 'speed' } }), 0, 180), 1, 850), 2), { p: -1, t: 'close', r: 1 });
+    assert.equal(v3.last.gain[1], 3);
+    assert.equal(M.sound(M.init(4, 1, { rules: { by: 'speed' } }), v3, null, 1), 'pop', '見切り: 速さで点の3点は、いちばん速くなければ「正解」の音にしない');
     const r0 = M.apply(hit(M.init(2, 1, { rules: {} }), 0, 300), { p: -1, t: 'close', r: 1 });
     assert.equal(r0.last.best, undefined, '見切り: 順位のときの局面の形は前と同じ（best を持たない）');
   }
@@ -7118,14 +7134,20 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.equal(solvePath(scramble(5, 250, mulberry32(9)).board, 5, 1000), null, '15パズル: 調べる数の上限を越えたら null（置き場所のヒントに替える）');
     // 部分点
     let t = P.apply(P.init(3, 4, { rules: { size: '3' } }), { p: -1, t: 'next' });
-    t = P.apply(t, { p: 1, t: 'part', q: 0, c: 5 });
+    t = P.apply(t, { p: 1, t: 'part', q: 0, c: 5, n: 1 });
     assert.equal(t.parts[1], 5);
-    assert.equal(P.apply(t, { p: 1, t: 'part', q: 0, c: 5 }), null, '15パズル: 同じ枚数は2回足さない');
-    assert.equal(P.apply(t, { p: 1, t: 'part', q: 0, c: 8 }), null, '15パズル: 全部合っている枚数は part では送れない（done で送る）');
-    assert.equal(P.apply(t, { p: 1, t: 'part', q: 1, c: 4 }), null, '15パズル: ちがう問題の枚数は弾く');
+    assert.equal(P.apply(t, { p: 1, t: 'part', q: 0, c: 5, n: 1 }), null, '15パズル: 同じ知らせは2回足さない');
+    assert.equal(P.apply(t, { p: 1, t: 'part', q: 0, c: 5 }), null, '15パズル: 何回目かの無い知らせは弾く');
+    assert.equal(P.apply(t, { p: 1, t: 'part', q: 0, c: 8, n: 2 }), null, '15パズル: 全部合っている枚数は part では送れない（done で送る）');
+    assert.equal(P.apply(t, { p: 1, t: 'part', q: 1, c: 4, n: 2 }), null, '15パズル: ちがう問題の枚数は弾く');
     t = P.apply(t, { p: 2, t: 'pass', q: 0, c: 3 });
     t = P.apply(t, { p: 0, t: 'done', q: 0, seq: undoPath(t.qs[0].path), ms: 8000 });
-    assert.equal(P.apply(t, { p: 1, t: 'part', q: 0, c: 6 }) !== null, true, '15パズル: そろえていない人は枚数を送り直せる');
+    assert.equal(P.apply(t, { p: 1, t: 'part', q: 0, c: 6, n: 2 }) !== null, true, '15パズル: そろえていない人は枚数を送り直せる');
+    // 通信の行き違いで古い知らせ（5枚の n=1）が新しい知らせ（6枚の n=2）のあとに当たっても、6枚のまま（2026-11-24）
+    {
+      const u = P.apply(P.apply(t, { p: 1, t: 'part', q: 0, c: 6, n: 2 }), { p: 1, t: 'part', q: 0, c: 5, n: 1 });
+      assert.equal(u, null, '15パズル: 古い枚数の知らせは弾く');
+    }
     t = P.apply(t, { p: -1, t: 'close' });
     assert.deepEqual(t.scores, [8 + 3, 5, 3], '15パズル: そろえた人は 8＋3、ほかは送った枚数');
     assert.deepEqual(t.log[0].pts, [11, 5, 3]);
@@ -7139,15 +7161,25 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
       for (let k = 0; k < 400 && c.phase === 'open'; k++) {
         clock += 300;
         for (let p = 1; p < 10; p++) { const m = P.cpu(c, p); if (m) { if (m.t === 'done') cpuDone += 1; c = P.apply(c, { ...m, p }) ?? c; } }
-        if (k === 100) { assert.equal(cpuDone, 0, '15パズル: 人がそろえるまで CPU はそろえない'); c = P.apply(c, { p: 0, t: 'done', q: 0, seq: undoPath(c.qs[0].path), ms: 30300 }); }
+        // CPU がそろえる予定は 3×3 で 18〜63秒なので、それより後（約65秒）まで人がそろえない（2026-11-24 の Codex の点検。前は約30秒で、そのあとの分を見ていなかった）
+        if (k === 215) { assert.equal(cpuDone, 0, '15パズル: 人がそろえるまで CPU はそろえない'); c = P.apply(c, { p: 0, t: 'done', q: 0, seq: undoPath(c.qs[0].path), ms: 64800 }); }
       }
       assert.ok(c.solved.slice(1).some((v) => v !== null), '15パズル: 人がそろえたあとは CPU もそろえる');
       assert.ok(c.solved.slice(1).every((v) => v === null || v > c.solved[0]), '15パズル: CPU は人より後');
       // 人があきらめたら、CPU もだれもそろえずにあきらめる（待ち続けない）
       let g = P.apply(P.init(3, 78, { rules: { size: '3' } }), { p: -1, t: 'next' });
       g = P.apply(g, { p: 0, t: 'pass', q: 0, c: 2 });
+      const g0 = clock;
       for (let k = 0; k < 400 && !g.passed.every(Boolean); k++) { clock += 300; for (const p of [1, 2]) { const m = P.cpu(g, p); if (m) g = P.apply(g, { ...m, p }) ?? g; } }
       assert.ok(g.passed.every(Boolean) && g.solved.every((v) => v === null), '15パズル: 人が全員あきらめたら CPU もあきらめる');
+      assert.ok(clock - g0 <= 1500, '15パズル: 人が全員あきらめたら、CPU は予定の時刻を待たずにすぐあきらめる');
+      // 代打の CPU から人が戻った席（cpu() が呼ばれなくなった席）は人と見る: 0 があきらめても、1 が戻って解いている間は 2 の CPU があきらめない
+      let h = P.apply(P.init(3, 79, { rules: { size: '3' } }), { p: -1, t: 'next' });
+      clock += 300; for (const p of [1, 2]) { const m = P.cpu(h, p); if (m) h = P.apply(h, { ...m, p }) ?? h; } // 1 も CPU が代わりに打っていた
+      clock += 2100; // 1 に人が戻り、cpu() が呼ばれなくなって2秒たった
+      h =P.apply(h, { p: 0, t: 'pass', q: 0, c: 2 });
+      for (let k = 0; k < 20; k++) { clock += 300; const m = P.cpu(h, 2); if (m) h = P.apply(h, { ...m, p: 2 }) ?? h; } // 1 は人が戻ったので呼ばれない
+      assert.equal(h.passed[2], false, '15パズル: 代打から人が戻った席が解いている間は、CPU は「人が全員終わった」と見ない');
       assert.ok(g.parts[1] !== null && g.parts[2] !== null, '15パズル: CPU も合っている枚数を送る');
     } finally {
       Object.defineProperty(performance, 'now', { value: realNow, configurable: true, writable: true });
@@ -12965,8 +12997,13 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     }
   }
   assert.ok(nearAll / othersAll > 0.5, `人ごみ: おしい人（特徴が1つだけちがう）が半分より多い（${((100 * nearAll) / othersAll).toFixed(0)}%）`);
-  assert.equal(featureCount(2, 5), 2, '人ごみ: 5問の3問目は特徴2つ');
-  assert.equal(featureCount(3, 5), 3, '人ごみ: 5問の4問目は特徴3つ');
+  // 前半・後半の分かれ目を数で確かめる（上の確認は作る側と同じ featureCount を使うので、分かれ目がずれても一緒にずれて通る。2026-11-24 の Codex の点検）
+  for (const [k, twos] of [[3, 2], [5, 3], [10, 5]]) {
+    for (let q = 0; q < k; q++) {
+      assert.equal(featureCount(q, k), q < twos ? 2 : 3, `人ごみ: ${k}問では ${twos}問目まで特徴2つ（${q + 1}問目）`);
+      assert.equal(Object.keys(makeQuestion(3, q, 'normal', k).clue).length, q < twos ? 2 : 3, `人ごみ: ${k}問の${q + 1}問目のお題の特徴の数`);
+    }
+  }
   let s = G.apply(G.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
   const x = s.qs[0];
   assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, c: x.people.length, ms: 300 }), null, '人ごみ: いない人は押せない');
@@ -13001,12 +13038,20 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
         const r = x.size * 0.62;
         for (const c of x.chicks) {
           let prev = posAt(x, c, 0);
+          let walked = 0, turns = 0, lastLeft = prev.left;
           for (let t = 0.05; t < 40; t += 0.05) {
             const p = posAt(x, c, t);
             assert.ok(p.x >= r - 1e-6 && p.x <= W - r + 1e-6 && p.y >= r - 1e-6 && p.y <= H - r + 1e-6, 'ひよこ: 柵から出ない');
-            assert.ok(Math.hypot(p.x - prev.x, p.y - prev.y) <= Math.hypot(c.vx, c.vy) * 0.05 + 1e-6, 'ひよこ: 跳ね返っても位置がとばない');
+            const d = Math.hypot(p.x - prev.x, p.y - prev.y);
+            assert.ok(d <= Math.hypot(c.vx, c.vy) * 0.05 + 1e-6, 'ひよこ: 跳ね返っても位置がとばない');
+            walked += d;
+            if (p.left !== lastLeft) { turns++; lastLeft = p.left; }
             prev = p;
           }
+          // 止まっていない: 40秒で進んだ道のりが、速さ×時間のほぼ全部（跳ね返る所でわずかに短くなるだけ）。横に動くひよこは跳ね返って向きを変える
+          // （2026-11-24 の Codex の点検。上の2つだけでは、位置が動かなくても通っていた）
+          assert.ok(walked >= Math.hypot(c.vx, c.vy) * 40 * 0.9, `ひよこ: 止まらずに動く ${level} ${seed} ${q}`);
+          if (Math.abs(c.vx) * 40 > 2 * W) assert.ok(turns >= 1, 'ひよこ: 柵で跳ね返って向きを変える');
         }
       }
     }
@@ -13072,6 +13117,11 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
         assert.ok(c.cps[0] > 0 && c.cps[0] < c.cps[1] && c.cps[1] < c.pts.length - 1, 'イライラ棒: 旗は道の途中に順に2つ');
       });
     }
+  }
+  // あとの問題ほど道が長い（遊び方の「だんだん長くなります」。2026-11-24 の Codex の点検のあと本人が推奨を承認）
+  for (let seed = 0; seed < 300; seed++) {
+    const L = G.init(2, seed, { rules: {} }).qs.map((c) => (c.pts.length - 1) * c.u);
+    assert.ok(L[0] < L[1] && L[1] < L[2], `イライラ棒: あとの問題ほど道が長い ${seed} ${L.map(Math.round)}`);
   }
   {
     const a = makeCourse(1, 0, 'easy'), b = makeCourse(1, 0, 'hard');

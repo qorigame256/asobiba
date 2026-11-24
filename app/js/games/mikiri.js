@@ -286,7 +286,8 @@ export default {
     if (b.last !== a.last) {
       const L = b.last;
       if (L.out.includes(me)) return 'wrong';
-      if (L.best?.includes(me) || L.gain[me] === 3 || L.duelWin === me) return 'correct'; // gain の 3 は前の版の局面（best が無い）のため
+      // 速さで点のときは best（3点でも、いちばん速くなければ「正解」にしない。2026-11-24 の Codex の点検）。順位のときは gain の 3（局面に best を持たない）
+      if ((b.rules?.by === 'speed' ? L.best?.includes(me) : L.gain[me] === 3) || L.duelWin === me) return 'correct';
       return 'pop';
     }
     return null;

@@ -25,6 +25,7 @@
 //     回の終わり・勝ち負けは必ず届く送り方でも送る。ゲストは届いた位置へなめらかに寄せて描く。だれがトンを押したかは、送ってきた人の席で決める（名乗った席は見ない）。
 
 import { play } from '../sound.js';
+import { glyphs } from './util.js';
 
 const PLAYERS = ['赤', '青', '緑', '黄'];
 const COLORS = ['#d9643a', '#2f6fb3', '#2e9a52', '#d4a20c'];
@@ -407,7 +408,7 @@ function mount(root, opts) {
         g.beginPath(); g.moveTo(-r * 0.7, -r * 0.7); g.lineTo(r * 0.7, r * 0.7); g.moveTo(r * 0.7, -r * 0.7); g.lineTo(-r * 0.7, r * 0.7); g.stroke();
       }
       g.restore();
-      const nm = [...seatName(p)]; // 字の数で数える（.length では CPU の 🤖 が2字になり、5字の「🤖ロボたろう」が「…」で切れていた。2026-11-20 の見た目の点検）
+      const nm = glyphs(seatName(p)); // 字の数で数える（.length では CPU の 🤖 が2字になり、5字の「🤖ロボたろう」が「…」で切れていた。2026-11-20 の見た目の点検）
       tags.push([nm.length > 6 ? nm.slice(0, 6).join('') + '…' : nm.join(''), x, y + r + 14]);
     });
     // 名札は全部の駒を描いてから、白い下地を付けて手前に描く（2026-11-17 見た目の点検。近くの駒の上に名札が重なって読めなかった）

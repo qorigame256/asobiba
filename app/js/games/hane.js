@@ -24,6 +24,7 @@
 //   n が今の羽根と同じで、p がいま受ける人のときだけ受け付けるので、同じ手が2回届いても2回目は反則になる。
 
 import { since, scoreChips, SEAT_COLORS } from './party.js';
+import { glyphs } from './util.js';
 
 export const INK_MAX = 5;
 const DROPS = [[5, '5回'], [3, '3回'], [7, '7回']];
@@ -267,7 +268,7 @@ export default {
         g.fillStyle = '#555';
         g.font = '12px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif';
         g.textAlign = 'center';
-        const nm = [...(p === me ? 'あなた' : String(o.names[p] ?? ''))]; // 字の数で数える（.length では 🤖 などの絵文字が2字になる。sumo.js の名札と同じ）
+        const nm = glyphs(p === me ? 'あなた' : String(o.names[p] ?? '')); // 字の数で数える（.length では 🤖 などの絵文字が2字になる。sumo.js の名札と同じ）
         g.fillText(nm.length > 7 ? nm.slice(0, 7).join('') + '…' : nm.join(''), x, y + r + 15);
       }
       if (s.phase === 'fly') {

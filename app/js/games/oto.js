@@ -52,12 +52,18 @@ export function notesOf(seed, n) {
 
 // この端末で、その問題の音を鳴らす予約をしたか（描き直しのたびに鳴らさないように）
 const rung = new Set();
-function ring(key, plan) {
+// いま画面に出ている音当ての盤（描き直すたびに入れ替わる）と、その問題の鍵。鳴らす時刻に、まだその問題の盤が出ているときだけ鳴らす
+// （問題が出てから音が鳴るまでの間に待合室やホームへ移ると、予約した音がそちらで鳴っていた。2026-11-24 の Codex の点検）
+let live = { wrap: null, key: null };
+function ring(key, plan, qkey = key) {
   if (rung.has(key)) return;
   rung.add(key);
   if (rung.size > 200) rung.delete(rung.keys().next().value);
   const t0 = since(key);
-  for (const [at, note] of plan) if (at >= t0 - 50) setTimeout(() => play(NOTE_FILES[note]), Math.max(0, at - t0));
+  for (const [at, note] of plan) {
+    if (at < t0 - 50) continue;
+    setTimeout(() => { if (live.wrap?.isConnected && live.key === qkey) play(NOTE_FILES[note]); }, Math.max(0, at - t0));
+  }
 }
 const cpuPlan = new Map();
 
@@ -195,8 +201,9 @@ export default {
     const right = s.notes[s.q];
     const shown = s.phase !== 'open';
     const tm = timesOf(s.rules.level);
+    live = { wrap, key };
     if (!shown) ring(key, [...(tm.ref !== null ? [[tm.ref, 0]] : []), ...tm.q.map((at) => [at, right])]);
-    else ring(key + ':ans', [[300, right]]);
+    else ring(key + ':ans', [[300, right]], key);
     const t = since(key);
     const head = document.createElement('div');
     head.className = 'ot-head';

@@ -269,6 +269,12 @@ export const esc = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', 
 // 使う側は、出す要素に class="phrase"（style.css の word-break: keep-all）を付ける。keep-all で字の間では折れなくなり、ここで入れた <wbr> と句読点・空白でだけ折れる。
 // 折る所: ひらがなで始まらない言葉の前と、句読点・閉じかっこ・空白の後ろ。くっつける所: かっこの後ろの助詞（⁠）・カタカナどうし（スーパー|マル|バツ）・数字と「人」「×」（4|人・6×|6）。
 // 全120の説明を待合室の幅で数え、言葉の途中の切れが 64→0 になった。残るのは空白のあとで折れる2つ（○×クイズの「⭕ か」・エアホッケーの「CPU と」）。
+// 見た目の1字ずつに分ける（🇯🇵 のように2つ以上の字でできた絵文字も1字。Intl.Segmenter が無い端末では字（コードポイント）ごと。2026-11-24 の Codex の点検）
+let graphemeSeg;
+export function glyphs(str) {
+  if (graphemeSeg === undefined) graphemeSeg = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter('ja', { granularity: 'grapheme' }) : null;
+  return graphemeSeg ? [...graphemeSeg.segment(String(str))].map((x) => x.segment) : [...String(str)];
+}
 // Intl.Segmenter（言葉に区切る仕組み）が無い端末では null を返す（呼ぶ側は今までどおり esc した文を出し、class も付けない）。
 let phraseSeg;
 export function phraseHtml(text) {

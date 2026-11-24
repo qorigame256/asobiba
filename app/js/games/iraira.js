@@ -66,14 +66,34 @@ function pathOf(n, rnd) {
 }
 
 // 1問の道。pts = 道の中心の折れ線（ますの中心）、cps = 途中の旗の点の番号、u = ます1つの幅、w = 道の太さ、r = 玉の半径
-export function makeCourse(seed, q, level) {
+// attempt は作り直しの回数（0 のときは前と同じ道）
+export function makeCourse(seed, q, level, attempt = 0) {
   const n = GRIDS[q] ?? GRIDS[GRIDS.length - 1];
-  const rnd = mulberry32((seed * 97 + q * 389 + 5) >>> 0);
+  const rnd = mulberry32((seed * 97 + q * 389 + 5 + attempt * 7919) >>> 0);
   const cells = pathOf(n, rnd);
   const u = W / n;
   const pts = cells.map((c) => [(c % n + 0.5) * u, (Math.floor(c / n) + 0.5) * u]);
   const len = pts.length;
   return { n, u, w: u * (WIDTH[level] ?? WIDTH.normal), r: u * BALL, pts, cps: [Math.floor(len / 3), Math.floor((2 * len) / 3)] };
+}
+
+// 道の長さ（中心の折れ線の長さ）
+export const courseLen = (c) => (c.pts.length - 1) * c.u;
+// 3問の道。あとの問題ほど長くする（遊び方の「だんだん長くなります」。前の問題より短ければ作り直す。2026-11-24 の Codex の点検のあと本人が推奨を承認）。
+// 300回作り直しても長くならなければ、作った中でいちばん長いもの（種 0〜2999 では最多143回で見つかった。3000通りで0.2秒）
+export function makeCourses(seed, level) {
+  const out = [];
+  for (let q = 0; q < GRIDS.length; q++) {
+    const prev = q ? courseLen(out[q - 1]) : 0;
+    let best = null;
+    for (let a = 0; a < 300; a++) {
+      const c = makeCourse(seed, q, level, a);
+      if (!best || courseLen(c) > courseLen(best)) best = c;
+      if (courseLen(c) > prev) break;
+    }
+    out.push(best);
+  }
+  return out;
 }
 
 // 点から折れ線までのいちばん近い距離
@@ -117,7 +137,7 @@ export default {
 
   init(n, seed, { rules = {} } = {}) {
     const r = { level: 'normal', ...rules };
-    const qs = GRIDS.map((_, q) => makeCourse(seed, q, levelOf(r)));
+    const qs = makeCourses(seed, levelOf(r));
     return {
       n, seed, rules: r, qs, q: -1, phase: 'ready',
       solved: Array(n).fill(null), passed: Array(n).fill(false), scores: Array(n).fill(0), last: null, log: [], step: 0,
@@ -225,13 +245,20 @@ export default {
     };
     const chips = scoreChips(o, s.scores, { won, extra, steady: true });
     chips.querySelectorAll('.cc-opp-name').forEach((el, p) => { el.style.borderBottom = `3px solid ${SEAT_COLORS[p % SEAT_COLORS.length]}`; });
-    if (ui?.mount === mount && root.contains(ui.wrap)) { ui.chips.replaceWith(chips); ui.chips = chips; ui.bar?.(anySolved); return; }
+    if (ui?.mount === mount && root.contains(ui.wrap)) {
+      ui.chips.replaceWith(chips);
+      ui.chips = chips;
+      ui.s = s;
+      ui.bar?.(anySolved);
+      ui.paintOthers?.(); // ゴール・あきらめた人の玉を消す
+      return;
+    }
 
     root.innerHTML = '';
     root.className = 'board kj irb';
     const wrap = document.createElement('div');
     wrap.className = 'kj-wrap';
-    ui = { mount, wrap, chips };
+    ui = { mount, wrap, chips, s };
     wrap.append(chips);
     root.append(wrap);
     if (s.phase === 'end') { wrap.append(this.review(s, me, o)); return; }
@@ -246,17 +273,17 @@ export default {
     const limit = limitOf(s);
     if (s.phase === 'open') {
       since(key);
+      // 「だれかがゴール！」の行はいつも場所を取っておき、見せるかどうかだけを替える（行が足されると道が下へずれ、引っぱっている玉が壁にさわるため。
+      // 2026-11-24 の Codex の点検。抜けた数さがしと同じ形）。帯は timeBar と afterBar で同じ高さ
+      const line = Object.assign(document.createElement('div'), { className: 'kj-sub', textContent: 'だれかがゴール！ もうすぐ締め切り' });
       const slot = document.createElement('div');
-      card.append(slot);
+      card.append(line, slot);
       let was = null;
       ui.bar = (any) => {
         if (any === was) return;
         was = any;
-        slot.innerHTML = '';
-        if (any) {
-          slot.insertAdjacentHTML('beforeend', '<div class="kj-sub">だれかがゴール！ もうすぐ締め切り</div>');
-          slot.append(afterBar(key, limit, AFTER_MS));
-        } else slot.append(timeBar(key, limit, { secs: true }));
+        line.style.visibility = any ? '' : 'hidden';
+        slot.replaceChildren(any ? afterBar(key, limit, AFTER_MS) : timeBar(key, limit, { secs: true }));
       };
       ui.bar(anySolved);
     } else {
@@ -311,8 +338,9 @@ export default {
       if (!othersG.isConnected && othersG.dataset.on) return;
       othersG.dataset.on = '1';
       othersG.innerHTML = '';
+      const now = ui.s; // 道を作り直さずに描き直すときも、いまの局面で見る
       for (const [p, v] of others) {
-        if (v.key !== key || p === me || p >= s.n || doneOf(s, p)) continue;
+        if (v.key !== key || p === me || p >= now.n || doneOf(now, p)) continue;
         const e = document.createElementNS(ns, 'circle');
         e.setAttribute('cx', v.x.toFixed(2));
         e.setAttribute('cy', v.y.toFixed(2));
@@ -367,23 +395,26 @@ export default {
       return [((e.clientX - r.left) / r.width) * W, ((e.clientY - r.top) / r.height) * W];
     };
     if (playing) {
+      // 玉をつかんだ指（pointerId）だけで動かす。ほかの指が触れても動かさず、ほかの指を離してもつかみは切らない（2026-11-24 の Codex の点検）。
+      // 玉の上を押し直したときだけ、その指に持ち替える（離した合図を取り逃がして、つかんだままに見えるときも押し直せるように）
       svg.addEventListener('pointerdown', (e) => {
         if (e.button !== 0 || loc.sent || since(key) >= limit) return;
         const [x, y] = at(e);
         if (Math.hypot(x - loc.x, y - loc.y) > c.u * GRAB) return;
         e.preventDefault();
         loc.grab = true;
+        loc.pid = e.pointerId;
         try { svg.setPointerCapture?.(e.pointerId); } catch { /* 指の番号が古いときは捕まえずに続ける */ }
         paintBall();
       });
       svg.addEventListener('pointermove', (e) => {
-        if (!loc.grab || loc.sent) return;
+        if (!loc.grab || loc.sent || e.pointerId !== loc.pid) return;
         if (since(key) >= limit) { loc.grab = false; paintBall(); return; }
         moveTo(...at(e));
         paintBall();
         sendPos();
       });
-      const stop = () => { if (loc.grab) { loc.grab = false; paintBall(); } };
+      const stop = (e) => { if (loc.grab && e.pointerId === loc.pid) { loc.grab = false; paintBall(); } };
       svg.addEventListener('pointerup', stop);
       svg.addEventListener('pointercancel', stop);
     }

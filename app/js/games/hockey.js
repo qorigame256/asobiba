@@ -77,8 +77,9 @@ const SEND_IDLE_MS = 250; // 2026-11-19 に 90ms から 200ms、11-20 に 250ms 
 // 2026-11-23 本人の声「物凄くラグい」（4人のオンライン・往復 約300ms の録画）への対策（Claude の判断）:
 //   - ほかの端末のマレットは、届いた位置へ速く動いてから次が届くまで止まっていたので、0.2〜0.25秒ごとに飛んで見えた。
 //     届いた位置どうしの間を、届く間隔（の見込み。MLERP_MIN〜MLERP_MAX）をかけてまっすぐ動かす（net.mt）。そのぶん見た目は1回分遅れるが、
-//     ほかの端末のマレットは当たりに使わない（見た目だけ）ので、勝ち負けには関わらない。
-//   - 自分のマレットがパックを打ったら、次の送る時刻を待たずにすぐ送る（打った向きが相手に最大 SEND_MS 早く届く）。送る数が増えすぎないよう、
+//     ほかの端末のマレットは当たりに使わない（見た目だけ）ので、勝ち負けには関わらない。ただしホストの CPU が狙うゴールを選ぶとき（T.cpu の mallets）は、
+//     この途中の位置を見る（届いた位置より少し遅れた位置。影響はごく小さいので今のまま。2026-11-24 の Codex の点検のあと本人が推奨を承認）。
+//   - 自分のマレットがパックを打ったら（この端末が2つのパックを持っているときは、パックどうしが強く当たったときも）、次の送る時刻を待たずにすぐ送る（打った向きが相手に最大 SEND_MS 早く届く）。送る数が増えすぎないよう、
 //     前に送ってから HIT_GAP_MS たっていないときは待つ（打ったあとの次の送りは、いつもどおり SEND_MS あと）。
 const MLERP_MIN = 120;
 const MLERP_MAX = 400;
@@ -1311,10 +1312,11 @@ function mount(root, opts) {
     if (d.k === 'goal' && d.ep === net.ep) mergeLost(d.l, d.gi);
     if (d.k === 'timeup' && d.ep === net.ep) setTimeUp();
     if (d.k === 's' && by.length) {
-      if (Array.isArray(d.m)) for (const e of d.m) if (Array.isArray(e) && by.includes(e[0]) && !dv.includes(e[0])) towardMallet(e[0], e[1], e[2], now);
       // ほかの端末が「もう一回」を始めていた（知らせが落ちた・こちらが途中で再読み込みした）
       if (d.ep > net.ep) onlineReset(d.ep);
       if (d.ep !== net.ep) return;
+      // マレットの位置は試合の番号を合わせてから受け取る（前の試合の位置で動かさない・始め直しで受け取った位置を消さない。2026-11-24 の Codex の点検）
+      if (Array.isArray(d.m)) for (const e of d.m) if (Array.isArray(e) && by.includes(e[0]) && !dv.includes(e[0])) towardMallet(e[0], e[1], e[2], now);
       mergeLost(d.l, d.gi);
       if (d.tu) setTimeUp(); // 時間切れの知らせが落ちていた（失点を合わせてから決着を見る）
       const os = Array.isArray(d.o) ? d.o : [];
@@ -1392,7 +1394,7 @@ function mount(root, opts) {
     net.mt[p] = { fx: st.mallets[p].x, fy: st.mallets[p].y, t0: now, dur: k ? k.dur * 0.7 + gap * 0.3 : gap, at: now };
     targets[p] = { x, y };
   }
-  // ほかの端末のマレットを、動き始めの位置から届いた位置までの途中に置く（見た目だけ。当たりには使わない）。動かした席の一覧を返す
+  // ほかの端末のマレットを、動き始めの位置から届いた位置までの途中に置く（当たりには使わない。CPU の狙い選びはこの位置を見る＝先頭の説明）。動かした席の一覧を返す
   function glideMallets(dv, dt) {
     const t = performance.now();
     const done = [];
@@ -1482,7 +1484,8 @@ function mount(root, opts) {
     }
     bumpSound(ev);
     const holding = net.owners.some((o, i) => dv.includes(o) || (net.handed[i] === o && net.said[o]?.[i] !== o));
-    // ev.hit は、この端末が動かしているマレットが、この端末が持っているパックを打った強さ（すぐ送る。先頭の HIT_GAP_MS の説明）
+    // ev.hit は、この端末が動かしているマレットが、この端末が持っているパックを打った強さ（パックどうしの当たり（bumpPucks）も入る。すぐ送る。先頭の HIT_GAP_MS の説明。
+    // HIT_GAP_MS があるので、すぐ送る分を足しても1秒8通の内に収まる）
     const hitNow = ev.hit > HIT_SEND && now - net.lastSend >= HIT_GAP_MS;
     if (dv.length && (hitNow || now - net.lastSend >= (holding ? SEND_MS : SEND_IDLE_MS))) sendState(now, false, dv);
   }

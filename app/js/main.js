@@ -759,6 +759,8 @@ function nudgeButton(wait) {
     setTimeout(() => { if (b.isConnected) b.disabled = false; }, NUDGE_MS);
   }, 'secondary dock-nudge');
   b.disabled = Date.now() - nudgeAt < NUDGE_MS;
+  // 押せない間に作り直したボタンも10秒たったら押せるようにする（ほかの人の準備OKで段が作り直されると、前のボタンのタイマーしか無かった。2026-11-24 の Codex の点検）
+  if (b.disabled) setTimeout(() => { if (b.isConnected) b.disabled = false; }, NUDGE_MS - (Date.now() - nudgeAt));
   b.title = `まだの人（${wait.map(nameOf).join('・')}）に、準備OK を押すよう知らせる`;
   return b;
 }
@@ -1429,6 +1431,7 @@ function canMove(game, st, res) {
   if (me === SPECTATOR) return false;
   if (awayMe()) return false;
   if (game.multi) return game.canAct(st, me);
+  if (limitOut && limitOut === limitKeyOf(me)) return false; // 持ち時間が切れた（watchTurnLimit）
   return seatsFilled() && game.turn(st) === me;
 }
 
@@ -2312,12 +2315,15 @@ const turnLimitMs = (game) => {
   return sec ? sec * 1000 + (S.moves.length ? 0 : TURN_LIMIT_FIRST) : 0;
 };
 let limitKey = null;
+const limitKeyOf = (p) => `${S.code}:${S.gameId}:${S.round}:${S.undo ?? 0}:${S.moves.length}:${S.order?.[p]}:${S.clock?.at}`;
+// 自分の時間切れの一言を出した番。この番のうちは自分では打たせない（ホストのおまかせの手と本人の手が同じ番に通らないように。2026-11-24 の Codex の点検）
+let limitOut = null;
 function watchTurnLimit(game, st, res) {
   const lim = turnLimitMs(game);
   if (!lim || res || !seatsFilled() || !S.clock) return;
   const p = game.turn(st);
   if (!Number.isInteger(p) || cpuPlays(S.order[p])) return;
-  const keyNow = () => `${S.code}:${S.gameId}:${S.round}:${S.undo ?? 0}:${S.moves.length}:${S.order?.[p]}:${S.clock?.at}`;
+  const keyNow = () => limitKeyOf(p);
   const key = keyNow();
   if (limitKey === key) return;
   limitKey = key;
@@ -2325,6 +2331,7 @@ function watchTurnLimit(game, st, res) {
   const due = S.clock.at + lim - Date.now();
   setTimeout(() => { // 各端末の一言（自分の画面の残りが0になったとき）
     if (S !== session || keyNow() !== key) return;
+    if (p === myPlayer()) { limitOut = key; render(); }
     toast(p === myPlayer() ? '⏰ 時間切れ！ おまかせで置きます' : `⏰ ${seatMark(game, p)}の時間切れ`);
   }, Math.max(0, due));
   if (!S.isHost) return;

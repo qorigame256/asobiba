@@ -264,13 +264,15 @@ export default {
     };
     const mine = me !== null ? Math.min(progOf(s, me), cnt - 1) : 0; // この端末が解いている問題
     const mount = `${s.seed}:${s.phase}:${me}:${me !== null && doneOf(s, me)}:${mine}:${!!o.canMove}`; // 動かせるかが変わったら作り直す（観戦から席に入ったとき）
-    if (ui?.mount === mount && root.contains(ui.wrap)) { ui.s = s; ui.refresh(); return; }
+    // 見ているほかの人の盤も描き直す（その人の完成の手が届いたら、送りっぱなしの盤が欠けていても答えの盤にする。2026-11-24 の Codex の点検）
+    if (ui?.mount === mount && root.contains(ui.wrap)) { ui.s = s; ui.refresh(); ui.paintBoard?.(watch.p); return; }
 
     root.innerHTML = '';
     root.className = 'board kj np';
     const wrap = document.createElement('div');
     wrap.className = 'kj-wrap';
     ui = { mount, wrap, s };
+    const cur = ui; // 同じ画面のまま届いた局面は cur.s（上の「見ているほかの人の盤も描き直す」）
     let chips = chipsOf();
     Object.assign(ui, { refresh: () => { const c = chipsOf(); chips.replaceWith(c); chips = c; } });
     wrap.append(chips);
@@ -316,7 +318,7 @@ export default {
       const vp = viewOf();
       if (s.phase !== 'open' || vp === mineSeat) return { q, cells: showCells, mine: showCells === loc.cells };
       if (vp === null) return { q, cells: q.puzzle, mine: false };
-      if (s.solved[vp] !== null) { const vq = qOf(s, cnt - 1); return { q: vq, cells: vq.answer, mine: false }; }
+      if (cur.s.solved[vp] !== null) { const vq = qOf(s, cnt - 1); return { q: vq, cells: vq.answer, mine: false }; }
       const b = boards.get(vp);
       if (!b || b.g.length !== N * N) return { q, cells: q.puzzle, mine: false };
       const vq = qOf(s, Math.min(b.k, cnt - 1));
@@ -373,6 +375,7 @@ export default {
     }
     let lastSend = -1e9;
     let sendT = 0;
+    let wasFull = loc.cells.every((x, i) => x || q.puzzle[i]);
     // 進み具合と盤を送りっぱなしで送る（0.4秒に1回まで。間に合わなかった分は少しあとにまとめて送る。盤は解き終わった人・観戦の人が見る）
     const sendProgress = (force = false) => {
       if (!o.stream) return;
@@ -389,7 +392,9 @@ export default {
     // 埋めたあとに: 送る・描く・そろったら完成を送る（put と時間でヒントから）
     const changed = () => {
       const filled = loc.cells.filter((x, i) => x && !q.puzzle[i]).length;
-      sendProgress(filled === blanks);
+      // 全部埋まった瞬間だけすぐ送る（埋まったまま直している間は 0.4秒に1回まで。送る数の見張りに捨てられないように。2026-11-24 の Codex の点検）
+      sendProgress(filled === blanks && !wasFull);
+      wasFull = filled === blanks;
       draw();
       if (loc.cells.join('') === q.answer.join('')) {
         const ms = Math.round(since(key));
@@ -407,6 +412,8 @@ export default {
       }
       loc.cells[loc.sel] = v;
       if (v) for (const j of peersOf(sh)[loc.sel]) loc.memo[j] = loc.memo[j].filter((x) => x !== v);
+      // 正しい数字を入れたら、時間でヒントの時計をすぐ0に戻す（0.5秒ごとの数え直しの間に1つ消して1つ入れると、数が同じで戻らなかった。2026-11-24 の Codex の点検）
+      if (v && v === q.answer[loc.sel]) { loc.good = loc.cells.filter((x, i) => !q.puzzle[i] && x === q.answer[i]).length; loc.goodAt = Date.now(); }
       changed();
     };
     // 時間でヒント（詳細設定 clue。2026-11-22 本人の依頼「10秒間正しい答えが一つも入らなかったら、ランダムで一つ答えを埋める」。最初は あり は本人の選択）:
