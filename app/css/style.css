@@ -3912,6 +3912,36 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .ck-edge { position: absolute; top: 0; bottom: 0; left: var(--cliff); width: 5px; background: #5a3d1e; }
 .board button.btn.ck-brake { display: block; width: min(100%, 420px); margin: 10px auto 0; padding: 18px; border-radius: 16px; background: #d9342b; color: #fff; font-size: 1.5rem; font-weight: 900; cursor: pointer; touch-action: manipulation; }
 
+/* ---------- 2026-11-24 に足した3つ（人ごみさがし・ひよこかぞえ・イライラ棒）。地面・柵・道の色はどのスキンでも同じ ---------- */
+:is([data-game="hitogomi"], [data-game="hiyoko"], [data-game="iraira"]) .board { width: min(100%, 560px); }
+/* 人ごみさがし（押した人に枠: picked 送った・ok 正解・ng まちがい・ans 答え） */
+.hg-clue { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; margin: 2px 0 6px; font-weight: 800; }
+.hg-q { font-size: 1.15rem; }
+.hg-tag { padding: 3px 12px; border: 2px solid var(--accent); border-radius: 999px; background: var(--field); font-size: clamp(1rem, 4.4vw, 1.2rem); }
+.hg-fig { display: block; width: min(100%, 520px); margin: 0 auto 4px; border-radius: 12px; background: #e9e3cf; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+.hg-p { cursor: pointer; }
+.hg-fig.locked .hg-p { cursor: default; }
+.hg-hit { fill: transparent; stroke: none; }
+.hg-p.picked .hg-hit { fill: rgba(232, 169, 19, .25); stroke: #e8a913; stroke-width: .6; }
+.hg-p.ng .hg-hit { fill: rgba(217, 83, 79, .25); stroke: #d9534f; stroke-width: .7; }
+.hg-p.ok .hg-hit, .hg-p.ans .hg-hit { fill: rgba(47, 138, 74, .2); stroke: #2f8a4a; stroke-width: .8; }
+/* ひよこかぞえ */
+.hy-fig { display: block; width: min(100%, 520px); margin: 6px auto; border: 4px solid #a0794a; border-radius: 12px; background: #a8d98a; -webkit-user-select: none; user-select: none; }
+.hy-n { font-size: 3.4px; font-weight: 900; fill: #fff; stroke: #333; stroke-width: .7px; paint-order: stroke; }
+/* イライラ棒（壁は暗い色、道は明るい色。壁にさわると一瞬赤く光る） */
+.irb-fig { display: block; width: min(100%, 460px); margin: 4px auto; border-radius: 12px; touch-action: none; -webkit-user-select: none; user-select: none; }
+.irb-wall { fill: #3a3550; }
+.irb-edge { fill: none; stroke: #f2c21b; stroke-linecap: round; stroke-linejoin: round; }
+.irb-road { fill: none; stroke: #fdf8ea; stroke-linecap: round; stroke-linejoin: round; }
+.irb-start { fill: #bfe6c6; }
+.irb-ball { stroke: #fff; stroke-width: .5; }
+.irb-ball.grab { stroke: #222; stroke-width: .7; }
+.irb-fig.live .irb-ball { cursor: grab; }
+.irb-others circle { opacity: .45; }
+.irb-fig.crash .irb-wall { animation: irb-crash .45s ease-out; }
+@keyframes irb-crash { from { fill: #d9342b; } to { fill: #3a3550; } }
+@media (prefers-reduced-motion: reduce) { .irb-fig.crash .irb-wall { animation: none; } }
+
 /* 音当て（oto.js）。鍵盤はどのスキンでも白と黒の線（本物の鍵盤の色） */
 .ot-head { display: flex; align-items: center; justify-content: center; gap: 10px; }
 .ot-wave { font-size: 1.8rem; transition: transform .15s; }

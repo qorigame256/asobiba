@@ -1,0 +1,63 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "app/fonts",
+    "app/voice",
+    "app/sounds",
+    "tools/test-logic.mjs",
+    "tools/font-chars.json",
+    "tools/font-texts.mjs",
+    "tools/voice-texts.mjs"
+  ],
+  "cwd": "copy",
+  "env": {
+    "QUICK": "1",
+    "SEED": "1"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 300,
+  "breaks": [
+    {
+      "name": "人ごみさがし: お題に合う人を弾かない",
+      "file": "app/js/games/hitogomi.js",
+      "old": "    if (!matches(m, clue)) people.push(m);",
+      "new": "    people.push(m);"
+    },
+    {
+      "name": "人ごみさがし: いつも特徴2つ",
+      "file": "app/js/games/hitogomi.js",
+      "old": "export const featureCount = (q, k) => (q < Math.ceil(k / 2) ? 2 : 3);",
+      "new": "export const featureCount = (q, k) => 2;"
+    },
+    {
+      "name": "ひよこかぞえ: 柵で跳ね返らない",
+      "file": "app/js/games/hiyoko.js",
+      "old": "  return m <= span ? [lo + m, 1] : [lo + 2 * span - m, -1];",
+      "new": "  return [lo + m, 1];"
+    },
+    {
+      "name": "イライラ棒: 壁の判定を道の太さの半分でなく太さで見る",
+      "file": "app/js/games/iraira.js",
+      "old": "distTo(c, x, y) > c.w / 2 - c.r;",
+      "new": "distTo(c, x, y) > c.w - c.r;"
+    },
+    {
+      "name": "イライラ棒: 締め切りを待たない",
+      "file": "app/js/games/iraira.js",
+      "old": "const AFTER_MS = 20000;",
+      "new": "const AFTER_MS = 5000;"
+    }
+  ]
+}

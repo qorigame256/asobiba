@@ -12937,6 +12937,166 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('koori OK');
 }
 
+// 人ごみさがし（2026-11-24）: お題に合う人はちょうど1人・お題の特徴の数と言い方・人数と置き場所・おしい人が多い・点と締め切り・CPU どうしで最後まで
+{
+  const G = GAMES.hitogomi;
+  const { makeQuestion, matches, featureCount, GRID, HATS, W } = await import('../app/js/games/hitogomi.js');
+  let nearAll = 0, othersAll = 0;
+  for (const level of ['easy', 'normal', 'hard']) {
+    const [cols, rows] = GRID[level];
+    for (let seed = 0; seed < 30; seed++) {
+      for (let q = 0; q < 10; q++) {
+        const x = makeQuestion(seed, q, level, 10);
+        assert.equal(x.people.length, cols * rows, `人ごみ: 人数 ${level}`);
+        const hit = x.people.map((m, i) => i).filter((i) => matches(x.people[i], x.clue));
+        assert.deepEqual(hit, [x.target], `人ごみ: お題に合う人はちょうど1人 ${level} ${seed} ${q}`);
+        assert.equal(Object.keys(x.clue).length, featureCount(q, 10), '人ごみ: 前半は特徴2つ・後半は3つ');
+        if ('hat' in x.clue) assert.ok(x.clue.hat > 0 && HATS[x.clue.hat], '人ごみ: 「帽子なし」はお題に使わない');
+        if ('glasses' in x.clue) assert.equal(x.clue.glasses, 1, '人ごみ: 「めがねなし」はお題に使わない');
+        const cells = new Set(x.people.map((m) => `${Math.round(m.x / x.cw)}:${Math.round(m.y / (x.cw * 1.3))}`));
+        assert.equal(cells.size, x.people.length, '人ごみ: 1つの場所に1人');
+        for (const m of x.people) assert.ok(m.x >= -x.cw * 0.06 && m.x + x.cw <= W + x.cw * 0.06 && m.y >= -x.cw * 0.04 && m.y + x.cw * 1.3 <= x.h + x.cw * 0.04, '人ごみ: 絵の中');
+        x.people.forEach((m, i) => {
+          if (i === x.target) return;
+          othersAll++;
+          if (Object.keys(x.clue).filter((k) => m[k] !== x.clue[k]).length === 1) nearAll++;
+        });
+      }
+    }
+  }
+  assert.ok(nearAll / othersAll > 0.5, `人ごみ: おしい人（特徴が1つだけちがう）が半分より多い（${((100 * nearAll) / othersAll).toFixed(0)}%）`);
+  assert.equal(featureCount(2, 5), 2, '人ごみ: 5問の3問目は特徴2つ');
+  assert.equal(featureCount(3, 5), 3, '人ごみ: 5問の4問目は特徴3つ');
+  let s = G.apply(G.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  const x = s.qs[0];
+  assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, c: x.people.length, ms: 300 }), null, '人ごみ: いない人は押せない');
+  s = G.apply(s, { p: 0, t: 'ans', q: 0, c: x.target === 0 ? 1 : 0, ms: 300 });
+  assert.equal(s.miss[0], true, '人ごみ: ちがう人はまちがい');
+  assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, c: x.target, ms: 400 }), null, '人ごみ: 1問に1回だけ');
+  s = G.apply(s, { p: 1, t: 'ans', q: 0, c: x.target, ms: 9000 });
+  assert.equal(G.referee(s).ms, 5000, '人ごみ: だれかが正解したら5秒で締め切り');
+  s = G.apply(s, { p: 2, t: 'ans', q: 0, c: x.target, ms: 7000 });
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [0, 2, 3], '人ごみ: 速い順に3・2点');
+  assert.equal(G.init(2, 1, { rules: {} }).qs.length, 5, '人ごみ: 最初は5問');
+  for (const rules of [{}, { level: 'hard', rounds: 3 }, { level: 'easy', rounds: 10 }]) {
+    const end = runCpus(G, 5, 8, rules, 250, 8000);
+    assert.ok(G.result(end) && end.scores.some((v) => v > 0), `人ごみ: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('hitogomi OK');
+}
+
+// ひよこかぞえ（2026-11-24）: 羽数はむずかしさの範囲・ひよこは柵から出ない・跳ね返りでとばない・後ろの問題ほど速い・点と締め切り・CPU どうしで最後まで
+{
+  const G = GAMES.hiyoko;
+  const { makeQuestion, posAt, RANGE, W, H } = await import('../app/js/games/hiyoko.js');
+  for (const level of ['easy', 'normal', 'hard']) {
+    const seen = new Set();
+    for (let seed = 0; seed < 40; seed++) {
+      for (let q = 0; q < 5; q++) {
+        const x = makeQuestion(seed, q, level, 5);
+        const [lo, hi] = RANGE[level];
+        assert.ok(x.count >= lo && x.count <= hi && x.chicks.length === x.count, `ひよこ: 羽数は範囲の中 ${level}`);
+        seen.add(x.count);
+        const r = x.size * 0.62;
+        for (const c of x.chicks) {
+          let prev = posAt(x, c, 0);
+          for (let t = 0.05; t < 40; t += 0.05) {
+            const p = posAt(x, c, t);
+            assert.ok(p.x >= r - 1e-6 && p.x <= W - r + 1e-6 && p.y >= r - 1e-6 && p.y <= H - r + 1e-6, 'ひよこ: 柵から出ない');
+            assert.ok(Math.hypot(p.x - prev.x, p.y - prev.y) <= Math.hypot(c.vx, c.vy) * 0.05 + 1e-6, 'ひよこ: 跳ね返っても位置がとばない');
+            prev = p;
+          }
+        }
+      }
+    }
+    assert.equal(seen.size, RANGE[level][1] - RANGE[level][0] + 1, `ひよこ: 範囲の数はどれも出る ${level}`);
+  }
+  {
+    const speed = (x) => x.chicks.reduce((a, c) => a + Math.hypot(c.vx, c.vy), 0) / x.chicks.length;
+    let first = 0, last = 0;
+    for (let seed = 0; seed < 40; seed++) { first += speed(makeQuestion(seed, 0, 'normal', 5)); last += speed(makeQuestion(seed, 4, 'normal', 5)); }
+    assert.ok(last / first > 1.3, 'ひよこ: 後ろの問題ほど速く動く');
+  }
+  let s = G.apply(G.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  const x = s.qs[0];
+  assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, c: 100, ms: 300 }), null, 'ひよこ: 3桁は弾く');
+  s = G.apply(s, { p: 0, t: 'ans', q: 0, c: x.count + 1, ms: 300 });
+  assert.equal(s.miss[0], true, 'ひよこ: ちがう数はまちがい');
+  s = G.apply(s, { p: 1, t: 'ans', q: 0, c: x.count, ms: 9000 });
+  assert.equal(G.referee(s).ms, 8000, 'ひよこ: だれかが正解したら8秒で締め切り');
+  s = G.apply(s, { p: 2, t: 'ans', q: 0, c: x.count, ms: 7000 });
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [0, 2, 3], 'ひよこ: 速い順に3・2点');
+  assert.equal(G.init(2, 1, { rules: {} }).qs.length, 5, 'ひよこ: 最初は5問');
+  for (const rules of [{}, { level: 'hard', rounds: 3 }, { level: 'easy', rounds: 10 }]) {
+    const end = runCpus(G, 5, 8, rules, 250, 8000);
+    assert.ok(G.result(end) && end.scores.some((v) => v > 0), `ひよこ: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('hiyoko OK');
+}
+
+// イライラ棒（2026-11-24）: 道は左上から右下へ、となりのますへ1つずつ・同じますを2回通らない・道の上は壁にさわらない・
+// となり合うがつながっていない道の間には壁がある・旗は道の途中・点と締め切り・CPU どうしで最後まで
+{
+  const G = GAMES.iraira;
+  const { makeCourse, hitsWall, GRIDS } = await import('../app/js/games/iraira.js');
+  for (const level of ['easy', 'normal', 'hard']) {
+    for (let seed = 0; seed < 30; seed++) {
+      GRIDS.forEach((n, q) => {
+        const c = makeCourse(seed, q, level);
+        const cell = ([x, y]) => Math.floor(y / c.u) * n + Math.floor(x / c.u);
+        const cells = c.pts.map(cell);
+        assert.equal(cells[0], 0, 'イライラ棒: 左上から');
+        assert.equal(cells.at(-1), n * n - 1, 'イライラ棒: 右下まで');
+        assert.equal(new Set(cells).size, cells.length, 'イライラ棒: 同じますを2回通らない');
+        assert.ok(cells.length >= 2 * n - 1, 'イライラ棒: 道の長さ');
+        for (let i = 0; i + 1 < c.pts.length; i++) {
+          const [ax, ay] = c.pts[i], [bx, by] = c.pts[i + 1];
+          assert.ok(Math.abs(Math.hypot(bx - ax, by - ay) - c.u) < 1e-9, 'イライラ棒: となりのますへ1つずつ');
+          for (let t = 0; t <= 1; t += 0.1) assert.equal(hitsWall(c, ax + (bx - ax) * t, ay + (by - ay) * t), false, `イライラ棒: 道の上は壁にさわらない ${level} ${seed} ${q}`);
+        }
+        // となり合っているが、道ではつながっていないますの間（境目のまん中）は壁
+        const idx = new Map(cells.map((v, i) => [v, i]));
+        for (let i = 0; i < cells.length; i++) {
+          for (let j = i + 2; j < cells.length; j++) {
+            const a = cells[i], b = cells[j];
+            const adj = (Math.abs(a - b) === 1 && Math.floor(a / n) === Math.floor(b / n)) || Math.abs(a - b) === n;
+            if (!adj) continue;
+            const mx = (c.pts[i][0] + c.pts[j][0]) / 2, my = (c.pts[i][1] + c.pts[j][1]) / 2;
+            assert.equal(hitsWall(c, mx, my), true, `イライラ棒: つながっていない道の間は壁 ${level} ${seed} ${q}`);
+          }
+        }
+        // 道の外のますのまん中は壁
+        for (let v = 0; v < n * n; v++) if (!idx.has(v)) assert.equal(hitsWall(c, (v % n + 0.5) * c.u, (Math.floor(v / n) + 0.5) * c.u), true, 'イライラ棒: 道の外は壁');
+        assert.ok(c.cps[0] > 0 && c.cps[0] < c.cps[1] && c.cps[1] < c.pts.length - 1, 'イライラ棒: 旗は道の途中に順に2つ');
+      });
+    }
+  }
+  {
+    const a = makeCourse(1, 0, 'easy'), b = makeCourse(1, 0, 'hard');
+    assert.deepEqual(a.pts, b.pts, 'イライラ棒: むずかしさで変わるのは道の太さだけ');
+    assert.ok(a.w > b.w, 'イライラ棒: やさしいほど道が太い');
+  }
+  let s = G.apply(G.init(3, 4, { rules: {} }), { p: -1, t: 'next' });
+  assert.equal(G.apply(s, { p: 0, t: 'done', q: 0, ms: 46000 }), null, 'イライラ棒: 制限時間を過ぎたゴールは弾く');
+  assert.equal(G.apply(s, { p: 0, t: 'done', q: 1, ms: 3000 }), null, 'イライラ棒: ちがう問題のゴールは弾く');
+  s = G.apply(s, { p: 0, t: 'pass', q: 0 });
+  assert.equal(G.apply(s, { p: 0, t: 'done', q: 0, ms: 3000 }), null, 'イライラ棒: あきらめたあとはゴールできない');
+  s = G.apply(s, { p: 1, t: 'done', q: 0, ms: 9000 });
+  assert.equal(G.referee(s).ms, 20000, 'イライラ棒: だれかがゴールしたら20秒で締め切り');
+  s = G.apply(s, { p: 2, t: 'done', q: 0, ms: 7000 });
+  assert.equal(G.referee(s).ms, 1500, 'イライラ棒: 全員がゴールかあきらめたら1.5秒');
+  s = G.apply(s, { p: -1, t: 'close' });
+  assert.deepEqual(s.scores, [0, 2, 3], 'イライラ棒: 速い順に3・2点');
+  assert.equal(G.init(2, 1, { rules: {} }).qs.length, 3, 'イライラ棒: 3問');
+  for (const rules of [{}, { level: 'hard' }, { level: 'easy' }]) {
+    const end = runCpus(G, 5, 8, rules, 250, 8000);
+    assert.ok(G.result(end) && end.scores.some((v) => v > 0), `イライラ棒: CPU どうしで最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('iraira OK');
+}
+
 // 送る数の見張り（net.js の sendBudget。2026-11-19）: 中継サーバーの上限（1つの接続から区切られた1秒に10通）を超えないよう、直近1秒に8通送ったら qos 0 は送らない。qos 1 はいつも送る
 {
   const { sendBudget } = await import('../app/js/net.js');
