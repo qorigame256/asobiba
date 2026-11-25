@@ -1,0 +1,45 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": ["app/js", "tools/probes/uiux12-logic.mjs"],
+  "cwd": "copy",
+  "build": ["node", "--input-type=module", "-e", "await import('./app/js/games/index.js')"],
+  "test": ["node", "tools/probes/uiux12-logic.mjs"],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 60,
+  "breaks": [
+    {
+      "name": "ヨット: 0点の役でも帯を出す",
+      "file": "app/js/games/yacht.js",
+      "old": "if (m.cat < 7 || !(v > 0)) return null;",
+      "new": "if (m.cat < 7) return null;",
+      "expect": ["0点の役は出さない"]
+    },
+    {
+      "name": "ヨット: チョイスでも帯を出す",
+      "file": "app/js/games/yacht.js",
+      "old": "if (m.cat < 7 || !(v > 0)) return null;",
+      "new": "if (m.cat < 6 || !(v > 0)) return null;",
+      "expect": ["チョイスは出さない"]
+    },
+    {
+      "name": "鬼ごっこ: 逃げる人の位置を記録しない",
+      "file": "app/js/games/oni.js",
+      "old": "s.hist.push(s.pos.slice());",
+      "new": "if (s.k > 99) s.hist.push(s.pos.slice());"
+    },
+    {
+      "name": "お絵描き当て: 絵を記録に残さない",
+      "file": "app/js/games/oekaki.js",
+      "old": "correct: s.correct.slice(), strokes: s.strokes });",
+      "new": "correct: s.correct.slice(), strokes: [] });"
+    },
+    {
+      "name": "お絵描き当て: 前の局面の記録を書き換える",
+      "file": "app/js/games/oekaki.js",
+      "old": "s.history = s.history.concat({",
+      "new": "s.history.push({",
+      "expect": ["前の局面の history を書き換えない"]
+    }
+  ]
+}

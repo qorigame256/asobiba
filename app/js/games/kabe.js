@@ -357,7 +357,15 @@ export default {
     const g = geo(s.n);
     const name = (q) => `<b class="pl p${col(q)}">${this.players[col(q)]}</b>`;
     let html = `のこりの壁　${s.left.map((k, q) => `${name(q)} ${k}`).join('　')}`;
-    html += `<br>ゴールまで　${s.sides.map((side, q) => `${name(q)} ${distOf(g, s.walls, side, s.pos[q])}`).join('　')}`;
+    // 壁の効き目（2026-11-25 の UI・UX の12回目。本人が選んだ案）: 直前の手が壁で、その壁のせいでゴールまでが遠くなった人は、
+    // 数字が前の数から数え上がり、横に「+2」が出る（次の手まで）。数え上がりは style.css の .kw-up（数は ::after に出すので、読み上げ用に aria-label を付ける）
+    let before = null;
+    if (Number.isInteger(s.last?.w)) { before = s.walls.slice(); before[s.last.w] = 0; }
+    html += `<br>ゴールまで　${s.sides.map((side, q) => {
+      const d = distOf(g, s.walls, side, s.pos[q]);
+      const was = before ? distOf(g, before, side, s.pos[q]) : d;
+      return d > was ? `${name(q)} <span class="kw-up" style="--from:${was};--to:${d}" aria-label="${d}"></span><b class="kw-plus">+${d - was}</b>` : `${name(q)} ${d}`;
+    }).join('　')}`;
     for (const q of s.skipped ?? []) html += `<br>${name(q)}は動けないので飛ばし`;
     if (s.won?.long) html += `<br>${MAX_PLY[s.np]}手になったので引き分け`;
     return html;

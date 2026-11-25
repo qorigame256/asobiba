@@ -153,6 +153,7 @@ export default {
 
     const opps = document.createElement('div');
     opps.className = 'cc-opps';
+    const chipOf = [];
     const seats = me === null ? Array.from({ length: s.n }, (_, p) => p) : Array.from({ length: s.n }, (_, k) => (me + k) % s.n);
     const res = this.result(s);
     for (const p of seats) {
@@ -165,6 +166,7 @@ export default {
       score.className = 'mm-score';
       score.textContent = `${s.scores[p]}組`;
       chip.append(name, score);
+      chipOf[p] = chip;
       if (o.away[p]) chip.append(tag('away', '応答なし'));
       else if (o.sub?.[p]) chip.append(tag('away', 'CPU が代わりに'));
       opps.append(chip);
@@ -235,8 +237,36 @@ export default {
       grid.append(e);
     });
     root.append(grid);
+    // そろった2枚が、取った人の名前の札へ飛ぶ（2026-11-25 の UI・UX の12回目。本人が選んだ案）。
+    // Claude の判断: そろったのが見えるよう FLY_WAIT 待ってから、2枚の写しを FLY_MS で名前の札へ小さくしながら飛ばし、着いたら組の数がふくらむ。
+    //   盤の札はそのまま（取った札の見た目は今までどおり）。新しく届いた手のときだけ出し、動きを減らす設定の端末では出さない。
+    const L = s.last;
+    if (o.fresh && L?.t === 'pair' && L.match && chipOf[L.p] && typeof matchMedia === 'function' && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      const chip = chipOf[L.p];
+      setTimeout(() => {
+        if (!grid.isConnected || !chip.isConnected) return;
+        const to = chip.getBoundingClientRect();
+        let n = 0;
+        for (const i of [L.a, L.b]) {
+          const from = grid.children[i]?.getBoundingClientRect();
+          if (!from?.width) continue;
+          const g = cardEl(s.cards[i]);
+          g.classList.add('mm-fly');
+          Object.assign(g.style, { left: from.left + 'px', top: from.top + 'px', width: from.width + 'px', height: from.height + 'px' });
+          document.body.append(g);
+          const dx = to.left + to.width / 2 - from.left - from.width / 2;
+          const dy = to.top + to.height / 2 - from.top - from.height / 2;
+          const a = g.animate([{ transform: 'none', opacity: 1 }, { transform: `translate(${dx}px, ${dy}px) scale(.35)`, opacity: .3 }], { duration: FLY_MS, delay: n++ * 90, easing: 'ease-in', fill: 'forwards' });
+          a.onfinish = a.oncancel = () => g.remove();
+        }
+        setTimeout(() => chip.querySelector('.mm-score')?.animate([{ transform: 'scale(1.5)' }, { transform: 'none' }], { duration: 300, easing: 'ease-out' }), FLY_MS + 90);
+      }, FLY_WAIT);
+    }
   },
 };
+
+const FLY_WAIT = 450;
+const FLY_MS = 480;
 
 const SHORT_MS = 1000; // 札が見える時間（短い）
 let missShown = { key: '', at: 0 }; // いま見せているはずれの2枚と、出した時刻（この端末だけ）

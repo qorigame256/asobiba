@@ -1337,10 +1337,13 @@ main.slow-zoom > section > #board { position: relative; z-index: 2; } /* 下へ�
   justify-content: center;
   gap: 8px;
 }
+/* 革命のあいだの卓の色（2026-11-25 の UI・UX の12回目）。卓はどの色の組でも同じ緑なので、革命の色も直に書く */
+.df-field.rev { background: #5d3b7a; }
 .df-cards { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
 .df-cards .pcard { width: 54px; }
 .df-cards.pop .pcard { animation: pop .22s ease-out; }
 .df-empty { color: #d7eadc; font-size: .9rem; }
+.df-field.rev .df-empty { color: #e6d9f2; }
 .df-badges { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
 .df-badges span { background: #f3c74b; color: #3b2a00; font-weight: 700; font-size: .8rem; border-radius: 999px; padding: 1px 10px; }
 .df-hand { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; }
@@ -2054,6 +2057,13 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 [data-game="wordwolf"] .board { width: min(100%, 600px); }
 [data-game="jinro"] .board { width: min(100%, 600px); }
 .jr-wrap { display: flex; flex-direction: column; gap: 10px; }
+/* 夜は画面が暗くなり、朝に明ける（2026-11-25 の UI・UX の12回目）。色の組（スキン）の変数を夜の色に置き換えるので、中の札・欄もいっしょに暗くなる。
+   人狼の役の札（.jr-role.wolf）と推理のメモは色を直に持つので変わらない */
+.board.jr { position: relative; margin: -8px; padding: 8px; border-radius: 14px; transition: background-color 1.2s ease, color 1.2s ease; }
+.board.jr.jr-night { --ink: #e4e9ff; --muted: #a9b3d6; --line: #46527e; --panel: #232c4a; --field: #2a3457; --soft: #2a3457; --cool: #2a3457; --hi: #3a4675; background-color: #171e36; color: var(--ink); }
+.board.jr::before { content: "🌙"; position: absolute; right: 12px; top: 6px; font-size: 1.2rem; opacity: 0; transition: opacity 1.2s ease; pointer-events: none; }
+.board.jr.jr-night::before { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .board.jr, .board.jr::before { transition: none; } }
 .jr-top > .cc-opps { margin: 10px 0; } /* 役の札・名前の札・話し合いの欄がくっついていた（2026-11-17 見た目の点検。名前の札は .jr の直下でなく上の入れ物 .jr-top の中にあるので、2026-11-20 の点検までこの指定が効いていなかった） */
 .jr-role { border-radius: 12px; padding: 10px 12px; background: var(--soft, #fff4e6); }
 .jr-role.wolf { background: #3a2a3f; color: #fff; }
@@ -2154,6 +2164,11 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .oe-form .btn { flex: none; }
 .oe-chat { max-height: 160px; overflow-y: auto; background: var(--panel); border: 1.5px solid var(--line); border-radius: 10px; padding: 6px 10px; font-size: .9rem; }
 .oe-chat .ok { color: #2f8a4a; }
+/* 絵のふりかえり（結果の画面。2026-11-25 の UI・UX の12回目）。絵はどの色の組でも白い紙なので、字の色も直に書く */
+.oe-album { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+.board button.oe-pic { display: flex; flex-direction: column; gap: 2px; padding: 4px; background: #fff; border: 1.5px solid var(--line); border-radius: 10px; color: #2d2a26; font: inherit; font-size: .78rem; line-height: 1.35; cursor: pointer; min-width: 0; }
+.oe-pic canvas { display: block; width: 100%; aspect-ratio: 1; border-radius: 6px; }
+.oe-pic b { display: block; font-size: .95rem; overflow-wrap: anywhere; }
 
 /* ---------- せりあい ---------- */
 [data-game="seri"] .board { width: min(100%, 620px); }
@@ -2164,6 +2179,16 @@ html:has(.tg-field.live), html:has(.tg-field.live) body { overflow: hidden; over
 .sr-bid { background: var(--field); border-radius: 999px; padding: 0 10px; border: 1px solid var(--line); }
 .sr-bid.cancel { text-decoration: line-through; color: var(--muted); }
 .sr-bid.win { background: var(--hi, #fff1c2); border-color: var(--win); font-weight: 700; }
+/* 競りの結果を順に見せる（2026-11-25 の UI・UX の12回目）。--d は数字が開くまで、--j は打ち消しと勝ちが出るまでの待ち時間（seri.js が入れる） */
+.sr-got { font-style: normal; font-weight: 800; margin-left: 4px; color: var(--accent); }
+.sr-last.opening .sr-bid b { display: inline-block; animation: sr-open .25s ease-out var(--d, 0ms) both; }
+.sr-last.opening > div:first-child, .sr-last.opening .sr-got { animation: sr-fade .25s ease-out var(--j, 0ms) both; }
+.sr-last.opening .sr-bid.cancel { animation: sr-cancel .3s ease-out var(--j, 0ms) both; }
+.sr-last.opening .sr-bid.win { animation: sr-win .35s ease-out var(--j, 0ms) both; }
+@keyframes sr-open { from { opacity: 0; transform: rotateY(90deg); } }
+@keyframes sr-fade { from { opacity: 0; } }
+@keyframes sr-cancel { from { text-decoration-color: transparent; color: var(--ink); } 40% { transform: translateX(3px); } 70% { transform: translateX(-3px); } }
+@keyframes sr-win { from { background: var(--field); border-color: var(--line); font-weight: 400; } 60% { transform: scale(1.12); } }
 .sr-now { background: #2e6b47; color: #fff; border-radius: var(--radius); padding: 10px; text-align: center; }
 .sr-now .um-label { color: #d7eadc; }
 .sr-now small { color: #d7eadc; }
@@ -2830,6 +2855,10 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .cb-slot.p2 { background: #2e9a52; }
 .cb-slot.next { outline: 2px dashed rgba(47, 95, 158, .55); outline-offset: -2px; }
 .cb-slot.last { box-shadow: inset 0 0 0 2px #fff; }
+/* 玉が柱の上から落ちる（2026-11-25 の UI・UX の12回目）。--dz は落ちる段の数（cube4.js が入れる）。段の間のすき間の分は数えない（少し短く落ちるだけ） */
+.cb-slot.drop { animation: cb-drop calc(.14s + var(--dz, 1) * .05s) ease-in both; }
+@keyframes cb-drop { from { transform: translateY(calc(var(--dz, 1) * -110%)); } }
+@media (prefers-reduced-motion: reduce) { .cb-slot.drop { animation: none; } }
 .cb-slot.win { box-shadow: 0 0 0 2px var(--win); }
 .cb-layers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 @media (max-width: 520px) { .cb-layers { grid-template-columns: repeat(2, 1fr); } }
@@ -3005,6 +3034,11 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .og-ans.top { border-color: var(--win); box-shadow: 0 0 0 3px var(--win); }
 .og-text { flex: 1; font-size: 1.1rem; font-weight: 700; overflow-wrap: anywhere; }
 .og-who { flex: none; font-size: .8rem; color: var(--muted); }
+/* 結果の発表（2026-11-25 の UI・UX の12回目）: 票の少ない答えから順に名前と票が出る。--d は oogiri.js が入れる待ち時間 */
+.og-list.reveal .og-who { animation: og-who .3s ease-out var(--d, 0ms) both; }
+.og-list.reveal .og-ans { animation: og-open .35s ease-out var(--d, 0ms) both; }
+@keyframes og-who { from { opacity: 0; transform: translateX(8px); } }
+@keyframes og-open { from { border-color: var(--line); box-shadow: none; } 50% { transform: scale(1.02); } }
 /* 福笑い */
 .fw-name { font-size: 1.3rem; font-weight: 800; }
 .fw-next { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 1.15rem; min-height: 3rem; }
@@ -3377,6 +3411,12 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .on-r + .on-r { transform: translate(18%, -18%); }
 .on-ghost { grid-area: 1 / 1; width: 70%; height: 70%; border-radius: 50%; border: 2.5px dashed; display: grid; place-items: center; font-size: .55em; font-weight: 900; color: #333; background: rgba(255, 255, 255, .55); }
 .on-x { grid-area: 1 / 1; color: #a83226; font-weight: 900; }
+/* 決着のあとの「通った道」（2026-11-25 の UI・UX の12回目）。マスの左上から小さな丸を並べる。盤はどの色の組でも同じ草の色なので、字の色も直に書く */
+.on-tr { position: absolute; inset: 1px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 1px; z-index: 3; pointer-events: none; } /* マスの大きさを押し広げないよう、マスの上に重ねて置く（中身の大きさに数えさせない） */
+.on-tr i { min-width: 1.5em; height: 1.5em; padding: 0 1px; border-radius: 99px; display: grid; place-items: center; font-style: normal; font-size: .5em; font-weight: 800; color: #fff; border: 1px solid rgba(255, 255, 255, .8); animation: on-tr-in .2s ease-out; }
+@keyframes on-tr-in { from { transform: scale(.3); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .on-tr i { animation: none; } }
+.board .on-again { justify-self: center; }
 .board button.on-go { display: block; margin: 0 auto; min-width: 12em; }
 
 /* ---------- 方眼紙レース（race.js）。コースの色はどのスキンでも同じ ---------- */
@@ -4064,6 +4104,16 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .kw .kw-wall.v { width: 9px; transform: translateX(-50%); }
 .kw .kw-wall.ghost { opacity: .55; box-shadow: none; outline: 2px dashed #fff; }
 .kw .kw-wall.ghost.ng { background: #c0392b; }
+/* 神経衰弱: そろった2枚の写しが取った人の名前の札へ飛ぶ（2026-11-25 の UI・UX の12回目。memory.js が場所と大きさを入れる） */
+.pcard.mm-fly { position: fixed; z-index: 60; margin: 0; pointer-events: none; }
+/* 壁の効き目（2026-11-25 の UI・UX の12回目）: ゴールまでの数が前の数（--from）から今の数（--to）へ数え上がり、「+2」が出る。@property の無いブラウザでは今の数がすぐ出る */
+@property --kwn { syntax: '<integer>'; inherits: false; initial-value: 0; }
+.kw-up { --kwn: var(--to); counter-reset: kwn var(--kwn); animation: kw-up .7s steps(6, end) both; font-weight: 800; }
+.kw-up::after { content: counter(kwn); }
+@keyframes kw-up { from { --kwn: var(--from); } }
+.kw-plus { display: inline-block; margin-left: 3px; color: #c0392b; animation: kw-plus .35s ease-out .7s both; }
+@keyframes kw-plus { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) { .kw-up, .kw-plus { animation: none; } }
 .kw .kw-goal { position: absolute; background: var(--pc); border-radius: 3px; }
 .kw .kw-goal.top { top: 1px; left: 8px; right: 8px; height: 5px; }
 .kw .kw-goal.bottom { bottom: 1px; left: 8px; right: 8px; height: 5px; }

@@ -796,7 +796,7 @@ export default {
 
     // 場
     const field = document.createElement('div');
-    field.className = 'df-field';
+    field.className = 'df-field' + (s.rev ? ' rev' : ''); // 革命のあいだは卓の色が変わったまま（2026-11-25 の UI・UX の12回目。11バックは色を変えない。札の「11バック中」だけ）
     const badges = [];
     if (s.rev) badges.push('革命中');
     if (s.back) badges.push('11バック中');

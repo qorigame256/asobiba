@@ -226,6 +226,8 @@ export default {
         const v = s.grid[i];
         slot.className = 'cb-slot' + (v === null ? '' : ' p' + col(v)) + (win.has(i) ? ' win' : '') + (i === s.last ? ' last' : '');
         if (v === null && z === h && o.canMove) slot.classList.add('next');
+        // 玉が柱の上から落ちて積み重なる（2026-11-25 の UI・UX の12回目。本人が選んだ案。はねない）: 新しく届いた手の玉だけ、柱の上の外から自分の段まで落とす
+        if (i === s.last && o.fresh && !s.free) { slot.classList.add('drop'); slot.style.setProperty('--dz', N - z); }
         if (danger.has(i)) { slot.classList.add('danger'); b.classList.add('has-danger'); }
         b.append(slot);
       }

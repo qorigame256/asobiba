@@ -30,6 +30,15 @@ const VOTE_MS = 30000;
 const READY_MS = 3000;
 const SHOWN_MS = 7000;
 const GRACE_MS = 1000;
+// 結果の発表（2026-11-25 の UI・UX の12回目。本人が選んだ案）: 票の少ない答えから順に、書いた人の名前と票を出す（いちばんの答えが最後）。
+// Claude の判断: 最初の1つまで REVEAL_LEAD、1つごとに revealStep（多くても全部で4.5秒に収める。結果を見せる SHOWN_MS が7秒のため）。
+//   発表が終わるまで、上の点数の札は足す前の点のままにする（先に「+3」が出ると、いちばんの答えが分かってしまうため）。
+//   同じ票の答えは並んだ順。審査員が選ぶ でも同じ（選ばれた答えが最後）。動きを減らす設定の端末では、今までどおりいちどに出す。
+const REVEAL_LEAD = 500;
+const revealStep = (n) => Math.min(700, 4500 / Math.max(1, n));
+const revealMs = (n) => REVEAL_LEAD + revealStep(n) * n;
+const quiet = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+let revealTimer = null;
 
 const qKey = (s, q = s.q) => `oogiri:${s.seed}:${q}:${s.phase}`;
 const clone = (s) => ({ ...s, scores: s.scores.slice(), said: s.said.slice(), votes: s.votes.slice() });
@@ -173,7 +182,12 @@ export default {
       if (s.phase === 'shown' && s.last) return s.last.got[p] ? `<span class="pt-ok">+${s.last.got[p]}</span>` : '<span class="pt-ng">―</span>';
       return '';
     };
-    const chips = scoreChips(o, s.scores, { won, extra, steady: true });
+    // 発表の途中は、足す前の点を見せる（発表が終わる時刻にもう一度描く）
+    clearTimeout(revealTimer);
+    const left = s.phase === 'shown' && s.last && !quiet() ? revealMs(orderOf(s).length) - since(qKey(s)) : 0;
+    const holding = left > 0;
+    if (holding) revealTimer = setTimeout(() => { if (root.isConnected && ui?.mount === mount) this.render(root, s, o); }, left + 30);
+    const chips = scoreChips(o, holding ? s.scores.map((v, p) => v - s.last.got[p]) : s.scores, { won, extra: holding ? () => '' : extra, steady: true });
     if (ui?.mount === mount && root.contains(ui.wrap)) { ui.chips.replaceWith(chips); ui.chips = chips; return; }
 
     root.innerHTML = '';
@@ -238,6 +252,9 @@ export default {
     const order = orderOf(s);
     const can = s.phase === 'vote' && me !== null && o.canMove && s.votes[me] === null && targetsOf(s, me).length > 0;
     const top = s.phase === 'shown' && s.last ? Math.max(...s.last.got) : 0;
+    // 発表の順（票の少ない順。同じ票は並んだ順）
+    const rank = new Map(s.phase === 'shown' && s.last ? order.map((p, i) => [p, i]).sort((a, b) => s.last.got[a[0]] - s.last.got[b[0]] || a[1] - b[1]).map(([p], k) => [p, k]) : []);
+    if (holding) list.classList.add('reveal');
     order.forEach((p, i) => {
       const item = document.createElement(can && p !== me ? 'button' : 'div');
       item.className = 'og-ans' + (p === me ? ' mine' : '') + (me !== null && s.votes[me] === p ? ' voted' : '') + (top > 0 && s.last.got[p] === top ? ' top' : '');
@@ -250,6 +267,7 @@ export default {
       if (s.phase === 'shown') tag.textContent = judge !== null ? `${p === me ? 'あなた' : o.names[p]}${s.last.got[p] ? '・👑 選ばれた！' : ''}` : `${p === me ? 'あなた' : o.names[p]}・${s.last.got[p]}票`;
       else tag.textContent = p === me ? 'あなたの答え' : String.fromCharCode(65 + i);
       item.append(body, tag);
+      if (holding) item.style.setProperty('--d', `${Math.round(REVEAL_LEAD + revealStep(order.length) * rank.get(p) - since(key))}ms`); // 途中で作り直しても続きから（負の値は進んだ所から始まる）
       if (item.tagName === 'BUTTON') item.onclick = () => { list.querySelectorAll('button').forEach((b) => { b.disabled = true; }); o.onMove({ t: 'vote', q: s.q, to: p }); };
       list.append(item);
     });

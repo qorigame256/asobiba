@@ -124,7 +124,8 @@ function choose(s, i) {
 function endTurn(s, why) {
   s.phase = 'show';
   s.why = why;
-  s.history.push({ drawer: s.turn, topic: s.topics[s.turn], correct: s.correct.slice() });
+  // strokes: 結果の画面の「絵のふりかえり」に使う（2026-11-25 の UI・UX の12回目）。前の局面と配列を分け合わないよう、足すたびに新しい配列にする
+  s.history = s.history.concat({ drawer: s.turn, topic: s.topics[s.turn], correct: s.correct.slice(), strokes: s.strokes });
 }
 
 export default {
@@ -331,6 +332,7 @@ export default {
       }
     }
 
+    if (res) { showAlbum(s, o, nameP); return; } // 終わったら点数と絵のふりかえりだけ（下の部品は root に入っていない）
     paint(s, !!o.hidden?.[s.turn]); // 「この人を隠す」を押した人の絵は描かない
     // インクの量（詳細設定）: 残りを帯で見せる（当てる人にも見える）
     ui.ink.hidden = res || s.ink === undefined || s.phase !== 'draw';
@@ -381,7 +383,7 @@ function showTopic() {
   const t = res ? null : TOPICS[s.topics[s.turn]];
   let html;
   if (res) {
-    html = '<div class="um-label">おしまい</div>' + s.history.map((h) => `${esc(nameP(h.drawer))}: <b>${esc(TOPICS[h.topic][0])}</b>（${h.correct.length}人が正解）`).join('<br>');
+    html = '<div class="um-label">おしまい　絵のふりかえり</div><small>絵を押すと、描いた順にもう一度見られます</small>'; // 絵・お題・正解の人数は下の album に並べる
   } else if (s.phase === 'choose') {
     html = isChooser()
       ? '<div class="um-label">描くお題を選んでください（ほかの人には見えません）</div><small>10秒たつと左のお題に決まります</small>'
@@ -526,7 +528,10 @@ function build(root, s, key, res) {
     input.focus();
   };
 
-  if (res) root.append(ui.chips, ui.topic); // 終わったら点数とお題の一覧だけ
+  ui.album = document.createElement('div');
+  ui.album.className = 'oe-album';
+  ui.albumKey = null;
+  if (res) root.append(ui.chips, ui.topic, ui.album); // 終わったら点数と絵のふりかえりだけ
   else root.append(ui.chips, ui.topic, ui.pick, ui.bar, ui.wrap, ui.ink, ui.tools, ui.form, ui.note, ui.chat);
 }
 
@@ -568,6 +573,61 @@ function paint(s, hide = false) {
   if (hide) { ui.drawn = s.strokes.length; return; }
   for (const st of s.strokes.slice(ui.drawn)) strokeTo(ctx, decode(st.d), st.c, st.w);
   ui.drawn = s.strokes.length;
+}
+
+// 絵のふりかえり（2026-11-25 の UI・UX の12回目。本人が選んだ案）: 結果の画面に、全員の絵・お題・描いた人・正解の人数を並べる。
+// Claude の判断: 出たときに1枚ずつ順に、描いた順（線の順）で引き直して見せる（1枚 REPLAY_MS。動きを減らす設定の端末では止めた絵をすぐ出す）。
+//   絵を押すと、その1枚をもう一度引き直す。「この人を隠す」を押した人の絵は白いまま。消しゴムの線も描いた順に重ねるので、途中の形もそのまま見える。
+const REPLAY_MS = 1400;
+let replayTok = 0;
+function replay(canvas, strokes, ms, tok) {
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const segs = strokes.map((st) => ({ pts: decode(st.d), c: st.c, w: st.w }));
+  if (!ms || !segs.length) { for (const g of segs) strokeTo(ctx, g.pts, g.c, g.w); return Promise.resolve(); }
+  // 線を点2つずつの短い線に分け、時間に合わせた数だけ描き足す
+  const parts = [];
+  for (const g of segs) {
+    if (g.pts.length < 2) parts.push(g);
+    for (let i = 1; i < g.pts.length; i++) parts.push({ pts: [g.pts[i - 1], g.pts[i]], c: g.c, w: g.w });
+  }
+  return new Promise((done) => {
+    const t0 = performance.now();
+    let n = 0;
+    const step = () => {
+      if (tok !== replayTok || !canvas.isConnected) { done(); return; }
+      const to = Math.ceil(Math.min(1, (performance.now() - t0) / ms) * parts.length);
+      for (; n < to; n++) strokeTo(ctx, parts[n].pts, parts[n].c, parts[n].w);
+      if (n >= parts.length) done(); else setTimeout(step, 30);
+    };
+    step();
+  });
+}
+function showAlbum(s, o, nameP) {
+  const key = `${s.seed}:${s.history.length}:${s.history.map((h) => (o.hidden?.[h.drawer] ? 1 : 0)).join('')}`;
+  if (ui.albumKey === key) return;
+  ui.albumKey = key;
+  ui.album.innerHTML = '';
+  const tok = ++replayTok;
+  const still = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const items = s.history.map((h) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'oe-pic';
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 300;
+    const cap = document.createElement('span');
+    cap.innerHTML = `<b>${esc(TOPICS[h.topic][0])}</b>${esc(nameP(h.drawer))}・${h.correct.length}人が正解`;
+    b.append(cv, cap);
+    const strokes = o.hidden?.[h.drawer] ? [] : h.strokes ?? [];
+    replay(cv, strokes, 0, tok); // まず止めた絵を出す（順番が来るまで白いままにしない）
+    b.onclick = () => { replay(cv, strokes, still ? 0 : REPLAY_MS, ++replayTok); };
+    ui.album.append(b);
+    return [cv, strokes];
+  });
+  if (still) return;
+  (async () => { for (const [cv, strokes] of items) { if (tok !== replayTok) return; await replay(cv, strokes, REPLAY_MS, tok); } })();
 }
 
 // ペンの動き。動かしている間は手元にすぐ描き、0.5秒ごとに区切って送る

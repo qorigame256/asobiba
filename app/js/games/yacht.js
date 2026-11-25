@@ -174,6 +174,18 @@ export default {
     return `${s.round + 1}回目（全${all}回）: みんな同時に振っています`;
   },
   // 鳴らすのは自分の手と、次の回へ進んだときだけ（ほかの人の分まで鳴らすとにぎやかすぎるため）
+  // 役の名前を大きく出す（2026-11-25 の UI・UX の12回目。本人が選んだ案。main.js の cutin の約束）。
+  // Claude の判断: 出すのは フォーダイス・フルハウス・Sストレート・Bストレート・ヨット に0点でない点を書いたとき（1〜6 とチョイスは役ではないので出さない）と、
+  //   2回目のヨットの +100点。全員が同時に遊ぶので、ほかの人が書いたときも出す（帯の字は役の名前と点だけ。だれが書いたかは点数の表の印で分かる）。
+  //   帯の色はヨットが金・ほかは青。
+  cutin(a, b, m) {
+    if (m.t !== 'score' || !Number.isInteger(m.p) || !b.pl?.[m.p]) return null;
+    const v = b.pl[m.p].sheet[m.cat];
+    const extra = (b.pl[m.p].extra ?? 0) - (a.pl[m.p].extra ?? 0);
+    if (extra > 0) return { text: `ヨット！ +${extra}点`, color: '#c9930a' };
+    if (m.cat < 7 || !(v > 0)) return null;
+    return { text: `${CATS[m.cat]}！ ${v}点`, color: m.cat === 11 ? '#c9930a' : '#2f6fb3' };
+  },
   sound(a, b, m, me) {
     if (b.round > a.round) return 'turn';
     if (m.p !== me) return null;

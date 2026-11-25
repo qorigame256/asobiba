@@ -322,6 +322,7 @@ export default {
       ui = { seed: s.seed, me, wrap, top, act, form, input, actKey: null, cur: null };
     }
     ui.cur = { s, o };
+    root.classList.toggle('jr-night', s.phase === 'night'); // 夜は画面が暗くなる（style.css の .jr-night。色がゆっくり替わるよう、盤を作り直さずクラスだけ替える）
 
     /* 上: 自分の役・みんな・できごと・話し合い（毎回描き直す） */
     const top = document.createElement('div');

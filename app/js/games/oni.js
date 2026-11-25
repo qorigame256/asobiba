@@ -33,6 +33,56 @@
 import { mulberry32, shuffle } from './util.js';
 import { SEAT_COLORS } from './party.js';
 
+// 決着のあと、通った道を早送りで見せる（2026-11-25 の UI・UX の12回目。本人が選んだ案）。
+// Claude の判断: 始めの位置から1手ずつ（PATH_MS ごと）、鬼は赤・逃げる人は席の色の小さな丸に手の番号を書いて足していく（始めの位置は「始」）。
+//   つかまった人の道はつかまった手で止まる。終わったら全部残し、「▶ 通った道をもう一度」で見直せる。動きを減らす設定の端末では、はじめから全部出す。
+//   盤は描き直しのたびに作り直されるので、いつ始めたかを対局ごとに覚え、描き直されても続きから出す（最初からやり直さない）。
+const PATH_MS = 450;
+const pathAt = new Map(); // 対局の種 → 見せ始めた時刻
+let pathTimer = null;
+function showPaths(wrap, grid, s) {
+  clearTimeout(pathTimer);
+  const still = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (!pathAt.has(s.seed)) pathAt.set(s.seed, still ? -Infinity : performance.now());
+  const last = s.trail.length - 1;
+  const cells = grid.children;
+  const put = (c, color, label) => {
+    let box = cells[c].querySelector('.on-tr');
+    if (!box) { box = document.createElement('span'); box.className = 'on-tr'; cells[c].append(box); }
+    const d = document.createElement('i');
+    d.style.background = color;
+    d.textContent = label;
+    box.append(d);
+  };
+  const drawStep = (k) => {
+    const label = k === 0 ? '始' : String(k);
+    put(s.trail[k], '#c0392b', label);
+    if (s.trail2) put(s.trail2[k], '#c0392b', label);
+    for (let p = 0; p < s.n; p++) {
+      if (isOni(s, p)) continue;
+      const out = s.caught.find((x) => x.p === p);
+      if (out && k > out.k) continue; // つかまった手より先は無い
+      put(s.hist[k][p], SEAT_COLORS[p], label);
+    }
+  };
+  let shown = -1;
+  const again = document.createElement('button');
+  again.type = 'button';
+  again.className = 'btn small secondary on-again';
+  again.textContent = '▶ 通った道をもう一度';
+  again.hidden = true;
+  again.onclick = () => { pathAt.set(s.seed, performance.now()); grid.querySelectorAll('.on-tr').forEach((e) => e.remove()); shown = -1; again.hidden = true; tick(); };
+  wrap.append(again);
+  const tick = () => {
+    if (!grid.isConnected) return;
+    const to = Math.min(last, Math.floor((performance.now() - pathAt.get(s.seed)) / PATH_MS));
+    while (shown < to) drawStep(++shown);
+    if (shown < last) pathTimer = setTimeout(tick, PATH_MS / 3);
+    else again.hidden = still;
+  };
+  tick();
+}
+
 export const W = 9;
 export const TURNS = 15;
 export const EVERY = 3;
@@ -137,7 +187,7 @@ export function belief(s, p) {
 }
 
 const clone = (s) => ({
-  ...s, pos: s.pos.slice(), alive: s.alive.slice(), moved: s.moved.slice(), trail: s.trail.slice(), caught: s.caught.slice(),
+  ...s, pos: s.pos.slice(), alive: s.alive.slice(), moved: s.moved.slice(), trail: s.trail.slice(), caught: s.caught.slice(), hist: s.hist.slice(),
   ...(s.trail2 ? { trail2: s.trail2.slice(), ogo: s.ogo.slice() } : {}),
 });
 // 逃げる人が全員動き終えたとき: 見える手なら鬼に見せる（草むらの中の人は見せない）
@@ -184,7 +234,7 @@ export default {
     const { trees, pos } = setup(n, two ? [oni, oni2] : [oni], seed);
     const s = {
       n, seed, oni, trees, O: CENTER, pos, alive: pos.map((c) => c !== null), counts: counts ?? Array(n).fill(0),
-      k: 1, phase: 'run', moved: Array(n).fill(false), seen: { k: 0, pos: pos.slice() }, trail: [CENTER], caught: [], step: 0,
+      k: 1, phase: 'run', moved: Array(n).fill(false), seen: { k: 0, pos: pos.slice() }, trail: [CENTER], hist: [pos.slice()], caught: [], step: 0,
     };
     if ([2, 4].includes(Number(rules.every))) s.every = Number(rules.every);
     if (rules.grass === true) { s.grass = grassOf(trees, pos, seed); s.seen.ks = Array(n).fill(0); }
@@ -246,6 +296,7 @@ export default {
         s.ogo = [null, null];
       } else s.O = m.to;
       s.trail.push(s.O);
+      s.hist.push(s.pos.slice()); // この手で逃げる人が動き終えた位置（決着のあとの「通った道」に使う。trail と同じ番号で並ぶ）
       const stops = s.oni2 !== undefined ? [s.O, s.O2] : [s.O];
       for (const p of aliveRunners(s)) if (stops.includes(s.pos[p])) { s.alive[p] = false; s.caught.push({ p, k: s.k, at: s.pos[p] }); }
       if (s.caught.length >= need(s) || s.k >= TURNS) { s.phase = 'end'; return s; }
@@ -391,6 +442,7 @@ export default {
       grid.append(b);
     }
     wrap.append(grid);
+    if (s.phase === 'end') showPaths(wrap, grid, s);
     // 下の段: 決めるボタンと説明
     const note = document.createElement('p');
     note.className = 'cc-log';

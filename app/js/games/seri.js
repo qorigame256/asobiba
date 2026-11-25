@@ -21,6 +21,17 @@ const roundsOf = (s) => s.deck.length; // 回数 = 点数の札の数 = 数字�
 const clone = (s) => ({ ...s, bids: s.bids.slice(), hands: s.hands.map((h) => h.slice()), scores: s.scores.slice(), pot: s.pot.slice(), taken: s.taken.map((t) => t.slice()) });
 const sum = (a) => a.reduce((x, y) => x + y, 0);
 
+// 競りの結果を順に見せる（2026-11-25 の UI・UX の12回目。本人が選んだ案）: 出した数字を小さい順に1つずつ開き、
+// 全部開いたら同じ数字どうしに打ち消しの線が入り、取った人の札が光って点（+8 など）が出る。
+// Claude の判断: 1つごとに OPEN_STEP（多くても全部で2.4秒）、開き終わってから JUDGE_GAP で打ち消しと勝ち。それまで上の点数の札は足す前の点のまま
+//   （先に点が増えると、だれが取ったかが分かるため）。札は席の順に並べたまま、開く順だけ小さい順にする。
+//   演出は新しく決まった回を初めて描いたときだけ始め、描き直されても続きから出す。動きを減らす設定の端末では今までどおりいちどに出す。
+const openStep = (n) => Math.min(450, 2400 / Math.max(1, n));
+const JUDGE_GAP = 350;
+const openAt = new Map(); // 対局の種:回 → 開き始めた時刻
+let openTimer = null;
+const quiet = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 let sel = { key: null, v: null }; // 選び中の札（通信で描き直されても消えないように外に持つ）
 
 export default {
@@ -123,7 +134,17 @@ export default {
     root.innerHTML = '';
     root.className = 'board sr';
 
-    root.append(scoreChips({ ...o, me }, s.scores, {
+    // 競りの結果を順に見せている途中か（left = 残りの時間）
+    const L0 = s.last;
+    const okey = L0 ? `${s.deck.join()}:${s.n}:${L0.round}` : ''; // 局面に種が無いので、山の並びで対局を見分ける
+    if (L0 && o.fresh && !openAt.has(okey) && !quiet()) { openAt.set(okey, performance.now()); if (openAt.size > 40) openAt.delete(openAt.keys().next().value); }
+    const passed = L0 && openAt.has(okey) ? performance.now() - openAt.get(okey) : Infinity;
+    const judgeAt = L0 ? openStep(s.n) * s.n + JUDGE_GAP : 0;
+    const opening = passed < judgeAt + 400;
+    clearTimeout(openTimer);
+    if (opening) openTimer = setTimeout(() => { if (root.isConnected) this.render(root, s, { ...o, fresh: false }); }, judgeAt + 430 - passed);
+    const held = opening && passed < judgeAt && L0.who >= 0 ? s.scores.map((v, p) => (p === L0.who ? v - sum(L0.pot) : v)) : s.scores;
+    root.append(scoreChips({ ...o, me }, held, {
       won: res ? res.winners : [],
       extra: (p) => (res ? '' : s.bids[p] !== null ? '<span class="pt-ok">出した✓</span>' : '考え中…'),
     }));
@@ -132,7 +153,8 @@ export default {
     const L = s.last;
     if (L) {
       const box = document.createElement('div');
-      box.className = 'sr-last' + (o.fresh ? ' pop' : '');
+      box.className = 'sr-last' + (o.fresh ? ' pop' : '') + (opening ? ' opening' : '');
+      if (opening) box.style.setProperty('--j', `${Math.round(judgeAt - passed)}ms`);
       const pot = L.pot.map(potText).join('・');
       const head = document.createElement('div');
       head.innerHTML = `${L.round + 1}回目（${pot}）: ` + (L.who >= 0 ? `<b>${esc(nameP(L.who))}</b>が取った` : '全員打ち消し合って、次の回に持ち越し');
@@ -141,7 +163,8 @@ export default {
       L.bids.forEach((v, p) => {
         const e = document.createElement('span');
         e.className = 'sr-bid' + (L.cancel[p] ? ' cancel' : '') + (p === L.who ? ' win' : '');
-        e.innerHTML = `${esc(nameP(p))} <b>${v}</b>`;
+        e.innerHTML = `${esc(nameP(p))} <b>${v}</b>` + (p === L.who ? `<i class="sr-got">${potText(sum(L.pot))}</i>` : '');
+        if (opening) e.style.setProperty('--d', `${Math.round(openStep(s.n) * L.bids.filter((x, q) => x < v || (x === v && q < p)).length - passed)}ms`);
         row.append(e);
       });
       box.append(head, row);
