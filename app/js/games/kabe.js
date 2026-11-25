@@ -296,13 +296,13 @@ export default {
 
   cpu(s, p, rules) { return kabeCpu(this, s, rules); },
 
-  init({ rules = {} } = {}) {
+  init({ rules = {}, seed = 0 } = {}) {
     const n = rules.size === 7 ? 7 : 9;
     const np = [3, 4].includes(rules.players) ? rules.players : 2;
     const sides = SIDES[np];
     return {
       n, np, sides, pos: sides.map((side) => startOf(side, n)), walls: Array(geo(n).WALLS).fill(0),
-      left: Array(np).fill(wallsOf(n, np, rules.wall)), turn: 0, ply: 0, last: null, won: null, skipped: [],
+      left: Array(np).fill(wallsOf(n, np, rules.wall)), turn: 0, ply: 0, last: null, won: null, skipped: [], seed, // seed は置きかけの壁（ui）を対局ごとに分けるためだけ（ルールには使わない）
     };
   },
 
@@ -377,7 +377,7 @@ export default {
     const draw = () => this.render(root, s, o);
     const bottom = Number.isInteger(o.view) ? o.view : Number.isInteger(o.me) && o.me >= 0 && o.me < s.np ? o.me : 0; // 自分の辺が下に来るように（観戦と同じ画面の対局では1番手が下。⇅ を押したときは o.view の人）
     const rot = ROT[s.sides[bottom]];
-    const key = `${s.n}:${s.ply}:${o.me}`;
+    const key = `${s.seed}:${s.n}:${s.ply}:${o.me}`; // 種を入れないと、同じ大きさで始め直した対局に前の点線が残る（2026-11-25 の Codex の点検）
     if (ui.key !== key) ui = { key, mode: 'move', ghost: null };
     const over = !!s.won || s.gave !== undefined; // 参りました（util.js の withGiveUp）も終わり
     const can = o.canMove && !over;

@@ -170,7 +170,7 @@ export default {
     const i = d.i === null ? null : Number(d.i);
     if (i !== null && !(Number.isInteger(i) && i >= 0 && i < n)) return;
     peek = i === null ? null : { key: peekKey(s), i };
-    if (view.root.isConnected) this.render(view.root, s, { ...view.o, fresh: false });
+    if (view.root.isConnected && view.root.classList.contains('bb')) this.render(view.root, s, { ...view.o, fresh: false }); // 待合室へ移ったゲストの盤には描かない（2026-11-25 の Codex の点検）
   },
 
   // 観戦の人の「みんなの手札を開く」（2026-11-19 の UI・UX の10回目。room.md）: 全員の手札を開いた欄（cards.js の peekBox）。main.js が観戦の人の画面の盤の下に足す

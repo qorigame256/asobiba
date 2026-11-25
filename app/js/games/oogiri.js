@@ -186,7 +186,7 @@ export default {
     clearTimeout(revealTimer);
     const left = s.phase === 'shown' && s.last && !quiet() ? revealMs(orderOf(s).length) - since(qKey(s)) : 0;
     const holding = left > 0;
-    if (holding) revealTimer = setTimeout(() => { if (root.isConnected && ui?.mount === mount) this.render(root, s, o); }, left + 30);
+    if (holding) revealTimer = setTimeout(() => { if (root.isConnected && ui?.mount === mount && root.contains(ui.wrap)) this.render(root, s, o); }, left + 30); // 盤が待合室に替わっていたら描かない（2026-11-25 の Codex の点検）
     const chips = scoreChips(o, holding ? s.scores.map((v, p) => v - s.last.got[p]) : s.scores, { won, extra: holding ? () => '' : extra, steady: true });
     if (ui?.mount === mount && root.contains(ui.wrap)) { ui.chips.replaceWith(chips); ui.chips = chips; return; }
 

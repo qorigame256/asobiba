@@ -7072,7 +7072,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.equal(P.apply(s, { p: 0, t: 'done', q: 0, seq: seq.slice(0, -1), ms: 5000 }), null, 'あと1手でそろう所では受け付けない');
   s = P.apply(s, { p: 1, t: 'done', q: 0, seq, ms: 9000 });
   assert.equal(P.apply(s, { p: 1, t: 'done', q: 0, seq, ms: 9000 }), null, '同じ手が2回届いても1回');
-  assert.equal(P.referee(s).ms, 20000, '最初にそろってから20秒');
+  assert.equal(P.referee(s).ms, 21500, '最初にそろってから20秒＋猶予1.5秒（2026-11-25 から猶予を足す）');
   s = P.apply(s, { p: 0, t: 'done', q: 0, seq: seq + 'UD', ms: 7000 }); // 寄り道してもそろえばよい（空きが右下にある間なら U・D で戻る）
   s = P.apply(s, { p: 2, t: 'pass', q: 0 });
   s = P.apply(s, { p: -1, t: 'close' });
@@ -7381,7 +7381,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
       since('meiro:31:0'); // 画面に出た
       clock += 10000;
       d = Z.apply(d, { p: 0, t: 'done', q: 0, seq: solve(d.qs[0], 9), ms: 10000 });
-      assert.equal(Z.referee(d).ms, 20000, '迷路: 10秒で着いたら、締め切りは20秒後');
+      assert.equal(Z.referee(d).ms, 21500, '迷路: 10秒で着いたら、締め切りは20秒＋猶予1.5秒後（2026-11-25 から猶予を足す）');
       clock += 60000;
       assert.equal(Z.referee(d).ms, 6500, '迷路: 70秒で着いたら、締め切りは制限時間（75秒＋1.5秒）まで');
     } finally {
@@ -12237,7 +12237,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.equal(N.apply(s, { p: 0, t: 'ans', q: 0, c: right, ms: 400 }), null, 'なぞなぞ: 答えられるのは1回だけ');
   assert.equal(N.apply(s, { p: 1, t: 'ans', q: 0, c: 'ないもの', ms: 400 }), null, 'なぞなぞ: 札にない答えは弾く');
   s = N.apply(s, { p: 1, t: 'ans', q: 0, c: right, ms: 900 });
-  assert.equal(N.referee(s).ms, 5000, 'なぞなぞ: だれかが正解したら5秒で締め切り');
+  assert.equal(N.referee(s).ms, 6500, 'なぞなぞ: だれかが正解したら5秒＋猶予1.5秒で締め切り');
   s = N.apply(s, { p: 2, t: 'ans', q: 0, c: right, ms: 700 });
   s = N.apply(s, { p: -1, t: 'close' });
   assert.deepEqual(s.scores, [0, 2, 3], 'なぞなぞ: 速い順に3・2点、まちがいは0点');
@@ -12673,7 +12673,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   s = G.apply(s, { p: 0, t: 'ans', q: 0, c: x.start, ms: 300 });
   assert.equal(s.miss[0], true, '道案内: ちがうますはまちがい');
   s = G.apply(s, { p: 1, t: 'ans', q: 0, c: x.end, ms: 900 });
-  assert.equal(G.referee(s).ms, 5000, '道案内: だれかが正解したら5秒で締め切り');
+  assert.equal(G.referee(s).ms, 6500, '道案内: だれかが正解したら5秒＋猶予1.5秒で締め切り');
   s = G.apply(s, { p: 2, t: 'ans', q: 0, c: x.end, ms: 700 });
   s = G.apply(s, { p: -1, t: 'close' });
   assert.deepEqual(s.scores, [0, 2, 3], '道案内: 速い順に3・2点');
@@ -12758,7 +12758,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   s = G.apply(s, { p: 0, t: 'ans', q: 0, c: x.miss === 1 ? 2 : 1, ms: 300 });
   assert.equal(s.miss[0], true, '抜けた数: ある数はまちがい');
   s = G.apply(s, { p: 1, t: 'ans', q: 0, c: x.miss, ms: 9000 });
-  assert.equal(G.referee(s).ms, 8000, '抜けた数: だれかが正解したら8秒で締め切り');
+  assert.equal(G.referee(s).ms, 9500, '抜けた数: だれかが正解したら8秒＋猶予1.5秒で締め切り');
   s = G.apply(s, { p: 2, t: 'ans', q: 0, c: x.miss, ms: 7000 });
   s = G.apply(s, { p: -1, t: 'close' });
   assert.deepEqual(s.scores, [0, 2, 3], '抜けた数: 速い順に3・2点');
@@ -13011,7 +13011,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.equal(s.miss[0], true, '人ごみ: ちがう人はまちがい');
   assert.equal(G.apply(s, { p: 0, t: 'ans', q: 0, c: x.target, ms: 400 }), null, '人ごみ: 1問に1回だけ');
   s = G.apply(s, { p: 1, t: 'ans', q: 0, c: x.target, ms: 9000 });
-  assert.equal(G.referee(s).ms, 5000, '人ごみ: だれかが正解したら5秒で締め切り');
+  assert.equal(G.referee(s).ms, 6500, '人ごみ: だれかが正解したら5秒＋猶予1.5秒で締め切り');
   s = G.apply(s, { p: 2, t: 'ans', q: 0, c: x.target, ms: 7000 });
   s = G.apply(s, { p: -1, t: 'close' });
   assert.deepEqual(s.scores, [0, 2, 3], '人ごみ: 速い順に3・2点');
@@ -13069,7 +13069,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   s = G.apply(s, { p: 0, t: 'ans', q: 0, c: x.count + 1, ms: 300 });
   assert.equal(s.miss[0], true, 'ひよこ: ちがう数はまちがい');
   s = G.apply(s, { p: 1, t: 'ans', q: 0, c: x.count, ms: 9000 });
-  assert.equal(G.referee(s).ms, 8000, 'ひよこ: だれかが正解したら8秒で締め切り');
+  assert.equal(G.referee(s).ms, 9500, 'ひよこ: だれかが正解したら8秒＋猶予1.5秒で締め切り');
   s = G.apply(s, { p: 2, t: 'ans', q: 0, c: x.count, ms: 7000 });
   s = G.apply(s, { p: -1, t: 'close' });
   assert.deepEqual(s.scores, [0, 2, 3], 'ひよこ: 速い順に3・2点');
@@ -13134,7 +13134,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   s = G.apply(s, { p: 0, t: 'pass', q: 0 });
   assert.equal(G.apply(s, { p: 0, t: 'done', q: 0, ms: 3000 }), null, 'イライラ棒: あきらめたあとはゴールできない');
   s = G.apply(s, { p: 1, t: 'done', q: 0, ms: 9000 });
-  assert.equal(G.referee(s).ms, 20000, 'イライラ棒: だれかがゴールしたら20秒で締め切り');
+  assert.equal(G.referee(s).ms, 21500, 'イライラ棒: だれかがゴールしたら20秒＋猶予1.5秒で締め切り');
   s = G.apply(s, { p: 2, t: 'done', q: 0, ms: 7000 });
   assert.equal(G.referee(s).ms, 1500, 'イライラ棒: 全員がゴールかあきらめたら1.5秒');
   s = G.apply(s, { p: -1, t: 'close' });
@@ -13291,6 +13291,12 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.equal(h(a3), '2195e4e802428b6b', 'イライラ棒: なしの道は設定を足す前と同じ');
     const a4 = []; for (let s = 0; s < 50; s++) a4.push(ot.notesOf(s, 20));
     assert.equal(h(a4), '53d25d170a331ed5', '音当て: なしの問題は設定を足す前と同じ');
+    // 黒い鍵盤も・和音なしの問題が、和音を足す前（c59b77b）と同じ（前は今の版どうしで比べていた。2026-11-25 の Codex の点検）
+    const a4b = []; for (let s = 0; s < 50; s++) a4b.push(ot.notesOf(s, 20, true));
+    assert.equal(h(a4b), '01a95b27109a4706', '音当て: 黒い鍵盤も・和音なしの問題は和音を足す前と同じ');
+    // 対局の始め（init）が作る問題も同じ（notesOf だけでは、init の渡し方を変えても通る。同じ点検）
+    const a4i = []; for (let s = 0; s < 50; s++) for (const rules of [{}, { black: 'on' }]) a4i.push(ot.default.init(2, s, { rules }).notes);
+    assert.equal(h(a4i), '88844d21a1d3d2bd', '音当て: 和音なしの対局の始めの問題は和音を足す前と同じ');
     assert.equal(h([GAMES.koori.init(2, 1), GAMES.koori.init(3, 7), GAMES.koori.init(4, 99)]), '0f62c452803e2951', '氷割り: 5×5 の局面は設定を足す前と同じ');
     const a6 = []; for (const p of [[1, 2, 3], [3, 3, 1], [5, 5, 5], [2, 4, 4, 1], [7, 1, 7, 2, 6]]) a6.push(kb.scoreRound(p));
     assert.equal(h(a6), '893832889863db96', 'かぶったら0点: かぶらなかった全員の点は設定を足す前と同じ');
@@ -13595,6 +13601,43 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   for (const rules of [{ chord: 'on' }, { chord: 'on', black: 'on' }]) {
     const end = runCpus(G, 5, 11, rules, 50, 40000);
     assert.ok(G.result(end) && end.scores.some((v) => v > 0), `音当て: 和音で CPU どうしが最後まで ${JSON.stringify(rules)}`);
+  }
+  // 2026-11-25 の Codex の点検: 和音の CPU が外すと決めたら、どの組でも正解を送らない（端の音で「となりがもう1つの音だけ」のとき正解を送り、当てる割合が5割を超えていた）
+  // 10段勝負でホストが開き直して CPU の覚えが消えても、局面の幅から続ける（はじめの幅に戻ると幅が広がった）
+  {
+    const realNow = performance.now.bind(performance);
+    const realRnd = Math.random;
+    let fake = 0;
+    performance.now = () => fake;
+    try {
+      let seed = 900;
+      for (const black of [false, true]) {
+        const keys = black ? CHROMA : [0, 1, 2, 3, 4, 5, 6];
+        for (let a = 0; a < keys.length; a++) for (let b = a + 1; b < keys.length; b++) for (const i of [0.1, 0.9]) {
+          const base = G.apply(G.init(2, seed++, { rules: { chord: 'on', ...(black ? { black: 'on' } : {}) } }), { p: -1, t: 'next' });
+          const s = { ...base, notes: base.notes.map(() => [keys[a], keys[b]]) };
+          const seq = [0, 0.9, i, 0]; // 時刻・外す・どちらをずらすか・となりの音
+          let k = 0;
+          Math.random = () => seq[k++ % seq.length];
+          let m = null;
+          for (let t = 0; t < 200 && !m; t++) { m = G.cpu(s, 1); fake += 100; }
+          Math.random = realRnd;
+          assert.ok(m && m.c.length === 2 && [...m.c].sort().join() !== [keys[a], keys[b]].sort().join(), `音当て: 和音の CPU は外すと決めたら正解を送らない ${keys[a]},${keys[b]}`);
+        }
+      }
+      const r0 = { ...T.apply(T.init(1, 778, { rules: { mode: 'ten' } }), { p: -1, t: 'start' }), h: [5], w: [400] };
+      let m = null;
+      for (let i = 0; i < 50 && !m; i++) { fake += 200; m = T.cpu(r0, 0); }
+      assert.ok(m && m.k === 5 && (m.t === 'over' || m.w <= 434), 'タワー: 10段勝負で開き直したあとの CPU は局面の幅から続ける');
+      // だれかが解いたあとの締め切りにも猶予を足す（ゲストが最後に送った手が届く前に締め切っていた。同じ点検のあと本人が推奨を承認）。制限時間までの残りより長くは待たない
+      const { afterMs } = await import('../app/js/games/party.js');
+      fake = 0;
+      assert.equal(afterMs('probe-after-a', 60000, 20000, 1500), 21500, '締め切り: だれかが解いたあとも猶予を足して締め切る');
+      assert.equal(afterMs('probe-after-b', 5000, 20000, 1500), 6500, '締め切り: 制限時間の残りが短ければ、そちらで締め切る');
+    } finally {
+      performance.now = realNow;
+      Math.random = realRnd;
+    }
   }
   console.log('47th settings OK');
 }

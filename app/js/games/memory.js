@@ -167,6 +167,7 @@ export default {
       score.textContent = `${s.scores[p]}組`;
       chip.append(name, score);
       chipOf[p] = chip;
+      chip.dataset.p = p; // 飛ぶ札が、描き直されたあとの名前の札を探し直すため
       if (o.away[p]) chip.append(tag('away', '応答なし'));
       else if (o.sub?.[p]) chip.append(tag('away', 'CPU が代わりに'));
       opps.append(chip);
@@ -201,7 +202,7 @@ export default {
       if (missShown.key !== key) missShown = { key, at: Date.now() };
       const left = SHORT_MS - (Date.now() - missShown.at);
       hidden = left <= 0;
-      if (!hidden) missTimer = setTimeout(() => { if (root.isConnected && missShown.key === key) this.render(root, s, o); }, left + 20);
+      if (!hidden) missTimer = setTimeout(() => { if (root.isConnected && root.classList.contains('mm') && missShown.key === key) this.render(root, s, o); }, left + 20);
     }
     s.cards.forEach((card, i) => {
       let e;
@@ -242,9 +243,12 @@ export default {
     //   盤の札はそのまま（取った札の見た目は今までどおり）。新しく届いた手のときだけ出し、動きを減らす設定の端末では出さない。
     const L = s.last;
     if (o.fresh && L?.t === 'pair' && L.match && chipOf[L.p] && typeof matchMedia === 'function' && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      const chip = chipOf[L.p];
       setTimeout(() => {
-        if (!grid.isConnected || !chip.isConnected) return;
+        // 待っている間に続けてめくると盤が作り直されるので、そのときは今の盤と名前の札を探し直す（前は飛ばずに終わった。2026-11-25 の Codex の点検）
+        if (!root.isConnected || !root.classList.contains('mm')) return;
+        const grid = root.querySelector('.mm-grid');
+        const chip = root.querySelector(`.cc-opp[data-p="${L.p}"]`);
+        if (!grid || !chip) return;
         const to = chip.getBoundingClientRect();
         let n = 0;
         for (const i of [L.a, L.b]) {

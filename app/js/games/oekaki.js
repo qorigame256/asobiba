@@ -580,7 +580,9 @@ function paint(s, hide = false) {
 //   絵を押すと、その1枚をもう一度引き直す。「この人を隠す」を押した人の絵は白いまま。消しゴムの線も描いた順に重ねるので、途中の形もそのまま見える。
 const REPLAY_MS = 1400;
 let replayTok = 0;
+const replayOf = new WeakMap(); // 絵 → いまその絵を引き直している番号（別の絵を押して止まった引き直しは、残りを描き切って止める）
 function replay(canvas, strokes, ms, tok) {
+  replayOf.set(canvas, tok);
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -596,7 +598,12 @@ function replay(canvas, strokes, ms, tok) {
     const t0 = performance.now();
     let n = 0;
     const step = () => {
-      if (tok !== replayTok || !canvas.isConnected) { done(); return; }
+      if (tok !== replayTok || !canvas.isConnected) {
+        // 別の絵を押して止まったときは、この絵を描きかけのまま残さない（同じ絵をもう一度押したときは、新しい引き直しに任せる。2026-11-25 の Codex の点検）
+        if (replayOf.get(canvas) === tok) for (; n < parts.length; n++) strokeTo(ctx, parts[n].pts, parts[n].c, parts[n].w);
+        done();
+        return;
+      }
       const to = Math.ceil(Math.min(1, (performance.now() - t0) / ms) * parts.length);
       for (; n < to; n++) strokeTo(ctx, parts[n].pts, parts[n].c, parts[n].w);
       if (n >= parts.length) done(); else setTimeout(step, 30);

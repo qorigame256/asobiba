@@ -142,7 +142,7 @@ export default {
     const judgeAt = L0 ? openStep(s.n) * s.n + JUDGE_GAP : 0;
     const opening = passed < judgeAt + 400;
     clearTimeout(openTimer);
-    if (opening) openTimer = setTimeout(() => { if (root.isConnected) this.render(root, s, { ...o, fresh: false }); }, judgeAt + 430 - passed);
+    if (opening) openTimer = setTimeout(() => { if (root.isConnected && root.classList.contains('sr')) this.render(root, s, { ...o, fresh: false }); }, judgeAt + 430 - passed);
     const held = opening && passed < judgeAt && L0.who >= 0 ? s.scores.map((v, p) => (p === L0.who ? v - sum(L0.pot) : v)) : s.scores;
     root.append(scoreChips({ ...o, me }, held, {
       won: res ? res.winners : [],
@@ -214,8 +214,9 @@ export default {
       const ok = document.createElement('button');
       ok.type = 'button';
       ok.className = 'btn primary';
-      ok.textContent = sel.v === null ? '札を選んでください' : `${sel.v} を出す`;
-      ok.disabled = sel.v === null;
+      // 前の回の発表の途中は出せない（全員がすぐ出すと次の回の結果で発表が途中で消えた。2026-11-25 の Codex の点検のあと本人が推奨を承認）。札は選んでおける
+      ok.textContent = opening ? '発表中…' : sel.v === null ? '札を選んでください' : `${sel.v} を出す`;
+      ok.disabled = sel.v === null || opening;
       ok.onclick = () => o.onMove({ t: 'bid', r: s.round, v: sel.v });
       act.append(ok);
       root.append(act);

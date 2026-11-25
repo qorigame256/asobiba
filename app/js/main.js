@@ -4144,6 +4144,7 @@ function turnFx() {
 // 技の名前: 色の帯に大きな字が右から入って左へ抜ける（ゲームの cutin が返す { text, color, flash }）。color は帯の色（CSS の色か linear-gradient）。
 // flash = 'invert' なら盤を一瞬白黒反転する（大富豪の革命）。帯が出ている間（cutUntil まで）は、あなたのターンの帯を待たせる（重なると読めない）
 let cutUntil = 0;
+const END_AFTER_CUT = 1000; // 決着の手で技の名前を出したとき、勝ち負けの音・判子を遅らせる長さ（帯は 1.25秒で抜ける。Claude の判断）
 function cutInFx({ text, color, flash }) {
   if (lessMotion()) return;
   const box = document.createElement('div');
@@ -4494,15 +4495,30 @@ function moveSound(game, st, res, prevLen, mine, hold = 0) {
     let said = null; // 麻雀の最後の局の「ロン！」など
     try { said = game.sound?.(before, st, m, me); } catch { /* 終局の手に音の決めごとが合わなくても、勝ち負けの音は鳴らす */ }
     const end = endSound(res, me);
-    // 決め手のスロー（slowFinish）のときは、石が着いたときに置いた音、一拍おいてから勝ち負けの音・判子（押して飛ばせばすぐ）
-    if (hold) slowAt(SLOW_LAND, () => play(said && !isVoice(said) ? said : 'place'), false);
-    slowAt(hold, () => {
-      if (isVoice(said)) { play(said); setTimeout(() => play(end), 700); } else play(end);
-      if (end === 'win' || end === 'lose') haptic(end);
-      if (end === 'win') confetti(); // 勝ちの音を鳴らす画面には紙吹雪
-      endStamp(game, res, me, end, isVoice(said) ? 700 : 0); // 決着の判子（勝ち負けの音と一緒に）
-      greet('end', isVoice(said) ? 1900 : 1200);
-    });
+    // 決着の手の技の名前（ヨットの最後の手のヨット・大富豪の上がりの革命 など）: 前は決着の手では出さなかった。帯を先に出し、勝ち負けの音・判子は帯が抜けるころに出す
+    // （2026-11-25 の Codex の点検のあと本人が推奨を承認。下の決着でない手と同じく、新しい手を後ろから見て最初に技の名前のある手）
+    let cut = null;
+    if (game.cutin) {
+      const steps = [];
+      let cur = before;
+      for (let i = prevLen; i < S.moves.length; i++) { const nx = game.apply(cur, S.moves[i]); if (!nx) break; steps.push([cur, nx, S.moves[i]]); cur = nx; }
+      for (let k = steps.length - 1; k >= 0 && !cut; k--) { try { cut = game.cutin(...steps[k], me); } catch { cut = null; } }
+    }
+    if (cut) cutInFx(cut);
+    const gap = cut && !lessMotion() ? END_AFTER_CUT : 0;
+    const key = timerKey();
+    const finish = () => {
+      // 決め手のスロー（slowFinish）のときは、石が着いたときに置いた音、一拍おいてから勝ち負けの音・判子（押して飛ばせばすぐ）
+      if (hold) slowAt(SLOW_LAND, () => play(said && !isVoice(said) ? said : 'place'), false);
+      slowAt(hold, () => {
+        if (isVoice(said)) { play(said); setTimeout(() => play(end), 700); } else play(end);
+        if (end === 'win' || end === 'lose') haptic(end);
+        if (end === 'win') confetti(); // 勝ちの音を鳴らす画面には紙吹雪
+        endStamp(game, res, me, end, isVoice(said) ? 700 : 0); // 決着の判子（勝ち負けの音と一緒に）
+        greet('end', isVoice(said) ? 1900 : 1200);
+      });
+    };
+    if (gap) setTimeout(() => { if (S && timerKey() === key) finish(); }, gap); else finish();
     return;
   }
   // 手が2つ以上まとめて届いたとき、前は最後の1手の音だけ鳴らしていたので、最後がほかの人の「鳴らさない」手だと無音になった（2026-10-26 本人の声「効果音がならないゲームがある」）。

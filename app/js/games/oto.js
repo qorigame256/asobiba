@@ -229,7 +229,9 @@ export default {
       if (Math.random() < 0.5) c = right;
       else if (Array.isArray(right)) {
         // 和音: 2つのうち1つを、もう1つと重ならないとなりの音にずらす
-        const i = Math.floor(Math.random() * 2);
+        let i = Math.floor(Math.random() * 2);
+        // 端の音でとなりがもう1つの音しか無いとき（白い鍵盤の「ド・レ」など）は、もう1つの音をずらす（そのままだと正解を押してしまい、当てる割合が5割を超えた。2026-11-25 の Codex の点検）
+        if (!nearOf(right[i]).some((y) => y !== right[1 - i])) i = 1 - i;
         const near = nearOf(right[i]).filter((y) => y !== right[1 - i]);
         c = near.length ? (i === 0 ? [pickOne(near), right[1]] : [right[0], pickOne(near)]) : right;
       } else c = pickOne(nearOf(right));

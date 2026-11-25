@@ -1,0 +1,68 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "app/fonts",
+    "app/voice",
+    "app/sounds",
+    "tools/test-logic.mjs",
+    "tools/font-chars.json",
+    "tools/font-texts.mjs",
+    "tools/voice-texts.mjs"
+  ],
+  "cwd": "copy",
+  "env": {
+    "QUICK": "1",
+    "SEED": "1"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 300,
+  "breaks": [
+    {
+      "name": "音当て: 黒い鍵盤も・和音なしの問題の乱数を変える",
+      "file": "app/js/games/oto.js",
+      "old": "mulberry32((seed * 149 + 19) >>> 0)",
+      "new": "mulberry32((seed * 149 + 20) >>> 0)",
+      "expect": ["音当て: 黒い鍵盤も・和音なしの問題は和音を足す前と同じ"]
+    },
+    {
+      "name": "音当て: 和音なしのときだけ対局の始めの問題を変える",
+      "file": "app/js/games/oto.js",
+      "old": "notes: notesOf(seed, roundsOf(r), blackOn(r), chordOn(r))",
+      "new": "notes: notesOf(chordOn(r) ? seed : seed + 1, roundsOf(r), blackOn(r), chordOn(r))",
+      "expect": ["音当て: 和音なしの対局の始めの問題は和音を足す前と同じ"]
+    },
+    {
+      "name": "音当て: 和音の CPU が端の音でずらす方を替えない",
+      "file": "app/js/games/oto.js",
+      "old": "if (!nearOf(right[i]).some((y) => y !== right[1 - i])) i = 1 - i;",
+      "new": "",
+      "expect": ["音当て: 和音の CPU は外すと決めたら正解を送らない 0,1"]
+    },
+    {
+      "name": "タワー: 開き直した CPU をはじめの幅に戻す",
+      "file": "app/js/games/tower.js",
+      "old": "w: plan?.w ?? (s.ten ? (s.w[p] / 1000) * BASE : BASE)",
+      "new": "w: plan?.w ?? BASE",
+      "expect": ["タワー: 10段勝負で開き直したあとの CPU は局面の幅から続ける"]
+    },
+    {
+      "name": "締め切り: だれかが解いたあとの猶予を外す",
+      "file": "app/js/games/party.js",
+      "old": "Math.min(after + grace,",
+      "new": "Math.min(after,",
+      "expect": ["最初にそろってから20秒＋猶予1.5秒（2026-11-25 から猶予を足す）"]
+    }
+  ]
+}

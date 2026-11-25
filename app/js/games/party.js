@@ -226,7 +226,9 @@ export function timeBar(key, limit, { secs = false } = {}) {
 export function afterBar(key, limit, after) {
   return after - since(key + ':after') <= limit - since(key) ? timeBar(key + ':after', after, { secs: true }) : timeBar(key, limit, { secs: true });
 }
-export const afterMs = (key, limit, after, grace) => Math.round(Math.min(after, Math.max(0, limit + grace - since(key))));
+// ホストが締め切るのは、after にも制限時間と同じ猶予 grace を足した時刻（猶予が無いと、ゲストの画面で after の最後に送った手（15パズルの部分点は1秒おいて送る）が届く前に締め切られた。
+// 2026-11-25 の Codex の点検のあと本人が推奨を承認。帯と手を止める時刻は after のまま）
+export const afterMs = (key, limit, after, grace) => Math.round(Math.min(after + grace, Math.max(0, limit + grace - since(key))));
 
 export const secText = (ms) => (ms / 1000).toFixed(2) + '秒';
 
@@ -561,7 +563,8 @@ export function holdToSee(card) {
     try { localStorage.setItem(HOLD_KEY, holdOn ? '1' : '0'); } catch { /* 覚えられなくても遊べる */ }
     set();
   };
-  card.addEventListener('pointerdown', (e) => { if (!holdOn) return; holding = true; holdPid = e.pointerId; card.classList.remove('hold-shut'); });
+  // 2本目の指で押しても、最初に押した指の番号のまま（上書きすると、2本目を離しただけで隠れた。2026-11-25 の Codex の点検）
+  card.addEventListener('pointerdown', (e) => { if (!holdOn) return; if (!holding) holdPid = e.pointerId; holding = true; card.classList.remove('hold-shut'); });
   card.addEventListener('contextmenu', (e) => { if (holdOn) e.preventDefault(); }); // 長押しのメニューを出さない
   card.append(tip, tgl);
   holdCard = card;
@@ -577,10 +580,12 @@ export function leftFlash(host, key, alive) {
   const prev = leftSeen.get(key);
   leftSeen.clear();
   leftSeen.set(key, alive);
-  if (prev === undefined || alive >= prev || alive < 2 || typeof document === 'undefined') return;
+  if (prev === undefined || alive >= prev || typeof document === 'undefined') return;
+  leftEl?.remove(); // 続けて減ったら前の字は消して、新しい数だけ出す（重なっていた。2026-11-24 の2回目の Codex の点検）。決着（1人以下）のときも前の字を消す（「のこり2人」が残った。2026-11-25 の Codex の点検）
+  leftEl = null;
+  if (alive < 2) return;
   const r = host.getBoundingClientRect();
   if (!r.width) return;
-  leftEl?.remove(); // 続けて減ったら前の字は消して、新しい数だけ出す（重なっていた。2026-11-24 の2回目の Codex の点検）
   const d = document.createElement('div');
   leftEl = d;
   d.className = 'left-flash';

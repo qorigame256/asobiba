@@ -231,7 +231,7 @@
 - `tools/test-shogi.mjs` … 将棋のルールと CPU の自動確認（`node tools/test-shogi.mjs`。数秒）。
 - `tools/test-mahjong.mjs` … 麻雀の役・符・点数・向聴数を元のアプリの対照表と全件突き合わせ、
   進行の決まり（フリテン・喰い替え・頭ハネなど）を確かめる（数秒）。対照表は公開リポジトリに写さず、あちらのフォルダから直接読む
-  （場所は Git に入れない `tools/local-paths.json` の `mahjongTestdata`。無ければ突き合わせだけ飛ばす）。壊す確認の計画は `tools/break-plans/mahjong-nuki.json`（抜いた北へのロン）。音当てとペンギンの氷割りの計画は `tools/break-plans/oto-koori.json`、マルバツの持ち時間と海戦ゲームのヒット数の計画は `tools/break-plans/time-hits.json`、15パズル・迷路・価値観ならべ・時計あわせ（2026-11-22 の直し）の計画は `tools/break-plans/puzzle-1122.json`、人ごみさがし・ひよこかぞえ・イライラ棒の計画は `tools/break-plans/new-1124.json`、2026-11-24 の Codex の点検の直しの計画は `tools/break-plans/codex-1124.json`、同日の46回目の9つの設定の計画は `tools/break-plans/settings-1124.json`、同日の2回目の Codex の点検の直しの計画は `tools/break-plans/codex-1124b.json`、かべ置きレースの計画は `tools/break-plans/kabe.json`、同日の47回目の3つの設定の計画は `tools/break-plans/settings-1125.json`、UI・UX の12回目の計画は `tools/break-plans/uiux12.json`。
+  （場所は Git に入れない `tools/local-paths.json` の `mahjongTestdata`。無ければ突き合わせだけ飛ばす）。壊す確認の計画は `tools/break-plans/mahjong-nuki.json`（抜いた北へのロン）。音当てとペンギンの氷割りの計画は `tools/break-plans/oto-koori.json`、マルバツの持ち時間と海戦ゲームのヒット数の計画は `tools/break-plans/time-hits.json`、15パズル・迷路・価値観ならべ・時計あわせ（2026-11-22 の直し）の計画は `tools/break-plans/puzzle-1122.json`、人ごみさがし・ひよこかぞえ・イライラ棒の計画は `tools/break-plans/new-1124.json`、2026-11-24 の Codex の点検の直しの計画は `tools/break-plans/codex-1124.json`、同日の46回目の9つの設定の計画は `tools/break-plans/settings-1124.json`、同日の2回目の Codex の点検の直しの計画は `tools/break-plans/codex-1124b.json`、かべ置きレースの計画は `tools/break-plans/kabe.json`、同日の47回目の3つの設定の計画は `tools/break-plans/settings-1125.json`、UI・UX の12回目の計画は `tools/break-plans/uiux12.json`、同日の Codex の点検の直しの計画は `tools/break-plans/codex-1125.json`。
 - `tools/probes/` … 画面や計算を確かめる小さな台本（`play-shot.mjs` の操作の JSON を書き出すもの・`play-two.mjs` の `--script` に渡すもの・`node` でそのまま流すもの。使い方は各ファイルの先頭）。
   いまあるのは 2026-11-25 の UI・UX の12回目の分（`uiux12-logic.mjs` はヨットの帯・鬼ごっこの道・お絵描き当ての絵の記録の計算の確認で、数秒）。
 - `tools/test-mahjong-play.mjs` … 麻雀を CPU どうし・無作為の手で48局と、トビなしの6局・1局だけの12局を最後まで打ち、点数の合計・牌の数などが崩れないかを見る（3分ほど）。
@@ -301,7 +301,7 @@
 
 - 2026-10-04 までの記録（わざと壊して自動確認が落ちることを確かめたもの・ブラウザで確かめたこと・実測の数字）は `docs/確認の記録.md` にある。
   **新しい確認はコミットのメッセージにだけ書き、ここにもそのファイルにも足さない**（共通ルールの「経緯はコミットのメッセージに書く」に合わせた Claude の判断）。
-- **Codex の点検の基準: daaec3d までのコミットは全部点検を終えた**（2026-11-24）。次に点検するときは、`daaec3d..HEAD` のうちコード（`app/`・`tools/`）を変えたコミットを見せる。
+- **Codex の点検の基準: 91cd9d3 までのコミットは全部点検を終えた**（2026-11-25）。次に点検するときは、`91cd9d3..HEAD` のうちコード（`app/`・`tools/`）を変えたコミットを見せる。
   点検を終えたら、この行のコミットを書き換える（1行のまま。経緯は各点検の直しのコミットのメッセージにある）。
 - **未確認のもの**（本人の端末か耳でないと確かめられないもの・Claude がブラウザの画面でまだ見ていないもの）の一覧は `docs/未確認のもの.md` にある。
   **確かめたらその行を消し、確かめたことはコミットのメッセージに書く。** **新しく未確認のものができたら、そのファイルに足す**（ここには書かない）。
@@ -316,5 +316,8 @@
   炎がふくらむ途中で描き直すと動きが切れる・チーム分けの札と「のこり◯人」が待合室に戻っても最大2.6秒残る。
   同じ点検で、確かめて当たらなかった（意図どおり）もの: ナンプレの観戦で完成の盤に替わらない（`mount` に `doneOf` が入っていて作り直す）・イライラ棒で玉に触れた2本目の指に持ち替わる（押し直しで持ち替える作り）・
   音当てで予定の時刻を過ぎてから戻ると問題の音が鳴らない（過ぎた音は鳴らさない作り）。
+- **2026-11-25 の Codex の点検（`daaec3d..91cd9d3`）で直さないと決めたもの**（本人の決定。Claude の推奨どおり。出し直さない）: ひよこかぞえで公開の切り替えをまたいだ対局の問題が変わる・
+  改造した端末から届いた手を信じる所（雪合戦の投げた席と雪玉の id の頭の食い違い・10段勝負の幅のありえない広がり・`main.js` が手の一覧を受け取るとき送った人がその番の人かを見ない）・雪合戦で当たりがまとめて届くと「◯◯に当てた！」が1人分になる。
+  同じ点検で当たらなかったもの: かべ置きレースの CPU が `boardCpu` でない（3〜4人のマンカラなどと同じく専用の CPU でよい）・かぶったら0点の壊す確認が別の確認で先に落ちる（守られていることは変わらない）。
 - **2026-11-19 の無駄探しで見送ったもの**（Claude の推奨どおりと本人が決めた。出し直さない）: 目安を超えた rules（`room.md`・`quick-games.md` など）を分けること・`docs/出した案の一覧.md` を種類ごとに分けること。
   数字と理由はそのコミットのメッセージ。

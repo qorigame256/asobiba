@@ -3412,7 +3412,7 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .on-ghost { grid-area: 1 / 1; width: 70%; height: 70%; border-radius: 50%; border: 2.5px dashed; display: grid; place-items: center; font-size: .55em; font-weight: 900; color: #333; background: rgba(255, 255, 255, .55); }
 .on-x { grid-area: 1 / 1; color: #a83226; font-weight: 900; }
 /* 決着のあとの「通った道」（2026-11-25 の UI・UX の12回目）。マスの左上から小さな丸を並べる。盤はどの色の組でも同じ草の色なので、字の色も直に書く */
-.on-tr { position: absolute; inset: 1px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 1px; z-index: 3; pointer-events: none; } /* マスの大きさを押し広げないよう、マスの上に重ねて置く（中身の大きさに数えさせない） */
+.on-tr { position: absolute; inset: 1px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 1px; z-index: 3; pointer-events: none; overflow: hidden; } /* マスの大きさを押し広げないよう、マスの上に重ねて置く（中身の大きさに数えさせない） */
 .on-tr i { min-width: 1.5em; height: 1.5em; padding: 0 1px; border-radius: 99px; display: grid; place-items: center; font-style: normal; font-size: .5em; font-weight: 800; color: #fff; border: 1px solid rgba(255, 255, 255, .8); animation: on-tr-in .2s ease-out; }
 @keyframes on-tr-in { from { transform: scale(.3); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .on-tr i { animation: none; } }
@@ -4111,7 +4111,7 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .kw-up { --kwn: var(--to); counter-reset: kwn var(--kwn); animation: kw-up .7s steps(6, end) both; font-weight: 800; }
 .kw-up::after { content: counter(kwn); }
 @keyframes kw-up { from { --kwn: var(--from); } }
-.kw-plus { display: inline-block; margin-left: 3px; color: #c0392b; animation: kw-plus .35s ease-out .7s both; }
+.kw-plus { display: inline-block; margin-left: 3px; color: var(--red-ink, #c0392b); animation: kw-plus .35s ease-out .7s both; }
 @keyframes kw-plus { from { opacity: 0; transform: translateY(4px); } }
 @media (prefers-reduced-motion: reduce) { .kw-up, .kw-plus { animation: none; } }
 .kw .kw-goal { position: absolute; background: var(--pc); border-radius: 3px; }

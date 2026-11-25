@@ -151,7 +151,7 @@ export default {
     const t = since(key(s) + ':play');
     // ホストが開き直すと覚えが消えるので、局面の高さから続ける（幅は真ん中に積んできたことにする）
     if (!plan || plan.k < s.h[p] || (plan.k > s.h[p] && plan.last?.k !== s.h[p])) {
-      plan = { k: s.h[p], x: 0, w: plan?.w ?? BASE, at: t + 800 + Math.random() * 800, last: null };
+      plan = { k: s.h[p], x: 0, w: plan?.w ?? (s.ten ? (s.w[p] / 1000) * BASE : BASE), at: t + 800 + Math.random() * 800, last: null };
       cpuPlan.set(pk, plan);
       if (cpuPlan.size > 100) cpuPlan.delete(cpuPlan.keys().next().value);
     }
@@ -198,6 +198,7 @@ export default {
     if (loc?.key !== tk) loc = { key: tk, blocks: [{ x: 0, w: BASE }], at: 1000, over: false, cut: null, perfect: -1e9 };
     if (me !== null && s.h[me] > loc.blocks.length - 1) { // 開き直したとき: 局面の高さまで真ん中に積んだことにする
       const top = loc.blocks.at(-1);
+      if (s.ten) top.w = (s.w[me] / 1000) * BASE; // 10段勝負は局面に幅があるので、それを引き継ぐ（はじめの幅に戻すと幅が広がる）
       while (loc.blocks.length - 1 < s.h[me]) loc.blocks.push({ ...top });
       loc.at = since(tk) + 1000;
     }

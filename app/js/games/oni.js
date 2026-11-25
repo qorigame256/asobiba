@@ -53,6 +53,11 @@ function showPaths(wrap, grid, s) {
     d.style.background = color;
     d.textContent = label;
     box.append(d);
+    // 同じマスに丸が5つ以上たまったら、数に合わせて丸を小さくしてマスに収める（とどまり続けると16個たまり、となりのマスにはみ出した。
+    // 2026-11-25 の Codex の点検のあと本人が推奨を承認。それでもあふれる分は style.css の .on-tr の overflow で切る）
+    const n = box.children.length;
+    // 割合は幅390の画面で測った（丸16個は 0.45倍で収まり 0.5倍ではみ出た）
+    if (n > 4) box.style.fontSize = Math.max(0.4, Math.min(1, Math.sqrt(2.9 / n))).toFixed(2) + 'em';
   };
   const drawStep = (k) => {
     const label = k === 0 ? '始' : String(k);
