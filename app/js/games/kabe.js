@@ -13,6 +13,9 @@
 //   - 3〜4人で、動かせる先も置ける壁も無い人は、その番を飛ばす。
 //   - 引き分け: 2人 300手・3人 450手・4人 600手（ふつうは起きない。CPU どうしが行ったり来たりしても止まるように）。
 //   - 3〜4人の順位（成績表の「順位で点」）: ゴールした人が1位、ほかはゴールまでの近さの順（同じ近さは同じ順位）。
+// 2026-11-25 の47回目の案（本人が選んだ。分かれ目は Claude の判断）:
+//   - 詳細設定「壁の数」（鍵 wall）: 少なめ・ふつう（最初。上の数のまま）・多め。少なめは上の数の半分、多めは1.5倍（どちらも端数は切り上げ。9×9 の2人なら 5枚・10枚・15枚）。
+//     遊び方なので、おまかせでは抽選する。ふつうのときの局面は前と全く同じ。
 // 手 = 丸の行き先のマス（段*一辺+列。段0が一番上）か、一辺*一辺 + 壁の番号。
 //   壁の番号 = 向き（0 よこ・1 たて）*M*M + 段*M + 列（M = 一辺−1。交わる点の左上のマスの段と列）。
 //   よこの壁 (r, c) は r 段と r+1 段の間を c 列・c+1 列の2マス分ふさぐ。たての壁 (r, c) は c 列と c+1 列の間を r 段・r+1 段の2マス分ふさぐ。
@@ -21,6 +24,8 @@ import { CPU_SETTING, col } from './util.js';
 
 const SIDES = { 2: ['B', 'T'], 3: ['B', 'R', 'L'], 4: ['B', 'R', 'T', 'L'] };
 const WALLS = { 9: { 2: 10, 3: 7, 4: 5 }, 7: { 2: 6, 3: 4, 4: 3 } };
+const WALL_RATE = { few: 0.5, mid: 1, many: 1.5 };
+export const wallsOf = (n, np, wall) => Math.ceil(WALLS[n][np] * (WALL_RATE[wall] ?? 1));
 const MAX_PLY = { 2: 300, 3: 450, 4: 600 };
 const DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]]; // 上・下・左・右
 
@@ -285,6 +290,7 @@ export default {
   settings: [
     { key: 'players', label: '人数', def: 2, desc: '3人は下・右・左、4人は4つの辺から始めて、それぞれ向かいの辺をめざす。壁は人数で分ける', choices: [[2, '2人'], [3, '3人'], [4, '4人']] },
     { key: 'size', label: '盤の大きさ', def: 9, desc: '7×7 は壁が少なく、早く終わる', choices: [[9, '9×9'], [7, '7×7（短い）']] },
+    { key: 'wall', label: '壁の数', def: 'mid', desc: '1人が置ける壁の数。少なめは半分、多めは1.5倍（9×9 の2人なら 5枚・10枚・15枚）', choices: [['few', '少なめ'], ['mid', 'ふつう'], ['many', '多め']] },
     CPU_SETTING,
   ],
 
@@ -296,7 +302,7 @@ export default {
     const sides = SIDES[np];
     return {
       n, np, sides, pos: sides.map((side) => startOf(side, n)), walls: Array(geo(n).WALLS).fill(0),
-      left: Array(np).fill(WALLS[n][np]), turn: 0, ply: 0, last: null, won: null, skipped: [],
+      left: Array(np).fill(wallsOf(n, np, rules.wall)), turn: 0, ply: 0, last: null, won: null, skipped: [],
     };
   },
 

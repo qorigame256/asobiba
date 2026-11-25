@@ -3965,6 +3965,8 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .board button.ot-key.off { opacity: .55; }
 .board button.ot-key.ok { background: #2f8a4a; border-color: #2f8a4a; color: #fff; box-shadow: none; }
 .board button.ot-key.ng { background: #d9534f; border-color: #d9534f; color: #fff; box-shadow: none; }
+.board button.ot-key.sel { background: #ffd966; border-color: #c99a00; color: #222; box-shadow: inset 0 -2px 0 #e0b800; } /* 和音で1つ目に選んだ鍵盤 */
+.board button.ot-key.bk.sel { background: #c99a00; border-color: #7a5d00; color: #fff; }
 .board button.ot-key:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .ot-wave.on { animation: none; } }
 

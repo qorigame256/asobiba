@@ -1,0 +1,89 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "app/fonts",
+    "app/voice",
+    "app/sounds",
+    "tools/test-logic.mjs",
+    "tools/font-chars.json",
+    "tools/font-texts.mjs",
+    "tools/voice-texts.mjs"
+  ],
+  "cwd": "copy",
+  "env": {
+    "QUICK": "1",
+    "SEED": "1"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 300,
+  "breaks": [
+    {
+      "name": "かべ置きレース: 壁の数の設定を見ない",
+      "file": "app/js/games/kabe.js",
+      "old": "left: Array(np).fill(wallsOf(n, np, rules.wall)),",
+      "new": "left: Array(np).fill(WALLS[n][np]),",
+      "expect": ["かべ置きレース: 壁の数 少なめを詳細設定で選べる"]
+    },
+    {
+      "name": "かべ置きレース: 端数を切り捨てる",
+      "file": "app/js/games/kabe.js",
+      "old": "Math.ceil(WALLS[n][np] * (WALL_RATE[wall] ?? 1))",
+      "new": "Math.floor(WALLS[n][np] * (WALL_RATE[wall] ?? 1))",
+      "expect": ["かべ置きレース: 壁の数 7×7 の4人は 2・3・5枚（端数は切り上げ）"]
+    },
+    {
+      "name": "タワー: 10段勝負の幅を確かめない",
+      "file": "app/js/games/tower.js",
+      "old": "if (!Number.isInteger(m.w) || m.w < 1 || m.w > 1000) return null;",
+      "new": "if (false) return null;",
+      "expect": ["タワー: 10段勝負の手には幅が要る"]
+    },
+    {
+      "name": "タワー: 10段勝負でも100段まで積める",
+      "file": "app/js/games/tower.js",
+      "old": "if (s.h[m.p] >= capOf(s0)) s.over[m.p] = true;",
+      "new": "if (s.h[m.p] >= MAX) s.over[m.p] = true;",
+      "expect": ["タワー: 10段勝負は10段で上がり"]
+    },
+    {
+      "name": "タワー: 10段勝負の順位で幅を見ない",
+      "file": "app/js/games/tower.js",
+      "old": "(v >= TEN ? TEN + s.w[p] / 1001 : v)",
+      "new": "(v >= TEN ? TEN : v)",
+      "expect": ["タワー: 10段勝負は残った幅の広い人の勝ち・10段に届かない人はその下"]
+    },
+    {
+      "name": "音当て: 和音を押した順で比べる",
+      "file": "app/js/games/oto.js",
+      "old": "if (sameAns(m.c, s0.notes[s0.q])) s.solved[m.p]",
+      "new": "if (JSON.stringify(m.c) === JSON.stringify(s0.notes[s0.q])) s.solved[m.p]",
+      "expect": ["音当て: 和音は押した順によらず2つとも合っていれば正解"]
+    },
+    {
+      "name": "音当て: 和音で同じ組が続く",
+      "file": "app/js/games/oto.js",
+      "old": "} while (i > 0 && sameAns(pair, out[i - 1]));",
+      "new": "} while (false);",
+      "expect": ["音当て: 和音は前の問題と同じ組を続けない"]
+    },
+    {
+      "name": "音当て: 和音で同じ鍵盤を2つ押せる",
+      "file": "app/js/games/oto.js",
+      "old": " && m.c[0] !== m.c[1]",
+      "new": "",
+      "expect": ["音当て: 和音では同じ鍵盤を2つにできない"]
+    }
+  ]
+}

@@ -13517,4 +13517,86 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('kabe OK');
 }
 
+// 2026-11-25 の47回目の案: かべ置きレースの壁の数・積み上げタワーの10段勝負・音当ての和音
+{
+  // かべ置きレース 壁の数
+  const KB = GAMES.kabe;
+  const { wallsOf } = await import('../app/js/games/kabe.js');
+  assert.deepEqual(['few', 'mid', 'many'].map((v) => wallsOf(9, 2, v)), [5, 10, 15], 'かべ置きレース: 壁の数 9×9 の2人は 5・10・15枚');
+  assert.deepEqual(['few', 'mid', 'many'].map((v) => wallsOf(7, 4, v)), [2, 3, 5], 'かべ置きレース: 壁の数 7×7 の4人は 2・3・5枚（端数は切り上げ）');
+  assert.deepEqual(KB.init({ rules: { wall: 'few' } }).left, [5, 5], 'かべ置きレース: 壁の数 少なめを詳細設定で選べる');
+  assert.deepEqual(KB.init({ rules: { wall: 'many', players: 3 } }).left, [11, 11, 11], 'かべ置きレース: 壁の数 多めは3人でも1.5倍');
+  assert.deepEqual(KB.init({ rules: { wall: 'mid' } }), KB.init({ rules: {} }), 'かべ置きレース: 壁の数 ふつうの局面は前と同じ');
+  for (const rules of [{ wall: 'few' }, { wall: 'many', players: 4 }]) {
+    let x = KB.init({ rules });
+    for (let i = 0; !KB.result(x); i++) {
+      const m = KB.cpu(x, KB.turn(x), { ...rules, cpu: 'normal' });
+      const nx = KB.apply(x, m);
+      assert.ok(nx && i < 700, `かべ置きレース: 壁の数 ${rules.wall} で CPU どうしが最後まで`);
+      x = nx;
+    }
+  }
+
+  // 積み上げタワー 10段勝負
+  const T = GAMES.tower;
+  const { TEN } = await import('../app/js/games/tower.js');
+  const plain = T.init(2, 3);
+  assert.ok(!('ten' in plain) && !('w' in plain) && T.init(2, 3, { rules: { mode: 'high' } }).w === undefined, 'タワー: 高さのときの局面は前と同じ');
+  let s = T.apply(T.init(3, 4, { rules: { mode: 'ten' } }), { p: -1, t: 'start' });
+  assert.equal(T.apply(s, { p: 0, t: 'up', k: 0 }), null, 'タワー: 10段勝負の手には幅が要る');
+  assert.equal(T.apply(s, { p: 0, t: 'up', k: 0, w: 0 }), null, 'タワー: 10段勝負の幅は 1 より小さくできない');
+  assert.equal(T.apply(s, { p: 0, t: 'up', k: 0, w: 1001 }), null, 'タワー: 10段勝負の幅は 1000 より大きくできない');
+  const ws = [[500, 400], [700, 300], [900, 900]];
+  for (let k = 0; k < TEN; k++) {
+    s = T.apply(s, { p: 0, t: 'up', k, w: k < TEN - 1 ? 990 : ws[0][0] });
+    s = T.apply(s, { p: 1, t: 'up', k, w: k < TEN - 1 ? 990 : ws[1][0] });
+    if (k < TEN - 1) s = T.apply(s, { p: 2, t: 'up', k, w: 1000 });
+  }
+  assert.ok(s.over[0] && s.over[1] && !s.over[2], 'タワー: 10段勝負は10段で上がり');
+  assert.equal(T.apply(s, { p: 0, t: 'up', k: TEN, w: 500 }), null, 'タワー: 10段勝負は11段目を積めない');
+  s = T.apply(s, { p: 2, t: 'over', k: TEN - 1 });
+  s = T.apply(s, { p: -1, t: 'end' });
+  const r = T.result(s);
+  assert.deepEqual([r.winners, r.place, r.widths], [[1], [2, 1, 3], [500, 700, 1000]], 'タワー: 10段勝負は残った幅の広い人の勝ち・10段に届かない人はその下');
+  const hs = [];
+  for (let seed = 0; seed < quick(6, 2); seed++) {
+    const end = runCpus(T, 3, seed, { mode: 'ten' }, 200, 8000);
+    const res = T.result(end);
+    assert.ok(res && end.h.every((h) => h <= TEN) && end.w.every((w) => Number.isInteger(w) && w >= 1 && w <= 1000), 'タワー: 10段勝負で CPU どうしが最後まで');
+    hs.push(...end.h);
+  }
+  assert.ok(hs.some((h) => h === TEN), 'タワー: 10段勝負で CPU も10段に届くことがある');
+
+  // 音当て 和音
+  const G = GAMES.oto;
+  const { notesOf, timesOf, CHROMA } = await import('../app/js/games/oto.js');
+  for (const black of [false, true]) {
+    for (let seed = 0; seed < 40; seed++) {
+      const ns = notesOf(seed, 20, black, true);
+      const top = black ? 11 : 6;
+      assert.ok(ns.every(([a, b]) => Number.isInteger(a) && Number.isInteger(b) && a >= 0 && b <= top && CHROMA.indexOf(a) < CHROMA.indexOf(b)), '音当て: 和音は違う2つの音を低い順に');
+      assert.ok(ns.every((x, i) => i === 0 || x.join() !== ns[i - 1].join()), '音当て: 和音は前の問題と同じ組を続けない');
+      assert.deepEqual(notesOf(seed, 20, black, false), notesOf(seed, 20, black), '音当て: 和音なしの問題は前と同じ');
+    }
+  }
+  assert.equal(new Set(notesOf(5, 400, false, true).map((x) => x.join())).size, 21, '音当て: 和音は7つの音のどの2つの組も出る');
+  const ask = timesOf('mid').q[0];
+  let o = G.apply(G.init(2, 7, { rules: { chord: 'on' } }), { p: -1, t: 'next' });
+  const [lo, hi] = o.notes[0];
+  assert.equal(G.apply(o, { p: 0, t: 'ans', q: 0, c: lo, ms: ask + 100 }), null, '音当て: 和音では1つだけでは答えられない');
+  assert.equal(G.apply(o, { p: 0, t: 'ans', q: 0, c: [lo, lo], ms: ask + 100 }), null, '音当て: 和音では同じ鍵盤を2つにできない');
+  const okd = G.apply(o, { p: 0, t: 'ans', q: 0, c: [hi, lo], ms: ask + 100 });
+  assert.ok(okd.solved[0] !== null && okd.said[0].join() === [lo, hi].join(), '音当て: 和音は押した順によらず2つとも合っていれば正解');
+  const other = [0, 1, 2, 3, 4, 5, 6].find((x) => x !== lo && x !== hi);
+  const ngd = G.apply(o, { p: 0, t: 'ans', q: 0, c: [lo, other], ms: ask + 100 });
+  assert.ok(ngd.solved[0] === null && ngd.miss[0], '音当て: 和音で1つだけ合っていても不正解');
+  const single = G.apply(G.init(2, 7, { rules: {} }), { p: -1, t: 'next' });
+  assert.equal(G.apply(single, { p: 0, t: 'ans', q: 0, c: [0, 1], ms: ask + 100 }), null, '音当て: 和音なしでは2つ押せない');
+  for (const rules of [{ chord: 'on' }, { chord: 'on', black: 'on' }]) {
+    const end = runCpus(G, 5, 11, rules, 50, 40000);
+    assert.ok(G.result(end) && end.scores.some((v) => v > 0), `音当て: 和音で CPU どうしが最後まで ${JSON.stringify(rules)}`);
+  }
+  console.log('47th settings OK');
+}
+
 console.log(QUICK ? 'QUICK OK（軽い流し方。コミットの前は QUICK を付けずに全部を流す）' : 'ALL OK');

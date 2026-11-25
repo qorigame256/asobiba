@@ -80,8 +80,8 @@
     {
       "name": "音当て: なしでも黒い鍵盤を押せる",
       "file": "app/js/games/oto.js",
-      "old": "m.c > (blackOn(s0.rules) ? 11 : 6)",
-      "new": "m.c > 11"
+      "old": "const top = blackOn(s0.rules) ? 11 : 6;",
+      "new": "const top = 11;"
     },
     {
       "name": "音当て: 黒い鍵盤もで同じ音が続く",

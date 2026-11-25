@@ -11,8 +11,12 @@
 //     局面の数が端末の中で数えた数より少ないあいだは0.5秒ごとに、届いていない分をまとめて送り直す（金魚すくいと同じ）。
 //   - 全員おしまいになったら1.2秒で終わる。念のため始まって5分でも終わる。同じ高さの人は同じ順位。
 //   - CPU は1段ごとに 0.8〜1.6秒で落とし、ずれは真ん中から ±(0.035 + 段の数×0.003) くらい（ふつうの分かれ方）。
+// 2026-11-25 の47回目の案（本人が選んだ「10段勝負」。分かれ目は Claude の判断）:
+//   - 詳細設定「勝ち方」（鍵 mode）: 高さ（最初。上のとおり）・10段勝負（値 ten）。10段勝負は10段積んだら上がりで、そのとき残ったいちばん上のブロックの幅が広い人の勝ち。
+//     10段に届かずに全部はみ出した人は、10段積んだ人より下で、その中は高さの順。幅ははじめの幅（0.6）を 1000 とした整数（千分率）で手に入れ、画面には % で出す。
+//     速さ・ぴったり・はみ出しは高さのときと同じ。遊び方なので、おまかせでは抽選する。高さのときの局面と手は前と全く同じ（10段勝負のときだけ局面に ten・w を持ち、up の手に w を入れる）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → start → play → end
-// 手: { p: -1, t: 'start' | 'end' } / { p, t: 'up', k } / { p, t: 'over', k }
+// 手: { p: -1, t: 'start' | 'end' } / { p, t: 'up', k, w?（10段勝負のときだけ。積んだあとの幅の千分率 1〜1000） } / { p, t: 'over', k }
 
 import { scoreChips, since, SEAT_COLORS } from './party.js';
 import { play } from '../sound.js';
@@ -25,6 +29,10 @@ export const PERFECT = 0.015;
 const GROW = 0.02;
 const GAP = 350;
 export const MAX = 100;
+export const TEN = 10; // 10段勝負の上がり
+const capOf = (s) => (s.ten ? TEN : MAX);
+const permille = (w) => Math.max(1, Math.min(1000, Math.round((w / BASE) * 1000))); // 幅 → はじめの幅を 1000 とした整数
+const pctText = (pm) => `${Math.round(pm / 10)}%`;
 export const speedOf = (k) => Math.min(2.4, 0.7 + 0.04 * k);
 // k 段目のブロックの真ん中の位置（出てから t ミリ秒）
 export function xOf(k, t) {
@@ -41,14 +49,16 @@ export function stack(px, pw, x) {
   return { x: px + dx / 2, w, perfect: false };
 }
 
-const key = (s) => `tower:${s.seed}`;
-const clone = (s) => ({ ...s, h: s.h.slice(), over: s.over.slice() });
+const key = (s) => `tower:${s.seed}${s.ten ? ':ten' : ''}`; // 10段勝負は CPU の覚え（幅）が違うので鍵を分ける
+const clone = (s) => ({ ...s, h: s.h.slice(), over: s.over.slice(), ...(s.w ? { w: s.w.slice() } : {}) });
 
 function finish(s) {
-  const top = Math.max(...s.h);
-  const winners = s.h.map((v, p) => (v === top ? p : -1)).filter((p) => p >= 0);
-  const place = s.h.map((v) => 1 + s.h.filter((x) => x > v).length);
-  return { winners, place, heights: s.h.slice() };
+  // 10段勝負: 10段積んだ人は 10＋幅、届かなかった人は高さ（幅は 1000 までなので、10段の人がいつも上）
+  const score = s.ten ? s.h.map((v, p) => (v >= TEN ? TEN + s.w[p] / 1001 : v)) : s.h;
+  const top = Math.max(...score);
+  const winners = score.map((v, p) => (v === top ? p : -1)).filter((p) => p >= 0);
+  const place = score.map((v) => 1 + score.filter((x) => x > v).length);
+  return { winners, place, heights: s.h.slice(), ...(s.ten ? { widths: s.w.slice() } : {}) };
 }
 
 const cpuPlan = new Map();
@@ -75,9 +85,14 @@ export default {
   realtime: true,
   minPlayers: 1,
   maxPlayers: 10,
+  settings: [
+    { key: 'mode', label: '勝ち方', def: 'high', desc: '10段勝負は、10段積んだときに残ったブロックの幅がいちばん広い人の勝ち（10段に届かなかった人は、その下で高さの順）', choices: [['high', '高さ'], ['ten', '10段勝負（残った幅）']] },
+  ],
 
-  init(n, seed) {
-    return { n, seed, phase: 'ready', h: Array(n).fill(0), over: Array(n).fill(false), step: 0 };
+  init(n, seed, { rules = {} } = {}) {
+    const s = { n, seed, phase: 'ready', h: Array(n).fill(0), over: Array(n).fill(false), step: 0 };
+    if (rules.mode === 'ten') Object.assign(s, { ten: true, w: Array(n).fill(1000) });
+    return s;
   },
 
   turn() { return null; },
@@ -86,6 +101,11 @@ export default {
   sound(a, b, m) { return m.p === -1 && m.t === 'start' ? 'question' : null; }, // 自分の音は端末の中で鳴らす
   resultText(res, me, pn) {
     const h = res.heights[res.winners[0]];
+    if (res.widths && h >= TEN) {
+      const w = pctText(res.widths[res.winners[0]]);
+      if (res.winners.length === 1) return res.winners[0] === me ? `残った幅 ${w} で、あなたの勝ち！🎉` : `${pn(res.winners[0])}の勝ち！（残った幅 ${w}）`;
+      return `${res.winners.map(pn).join('・')}が残った幅 ${w} で同じ1位！${res.winners.includes(me) ? '🎉' : ''}`;
+    }
     if (res.winners.length === 1) return res.winners[0] === me ? `${h}段で、あなたの勝ち！🎉` : `${pn(res.winners[0])}の勝ち！（${h}段）`;
     return `${res.winners.map(pn).join('・')}が${h}段で同じ1位！${res.winners.includes(me) ? '🎉' : ''}`;
   },
@@ -111,8 +131,12 @@ export default {
     const s = clone(s0);
     s.step += 1;
     if (m.t === 'up') {
+      if (s0.ten) {
+        if (!Number.isInteger(m.w) || m.w < 1 || m.w > 1000) return null;
+        s.w[m.p] = m.w;
+      }
       s.h[m.p] += 1;
-      if (s.h[m.p] >= MAX) s.over[m.p] = true;
+      if (s.h[m.p] >= capOf(s0)) s.over[m.p] = true;
       return s;
     }
     if (m.t === 'over') { s.over[m.p] = true; return s; }
@@ -137,7 +161,7 @@ export default {
     const next = stack(plan.x, plan.w, plan.x + g);
     const k = plan.k;
     if (!next) return { t: 'over', k };
-    Object.assign(plan, { k: k + 1, x: next.x, w: next.w, at: t + 800 + Math.random() * 800, last: { t: 'up', k } });
+    Object.assign(plan, { k: k + 1, x: next.x, w: next.w, at: t + 800 + Math.random() * 800, last: s.ten ? { t: 'up', k, w: permille(next.w) } : { t: 'up', k } });
     return plan.last;
   },
 
@@ -145,7 +169,8 @@ export default {
     bindKeys();
     const me = o.me >= 0 && !o.watching ? o.me : null;
     const tk = key(s) + ':play';
-    const extra = (p) => (s.over[p] ? `<span class="pt-ng">${s.h[p] >= MAX ? '上がり' : 'おしまい'}</span>` : '<span class="pt-ok">積んでいる</span>');
+    const cap = capOf(s);
+    const extra = (p) => (s.over[p] ? (s.ten && s.h[p] >= cap ? `<span class="pt-ok">幅 ${pctText(s.w[p])}</span>` : `<span class="pt-ng">${s.h[p] >= cap ? '上がり' : 'おしまい'}</span>`) : '<span class="pt-ok">積んでいる</span>');
     const chips = scoreChips(o, s.h, { won: s.phase === 'end' ? finish(s).winners : [], extra, steady: true });
     chips.querySelectorAll('.pt-score small').forEach((e) => { e.textContent = '段'; });
     chips.querySelectorAll('.cc-opp-name').forEach((el, p) => { el.style.borderBottom = `3px solid ${SEAT_COLORS[p % SEAT_COLORS.length]}`; });
@@ -165,7 +190,7 @@ export default {
     root.append(wrap);
     ui = { mount, wrap, chips, state: s };
     if (s.phase === 'ready') {
-      wrap.insertAdjacentHTML('beforeend', '<div class="kj-card"><div class="kj-word small">よーい…</div><div class="kj-sub">動くブロックが下のブロックに重なる所で「落とす」を押そう（PC はスペースキーでも）。はみ出た分は切れます</div></div>');
+      wrap.insertAdjacentHTML('beforeend', `<div class="kj-card"><div class="kj-word small">よーい…</div><div class="kj-sub">動くブロックが下のブロックに重なる所で「落とす」を押そう（PC はスペースキーでも）。はみ出た分は切れます${s.ten ? '。10段積んだときに、残ったブロックの幅がいちばん広い人の勝ち' : ''}</div></div>`);
       return;
     }
     if (s.phase === 'end') return;
@@ -186,18 +211,20 @@ export default {
     note.className = 'cc-log';
     wrap.append(card);
     const height = () => loc.blocks.length - 1;
-    const playing = () => ui.state.phase === 'play' && me !== null && o.canMove && !loc.over && height() < MAX;
+    const playing = () => ui.state.phase === 'play' && me !== null && o.canMove && !loc.over && height() < cap;
+    const nowPct = () => pctText(permille(loc.blocks.at(-1).w));
     let btn = null;
     const sendOwn = () => {
       const st = ui.state;
       if (me === null || st.phase !== 'play' || st.over[me]) return;
-      for (let k = st.h[me]; k < height(); k++) o.onMove({ t: 'up', k }); // 届いていない分をまとめて（2回目に届いた手は弾かれる）
-      if (loc.over && height() < MAX) o.onMove({ t: 'over', k: height() });
+      for (let k = st.h[me]; k < height(); k++) o.onMove(s.ten ? { t: 'up', k, w: permille(loc.blocks[k + 1].w) } : { t: 'up', k }); // 届いていない分をまとめて（2回目に届いた手は弾かれる）
+      if (loc.over && height() < cap) o.onMove({ t: 'over', k: height() });
     };
     ui.update = () => {
       note.textContent = me === null ? '観戦中'
-        : height() >= MAX ? `${MAX}段！ 上がりです`
+        : height() >= cap ? (s.ten ? `${TEN}段！ 残った幅は ${nowPct()}。ほかの人を待っています` : `${MAX}段！ 上がりです`)
         : loc.over ? `${height()}段でおしまい。ほかの人を待っています`
+        : s.ten ? `${height()} / ${TEN}段 ・ 幅 ${nowPct()}`
         : `${height()}段 ・ 下のブロックに重なる所で落とそう`;
       if (btn) btn.disabled = !playing();
     };
@@ -219,7 +246,7 @@ export default {
         loc.blocks.push({ x: next.x, w: next.w });
         loc.at = t + GAP;
         if (next.perfect) { loc.perfect = t; play('correct', 0.5); } else play('place', 0.6);
-        if (height() >= MAX) loc.over = true;
+        if (height() >= cap) loc.over = true;
       }
       sendOwn();
       ui.update();
@@ -295,7 +322,7 @@ export default {
       g.fillStyle = '#333';
       g.font = 'bold 18px "Hiragino Sans", "Yu Gothic UI", Meiryo, sans-serif';
       g.textAlign = 'left';
-      g.fillText(`${k}段`, 10, 24);
+      g.fillText(s.ten ? `${k} / ${TEN}段　幅 ${nowPct()}` : `${k}段`, 10, 24);
       requestAnimationFrame(draw);
     };
     requestAnimationFrame(draw);
