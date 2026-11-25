@@ -16,17 +16,23 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+# 荷物を作るジョブと公開するジョブを分ける（1つのジョブで続けると、上げた直後の荷物が見つからず
+# 「No artifacts named "github-pages"」で落ちることがある。2026-11-24・11-25 に2回続けて落ちた。actions/deploy-pages の issue 451）
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: app
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v4
