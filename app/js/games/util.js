@@ -373,7 +373,9 @@ export function winLine(box, cells, fresh, key, delay = 160) {
 const promoAt = new Map();
 const PROMO_MS = 340; // CSS の .promo-flip と合わせる
 export function promoFlip(el, key, fresh, show, wait = 0) {
-  if (fresh && !promoAt.has(key)) {
+  // 新しく届いた手で、同じ鍵の動きがもう終わっていたら始め直す（待った・1手戻すのあとに同じ成りを指すと、手数も局面も同じ鍵になり、裏返らなかった。2026-11-26 の Codex の点検）
+  if (fresh && (!promoAt.has(key) || Date.now() - promoAt.get(key) >= wait + PROMO_MS)) {
+    promoAt.delete(key);
     promoAt.set(key, Date.now());
     if (promoAt.size > 40) promoAt.delete(promoAt.keys().next().value);
   }

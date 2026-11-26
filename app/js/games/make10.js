@@ -483,8 +483,11 @@ export default {
       const st = steps[k - 1];
       const A = st && row.querySelector(`[data-id="${st.a}"]`), B = st && row.querySelector(`[data-id="${st.b}"]`);
       if (k !== prev + 1 || !A || !B || !row.isConnected) { paintRow(k); return; }
+      // 式の左の数（A）が右にあるときは、先に A を B の前へ並べ替える（引き算・割り算で「1 − 6」と逆に見えていた。2026-11-26 の Codex の点検のあと本人が推奨を承認）。
+      // 合わさった札は2枚のうち左にあった所に入る（stateAt）ので、A を B の場所へ移しても次の段の並びは変わらない
+      if (A.getBoundingClientRect().left > B.getBoundingClientRect().left) row.insertBefore(A, B);
       const ra = A.getBoundingClientRect(), rb = B.getBoundingClientRect(), r0 = row.getBoundingClientRect();
-      const [R, rl, rr] = ra.left <= rb.left ? [B, ra, rb] : [A, rb, ra]; // R（右の札）が左の札へ寄る
+      const [R, rl, rr] = [B, ra, rb]; // R（右の札 = 式の右の数）が左の札へ寄る
       A.classList.add('mk-pick');
       B.classList.add('mk-pick');
       const op = document.createElement('span');

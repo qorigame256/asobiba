@@ -2624,7 +2624,13 @@ function renderPage() {
     board.className = 'board';
     return;
   }
-  if (S.lobbyView && S.mode === 'online' && !S.isHost) { renderAwayLobby(game, st); return; }
+  if (S.lobbyView && S.mode === 'online' && !S.isHost) {
+    // 待合室を見ている間に届いた手は「見た」ことにする（戻ったときに、見ていなかった手の演出・音が動いていた。
+    // 2026-11-26 の Codex の点検のあと本人が推奨を承認。戻ったら最後の形で出す）
+    if (S.shownKey === S.gameId + ':' + S.round) S.shownLen = S.moves.length;
+    renderAwayLobby(game, st);
+    return;
+  }
   if (ffwdNow(game)) return; // 途中から来た人に、ここまでを早送りで見せている（2026-11-16）
 
   const res = game.result(st);
@@ -4518,7 +4524,8 @@ function moveSound(game, st, res, prevLen, mine, hold = 0) {
         greet('end', isVoice(said) ? 1900 : 1200);
       });
     };
-    if (gap) setTimeout(() => { if (S && timerKey() === key) finish(); }, gap); else finish();
+    // 帯を出している間にゲストが待合室へ移ったら、待合室で勝ち負けの音・判子・紙吹雪を出さない（対局の鍵は変わらないので画面も見る。2026-11-26 の Codex の点検）
+    if (gap) setTimeout(() => { if (S && timerKey() === key && !(S.lobbyView && !S.isHost)) finish(); }, gap); else finish();
     return;
   }
   // 手が2つ以上まとめて届いたとき、前は最後の1手の音だけ鳴らしていたので、最後がほかの人の「鳴らさない」手だと無音になった（2026-10-26 本人の声「効果音がならないゲームがある」）。

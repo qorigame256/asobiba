@@ -2,7 +2,7 @@
 //   10を作れの mergeSteps（答えの例を2枚ずつ合わせる順）・15パズル／迷路／一筆書きの seqs・paths（答えを見せる間の早送りの元）・将棋の mateWhy（詰みの理由）。
 import assert from 'node:assert/strict';
 import { PUZZLES, mergeSteps } from '../../app/js/games/make10.js';
-import slide, { replay, isSolved, undoPath } from '../../app/js/games/slide.js';
+import slide, { replay, isSolved, undoPath, routeOf } from '../../app/js/games/slide.js';
 import meiro, { walk, solve } from '../../app/js/games/meiro.js';
 import hitofude, { isTrail, eulerPath } from '../../app/js/games/hitofude.js';
 import { _test as SG } from '../../app/js/games/shogi.js';
@@ -28,14 +28,18 @@ assert.deepEqual(mergeSteps([1, 1, 9, 9], 'zzz'), [], '10を作れ: 読めない
   let s = slide.apply(slide.init(3, 2, { rules: {} }), { p: -1, t: 'next' });
   const b = s.qs[0].board;
   const seq = undoPath(s.qs[0].path);
-  s = slide.apply(s, { p: 1, t: 'done', q: 0, seq, ms: 9000 });
+  // 遅かった人は、1手動かして戻すむだの入った別の動かし方（早送りがだれの分かを見分けるため。2026-11-26 の Codex の点検）
+  const slow = ['U', 'D', 'L', 'R'].map((d) => d + undoPath(d) + seq).find((x) => { const e = replay(b, 4, x); return e && isSolved(e); });
+  assert.ok(slow && slow !== seq);
+  s = slide.apply(s, { p: 1, t: 'done', q: 0, seq: slow, ms: 9000 });
   s = slide.apply(s, { p: 2, t: 'done', q: 0, seq, ms: 4000 });
   s = slide.apply(s, { p: 0, t: 'pass', q: 0 });
-  assert.deepEqual(s.seqs, [null, seq, seq], '15パズル: そろえた人の動かし方が残る');
+  assert.deepEqual(s.seqs, [null, slow, seq], '15パズル: そろえた人の動かし方が残る');
   s = slide.apply(s, { p: -1, t: 'close' });
   assert.equal(s.phase, 'shown');
   assert.deepEqual(s.last.winners, [2]);
-  assert.ok(isSolved(replay(b, 4, s.seqs[s.last.winners[0]])), '15パズル: 速かった人の動かし方でそろう');
+  assert.equal(routeOf(s), seq, '15パズル: 早送りするのはいちばん速かった人の動かし方');
+  assert.ok(isSolved(replay(b, 4, routeOf(s))), '15パズル: 速かった人の動かし方でそろう');
   s = slide.apply(s, { p: -1, t: 'next' });
   assert.deepEqual(s.seqs, [null, null, null], '15パズル: 次の問題で動かし方を空に戻す');
 }
@@ -61,6 +65,8 @@ assert.deepEqual(mergeSteps([1, 1, 9, 9], 'zzz'), [], '10を作れ: 読めない
   assert.deepEqual(s.paths[0], path, '一筆書き: 描けた人の描き順が残る（写し）');
   assert.ok(isTrail(s.qs[0], s.paths[0]), '一筆書き: 残った描き順が一筆書き');
   assert.equal(s.paths[1], null);
+  s = hitofude.apply(hitofude.apply(s, { p: -1, t: 'close' }), { p: -1, t: 'next' });
+  assert.deepEqual(s.paths, [null, null], '一筆書き: 次の問題で描き順を空に戻す');
 }
 
 // 将棋の詰みの理由: 頭金（後手玉 5一・先手金 5二・先手歩 5三）。金に利いている歩が「取れない理由」

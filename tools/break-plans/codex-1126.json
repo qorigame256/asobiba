@@ -1,0 +1,88 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "app/fonts",
+    "app/voice",
+    "app/sounds",
+    "tools/test-logic.mjs",
+    "tools/probes",
+    "tools/font-chars.json",
+    "tools/font-texts.mjs",
+    "tools/voice-texts.mjs"
+  ],
+  "cwd": "copy",
+  "env": {
+    "QUICK": "1",
+    "SEED": "1"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 300,
+  "breaks": [
+    {
+      "name": "タワー: 開き直した CPU の幅だけをほぼ0にする（必ず落ちる）",
+      "file": "app/js/games/tower.js",
+      "old": "w: plan?.w ?? (s.ten ? (s.w[p] / 1000) * BASE : BASE)",
+      "new": "w: plan?.w ?? (s.ten ? (s.h[p] ? 0.0001 : (s.w[p] / 1000) * BASE) : BASE)",
+      "expect": [
+        "タワー: 10段勝負で開き直したあとの CPU は局面の幅から続ける"
+      ]
+    },
+    {
+      "name": "タワー: 開き直した CPU をはじめの幅に戻す",
+      "file": "app/js/games/tower.js",
+      "old": "w: plan?.w ?? (s.ten ? (s.w[p] / 1000) * BASE : BASE)",
+      "new": "w: plan?.w ?? BASE",
+      "expect": [
+        "タワー: 10段勝負で開き直したあとの CPU は局面の幅から続ける"
+      ]
+    },
+    {
+      "name": "音当て: 和音の CPU が外すとき同じ音を2つ返す",
+      "file": "app/js/games/oto.js",
+      "old": "c = near.length ? (i === 0 ? [pickOne(near), right[1]] : [right[0], pickOne(near)]) : right;",
+      "new": "c = [right[0], right[0]];",
+      "expect": [
+        "音当て: 和音の CPU が外した手は受け付けられてまちがいになる 0,1"
+      ]
+    },
+    {
+      "name": "締め切り: 短い帯が0になっても止めない",
+      "file": "app/js/games/party.js",
+      "old": "seen(key + ':after') && since(key + ':after') >= after",
+      "new": "false && seen(key + ':after') && since(key + ':after') >= after",
+      "expect": [
+        "締め切り: 短い帯が0になったら答えを送らない"
+      ]
+    },
+    {
+      "name": "15パズル: 早送りを最後の席の動かし方にする",
+      "file": "app/js/games/slide.js",
+      "old": "s.seqs?.[s.last.winners[0]] : null",
+      "new": "s.seqs?.[1] : null",
+      "expect": [
+        "15パズル: 早送りするのはいちばん速かった人の動かし方"
+      ]
+    },
+    {
+      "name": "一筆書き: 次の問題で描き順を残す",
+      "file": "app/js/games/hitofude.js",
+      "old": "s.paths = Array(s.n).fill(null);",
+      "new": "s.paths = s.paths ?? Array(s.n).fill(null);",
+      "expect": [
+        "一筆書き: 次の問題で描き順を空に戻す"
+      ]
+    }
+  ]
+}

@@ -14,7 +14,7 @@
 //   ちょうど5本（「5本を超えた手」が「消える」ならそれ以上も）で手がはじけて消える。超えて残るときは5本立ってから数え直す。
 //   CPU が0.7秒で次を打つので、全部で0.6秒ほどに収めた。時刻で進めるので、途中で描き直しても続きから動く。
 
-import { replaySteps, seen, since } from './party.js';
+import { replaySteps, restartReplay, seen, since } from './party.js';
 
 const MAX_FINGERS = 4;
 const LIMITS = [40, 60, 80, 100];
@@ -176,6 +176,7 @@ export default {
 
     const L = s.last;
     const tkey = L?.t === 'atk' ? `ss:${s.step}:${L.p}:${L.from}:${L.to}:${L.hand}:${L.before}:${L.add}:${s.hands.join('/')}` : '';
+    if (tkey && o.fresh) restartReplay(tkey); // 新しく届いた手は今から動かす（party.js の restartReplay）
     const touching = !!tkey && (o.fresh || seen('replay:' + tkey));
 
     root.innerHTML = '';

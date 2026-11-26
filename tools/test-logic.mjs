@@ -13710,17 +13710,31 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
           for (let t = 0; t < 200 && !m; t++) { m = G.cpu(s, 1); fake += 100; }
           Math.random = realRnd;
           assert.ok(m && m.c.length === 2 && [...m.c].sort().join() !== [keys[a], keys[b]].sort().join(), `音当て: 和音の CPU は外すと決めたら正解を送らない ${keys[a]},${keys[b]}`);
+          // 返した手が局面に受け付けられ、まちがいとして数えられる（同じ音を2つ返すなどの弾かれる手だと CPU が答えられない。2026-11-26 の Codex の点検）
+          assert.ok(G.apply(s, { ...m, p: 1 })?.miss[1] === true, `音当て: 和音の CPU が外した手は受け付けられてまちがいになる ${keys[a]},${keys[b]}`);
         }
       }
       const r0 = { ...T.apply(T.init(1, 778, { rules: { mode: 'ten' } }), { p: -1, t: 'start' }), h: [5], w: [400] };
       let m = null;
-      for (let i = 0; i < 50 && !m; i++) { fake += 200; m = T.cpu(r0, 0); }
-      assert.ok(m && m.k === 5 && (m.t === 'over' || m.w <= 434), 'タワー: 10段勝負で開き直したあとの CPU は局面の幅から続ける');
+      // 乱数を真ん中に固めて、ずれ無しで積ませる（ぴったりなので幅は局面の 400 から少し戻る。前は「落ちた」も通していて、幅を0に戻して必ず落ちる形に壊しても通った。2026-11-26 の Codex の点検）
+      Math.random = () => 0.5;
+      try { for (let i = 0; i < 50 && !m; i++) { fake += 200; m = T.cpu(r0, 0); } } finally { Math.random = realRnd; }
+      assert.ok(m && m.k === 5 && m.t === 'up' && m.w > 400 && m.w <= 434, 'タワー: 10段勝負で開き直したあとの CPU は局面の幅から続ける'); // ぴったり重ねたので 400 から少し戻る
       // だれかが解いたあとの締め切りにも猶予を足す（ゲストが最後に送った手が届く前に締め切っていた。同じ点検のあと本人が推奨を承認）。制限時間までの残りより長くは待たない
       const { afterMs } = await import('../app/js/games/party.js');
       fake = 0;
       assert.equal(afterMs('probe-after-a', 60000, 20000, 1500), 21500, '締め切り: だれかが解いたあとも猶予を足して締め切る');
       assert.equal(afterMs('probe-after-b', 5000, 20000, 1500), 6500, '締め切り: 制限時間の残りが短ければ、そちらで締め切る');
+      // 猶予の間は締め切りを待つだけで、短い帯が0になったら新しい答えは送らない（2026-11-26 の Codex の点検）
+      {
+        const { afterOver, since: since2 } = await import('../app/js/games/party.js');
+        assert.equal(afterOver('probe-ao', 5000), false, '締め切り: 短い帯を出す前は止めない');
+        since2('probe-ao:after');
+        fake += 4999;
+        assert.equal(afterOver('probe-ao', 5000), false, '締め切り: 短い帯が残っている間は答えられる');
+        fake += 1;
+        assert.equal(afterOver('probe-ao', 5000), true, '締め切り: 短い帯が0になったら答えを送らない');
+      }
     } finally {
       performance.now = realNow;
       Math.random = realRnd;

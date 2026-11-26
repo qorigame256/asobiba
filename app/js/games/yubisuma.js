@@ -9,7 +9,7 @@
 // 数え上げ（2026-11-26 の UI・UX の13回目）: 一斉に開いた直後、上がった親指を画面の並び順に1本ずつ光らせて数え（親の数を超えた分は赤い番号）、
 //   数え終わったら当たり・はずれを出し、当たりなら親の片手（右端の1つ）が下りる。時刻で進めるので、途中で描き直しても続きから動く。
 
-import { replaySteps, seen, since } from './party.js';
+import { replaySteps, restartReplay, seen, since } from './party.js';
 
 const clone = (s) => ({ ...s, hands: s.hands.slice(), picks: s.picks.slice(), out: s.out.slice() });
 const active = (s, p) => s.hands[p] > 0;
@@ -129,6 +129,7 @@ export default {
 
     // 前の回の結果。一斉に開いた直後は親指を1本ずつ数え上げてから当たり・はずれを出す（先頭のコメント）
     const ckey = L ? `ys:${L.round}:${L.call}:${L.ups.join()}:${L.hands.join()}` : '';
+    if (L && anim) restartReplay(ckey); // 開いた瞬間の画面は今から動かす（party.js の restartReplay）
     const counting = !!L && (anim || seen('replay:' + ckey));
     let banner = null;
     let finalText = '';

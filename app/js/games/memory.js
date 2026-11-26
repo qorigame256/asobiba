@@ -263,7 +263,8 @@ export default {
           const a = g.animate([{ transform: 'none', opacity: 1 }, { transform: `translate(${dx}px, ${dy}px) scale(.35)`, opacity: .3 }], { duration: FLY_MS, delay: n++ * 90, easing: 'ease-in', fill: 'forwards' });
           a.onfinish = a.oncancel = () => g.remove();
         }
-        setTimeout(() => chip.querySelector('.mm-score')?.animate([{ transform: 'scale(1.5)' }, { transform: 'none' }], { duration: 300, easing: 'ease-out' }), FLY_MS + 90);
+        // 飛んでいる間に盤が作り直されても、着いたときの名前の札を探し直してふくらませる（2026-11-26 の Codex の点検）
+        setTimeout(() => (chip.isConnected ? chip : root.querySelector(`.cc-opp[data-p="${L.p}"]`))?.querySelector('.mm-score')?.animate([{ transform: 'scale(1.5)' }, { transform: 'none' }], { duration: 300, easing: 'ease-out' }), FLY_MS + 90);
       }, FLY_WAIT);
     }
   },

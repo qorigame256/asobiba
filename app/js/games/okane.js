@@ -27,7 +27,7 @@
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'pay', q, ms, c: [お金の種類ごとの枚数（MONEY の順）] }
 
 import { mulberry32, esc } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, afterOver, secText } from './party.js';
 import { pointsOf } from './make10.js';
 import { play } from '../sound.js';
 
@@ -232,6 +232,7 @@ export default {
 
   cpuDelay(s) { return s.phase === 'open' ? 200 : 500; },
   cpu(s, p) {
+    if (afterOver(qKey(s), AFTER_MS)) return null; // だれかが解いたあとの短い帯が0になったら答えない（締め切りの猶予の間に答えていた。2026-11-26 の Codex の点検）
     if (s.phase !== 'open' || doneOf(s, p)) return null;
     const end = cpuTime(s, s.q, p);
     if (end === null || end >= limitOf(s)) return null;
@@ -368,7 +369,7 @@ export default {
         const sum = total(loc.c, kinds);
         if (canPay(s, s.q, loc.c)) {
           const ms = Math.round(since(key));
-          if (ms >= limit) return;
+          if (ms >= limit || afterOver(key, AFTER_MS)) return;
           loc.sent = true;
           o.onMove({ t: 'pay', q: s.q, ms: Math.max(ms, MIN_MS), c: loc.c.slice() });
           paint();

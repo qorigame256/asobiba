@@ -231,7 +231,7 @@
 - `tools/test-shogi.mjs` … 将棋のルールと CPU の自動確認（`node tools/test-shogi.mjs`。数秒）。
 - `tools/test-mahjong.mjs` … 麻雀の役・符・点数・向聴数を元のアプリの対照表と全件突き合わせ、
   進行の決まり（フリテン・喰い替え・頭ハネなど）を確かめる（数秒）。対照表は公開リポジトリに写さず、あちらのフォルダから直接読む
-  （場所は Git に入れない `tools/local-paths.json` の `mahjongTestdata`。無ければ突き合わせだけ飛ばす）。壊す確認の計画は `tools/break-plans/mahjong-nuki.json`（抜いた北へのロン）。音当てとペンギンの氷割りの計画は `tools/break-plans/oto-koori.json`、マルバツの持ち時間と海戦ゲームのヒット数の計画は `tools/break-plans/time-hits.json`、15パズル・迷路・価値観ならべ・時計あわせ（2026-11-22 の直し）の計画は `tools/break-plans/puzzle-1122.json`、人ごみさがし・ひよこかぞえ・イライラ棒の計画は `tools/break-plans/new-1124.json`、2026-11-24 の Codex の点検の直しの計画は `tools/break-plans/codex-1124.json`、同日の46回目の9つの設定の計画は `tools/break-plans/settings-1124.json`、同日の2回目の Codex の点検の直しの計画は `tools/break-plans/codex-1124b.json`、かべ置きレースの計画は `tools/break-plans/kabe.json`、同日の47回目の3つの設定の計画は `tools/break-plans/settings-1125.json`、UI・UX の12回目の計画は `tools/break-plans/uiux12.json`、同日の Codex の点検の直しの計画は `tools/break-plans/codex-1125.json`、2026-11-26 の48回目の3つの設定の計画は `tools/break-plans/settings-1126.json`、同日の UI・UX の13回目の計画は `tools/break-plans/uiux13.json`。
+  （場所は Git に入れない `tools/local-paths.json` の `mahjongTestdata`。無ければ突き合わせだけ飛ばす）。壊す確認の計画は `tools/break-plans/mahjong-nuki.json`（抜いた北へのロン）。音当てとペンギンの氷割りの計画は `tools/break-plans/oto-koori.json`、マルバツの持ち時間と海戦ゲームのヒット数の計画は `tools/break-plans/time-hits.json`、15パズル・迷路・価値観ならべ・時計あわせ（2026-11-22 の直し）の計画は `tools/break-plans/puzzle-1122.json`、人ごみさがし・ひよこかぞえ・イライラ棒の計画は `tools/break-plans/new-1124.json`、2026-11-24 の Codex の点検の直しの計画は `tools/break-plans/codex-1124.json`、同日の46回目の9つの設定の計画は `tools/break-plans/settings-1124.json`、同日の2回目の Codex の点検の直しの計画は `tools/break-plans/codex-1124b.json`、かべ置きレースの計画は `tools/break-plans/kabe.json`、同日の47回目の3つの設定の計画は `tools/break-plans/settings-1125.json`、UI・UX の12回目の計画は `tools/break-plans/uiux12.json`、同日の Codex の点検の直しの計画は `tools/break-plans/codex-1125.json`、2026-11-26 の48回目の3つの設定の計画は `tools/break-plans/settings-1126.json`、同日の UI・UX の13回目の計画は `tools/break-plans/uiux13.json`、同日の Codex の点検の直しの計画は `tools/break-plans/codex-1126.json`。
 - `tools/probes/` … 画面や計算を確かめる小さな台本（`play-shot.mjs` の操作の JSON を書き出すもの・`play-two.mjs` の `--script` に渡すもの・`node` でそのまま流すもの。使い方は各ファイルの先頭）。
   いまあるのは 2026-11-25 の UI・UX の12回目の分（`uiux12-logic.mjs` はヨットの帯・鬼ごっこの道・お絵描き当ての絵の記録の計算の確認で、数秒）と、2026-11-26 の48回目の3つの設定の分（`settings-1126.steps.mjs`）と、同日の UI・UX の13回目の分
   （`uiux13-logic.mjs` は10を作れの合わさる順・早送りの元になる解き方・将棋の詰みの理由の計算の確認で、数秒。`test-logic.mjs` からも流す。
@@ -303,7 +303,7 @@
 
 - 2026-10-04 までの記録（わざと壊して自動確認が落ちることを確かめたもの・ブラウザで確かめたこと・実測の数字）は `docs/確認の記録.md` にある。
   **新しい確認はコミットのメッセージにだけ書き、ここにもそのファイルにも足さない**（共通ルールの「経緯はコミットのメッセージに書く」に合わせた Claude の判断）。
-- **Codex の点検の基準: 91cd9d3 までのコミットは全部点検を終えた**（2026-11-25）。次に点検するときは、`91cd9d3..HEAD` のうちコード（`app/`・`tools/`）を変えたコミットを見せる。
+- **Codex の点検の基準: effcbe6 までのコミットは全部点検を終えた**（2026-11-26）。次に点検するときは、`effcbe6..HEAD` のうちコード（`app/`・`tools/`）を変えたコミットを見せる。
   点検を終えたら、この行のコミットを書き換える（1行のまま。経緯は各点検の直しのコミットのメッセージにある）。
 - **未確認のもの**（本人の端末か耳でないと確かめられないもの・Claude がブラウザの画面でまだ見ていないもの）の一覧は `docs/未確認のもの.md` にある。
   **確かめたらその行を消し、確かめたことはコミットのメッセージに書く。** **新しく未確認のものができたら、そのファイルに足す**（ここには書かない）。
@@ -321,5 +321,11 @@
 - **2026-11-25 の Codex の点検（`daaec3d..91cd9d3`）で直さないと決めたもの**（本人の決定。Claude の推奨どおり。出し直さない）: ひよこかぞえで公開の切り替えをまたいだ対局の問題が変わる・
   改造した端末から届いた手を信じる所（雪合戦の投げた席と雪玉の id の頭の食い違い・10段勝負の幅のありえない広がり・`main.js` が手の一覧を受け取るとき送った人がその番の人かを見ない）・雪合戦で当たりがまとめて届くと「◯◯に当てた！」が1人分になる。
   同じ点検で当たらなかったもの: かべ置きレースの CPU が `boardCpu` でない（3〜4人のマンカラなどと同じく専用の CPU でよい）・かぶったら0点の壊す確認が別の確認で先に落ちる（守られていることは変わらない）。
+- **2026-11-26 の Codex の点検（`91cd9d3..effcbe6`）で直さないと決めたもの**（本人の決定。Claude の推奨どおり。出し直さない）: だるまの人の鬼で、遅い通信だと走った結果が締め切りに間に合わない（自動の鬼と同じ1.2秒の作り）・
+  だるまの10人で送る数が一瞬多くなる（自動のときから同じ。手は毎回全部送るので次で埋まる）・金魚すくい（みんなで1つ）で、手が2.5秒以上ホストに届かないときだけ次の代の点が消える／まだ出ていない金魚を改造した端末なら取れる／途中で再読み込みした人の時計が0からになる・
+  「のこり◯人」が時間切れの決着で最大1.3秒残る・10を作れで観戦の画面を切り替えると合わさる途中が飛ぶ・指スマや戦争で次の手がすぐ来ると数え上げが切れる・観戦の画面を切り替えると「+1点」などの短い動きが初めから流れる・
+  画面確認用の `tools/probes/uiux13-view.html` が、もう一度遊ぶ・観戦の切り替え・待合室からの戻りを通らない。
+  同じ点検で当たらなかったもの: 初期設定の詳細設定が局面の `rules` に入る（どのゲームも同じで勝ち負けに効かない）・見えない鬼ごっこの丸があふれた分を切る（前の点検で承認した作り）・
+  早解きの答えの早送りが、あとから開いた画面では開いた時から動く（`party.js` の `replaySteps` の作りどおり）・ためてビームの別の対局で3秒以内に同じ鍵になる（ほぼ起きない）。
 - **2026-11-19 の無駄探しで見送ったもの**（Claude の推奨どおりと本人が決めた。出し直さない）: 目安を超えた rules（`room.md`・`quick-games.md` など）を分けること・`docs/出した案の一覧.md` を種類ごとに分けること。
   数字と理由はそのコミットのメッセージ。

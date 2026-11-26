@@ -12,7 +12,7 @@
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q, c: ますの番号（左上から 0〜35）, ms }
 
 import { mulberry32 } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText, speedLine } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, afterOver, secText, speedLine } from './party.js';
 import { pointsOf } from './make10.js';
 
 const ROUNDS = [[5, '5問'], [10, '10問'], [20, '20問']];
@@ -168,6 +168,7 @@ export default {
 
   cpuDelay(s) { return s.phase === 'open' ? 200 : 500; },
   cpu(s, p) {
+    if (afterOver(qKey(s), AFTER_MS)) return null; // だれかが解いたあとの短い帯が0になったら答えない（締め切りの猶予の間に答えていた。2026-11-26 の Codex の点検）
     if (s.phase !== 'open' || doneOf(s, p)) return null;
     const x = s.qs[s.q];
     const key = qKey(s) + ':' + p;
@@ -256,7 +257,7 @@ export default {
         if (!can || map.dataset.sent) return;
         e.preventDefault();
         const ms = Math.round(since(key));
-        if (ms >= LIMIT) return;
+        if (ms >= LIMIT || afterOver(key, AFTER_MS)) return;
         map.dataset.sent = '1';
         b.classList.add('picked');
         cells.forEach((y) => { y.disabled = true; });

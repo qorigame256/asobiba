@@ -12,7 +12,7 @@
 //   r と「この回はもう選んだか」で、同じ手が2回来ても2回目は反則になる。
 
 import { jankenWinner } from './acchi.js';
-import { SEAT_COLORS, replaySteps, seen } from './party.js';
+import { SEAT_COLORS, replaySteps, restartReplay, seen } from './party.js';
 import { reachTag } from './util.js';
 
 const HANDS = { g: '✊', c: '✌️', p: '✋' };
@@ -188,6 +188,7 @@ export default {
     const chant = L && L.win !== null ? [...STEPS[L.win]] : [];
     const climbers = chant.length ? [...Array(s.n).keys()].filter((p) => L.picks[p] === L.win) : [];
     const akey = L ? `kaidan:${L.r}:${L.from.join()}:${s.pos.join()}` : '';
+    if (chant.length && anim) restartReplay(akey); // 開いた瞬間の画面は今から動かす（party.js の restartReplay）
     if (chant.length && (anim || seen('replay:' + akey))) {
       let was = 0;
       replaySteps(akey, hill, chant.length, chant.length * 260, (k) => {

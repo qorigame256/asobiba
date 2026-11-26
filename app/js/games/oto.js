@@ -26,7 +26,7 @@
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q, c: 0〜6（ド〜シ）・7〜11（ド♯〜ラ♯。黒い鍵盤もありのとき）か、和音のときは2つの違う音の配列, ms }
 
 import { mulberry32, esc } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText, speedLine } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, afterOver, secText, speedLine } from './party.js';
 import { pointsOf } from './make10.js';
 import { play, isMuted, wantSounds } from '../sound.js';
 
@@ -215,6 +215,7 @@ export default {
 
   cpuDelay(s) { return s.phase === 'open' ? 200 : 500; },
   cpu(s, p) {
+    if (afterOver(qKey(s), AFTER_MS)) return null; // だれかが解いたあとの短い帯が0になったら答えない（締め切りの猶予の間に答えていた。2026-11-26 の Codex の点検）
     if (s.phase !== 'open' || doneOf(s, p)) return null;
     const key = qKey(s) + ':' + p;
     let plan = cpuPlan.get(key);
@@ -344,7 +345,7 @@ export default {
         if (!canNow || keys.dataset.sent) return;
         e.preventDefault();
         const ms = Math.round(since(key));
-        if (ms < askOf(s) || ms >= limitOf(s)) return;
+        if (ms < askOf(s) || ms >= limitOf(s) || afterOver(key, AFTER_MS)) return;
         let ans = c;
         if (chord) {
           // 和音: 1つ目は選ぶだけ（同じ鍵盤をもう一度押すと取り消し）。2つ目で答える

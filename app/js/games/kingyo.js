@@ -260,7 +260,7 @@ export default {
     if (loc?.key !== tk) {
       loc = { key: tk, gen: Array(NF).fill(0), back: Array(NF).fill(0), dur: 1, left: poisOf(s), broke: 0, brokeAt: -1e9, scoops: [], out: false };
       // みんなで1つ: 局面で知っている代（ほかの人がすくったのを見分ける）・確かめた自分の手の数・輪・先を越された時刻。開き直したときは今の局面から始める（輪を出し直さない）
-      if (s.share) Object.assign(loc, { sgen: s.gen.slice(), checked: me !== null ? s.cnt[me] : 0, rings: [], lostAt: -1e9 });
+      if (s.share) Object.assign(loc, { sgen: s.gen.slice(), rings: [], lostAt: -1e9, lost: new Set(), ringed: new Set() });
     }
     const card = document.createElement('div');
     card.className = 'kj-card kg-card';
@@ -287,17 +287,31 @@ export default {
         for (let i = 0; i < NF; i++) {
           for (let g = loc.sgen[i]; g < st.gen[i]; g++) { // ほかの人がすくった所に、その人の色の輪
             const own = st.own[`${i}:${g}`];
-            if (own && own[0] !== me) loc.rings.push({ xy: posOf(fishOf(st.seed, i, g, st.nushi), own[1]), at: t, col: SEAT_COLORS[own[0] % SEAT_COLORS.length] });
+            if (own && own[0] !== me) {
+              loc.ringed.add(`${i}:${g}`);
+              loc.rings.push({ xy: posOf(fishOf(st.seed, i, g, st.nushi), own[1]), at: t, col: SEAT_COLORS[own[0] % SEAT_COLORS.length] });
+            }
           }
           loc.sgen[i] = st.gen[i];
           if (st.gen[i] >= loc.gen[i]) { loc.gen[i] = st.gen[i]; loc.back[i] = st.at[i]; } // まだ届いていない自分の分は端末の中のまま
         }
         if (loc.rings.length > 30) loc.rings.splice(0, loc.rings.length - 30);
         if (me !== null) { // 届いた自分の手のうち、先を越された金魚があったか
-          for (; loc.checked < Math.min(st.cnt[me], loc.scoops.length); loc.checked++) {
-            const f = loc.scoops[loc.checked].f ?? [];
-            if (f.some(([i, g]) => st.own[`${i}:${g}`]?.[0] !== me)) { loc.lostAt = t; play('wrong', 0.4); }
+          // 届いた手は毎回全部見直す（一度自分の点になった金魚も、先にすくっていた人の手があとから届くと移るため。前は届いたときに1回だけ見て、移ったときは何も出なかった。2026-11-26 の Codex の点検）
+          let lost = false;
+          for (let n = 0; n < Math.min(st.cnt[me], loc.scoops.length); n++) {
+            for (const [i, g] of loc.scoops[n].f ?? []) {
+              const k = `${i}:${g}`;
+              const own = st.own[k];
+              if (!own || own[0] === me || loc.lost.has(k)) continue;
+              loc.lost.add(k);
+              lost = true;
+              if (loc.ringed.has(k)) continue;
+              loc.ringed.add(k);
+              loc.rings.push({ xy: posOf(fishOf(st.seed, i, g, st.nushi), own[1]), at: t, col: SEAT_COLORS[own[0] % SEAT_COLORS.length] }); // 代が進まないまま持ち主が移ったので、上の輪の所では出ない
+            }
           }
+          if (lost) { loc.lostAt = t; play('wrong', 0.4); }
         }
       }
       if (st.phase === 'play' && me !== null) { // 開き直したとき: 局面の破れた枚数から続ける

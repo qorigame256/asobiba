@@ -229,6 +229,9 @@ export function afterBar(key, limit, after) {
 // ホストが締め切るのは、after にも制限時間と同じ猶予 grace を足した時刻（猶予が無いと、ゲストの画面で after の最後に送った手（15パズルの部分点は1秒おいて送る）が届く前に締め切られた。
 // 2026-11-25 の Codex の点検のあと本人が推奨を承認。帯と手を止める時刻は after のまま）
 export const afterMs = (key, limit, after, grace) => Math.round(Math.min(after + grace, Math.max(0, limit + grace - since(key))));
+// だれかが解いたあとの短い帯（afterBar）が0になったか。なったら答え・CPU の手を送らない（上の猶予の間に新しく押した答えが点になっていた。2026-11-26 の Codex の点検）。
+// 帯をまだ出していない（だれも解いていない）ときは false（ここで時計を始めない）
+export const afterOver = (key, after) => seen(key + ':after') && since(key + ':after') >= after;
 
 export const secText = (ms) => (ms / 1000).toFixed(2) + '秒';
 
@@ -642,6 +645,8 @@ export function teamIntro(host, key, o, n, teamOf, k) {
 // key ごとに見せ始めた時刻を覚え（since）、描き直しても続きから動かす（あとから開いた画面は、開いた時から）。
 // n 段を ms ミリ秒で流し（wait ミリ秒おいてから）、paint(k) を k = 0〜n で呼ぶ（k はここまで見せた段の数。同じ k では続けて呼ばない）。
 // el が画面から外れたら止める（最初の1回は、まだ画面に付いていない el でも描く）。動きを減らす設定の端末では、すぐ最後の段（k = n）だけ描く。
+// 新しく届いた手で同じ key の早送りを始めるときに呼ぶ（もう一度遊んで同じ回・同じ手になると key が前の対局と同じになり、前の時刻のまま動かなかった。2026-11-26 の Codex の点検）
+export const restartReplay = (key) => { shownAt.delete('replay:' + key); };
 export function replaySteps(key, el, n, ms, paint, wait = 300) {
   const tk = 'replay:' + key;
   let last = -1;

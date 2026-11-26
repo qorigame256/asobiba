@@ -36,7 +36,7 @@
 //   2026-11-24 の Codex の点検のあと本人が推奨を承認。局面の partN に人ごとの最後の n を持つ）
 
 import { mulberry32, esc } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText, replaySteps } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, afterOver, secText, replaySteps } from './party.js';
 import { pointsOf } from './make10.js';
 
 const READY_MS = 3000;
@@ -50,6 +50,8 @@ const ROUNDS = [[1, '1問'], [3, '3問'], [5, '5問']];
 const STEP = { U: -1, D: 1, L: 0, R: 0 }; // 段の動き（列の動きは下の DX）
 const DX = { U: 0, D: 0, L: -1, R: 1 };
 const BACK = { U: 'D', D: 'U', L: 'R', R: 'L' };
+// 答えを見せる間に早送りする動かし方: いちばん速かった人（同じ速さなら席の番号の小さい人）の分。tools/probes/uiux13-logic.mjs が見ている
+export const routeOf = (s) => (s.phase === 'shown' && s.last.winners.length ? s.seqs?.[s.last.winners[0]] : null);
 const SWIPE_MIN = 18; // これ（画面の点）より短い動きは、なでたことにしない
 
 const sizeOf = (r) => ([3, 5].includes(Number(r.size)) ? Number(r.size) : 4);
@@ -342,6 +344,7 @@ export default {
   // そろえない問題は同じころにあきらめる。部分点のため、制限時間の15〜40%のころに合っている枚数（最初の枚数から残りの3〜8割ぶん進めた数）を送る
   cpuDelay(s) { return s.phase === 'open' ? 300 : 500; },
   cpu(s, p) {
+    if (afterOver(qKey(s), AFTER_MS)) return null; // だれかが解いたあとの短い帯が0になったら答えない（締め切りの猶予の間に答えていた。2026-11-26 の Codex の点検）
     if (s.phase !== 'open' || doneOf(s, p)) return null;
     let seen = cpuSeats.get(s.seed);
     if (!seen) { seen = new Map(); cpuSeats.set(s.seed, seen); if (cpuSeats.size > 20) cpuSeats.delete(cpuSeats.keys().next().value); }
@@ -430,7 +433,7 @@ export default {
     const start = s.qs[s.q].board;
     const z = zerosOf(start);
     // いちばん速かった人の動かし方を、答えを見せる間に早送りで見せる（2026-11-26 の UI・UX の13回目。puzzle-games.md）。同じ速さが2人なら席の番号の小さい人
-    const route = s.phase === 'shown' && s.last.winners.length ? s.seqs?.[s.last.winners[0]] : null;
+    const route = routeOf(s);
     const rp = route ? { board: start.slice(), i: 0 } : null;
     if (s.phase !== 'open') {
       const t = document.createElement('div');

@@ -78,7 +78,7 @@ export default {
     { key: 'rounds', label: '回数', desc: '1回の対局で数字を出す回数', def: 8, choices: ROUNDS },
     { key: 'norepeat', label: '前と同じ数字', desc: '出せないにすると、前の回に自分が出した数字はその回に選べない', def: false, choices: [[false, '出せる'], [true, '出せない']] },
     { key: 'top', label: '点をもらう人', desc: 'いちばん大きい人だけにすると、かぶらなかった数字のうちいちばん大きい数字を出した1人だけが点をもらう', def: false, choices: [[false, 'かぶらなかった全員'], [true, 'いちばん大きい人だけ']] },
-    { key: 'carry', label: 'かぶった点', desc: '持ち越すにすると、かぶった数字の点が場に残り、あとの回でその数字を1人だけで出した人がまとめてもらう', def: false, choices: [[false, '消える'], [true, '持ち越す']] },
+    { key: 'carry', label: 'かぶった点', desc: '持ち越すにすると、かぶった数字の点が場に残り、あとの回でその数字で点をもらった人がまとめてもらう', def: false, choices: [[false, '消える'], [true, '持ち越す']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -191,7 +191,7 @@ export default {
     card.className = 'kj-card';
     wrap.append(card);
     if (s.phase === 'ready') {
-      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">1〜${s.max} から1つ選ぼう。${s.rules.top ? 'かぶらなかった中でいちばん大きい人だけ、その数が点' : 'ほかの人とかぶらなければ、その数が点'}・全${s.total}回${s.rules.norepeat ? '・前の回と同じ数字は出せない' : ''}${s.pot ? '・かぶった点は場に残り、あとでその数字を1人で出した人のもの' : ''}</div>`;
+      card.innerHTML = `<div class="kj-word small">よーい…</div><div class="kj-sub">1〜${s.max} から1つ選ぼう。${s.rules.top ? 'かぶらなかった中でいちばん大きい人だけ、その数が点' : 'ほかの人とかぶらなければ、その数が点'}・全${s.total}回${s.rules.norepeat ? '・前の回と同じ数字は出せない' : ''}${s.pot ? '・かぶった点は場に残り、あとでその数字で点をもらった人のもの' : ''}</div>`;
       return;
     }
     const key = rKey(s);
@@ -235,7 +235,8 @@ export default {
         const pot = document.createElement('small');
         pot.className = 'kb-pot';
         pot.textContent = `+${potOf(s, v)}`;
-        b.title = `場に${potOf(s, v)}点。1人だけで出すと ${v + potOf(s, v)}点`;
+        // 「いちばん大きい人だけ」と一緒のときは、1人だけで出しても点をもらえるとは限らないので言い方を変える（2026-11-26 の Codex の点検のあと本人が推奨を承認）
+        b.title = `場に${potOf(s, v)}点。${s.rules.top ? 'この数字で点をもらえれば' : '1人だけで出すと'} ${v + potOf(s, v)}点`;
         b.append(pot);
       }
       b.disabled = !can || v === ban;

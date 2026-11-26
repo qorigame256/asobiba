@@ -27,7 +27,7 @@
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, seq, ms } / { p, t: 'pass', q }
 
 import { mulberry32, esc } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText, SEAT_COLORS, replaySteps } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, afterOver, secText, SEAT_COLORS, replaySteps } from './party.js';
 import { pointsOf } from './make10.js';
 
 const READY_MS = 3000;
@@ -234,6 +234,7 @@ export default {
 
   cpuDelay(s) { return s.phase === 'open' ? 300 : 500; },
   cpu(s, p) {
+    if (afterOver(qKey(s), AFTER_MS)) return null; // だれかが解いたあとの短い帯が0になったら答えない（締め切りの猶予の間に答えていた。2026-11-26 の Codex の点検）
     if (s.phase !== 'open' || doneOf(s, p)) return null;
     const key = qKey(s) + ':' + p;
     let plan = cpuPlan.get(key);
@@ -430,7 +431,7 @@ export default {
     const finish = () => {
       if (loc.c !== goal || loc.sent) return;
       const ms = Math.round(since(key));
-      if (ms >= limit) return;
+      if (ms >= limit || afterOver(key, AFTER_MS)) return;
       loc.sent = true;
       o.onMove({ t: 'done', q: s.q, seq: loc.seq, ms });
     };

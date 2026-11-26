@@ -12,7 +12,7 @@
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'ans', q, i: 押した字の位置（0から）, ms }
 
 import { mulberry32, shuffle, esc } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText, speedLine } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, afterOver, secText, speedLine } from './party.js';
 import { pointsOf } from './make10.js';
 import { GOJI } from './goji-data.js';
 
@@ -135,6 +135,7 @@ export default {
 
   cpuDelay(s) { return s.phase === 'open' ? 200 : 500; },
   cpu(s, p) {
+    if (afterOver(qKey(s), AFTER_MS)) return null; // だれかが解いたあとの短い帯が0になったら答えない（締め切りの猶予の間に答えていた。2026-11-26 の Codex の点検）
     if (s.phase !== 'open' || doneOf(s, p)) return null;
     const x = PARSED[s.qs[s.q]];
     const key = qKey(s) + ':' + p;
@@ -194,7 +195,7 @@ export default {
         if (!can || line.dataset.sent) return;
         e.preventDefault();
         const ms = Math.round(since(key));
-        if (ms >= LIMIT) return;
+        if (ms >= LIMIT || afterOver(key, AFTER_MS)) return;
         line.dataset.sent = '1';
         btns.forEach((y) => { y.disabled = true; });
         b.classList.add('picked');

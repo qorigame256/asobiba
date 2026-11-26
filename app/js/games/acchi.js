@@ -12,7 +12,7 @@
 //   同じ向きだった顔に赤い輪、当てた人に「+1点」（同じ回に何人も当てたらその数）。時刻で進めるので、途中で描き直しても続きから動く。
 
 import { reachTag } from './util.js';
-import { replaySteps, seen, since } from './party.js';
+import { replaySteps, restartReplay, seen, since } from './party.js';
 
 const HANDS = { g: '✊', c: '✌️', p: '✋' };
 const HAND_NAME = { g: 'グー', c: 'チョキ', p: 'パー' };
@@ -132,6 +132,7 @@ export default {
 
     // ホイの動き（先頭のコメント）
     const hkey = L?.kind === 'hoi' ? `acchi:${L.r}:${L.picks.join('')}:${s.scores.join()}` : '';
+    if (hkey && anim) restartReplay(hkey); // 開いた瞬間の画面は今から動かす（party.js の restartReplay）
     const hoiAnim = !!hkey && (anim || seen('replay:' + hkey));
     let banner = null;
     let finalText = '';
