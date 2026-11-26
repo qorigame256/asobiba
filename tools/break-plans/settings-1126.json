@@ -1,0 +1,103 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "app/fonts",
+    "app/voice",
+    "app/sounds",
+    "tools/test-logic.mjs",
+    "tools/font-chars.json",
+    "tools/font-texts.mjs",
+    "tools/voice-texts.mjs"
+  ],
+  "cwd": "copy",
+  "env": {
+    "QUICK": "1",
+    "SEED": "1"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 300,
+  "breaks": [
+    {
+      "name": "かぶり: かぶった点を場に足さない",
+      "file": "app/js/games/kaburi.js",
+      "old": "next[v] += v;",
+      "new": "next[v] += 0;",
+      "expect": ["かぶり: かぶった5の点（1つ分）が場に残る"]
+    },
+    {
+      "name": "かぶり: 消えるのときも場を持つ",
+      "file": "app/js/games/kaburi.js",
+      "old": "if (r.carry === true) s.pot",
+      "new": "if (true) s.pot",
+      "expect": ["かぶり: 消えるのときは局面に場を持たない（前と全く同じ形）"]
+    },
+    {
+      "name": "かぶり: 局面で場の点を足さない",
+      "file": "app/js/games/kaburi.js",
+      "old": "if (s.pot) ({ pts, bonus, pot: s.pot } = carryRound(s.picks, pts, s.pot));",
+      "new": "if (false) ({ pts, bonus, pot: s.pot } = carryRound(s.picks, pts, s.pot));",
+      "expect": ["かぶり: 局面でも場の点を足して数える"]
+    },
+    {
+      "name": "だるま: 鬼の回に鬼も進める",
+      "file": "app/js/games/daruma.js",
+      "old": "m.k !== s0.k || m.p === oniOf(s0)) return null;",
+      "new": "m.k !== s0.k) return null;",
+      "expect": ["だるま: 鬼の回は鬼は進めない"]
+    },
+    {
+      "name": "だるま: 鬼でない人も振り向ける",
+      "file": "app/js/games/daruma.js",
+      "old": "(m.p !== -1 && m.p !== oniOf(s0))",
+      "new": "(m.p !== -1 && false)",
+      "expect": ["だるま: 鬼でない人は振り向けない"]
+    },
+    {
+      "name": "だるま: 次の回に振り向きを戻さない",
+      "file": "app/js/games/daruma.js",
+      "old": "s.sub = Array(s.n).fill(null);\n      if (humanOni(s)) s.turn = false;",
+      "new": "s.sub = Array(s.n).fill(null);\n      if (false) s.turn = false;",
+      "expect": ["だるま: 次の回はまた振り向く前から"]
+    },
+    {
+      "name": "金魚: あとから届いた早い手に移さない",
+      "file": "app/js/games/kingyo.js",
+      "old": "} else if (ms < prev[1] || (ms === prev[1] && p < prev[0])) {",
+      "new": "} else if (false) {",
+      "expect": ["金魚: 手の届いた順が違っても同じ局面"]
+    },
+    {
+      "name": "金魚: 同じ時刻を席の番号で決めない",
+      "file": "app/js/games/kingyo.js",
+      "old": "(ms === prev[1] && p < prev[0])",
+      "new": "(ms === prev[1] && false)",
+      "expect": ["金魚: 同じ時刻なら席の番号の小さい人"]
+    },
+    {
+      "name": "金魚: まだ出ていない代も取れる",
+      "file": "app/js/games/kingyo.js",
+      "old": "g > s.gen[i]) continue;",
+      "new": "g > s.gen[i] + 99) continue;",
+      "expect": ["金魚: まだ出ていない代の金魚は取れない"]
+    },
+    {
+      "name": "金魚: 1人ずつでも水そうの欄を持つ",
+      "file": "app/js/games/kingyo.js",
+      "old": "if (rules.share === true) Object.assign",
+      "new": "if (rules.share !== undefined) Object.assign",
+      "expect": ["金魚: 水そうが1人ずつなら前と全く同じ局面"]
+    }
+  ]
+}

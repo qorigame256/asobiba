@@ -1809,6 +1809,9 @@ main.slow-zoom > section > #board { position: relative; z-index: 2; } /* 下へ�
 .dr-face { font-size: 2.6rem; line-height: 1; transition: transform .15s; }
 .dr-face.look { transform: scale(1.25); }
 .dr-words { font-size: 1.3rem; font-weight: 800; min-width: 10em; }
+.dr-oni.human { flex-wrap: wrap; row-gap: 4px; } /* 人の鬼の回（daruma.js の oni）: 上の行にだれが鬼か */
+.dr-who { flex-basis: 100%; text-align: center; font-size: .9rem; font-weight: 800; color: var(--muted); }
+.dr-lane.oni .dr-track { opacity: .45; } /* 鬼の回はその人は進まない */
 .dr-lanes { display: flex; flex-direction: column; gap: 6px; }
 .dr-lane { display: grid; grid-template-columns: 5.5em 1fr; align-items: center; gap: 8px; }
 .dr-lane.mine .dr-name { font-weight: 800; }
@@ -2928,6 +2931,8 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .board button.kb-num { min-height: 3.6rem; border-radius: 14px; border: 2px solid var(--line); background: var(--field); color: var(--ink); font: inherit; font-size: 1.6rem; font-weight: 800; cursor: pointer; }
 .board button.kb-num.sel { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
 .board button.kb-num:disabled:not(.sel) { opacity: .5; cursor: default; }
+.board button.kb-num .kb-pot { display: block; margin-top: 1px; font-size: .78rem; font-weight: 800; line-height: 1; color: var(--accent); } /* 持ち越すのとき、場に残っている点（kaburi.js の carry） */
+.board button.kb-num.sel .kb-pot { color: inherit; }
 .board button.kb-go { display: block; margin: 0 auto; min-width: 12em; }
 .board button.kb-go:disabled { opacity: .55; cursor: default; }
 .kb-reveal { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; text-align: left; }

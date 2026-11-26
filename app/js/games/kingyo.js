@@ -22,8 +22,17 @@
 //   - 詳細設定「ぬし」（鍵は nushi）: なし（最初）・あり。生まれる金魚の4%が大きな「ぬし」（10点・重さ0.85）になる。
 //     重いので、水に入れてすぐ（およそ0.75秒のうちに）持ち上げないとポイが破れて逃げる。ほかの金魚と一緒にはすくいにくい。
 //     ぬしかどうかは金魚の色と動きを決めたあとの乱数で決める（なしのときの金魚は前と全く同じ）。ぬしはゆっくり泳ぐ。CPU はすくおうとした回の1%でぬし（10点）をすくう。
+// 2026-11-26 の48回目の案（本人が選んだ。案の名前は「同じ水そう」。分かれ目は Claude の判断）: 詳細設定「水そう」（1人ずつ（最初）・みんなで1つ。鍵は share）。
+//   みんなで1つでは、だれかがすくった金魚はみんなの水そうから消え、2.5秒後にその場所から次の金魚が出る（1人ずつのときの「自分の水そうからだけ消える」の代わり）。
+//   - 局面に、金魚の場所（slot）ごとの今の代（gen）・次の金魚が出る時刻（at）と、すくわれた金魚ごとの [すくった席, ms]（own。鍵は「場所:代」）を持つ。
+//   - すくう手に、すくった金魚（f: [[場所, 代], …]）と、各自の画面で遊び始めてからの時刻（ms）を入れる。点は手の v でなく、局面が金魚の種類から数える。
+//   - 同じ金魚を2人がすくったら、ms の小さい人のもの（同じなら席の番号の小さい人）。あとから早い手が届いたら、点と匹数をその人へ移す。
+//     届いた順で決めない（流しそうめんと同じ。通信の遅い人が不利にならず、手を足し直しても全員の端末で同じになる）。取られた金魚の手も回の数（cnt）は進める（手が止まらないように）。
+//   - ほかの人がすくった所には、その人の色の輪を0.7秒出す。自分がすくった金魚が先に取られていたら「先を越された…」を1.2秒出す。
+//   - CPU は、その時に見えている金魚から1匹をくじで選んですくう（すくえる見込み・間は1人ずつのときと同じ）。
+//   1人ずつのときは局面に gen・at・own を持たず、手も前と全く同じ形（tools/test-logic.mjs が見ている）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → start → play → end
-// 手: { p: -1, t: 'start' | 'end' } / { p, t: 'scoop', n, v, c } / { p, t: 'break', n } / { p, t: 'out' }
+// 手: { p: -1, t: 'start' | 'end' } / { p, t: 'scoop', n, v, c（みんなで1つのときは f, ms も） } / { p, t: 'break', n } / { p, t: 'out' }
 
 import { mulberry32 } from './util.js';
 import { scoreChips, since, leaders, winnersText, timeBar, SEAT_COLORS } from './party.js';
@@ -78,8 +87,39 @@ export const wear = (dt, v) => dt * DRAIN + Math.max(0, v - FAST) * dt * FAST_K;
 
 const key = (s) => `kingyo:${s.seed}`;
 const pointsText = (s) => (s.nushi ? '赤1点 黒3点 金5点 ぬし10点' : '赤1点 黒3点 金5点');
-const clone = (s) => ({ ...s, scores: s.scores.slice(), cnt: s.cnt.slice(), fish: s.fish.slice(), out: s.out.slice(), ...(s.broke ? { broke: s.broke.slice() } : {}) });
+const clone = (s) => ({
+  ...s, scores: s.scores.slice(), cnt: s.cnt.slice(), fish: s.fish.slice(), out: s.out.slice(), ...(s.broke ? { broke: s.broke.slice() } : {}),
+  ...(s.share ? { gen: s.gen.slice(), at: s.at.slice(), own: { ...s.own } } : {}),
+});
 const brokeOf = (s, p) => s.broke?.[p] ?? 0; // 破れたポイの枚数
+const RING_MS = 700;
+const LOST_MS = 1200;
+
+// みんなで1つの水そうで、すくう手を当てる（s は写したもの。書き換える）
+function shareScoop(s, p, f, ms) {
+  for (const x of f) {
+    if (!Array.isArray(x) || x.length !== 2) continue;
+    const [i, g] = x;
+    if (!Number.isInteger(i) || i < 0 || i >= NF || !Number.isInteger(g) || g < 0 || g > s.gen[i]) continue;
+    const k = `${i}:${g}`;
+    const prev = s.own[k];
+    const v = KINDS[fishOf(s.seed, i, g, s.nushi).kind].v;
+    if (!prev) { // まだだれもすくっていない（g は今の代）
+      s.own[k] = [p, ms];
+      s.gen[i] += 1;
+      s.at[i] = ms + RESPAWN;
+      s.scores[p] += v;
+      s.fish[p] += 1;
+    } else if (ms < prev[1] || (ms === prev[1] && p < prev[0])) { // あとから届いたが、こちらが先にすくっていた
+      s.own[k] = [p, ms];
+      s.scores[prev[0]] -= v;
+      s.fish[prev[0]] -= 1;
+      s.scores[p] += v;
+      s.fish[p] += 1;
+      if (g === s.gen[i] - 1) s.at[i] = ms + RESPAWN;
+    }
+  }
+}
 
 const cpuPlan = new Map();
 let loc = null; // この端末の記録 { key, gen, back, dur, left, broke, brokeAt, scoops: [{ v, c }], out }
@@ -99,6 +139,7 @@ export default {
     { key: 'poi', label: 'ポイの数', desc: '1人が使えるポイの枚数', def: 3, choices: POIS },
     { key: 'time', label: '時間', desc: '金魚をすくえる時間', def: 60, choices: TIMES },
     { key: 'nushi', label: 'ぬし', desc: 'ごくまれに大きな「ぬし」（10点）が出る。重いので、水に入れてすぐ持ち上げないとポイが破れる', def: false },
+    { key: 'share', label: '水そう', desc: 'みんなで1つにすると、だれかがすくった金魚はみんなの水そうから消える（同じ金魚は先にすくった人のもの）', def: false, choices: [[false, '1人ずつ'], [true, 'みんなで1つ']] },
   ],
 
   init(n, seed, { rules = {} } = {}) {
@@ -107,6 +148,7 @@ export default {
     if (POIS.some(([v]) => v === rules.poi) && rules.poi !== 3) s.poi = rules.poi;
     if (rules.nushi === true) s.nushi = true;
     if (TIMES.some(([v]) => v === rules.time) && rules.time !== 60) s.time = rules.time;
+    if (rules.share === true) Object.assign(s, { share: true, gen: Array(NF).fill(0), at: Array(NF).fill(0), own: {} });
     return s;
   },
 
@@ -149,6 +191,14 @@ export default {
       if (s.broke[m.p] >= poisOf(s)) s.out[m.p] = true;
       return s;
     }
+    if (m.t === 'scoop' && s0.share) {
+      if (m.n !== s0.cnt[m.p] || !Array.isArray(m.f) || m.f.length < 1 || m.f.length > 3 || !Number.isInteger(m.ms) || m.ms < 0 || m.ms > limitOf(s0) + GRACE_MS) return null;
+      const s = clone(s0);
+      s.step += 1;
+      s.cnt[m.p] += 1;
+      shareScoop(s, m.p, m.f, m.ms);
+      return s;
+    }
     if (m.t !== 'scoop' || m.n !== s0.cnt[m.p] || !Number.isInteger(m.c) || m.c < 1 || m.c > 3 || !Number.isInteger(m.v) || m.v < m.c || m.v > m.c * maxV(s0)) return null;
     const s = clone(s0);
     s.step += 1;
@@ -169,6 +219,12 @@ export default {
     plan.next = t + 2500 + Math.random() * 2000;
     if (Math.random() < 0.22) return { t: 'break', n: brokeOf(s, p) }; // ポイの数だけ破れたら局面がおしまいにする
     if (Math.random() >= 0.55) return null;
+    if (s.share) { // 見えている金魚から1匹
+      const seen = [...Array(NF).keys()].filter((i) => s.at[i] <= t);
+      if (!seen.length) return null;
+      const i = seen[Math.floor(Math.random() * seen.length)];
+      return { t: 'scoop', n: s.cnt[p], v: KINDS[fishOf(s.seed, i, s.gen[i], s.nushi).kind].v, c: 1, f: [[i, s.gen[i]]], ms: Math.round(t) };
+    }
     const r = Math.random();
     if (s.nushi && r < 0.01) return { t: 'scoop', n: s.cnt[p], v: 10, c: 1 };
     return { t: 'scoop', n: s.cnt[p], v: r < 0.05 ? 5 : r < 0.25 ? 3 : 1, c: 1 };
@@ -196,12 +252,16 @@ export default {
     root.append(wrap);
     ui = { mount, wrap, chips, state: s };
     if (s.phase === 'ready') {
-      wrap.insertAdjacentHTML('beforeend', `<div class="kj-card"><div class="kj-word small">よーい…</div><div class="kj-sub">押している間ポイが水の中に入り、離すとすくえる・${pointsText(s)}・ポイは${poisOf(s)}枚・${limitOf(s) / 1000}秒</div></div>`);
+      wrap.insertAdjacentHTML('beforeend', `<div class="kj-card"><div class="kj-word small">よーい…</div><div class="kj-sub">押している間ポイが水の中に入り、離すとすくえる・${pointsText(s)}・ポイは${poisOf(s)}枚・${limitOf(s) / 1000}秒${s.share ? '・水そうはみんなで1つ（すくった金魚はみんなの水そうから消える）' : ''}</div></div>`);
       return;
     }
     if (s.phase === 'end') return;
     since(tk);
-    if (loc?.key !== tk) loc = { key: tk, gen: Array(NF).fill(0), back: Array(NF).fill(0), dur: 1, left: poisOf(s), broke: 0, brokeAt: -1e9, scoops: [], out: false };
+    if (loc?.key !== tk) {
+      loc = { key: tk, gen: Array(NF).fill(0), back: Array(NF).fill(0), dur: 1, left: poisOf(s), broke: 0, brokeAt: -1e9, scoops: [], out: false };
+      // みんなで1つ: 局面で知っている代（ほかの人がすくったのを見分ける）・確かめた自分の手の数・輪・先を越された時刻。開き直したときは今の局面から始める（輪を出し直さない）
+      if (s.share) Object.assign(loc, { sgen: s.gen.slice(), checked: me !== null ? s.cnt[me] : 0, rings: [], lostAt: -1e9 });
+    }
     const card = document.createElement('div');
     card.className = 'kj-card kg-card';
     card.append(timeBar(tk, limitOf(s)));
@@ -222,6 +282,24 @@ export default {
     };
     ui.update = () => {
       const st = ui.state;
+      if (st.share && loc.sgen) { // みんなで1つ: 局面の金魚に合わせる
+        const t = since(tk);
+        for (let i = 0; i < NF; i++) {
+          for (let g = loc.sgen[i]; g < st.gen[i]; g++) { // ほかの人がすくった所に、その人の色の輪
+            const own = st.own[`${i}:${g}`];
+            if (own && own[0] !== me) loc.rings.push({ xy: posOf(fishOf(st.seed, i, g, st.nushi), own[1]), at: t, col: SEAT_COLORS[own[0] % SEAT_COLORS.length] });
+          }
+          loc.sgen[i] = st.gen[i];
+          if (st.gen[i] >= loc.gen[i]) { loc.gen[i] = st.gen[i]; loc.back[i] = st.at[i]; } // まだ届いていない自分の分は端末の中のまま
+        }
+        if (loc.rings.length > 30) loc.rings.splice(0, loc.rings.length - 30);
+        if (me !== null) { // 届いた自分の手のうち、先を越された金魚があったか
+          for (; loc.checked < Math.min(st.cnt[me], loc.scoops.length); loc.checked++) {
+            const f = loc.scoops[loc.checked].f ?? [];
+            if (f.some(([i, g]) => st.own[`${i}:${g}`]?.[0] !== me)) { loc.lostAt = t; play('wrong', 0.4); }
+          }
+        }
+      }
       if (st.phase === 'play' && me !== null) { // 開き直したとき: 局面の破れた枚数から続ける
         if (brokeOf(st, me) > loc.broke) { loc.broke = brokeOf(st, me); loc.left = Math.max(0, poisOf(st) - loc.broke); }
         if (st.out[me]) loc.out = true;
@@ -300,9 +378,10 @@ export default {
       const left = lift(loc.dur, got.map(([, k]) => k));
       if (left === null) { broke(); return; }
       loc.dur = left;
+      const f = got.map(([i]) => [i, loc.gen[i]]); // みんなで1つのとき送る、すくった金魚（場所と代）
       for (const [i] of got) { loc.gen[i] += 1; loc.back[i] = t + RESPAWN; }
       const v = got.reduce((a, [, k]) => a + KINDS[k].v, 0);
-      loc.scoops.push({ v, c: got.length });
+      loc.scoops.push(s.share ? { v, c: got.length, f, ms: Math.round(t) } : { v, c: got.length });
       play(got.some(([, k]) => k > 0) ? 'correct' : 'hit', 0.7);
       sendOwn();
       ui.update();
@@ -360,6 +439,24 @@ export default {
         g.beginPath(); g.arc(k.r * 0.55, -k.r * 0.25, k.r * 0.09, 0, Math.PI * 2); g.fill();
         g.restore();
       }
+      // みんなで1つ: ほかの人がすくった所の輪
+      if (loc.rings) {
+        for (const r of loc.rings) {
+          const a = 1 - (t - r.at) / RING_MS;
+          if (a <= 0 || t < r.at) continue;
+          g.save();
+          g.globalAlpha = a;
+          g.beginPath(); g.arc(r.xy[0], r.xy[1], POI_R * (1 + (1 - a) * 0.6), 0, Math.PI * 2);
+          g.strokeStyle = 'rgba(255,255,255,.9)'; // 白いふち（青い席の色が水に埋もれないように）
+          g.lineWidth = 0.016;
+          g.stroke();
+          g.strokeStyle = r.col;
+          g.lineWidth = 0.008;
+          g.stroke();
+          g.restore();
+        }
+        loc.rings = loc.rings.filter((r) => t - r.at < RING_MS);
+      }
       // ポイ
       const p = poi ? [poi.x, poi.y] : aim;
       if (p && me !== null && !loc.out) {
@@ -378,6 +475,20 @@ export default {
       if (poi) {
         g.fillStyle = 'rgba(0,0,0,.35)'; g.fillRect(0.02, 0.02, 0.3, 0.025);
         g.fillStyle = loc.dur > 0.4 ? '#7dff9a' : '#ff6b5a'; g.fillRect(0.02, 0.02, 0.3 * Math.max(0, loc.dur), 0.025);
+      }
+      // みんなで1つ: 自分がすくった金魚が先に取られていた（字は画面の点の単位で描く。水そうの単位のままだと字が小さすぎて崩れる端末があるため）
+      if (loc.lostAt !== undefined && t - loc.lostAt < LOST_MS) {
+        g.save();
+        g.setTransform(dpr, 0, 0, dpr, 0, 0);
+        g.globalAlpha = Math.min(1, 2 * (1 - (t - loc.lostAt) / LOST_MS));
+        g.font = `bold ${Math.round(W * 0.06)}px sans-serif`;
+        g.textAlign = 'center';
+        g.lineWidth = 4;
+        g.strokeStyle = 'rgba(0,0,0,.55)';
+        g.strokeText('先を越された…', W / 2, H * 0.18);
+        g.fillStyle = '#fff';
+        g.fillText('先を越された…', W / 2, H * 0.18);
+        g.restore();
       }
       requestAnimationFrame(draw);
     };

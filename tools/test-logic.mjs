@@ -7044,6 +7044,37 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   assert.equal(s.pos[0], 60, 'ゴールより先には行かない');
   const st = runCpus(D, 5, 8, {}, 500);
   assert.ok(D.result(st), 'だるま: CPU どうしで最後まで');
+  // 鬼を人が交代で（2026-11-26 の48回目の案）
+  {
+    const { oniOf } = await import('../app/js/games/daruma.js');
+    assert.equal('turn' in D.init(3, 4, { rules: {} }), false, 'だるま: 自動の鬼のときは局面に turn を持たない（前と全く同じ形）');
+    assert.equal(oniOf(D.apply(D.init(3, 4, { rules: {} }), { p: -1, t: 'next' })), -1, 'だるま: 自動のときは人の鬼はいない');
+    let h = D.apply(D.init(3, 4, { rules: { oni: 'human' } }), { p: -1, t: 'next' });
+    const o0 = oniOf(h);
+    const [r1, r2] = [0, 1, 2].filter((p) => p !== o0);
+    assert.equal(o0, 1, 'だるま: 最初の鬼は種で決まる');
+    assert.deepEqual(D.referee(h).move, { t: 'turn', k: 0 }, 'だるま: 人の鬼が振り向かなければホストが振り向かせる');
+    assert.equal(D.apply(h, { p: o0, t: 'cyc', k: 0, d: 5, out: false }), null, 'だるま: 鬼の回は鬼は進めない');
+    assert.equal(D.apply(h, { p: r1, t: 'turn', k: 0 }), null, 'だるま: 鬼でない人は振り向けない');
+    assert.equal(D.apply(h, { p: o0, t: 'turn', k: 1 }), null, 'だるま: 違う回の振り向きは弾く');
+    h = D.apply(h, { p: o0, t: 'turn', k: 0 });
+    assert.equal(h.turn, true);
+    assert.equal(D.apply(h, { p: o0, t: 'turn', k: 0 }), null, 'だるま: 振り向きは1回だけ');
+    assert.equal(D.canAct(h, o0), false, 'だるま: 振り向いた鬼はもう何もしない');
+    assert.equal(D.referee(h).key, 'hl0', 'だるま: 振り向いたら、振り向いている間のあとで締める');
+    assert.equal(D.apply(h, { p: r1, t: 'cyc', k: 0, d: 102, out: false }), null, 'だるま: 人の鬼でも進める長さには上限');
+    h = D.apply(h, { p: r1, t: 'cyc', k: 0, d: 30, out: false });
+    h = D.apply(h, { p: r2, t: 'cyc', k: 0, d: 20, out: true });
+    h = D.apply(h, { p: -1, t: 'next' });
+    assert.deepEqual([h.pos[o0], h.pos[r1], h.pos[r2]], [0, 30, 0], 'だるま: 人の鬼の回も、見つかった人はスタート');
+    assert.equal(h.turn, false, 'だるま: 次の回はまた振り向く前から');
+    assert.equal(oniOf(h), 2, 'だるま: 鬼は1回ごとに席順に代わる');
+    assert.equal(D.apply(h, { p: -1, t: 'turn', k: 1 })?.turn, true, 'だるま: ホストが代わりに振り向かせられる');
+    for (const n of [2, 5]) {
+      const hs = runCpus(D, n, 9 + n, { oni: 'human' }, 100);
+      assert.ok(D.result(hs), `だるま: 人が交代での鬼でも CPU どうしで最後まで（${n}人）`);
+    }
+  }
   console.log('daruma OK');
 }
 
@@ -8499,6 +8530,30 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
       const st = runCpus(K, n, n, { norepeat: true }, 200, 5000);
       assert.ok(K.result(st), `かぶり: 前と同じ数字なしでも CPU どうしで最後まで（${n}人）`);
       assert.ok(st.log.every((r, i) => i === 0 || r.picks.every((v, p) => v === null || v !== st.log[i - 1].picks[p])), 'かぶり: CPU も前と同じ数字を出さない');
+    }
+  }
+  // かぶった点の持ち越し（2026-11-26 の48回目の案）
+  {
+    const { carryRound } = await import('../app/js/games/kaburi.js');
+    assert.equal('pot' in K.init(4, 1, { rules: { carry: false } }), false, 'かぶり: 消えるのときは局面に場を持たない（前と全く同じ形）');
+    let r = carryRound([5, 5, 3, null], scoreRound([5, 5, 3, null]), Array(6).fill(0));
+    assert.deepEqual([r.pts, r.bonus, r.pot], [[0, 0, 3, 0], [0, 0, 0, 0], [0, 0, 0, 0, 0, 5]], 'かぶり: かぶった5の点（1つ分）が場に残る');
+    r = carryRound([5, 2, 2, 4], scoreRound([5, 2, 2, 4]), r.pot);
+    assert.deepEqual([r.pts, r.bonus, r.pot], [[10, 0, 0, 4], [5, 0, 0, 0], [0, 0, 2, 0, 0, 0]], 'かぶり: 5を1人で出した人が場の5点もまとめてもらい、場は0に戻る');
+    r = carryRound([2, 2, 1, 1], scoreRound([2, 2, 1, 1]), r.pot);
+    assert.deepEqual(r.pot, [0, 1, 4, 0, 0, 0], 'かぶり: だれももらわなければ場は残り、またかぶれば積み上がる');
+    r = carryRound([5, 2, 3, 3], scoreRound([5, 2, 3, 3], true), [0, 0, 7, 0, 0, 4]);
+    assert.deepEqual([r.pts, r.pot], [[9, 0, 0, 0], [0, 0, 7, 3, 0, 0]], 'かぶり: いちばん大きい人だけのとき、場の点ももらうのはその1人だけ（届かなかった2の場は残る）');
+    const closeWith = (x, vs) => { vs.forEach((v, p) => { if (v !== null) x = K.apply(x, { p, t: 'pick', r: x.r, v }); }); return K.apply(x, { p: -1, t: 'close' }); };
+    let x = K.apply(K.init(4, 4, { rules: { carry: true } }), { p: -1, t: 'next' });
+    x = K.apply(closeWith(x, [4, 4, 1, 2]), { p: -1, t: 'next' });
+    x = closeWith(x, [4, 3, 3, null]);
+    assert.deepEqual([x.scores, x.last.bonus, x.pot], [[8, 0, 1, 2], [4, 0, 0, 0], [0, 0, 0, 3, 0, 0]], 'かぶり: 局面でも場の点を足して数える');
+    for (const n of [3, 6]) {
+      const st = runCpus(K, n, 30 + n, { carry: true }, 200, 5000);
+      assert.ok(K.result(st), `かぶり: 持ち越すでも CPU どうしで最後まで（${n}人）`);
+      assert.deepEqual(st.scores, st.log.reduce((a, l) => a.map((v, p) => v + l.pts[p]), Array(n).fill(0)), 'かぶり: 持ち越すの点はふりかえりの点の合計');
+      assert.ok(st.pot.every((v) => v >= 0), 'かぶり: 場はマイナスにならない');
     }
   }
   console.log('kaburi OK');
@@ -10084,6 +10139,38 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     lasts[poi] = total;
   }
   assert.ok(lasts[5] > lasts[1], `金魚: ポイが多いほど CPU もたくさんすくう（1枚 ${lasts[1]}・5枚 ${lasts[5]}）`);
+  // みんなで1つの水そう（2026-11-26 の48回目の案）
+  {
+    assert.deepEqual(K.init(3, 4, { rules: { share: false } }), K.init(3, 4), '金魚: 水そうが1人ずつなら前と全く同じ局面');
+    const val = (seed, i, g) => KINDS[fishOf(seed, i, g).kind].v;
+    const sc = (p, n, f, ms) => ({ p, t: 'scoop', n, v: 1, c: 1, f, ms });
+    let w = K.apply(K.init(3, 5, { rules: { share: true } }), { p: -1, t: 'start' });
+    assert.equal(K.apply(w, { p: 0, t: 'scoop', n: 0, v: 1, c: 1 }), null, '金魚: みんなで1つの手には、すくった金魚と時刻が要る');
+    assert.equal(K.apply(w, sc(0, 0, [[0, 0]], 999999)), null, '金魚: ありえない時刻は弾く');
+    w = K.apply(w, { ...sc(0, 0, [[0, 0]], 5000), v: 99 });
+    assert.deepEqual([w.scores[0], w.fish[0], w.gen[0], w.at[0]], [val(5, 0, 0), 1, 1, 7500], '金魚: 点は手の v でなく金魚の種類から数え、その場所は2.5秒後に次の金魚');
+    w = K.apply(w, sc(1, 0, [[0, 0]], 5200));
+    assert.deepEqual([w.scores[1], w.fish[1], w.cnt[1], w.gen[0]], [0, 0, 1, 1], '金魚: あとからすくった人は取れない（手の数は進む）');
+    w = K.apply(w, sc(1, 1, [[0, 5]], 6000));
+    assert.equal(w.scores[1], 0, '金魚: まだ出ていない代の金魚は取れない');
+    const a = sc(1, 2, [[3, 0]], 9000), b = sc(2, 0, [[3, 0]], 8800);
+    const ab = K.apply(K.apply(w, a), b), ba = K.apply(K.apply(w, b), a);
+    assert.deepEqual([ab.scores, ab.fish, ab.own, ab.at, ab.gen], [ba.scores, ba.fish, ba.own, ba.at, ba.gen], '金魚: 手の届いた順が違っても同じ局面');
+    assert.deepEqual([ab.own['3:0'], ab.at[3], ab.scores[1], ab.scores[2]], [[2, 8800], 11300, 0, val(5, 3, 0)], '金魚: あとから届いても、先にすくった人のものに移る');
+    const x12 = K.apply(K.apply(w, sc(1, 2, [[4, 0]], 7000)), sc(2, 0, [[4, 0]], 7000));
+    const x21 = K.apply(K.apply(w, sc(2, 0, [[4, 0]], 7000)), sc(1, 2, [[4, 0]], 7000));
+    assert.deepEqual([x12.own['4:0'], x21.own['4:0']], [[1, 7000], [1, 7000]], '金魚: 同じ時刻なら席の番号の小さい人');
+    for (const n of [1, 4]) {
+      const end = runCpus(K, n, 60 + n, { share: true }, 150, 3000);
+      assert.ok(K.result(end), `金魚: みんなで1つでも CPU どうしで最後まで ${n}人`);
+      const owned = Object.entries(end.own);
+      assert.ok(owned.length > 0, '金魚: みんなで1つでも CPU がすくう');
+      assert.equal(owned.length, end.gen.reduce((x, y) => x + y, 0), '金魚: すくわれた金魚の数と代が合う');
+      const pts = Array(n).fill(0), fish = Array(n).fill(0);
+      for (const [k, [q]] of owned) { const [i, g] = k.split(':').map(Number); pts[q] += val(end.seed, i, g); fish[q] += 1; }
+      assert.deepEqual([end.scores, end.fish], [pts, fish], '金魚: 点と匹数は持ち主の金魚の合計');
+    }
+  }
   console.log('kingyo OK');
 }
 
