@@ -365,3 +365,22 @@ export function winLine(box, cells, fresh, key, delay = 160) {
     box.append(svg);
   });
 }
+
+// 成った駒が裏返る（2026-11-26 の UI・UX の13回目。本将棋・5五・駒落ち・3人・4人・3×4。shogi.md）: 駒が横につぶれ、細くなった所で成った字に替わって元の幅へ戻る。
+// el は動かす物（CSS の scale で動かすので、駒がすべる動き（main.js の flyPlay。transform）とぶつからない）。show(成ったか) は字と色を替える関数。
+// key はその手ごとに決まる文字（描き直しても続きから動かす）、fresh は新しく届いた手か、wait は駒がすべり終わるまで（ms）。
+// 動かさないとき（前に届いた手・動きを控える設定・もう動き終わった）は何もしない（呼ぶ側が成った形で描いておく）
+const promoAt = new Map();
+const PROMO_MS = 340; // CSS の .promo-flip と合わせる
+export function promoFlip(el, key, fresh, show, wait = 0) {
+  if (fresh && !promoAt.has(key)) {
+    promoAt.set(key, Date.now());
+    if (promoAt.size > 40) promoAt.delete(promoAt.keys().next().value);
+  }
+  const t = promoAt.has(key) ? Date.now() - promoAt.get(key) : Infinity;
+  if (t >= wait + PROMO_MS || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  show(false);
+  el.classList.add('promo-flip');
+  el.style.animationDelay = `${Math.round(wait - t)}ms`;
+  setTimeout(() => { if (el.isConnected) show(true); }, Math.max(0, wait + PROMO_MS / 2 - t));
+}

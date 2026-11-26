@@ -6,6 +6,10 @@
 // 終わり方（詳細設定）: 'last' … 最後の1人が残るまで（その人の負け）。最初はこれ / 'first' … 最初に抜けた人が出たら終わり
 // 手: { p, t: 'pick', r: 何回目か, up: 上げる本数, call: 言う数（親のときだけ） }
 //   r と「この回はもう選んだか」で、同じ手が2回来ても2回目は反則になる。
+// 数え上げ（2026-11-26 の UI・UX の13回目）: 一斉に開いた直後、上がった親指を画面の並び順に1本ずつ光らせて数え（親の数を超えた分は赤い番号）、
+//   数え終わったら当たり・はずれを出し、当たりなら親の片手（右端の1つ）が下りる。時刻で進めるので、途中で描き直しても続きから動く。
+
+import { replaySteps, seen, since } from './party.js';
 
 const clone = (s) => ({ ...s, hands: s.hands.slice(), picks: s.picks.slice(), out: s.out.slice() });
 const active = (s, p) => s.hands[p] > 0;
@@ -123,18 +127,24 @@ export default {
     root.innerHTML = '';
     root.className = 'board ys';
 
-    // 前の回の結果
+    // 前の回の結果。一斉に開いた直後は親指を1本ずつ数え上げてから当たり・はずれを出す（先頭のコメント）
+    const ckey = L ? `ys:${L.round}:${L.call}:${L.ups.join()}:${L.hands.join()}` : '';
+    const counting = !!L && (anim || seen('replay:' + ckey));
+    let banner = null;
+    let finalText = '';
     if (L) {
-      const banner = document.createElement('div');
-      banner.className = 'ys-last' + (L.hit ? ' hit' : '') + (anim ? ' pop' : '');
+      banner = document.createElement('div');
+      banner.className = 'ys-last' + (L.hit && !counting ? ' hit' : '') + (anim ? ' pop' : '');
       const parent = nameP(L.parent);
-      let text = `${L.round}回目: 親の${parent}が「${L.call}」→ 上がった親指は ${L.total}本。`;
-      if (!L.hit) text += 'はずれ';
-      else if (L.out) text += `当たり！ ${parent}は両手とも下ろして抜けた！`;
-      else text += `当たり！ ${parent}は片手を下ろした`;
-      banner.textContent = text;
+      finalText = `${L.round}回目: 親の${parent}が「${L.call}」→ 上がった親指は ${L.total}本。`;
+      if (!L.hit) finalText += 'はずれ';
+      else if (L.out) finalText += `当たり！ ${parent}は両手とも下ろして抜けた！`;
+      else finalText += `当たり！ ${parent}は片手を下ろした`;
+      banner.textContent = finalText;
       root.append(banner);
     }
+    const upEls = []; // 上がった親指（画面の並び順）
+    let downEl = null; // 当たったときに下りる親の手
 
     // 全員
     const grid = document.createElement('div');
@@ -166,7 +176,15 @@ export default {
       thumbs.className = 'ys-thumbs' + (anim ? ' pop' : '');
       const hands = L && L.ups[p] !== null ? L.hands[p] : s.hands[p];
       const up = L && L.ups[p] !== null ? L.ups[p] : 0;
-      thumbs.textContent = hands ? '👍'.repeat(up) + '✊'.repeat(hands - up) : '🙌';
+      if (!hands) thumbs.textContent = '🙌';
+      for (let i = 0; i < hands; i++) {
+        const t = document.createElement('span');
+        t.className = 'ysm-t';
+        t.textContent = i < up ? '👍' : '✊';
+        thumbs.append(t);
+        if (i < up) upEls.push(t);
+        if (L?.hit && p === L.parent && i === hands - 1) downEl = t;
+      }
       thumbs.title = L ? '前の回に上げた親指' : '';
       box.append(thumbs);
       const left = document.createElement('div');
@@ -176,6 +194,26 @@ export default {
       grid.append(box);
     }
     root.append(grid);
+    if (counting) {
+      const parent = nameP(L.parent);
+      const n = upEls.length;
+      const ms = Math.min(3200, Math.max(700, n * 340));
+      replaySteps(ckey, grid, n, ms, (k) => {
+        upEls.forEach((t, i) => {
+          t.classList.toggle('lit', i < k);
+          t.classList.toggle('over', i < k && i >= L.call);
+          if (i < k) t.dataset.n = i + 1;
+          else delete t.dataset.n;
+        });
+        const done = k >= n;
+        // 数え終わってすぐの間だけ動かす（あとで描き直したときに、もう一度ぽんと出たり手が下りたりしないように）
+        const just = done && since('replay:' + ckey) < 450 + ms + 600;
+        banner.className = 'ys-last' + (just ? ' pop' : '') + (done && L.hit ? ' hit' : '');
+        banner.textContent = done ? finalText : `${L.round}回目: 親の${parent}が「${L.call}」！ 数えると… ${k}本`;
+        downEl?.classList.toggle('ysm-down', done);
+        downEl?.classList.toggle('still', done && !just);
+      }, 450);
+    } else downEl?.classList.add('ysm-down', 'still');
 
     if (me === null || res) return;
     if (!active(s, me)) {

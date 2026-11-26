@@ -12,7 +12,7 @@
 //   r と「この回はもう選んだか」で、同じ手が2回来ても2回目は反則になる。
 
 import { jankenWinner } from './acchi.js';
-import { SEAT_COLORS } from './party.js';
+import { SEAT_COLORS, replaySteps, seen } from './party.js';
 import { reachTag } from './util.js';
 
 const HANDS = { g: '✊', c: '✌️', p: '✋' };
@@ -121,36 +121,94 @@ export default {
       root.append(banner);
     }
 
-    // 階段（全員のコマ）
+    // 階段（2026-11-26 の UI・UX の13回目。本人が全部採用。extra-games.md）: 全員のコマを1つの階段に並べ、勝った人のコマが1段ずつ跳ねて上る。
+    // 跳ねるたびに掛け声の字（パ・イ・ナ・ツ・プ・ル）が1文字ずつ出る（前は名前の横の棒が伸びるだけ）。同じ段のコマは上へ積む。
+    // 1段0.26秒・0.25秒おいてから（party.js の replaySteps。描き直しても続きから。その回の結果を開いた瞬間に見た画面だけ動かし、あとから開いた画面は上ったあとの形）
     const stairs = document.createElement('div');
     stairs.className = 'kd-stairs';
+    const hill = document.createElement('div');
+    hill.className = 'kd-hill';
+    const N = goal + 1;
+    const stepH = (i) => 8 + (i / goal) * 112;
+    for (let i = 0; i <= goal; i++) {
+      const st = document.createElement('div');
+      st.className = 'kd-step' + (i === goal ? ' goal' : '');
+      st.style.left = `${(i / N) * 100}%`;
+      st.style.width = `calc(${100 / N}% + 1px)`;
+      st.style.height = `${stepH(i)}px`;
+      hill.append(st);
+    }
+    const flag = document.createElement('span');
+    flag.className = 'kd-flag';
+    flag.textContent = '🏁';
+    flag.style.left = `${((goal + 0.5) / N) * 100}%`;
+    flag.style.bottom = `${stepH(goal) + 2}px`;
+    const chantEl = document.createElement('div');
+    chantEl.className = 'kd-chant';
+    hill.append(flag, chantEl);
+    const pieces = [...Array(s.n).keys()].map((p) => {
+      const pc = document.createElement('div');
+      pc.className = 'kd-piece' + (p === me ? ' mine' : '');
+      pc.style.background = SEAT_COLORS[p % SEAT_COLORS.length];
+      pc.textContent = [...nameP(p)][0] ?? '';
+      pc.title = nameP(p);
+      hill.append(pc);
+      return pc;
+    });
+    const place = (at) => {
+      const stack = new Map();
+      at.forEach((x, p) => {
+        const v = Math.min(x, goal);
+        const k = stack.get(v) ?? 0;
+        stack.set(v, k + 1);
+        pieces[p].style.left = `${((v + 0.5) / N) * 100}%`;
+        pieces[p].style.bottom = `${stepH(v) + 2 + k * 14}px`;
+      });
+    };
+    stairs.append(hill);
     for (let p = 0; p < s.n; p++) {
       const row = document.createElement('div');
       row.className = 'kd-row' + (p === me ? ' mine' : '');
+      const dot = document.createElement('span');
+      dot.className = 'kd-dot';
+      dot.style.background = SEAT_COLORS[p % SEAT_COLORS.length];
       const name = document.createElement('div');
       name.className = 'kd-name';
       name.textContent = nameP(p);
-      const track = document.createElement('div');
-      track.className = 'kd-track';
       const v = Math.min(s.pos[p], goal);
-      const fill = document.createElement('div');
-      fill.className = 'kd-fill';
-      fill.style.width = `${(v / goal) * 100}%`;
-      fill.style.background = SEAT_COLORS[p % SEAT_COLORS.length];
-      if (anim && L && L.from[p] !== s.pos[p]) fill.classList.add('up');
-      const flag = document.createElement('span');
-      flag.className = 'kd-goal';
-      flag.textContent = '🏁';
-      track.append(fill, flag);
       const num = document.createElement('div');
       num.className = 'kd-num';
       num.textContent = `${v}/${goal}段`;
       // あと一歩の人に印（2026-11-13。room.md「UI・UX の6回目」）: 次に1回勝てばどの手でも（いちばん短いグリコの3段でも）ゴールに届く人
       if (!res && v < goal && goal - v <= 3) name.append(reachTag('あと1勝'));
-      row.append(name, track, num);
+      row.append(dot, name, num);
       stairs.append(row);
     }
     root.append(stairs);
+    const chant = L && L.win !== null ? [...STEPS[L.win]] : [];
+    const climbers = chant.length ? [...Array(s.n).keys()].filter((p) => L.picks[p] === L.win) : [];
+    const akey = L ? `kaidan:${L.r}:${L.from.join()}:${s.pos.join()}` : '';
+    if (chant.length && (anim || seen('replay:' + akey))) {
+      let was = 0;
+      replaySteps(akey, hill, chant.length, chant.length * 260, (k) => {
+        place(s.pos.map((x, p) => (climbers.includes(p) ? Math.min(L.from[p] + k, x) : x)));
+        if (k === was + 1) {
+          const ch = document.createElement('span');
+          ch.textContent = chant[k - 1];
+          chantEl.append(ch);
+          for (const p of climbers) {
+            if (L.from[p] + k > Math.min(s.pos[p], goal)) continue; // ゴールに着いたコマは止まる
+            pieces[p].classList.remove('hop');
+            void pieces[p].offsetWidth;
+            pieces[p].classList.add('hop');
+          }
+        } else chantEl.textContent = chant.slice(0, k).join('');
+        was = k;
+      }, 250);
+    } else {
+      place(s.pos);
+      chantEl.textContent = chant.join('');
+    }
 
     // 全員が出した手（前の回）
     const grid = document.createElement('div');

@@ -13,11 +13,14 @@
 //   - 制限時間は やさしい60秒・ふつう90秒・むずかしい150秒。最初に描けた人から20秒で締め切る（制限時間のほうが先なら制限時間で）。あきらめる（この問題をとばす）もできる。
 //   - CPU は やさしいは7割5分・ふつうは6割・むずかしいは4割5分の問題を、制限時間の2.5〜7.5割のころに描く。描かない問題は同じころにあきらめる。
 //   - 詳細設定「問題の数」（2026-11-06 の36回目の案。鍵は rounds）: 1問・3問（最初）・5問（数字つなぎ早解きと同じ）。おまかせでは抽選しない（main.js の KEEP_KEYS の rounds）。
+// 2026-11-26 の UI・UX の13回目（本人が全部採用。puzzle-games.md）: 答えを見せる間（4秒）に、いちばん速かった人の描き順を早送りで見せる
+//   （前は「答えの一例」の線を一度に出していた。だれも描けなかった回と観戦の人の答えは今までどおり答えの一例）。描き順は描けた手の path を局面の paths に覚える。
+//   速さは 15パズル早解きと同じ形（party.js の replaySteps。1本0.18秒、0.9〜2.8秒に収める）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（数字つなぎ早解きと同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, path: [点…], ms } / { p, t: 'pass', q }
 
 import { mulberry32, esc } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText, replaySteps } from './party.js';
 import { pointsOf } from './make10.js';
 
 const READY_MS = 3000;
@@ -204,6 +207,7 @@ export default {
         s.phase = 'open';
         s.solved = Array(s.n).fill(null);
         s.passed = Array(s.n).fill(false);
+        s.paths = Array(s.n).fill(null);
         return s;
       }
       if (m.t === 'close' && s0.phase === 'open') {
@@ -228,6 +232,8 @@ export default {
     const s = clone(s0);
     s.step += 1;
     s.solved[m.p] = Math.round(m.ms);
+    s.paths = (s0.paths ?? Array(s0.n).fill(null)).slice(); // 描き順（答えを見せる間の早送りに使う）
+    s.paths[m.p] = m.path.slice();
     return s;
   },
 
@@ -299,10 +305,14 @@ export default {
         } else box.append(timeBar(key, limit, { secs: true }));
       };
       ui.bar();
-    } else {
+    }
+    // いちばん速かった人の描き順（答えを見せる間に早送りで見せる。2026-11-26 の UI・UX の13回目）。同じなら席の番号の小さい人
+    const route = s.phase === 'shown' && s.last.winners.length ? s.paths?.[s.last.winners[0]] ?? null : null;
+    let routeK = route ? 0 : -1;
+    if (s.phase !== 'open') {
       const t = document.createElement('div');
       t.className = 'kj-sub';
-      t.textContent = s.last.winners.length ? `いちばん速かったのは ${s.last.winners.map((p) => (p === me ? 'あなた' : o.names[p])).join('・')}` : 'だれも描けませんでした';
+      t.textContent = s.last.winners.length ? `いちばん速かったのは ${s.last.winners.map((p) => (p === me ? 'あなた' : o.names[p])).join('・')}${route ? '（描き順を早送り）' : ''}` : 'だれも描けませんでした';
       card.append(t);
     }
 
@@ -327,7 +337,7 @@ export default {
     const draw = () => {
       // 答えを見せる場面と観戦の人は、一筆書きの道の1つを描く
       const showAns = s.phase !== 'open' || me === null;
-      const path = showAns ? eulerPath(fig) : loc.path;
+      const path = route ? route.slice(0, routeK + 1) : showAns ? eulerPath(fig) : loc.path;
       const used = new Set();
       for (let i = 1; i < path.length; i++) used.add(ek(path[i - 1], path[i]));
       let html = '';
@@ -338,10 +348,10 @@ export default {
       const tip = path.length ? path[path.length - 1] : -1;
       fig.pts.forEach((_, v) => {
         const [x, y] = P(v);
-        html += `<circle cx="${x}" cy="${y}" r=".16" class="ft-pt${v === tip && !showAns ? ' tip' : ''}${showAns && v === path[0] ? ' start' : ''}"/>`;
+        html += `<circle cx="${x}" cy="${y}" r=".16" class="ft-pt${v === tip && (!showAns || (route && routeK < route.length - 1)) ? ' tip' : ''}${showAns && v === path[0] ? ' start' : ''}"/>`;
       });
       svg.innerHTML = html;
-      note.textContent = s.phase !== 'open' ? '赤い丸から描き始めると一筆で描けます（答えの一例）' : me === null ? '観戦中（答えの一例を見ています）'
+      note.textContent = route ? '赤い丸から描き始めた順（いちばん速かった人の描き順）' : s.phase !== 'open' ? '赤い丸から描き始めると一筆で描けます（答えの一例）' : me === null ? '観戦中（答えの一例を見ています）'
         : s.solved[me] !== null || loc.sent ? `描けた！（${s.solved[me] !== null ? secText(s.solved[me]) : '送っています…'}）ほかの人を待っています`
         : s.passed[me] ? 'あきらめました。ほかの人を待っています'
         : loc.path.length ? `なぞった線 ${loc.path.length - 1} / ${fig.edges.length}` : `好きな点から描き始めよう（線 ${fig.edges.length} 本）`;
@@ -398,6 +408,7 @@ export default {
     svg.onpointerup = up;
     svg.onpointercancel = up;
     draw();
+    if (route) replaySteps(key, svg, route.length - 1, Math.min(2800, Math.max(900, (route.length - 1) * 180)), (k) => { routeK = k; draw(); });
     wrap.append(svg, note);
     if (playing) {
       const row = document.createElement('div');

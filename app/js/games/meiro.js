@@ -21,11 +21,13 @@
 //     同じ歩数なら早く着いた方が上。歩数のときは、ほかの人の位置を見せない（ついて行けないように。位置を送ること自体をやめる）。
 //   Claude の判断: 歩数の局面だけ walks（席ごとの歩数）を持つ（早さのときの局面は前と全く同じ形）。遊んでいる間は自分の歩いた数を出す。
 //   CPU は、歩数のときは最短の道に寄り道（行けるほうへ1歩出て戻る）を最短の 1〜6割ぶん足して送る（いつも最短だと人が勝てないため）。おまかせで抽選してよい。
+// 2026-11-26 の UI・UX の13回目（本人が全部採用。puzzle-games.md）: 答えを見せる間（4秒）に、いちばん速かった人（歩数のときはいちばん少ない歩数の人）の通った道を、
+//   その人の色の線で早送りで伸ばす（行き止まりへ入って戻った分もそのまま）。道はゴールの手の seq を局面の seqs に覚える。速さは 15パズル早解きと同じ（party.js の replaySteps）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（15パズル早解きと同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, seq, ms } / { p, t: 'pass', q }
 
 import { mulberry32, esc } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText, SEAT_COLORS } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText, SEAT_COLORS, replaySteps } from './party.js';
 import { pointsOf } from './make10.js';
 
 const READY_MS = 3000;
@@ -197,6 +199,7 @@ export default {
         s.solved = Array(s.n).fill(null);
         s.passed = Array(s.n).fill(false);
         if (s.walks) s.walks = Array(s.n).fill(null);
+        s.seqs = Array(s.n).fill(null);
         return s;
       }
       if (m.t === 'close' && s0.phase === 'open') {
@@ -224,6 +227,8 @@ export default {
     s.step += 1;
     s.solved[m.p] = Math.round(m.ms);
     if (s.walks) s.walks[m.p] = m.seq.length;
+    s.seqs = (s0.seqs ?? Array(s0.n).fill(null)).slice(); // 通った道（答えを見せる間の早送りに使う）
+    s.seqs[m.p] = m.seq;
     return s;
   },
 
@@ -294,16 +299,22 @@ export default {
         card.insertAdjacentHTML('beforeend', '<div class="kj-sub">だれかがゴール！ もうすぐ締め切り</div>');
         card.append(afterBar(key, limit, AFTER_MS));
       } else card.append(timeBar(key, limit, { secs: true }));
-    } else {
-      const t = document.createElement('div');
-      t.className = 'kj-sub';
-      t.textContent = s.last.winners.length ? `${s.walks ? 'いちばん少ない歩数だったのは' : 'いちばん速かったのは'} ${s.last.winners.map((p) => (p === me ? 'あなた' : o.names[p])).join('・')}` : 'だれもゴールできませんでした';
-      card.append(t);
     }
-
     const n = s.size;
     const maze = s.qs[s.q];
     const goal = n * n - 1;
+    // いちばん速かった人の通った道（答えを見せる間に早送りで伸ばす。2026-11-26 の UI・UX の13回目）。同じなら席の番号の小さい人
+    const rw = s.phase === 'shown' && s.last.winners.length ? s.last.winners[0] : null;
+    const rseq = rw !== null ? s.seqs?.[rw] : null;
+    const route = rseq ? [0] : null;
+    if (rseq) for (const d of rseq) { const c = stepOf(maze, n, route.at(-1), d); if (c < 0) break; route.push(c); }
+    let routeK = 0;
+    if (s.phase !== 'open') {
+      const t = document.createElement('div');
+      t.className = 'kj-sub';
+      t.textContent = s.last.winners.length ? `${s.walks ? 'いちばん少ない歩数だったのは' : 'いちばん速かったのは'} ${s.last.winners.map((p) => (p === me ? 'あなた' : o.names[p])).join('・')}${route ? '（通った道を早送り）' : ''}` : 'だれもゴールできませんでした';
+      card.append(t);
+    }
     if (loc?.key !== key) loc = { key, c: 0, seq: '', sent: false, trail: new Set([0]) };
     const playing = s.phase === 'open' && me !== null && o.canMove && !doneOf(s, me) && !loc.sent;
     const cv = document.createElement('canvas');
@@ -361,6 +372,21 @@ export default {
           g.fillRect(x * u - 0.5, y * u - 0.5, u + 1, u + 1);
         }
         g.fillText('🏁', ...at(goal));
+      }
+      // 答えを見せる間: いちばん速かった人の通った道を、その人の色の線で先まで伸ばす（先に丸）
+      if (route && routeK > 0) {
+        g.strokeStyle = SEAT_COLORS[rw % SEAT_COLORS.length];
+        g.lineWidth = Math.max(3, u * 0.28);
+        g.lineJoin = 'round';
+        g.globalAlpha = 0.8;
+        g.beginPath();
+        route.slice(0, routeK + 1).forEach((c, i) => (i ? g.lineTo(...at(c)) : g.moveTo(...at(c))));
+        g.stroke();
+        g.globalAlpha = 1;
+        g.fillStyle = SEAT_COLORS[rw % SEAT_COLORS.length];
+        g.beginPath();
+        g.arc(...at(route[routeK]), u * 0.3, 0, Math.PI * 2);
+        g.fill();
       }
       // ほかの人（小さい丸）と自分（大きい丸）
       for (const [p, v] of others) {
@@ -458,6 +484,7 @@ export default {
     }
     requestAnimationFrame(paint);
     paint();
+    if (route) replaySteps(key, cv, route.length - 1, Math.min(2800, Math.max(900, (route.length - 1) * 60)), (k) => { routeK = k; paint(); });
   },
 
   review(s, me, o) {

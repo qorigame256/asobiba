@@ -10,7 +10,7 @@
 // マスの番号 = 段 * 3 + 列（段0 が一番上、列0 が左）。持ち駒 hands[p][駒の番号] = 枚数（1〜3 だけ使う）。
 // 手: { f: 動かす駒のマス, t: 行き先 } / { d: 打つ駒（1〜3）, t: 打つマス } / { resign: true }（投了。手番の人）
 
-import { peekMark, grabbable, justDragged } from './util.js';
+import { peekMark, grabbable, justDragged, promoFlip } from './util.js';
 
 const W = 3;
 const H = 4;
@@ -337,6 +337,8 @@ export function render(root, s, o, players) {
       p.dataset.fly = moved ? `mv:${s.ply}` : `sq:${i}`;
       if (moved) Object.assign(p.dataset, s.last.d ? { flyFrom: `hand:${s.last.side}:${s.last.d}` } : { flyFrom: `sq:${s.last.f}`, flySlide: '', flyLift: '' }); // flyLift: 浮いたまま滑る（2026-11-09）
       if (owner !== bottom) p.dataset.flyBase = 'rotate(180deg)';
+      // 成った駒が裏返る（2026-11-26 の UI・UX の13回目。util.js の promoFlip）: ヒヨコがすべり終わってからニワトリに替わる。成ったかは棋譜の「成」で見る
+      if (moved && s.last.note?.endsWith('成')) promoFlip(p, `zoo:${s.ply}:${s.keys[s.keys.length - 1]}`, o.fresh, (done) => { p.textContent = ICON[done ? t : CHICK]; }, 300);
       cell.append(p);
     }
     if (isTarget || isMovable) {

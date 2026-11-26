@@ -8,8 +8,11 @@
 //   - 全員が選び終わったら一斉に開く（指スマと同じ。通信の遅れで「ホイ」の瞬間は画面どうしで合わせられないため）。
 // 手: { p, t: 'pick', r: 何回目か, v: 'g' | 'c' | 'p'（じゃんけん）| 'u' | 'd' | 'l' | 'r'（向き） }
 //   r と「この回はもう選んだか」で、同じ手が2回来ても2回目は反則になる。
+// ホイの動き（2026-11-26 の UI・UX の13回目）: 一斉に開いた直後、「あっち向いて…」で指は ✊・顔は正面、「ホイ！」で指と顔が同時に向きを変え、
+//   同じ向きだった顔に赤い輪、当てた人に「+1点」（同じ回に何人も当てたらその数）。時刻で進めるので、途中で描き直しても続きから動く。
 
 import { reachTag } from './util.js';
+import { replaySteps, seen, since } from './party.js';
 
 const HANDS = { g: '✊', c: '✌️', p: '✋' };
 const HAND_NAME = { g: 'グー', c: 'チョキ', p: 'パー' };
@@ -127,14 +130,23 @@ export default {
     root.innerHTML = '';
     root.className = 'board ys ac';
 
+    // ホイの動き（先頭のコメント）
+    const hkey = L?.kind === 'hoi' ? `acchi:${L.r}:${L.picks.join('')}:${s.scores.join()}` : '';
+    const hoiAnim = !!hkey && (anim || seen('replay:' + hkey));
+    let banner = null;
+    let finalText = '';
     if (L) {
-      const banner = document.createElement('div');
-      banner.className = 'ys-last' + (L.kind === 'hoi' && L.hits.length ? ' hit' : '') + (anim ? ' pop' : '');
-      if (L.kind === 'janken') banner.textContent = L.win === null ? 'あいこ！ もう一度じゃんけん' : `${HAND_NAME[L.win]}の勝ち！ あっち向いて…`;
-      else if (!L.hits.length) banner.textContent = 'ホイ！ だれも同じ向きを向かなかった';
-      else banner.textContent = 'ホイ！ ' + L.hits.map(([w, l]) => `${nameP(w)}が${nameP(l)}を${DIR_NAME[L.picks[w]]}に向かせた（+1点）`).join('、');
+      banner = document.createElement('div');
+      banner.className = 'ys-last' + (L.kind === 'hoi' && L.hits.length && !hoiAnim ? ' hit' : '') + (anim ? ' pop' : '');
+      if (L.kind === 'janken') finalText = L.win === null ? 'あいこ！ もう一度じゃんけん' : `${HAND_NAME[L.win]}の勝ち！ あっち向いて…`;
+      else if (!L.hits.length) finalText = 'ホイ！ だれも同じ向きを向かなかった';
+      else finalText = 'ホイ！ ' + L.hits.map(([w, l]) => `${nameP(w)}が${nameP(l)}を${DIR_NAME[L.picks[w]]}に向かせた（+1点）`).join('、');
+      banner.textContent = finalText;
       root.append(banner);
     }
+    const fingers = []; // [指の span, 向き]
+    const faces = []; // [顔の span, 矢印の span, 向き, 同じ向きだったか]
+    const pluses = []; // [入れ物, 当てた数]
 
     // 全員（前の回に出したものを出す）
     const grid = document.createElement('div');
@@ -165,8 +177,27 @@ export default {
       const show = document.createElement('div');
       show.className = 'ys-thumbs' + (anim ? ' pop' : '');
       if (L?.kind === 'janken') show.textContent = HANDS[L.picks[p]];
-      else if (L?.kind === 'hoi') show.textContent = L.hands[p] === L.win ? FINGER[L.picks[p]] : '🙂' + FACE[L.picks[p]];
-      else show.textContent = '❔';
+      else if (L?.kind === 'hoi') {
+        show.classList.add('acm-show');
+        const dir = L.picks[p];
+        if (L.hands[p] === L.win) {
+          const f = document.createElement('span');
+          f.className = 'acm-finger';
+          show.append(f);
+          fingers.push([f, dir]);
+          const got = L.hits.filter(([w]) => w === p).length;
+          if (got) pluses.push([show, got]);
+        } else {
+          const face = document.createElement('span');
+          face.className = 'acm-face';
+          face.textContent = '🙂';
+          const arrow = document.createElement('span');
+          arrow.className = 'acm-arrow';
+          arrow.textContent = FACE[dir];
+          show.append(face, arrow);
+          faces.push([face, arrow, dir, L.hits.some(([, l]) => l === p)]);
+        }
+      } else show.textContent = '❔';
       const pts = document.createElement('div');
       pts.className = 'ys-left';
       pts.textContent = `${s.scores[p]}点` + (s.scores[p] === top && top > 0 && !res ? ' 👑' : '');
@@ -176,6 +207,35 @@ export default {
       grid.append(box);
     }
     root.append(grid);
+    if (L?.kind === 'hoi') {
+      // k: 0「あっち向いて…」/ 1「ホイ！」で指と顔が向く / 2 当たりの輪と「+1点」。動かさないときは 2 の形だけ（輪と点の動きは付けない）
+      const MS = 900, WAIT = 250;
+      const paint = (k, moving) => {
+        const just = moving && since('replay:' + hkey) < WAIT + MS + 700; // 動き終わってすぐの間だけ（あとの描き直しで動き直さないように）
+        for (const [f, dir] of fingers) {
+          f.textContent = k ? FINGER[dir] : '✊';
+          f.className = 'acm-finger' + (k ? ' to-' + dir : '') + (k === 1 && moving ? ' swing' : '');
+        }
+        for (const [face, arrow, dir, hit] of faces) {
+          face.className = 'acm-face' + (k ? ' to-' + dir : '') + (k === 2 && hit ? ' hit' + (just ? ' ring' : '') : '');
+          arrow.classList.toggle('on', k > 0);
+        }
+        for (const [box, got] of pluses) {
+          box.querySelector('.acm-plus')?.remove();
+          if (k < 2 || !just) continue;
+          const t = document.createElement('span');
+          t.className = 'acm-plus';
+          t.textContent = `+${got}点`;
+          box.append(t);
+        }
+        if (moving) {
+          banner.textContent = k === 0 ? 'あっち向いて…' : k === 1 ? 'ホイ！' : finalText;
+          banner.className = 'ys-last' + (k === 2 && L.hits.length ? ' hit' : '') + (k === 1 || (k === 2 && just) ? ' pop' : '');
+        }
+      };
+      if (hoiAnim) replaySteps(hkey, grid, 2, MS, (k) => paint(k, true), WAIT);
+      else paint(2, false);
+    }
 
     const note = (t) => { const x = document.createElement('p'); x.className = 'cc-log'; x.textContent = t; root.append(x); };
     if (res) return;

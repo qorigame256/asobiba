@@ -16,12 +16,13 @@
 //   - 問題の数: 3・5（最初）・8問（鍵は rounds）。
 //   - 順位の決め方: 手数（最初）・早さ（鍵は race）。早さでは、作れた人のうち早く作れた順に 3点・2点・それ以降は1点（手数は見せるが順位に使わない）。
 //     ほかの作り（1問60秒・全員が作れたら締め切り・むだな手も数える）は手数のときと同じ。
+// 2026-11-26 の UI・UX の13回目（本人が全部採用）: 答えを見せる間に、いちばん少ない手順を1手ずつ注いで見せる（前は最後の形だけ。作りは render の「答えを見せる間」のコメント）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, ops: ['f0' | 'e1' | 'p01' …], ms }
 //   f = 入れる・e = 捨てる・p = 移す（p01 は 0 番から 1 番へ）。数字は入れ物の番号（左から 0）
 
 import { mulberry32, esc } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, secText, replaySteps } from './party.js';
 import { pointsOf } from './make10.js';
 
 const LEVELS = [['easy', 'やさしい'], ['normal', 'ふつう'], ['hard', 'むずかしい']];
@@ -280,9 +281,10 @@ export default {
       a.textContent = `最少 ${x.min}手　${fast ? `いちばんは ${fast}` : 'だれも作れませんでした'}`;
       card.append(a);
     }
-    // 入れ物（自分の画面の量。観戦の人は空のまま、締め切りのあとは全員に、いちばん少ない手順の最後の形を見せる）
-    let fixed = x.caps.map(() => 0);
-    if (shown) for (const op of x.path) fixed = stepOf(x.caps, fixed, op);
+    // 入れ物（自分の画面の量。観戦の人は空のまま、締め切りのあとは全員に、いちばん少ない手順を空の形から1手ずつ見せる（2026-11-26 の UI・UX の13回目））
+    const states = [x.caps.map(() => 0)];
+    for (const op of x.path) states.push(stepOf(x.caps, states.at(-1), op) ?? states.at(-1));
+    let fixed = states[0];
     const amountsNow = () => (st && !shown ? st.a : fixed);
     const big = Math.max(...x.caps);
     const row = document.createElement('div');
@@ -359,6 +361,26 @@ export default {
     count.className = 'wq-count';
     card.append(row, count);
     draw();
+    // 答えを見せる間: いちばん少ない手順を、空の入れ物から1手ずつ動きで見せる（2026-11-26 の UI・UX の13回目。本人が全部採用。puzzle-games.md）。
+    // 0.3秒おいて1手0.55秒（全体で3秒まで。party.js の replaySteps）。入れる・捨てる入れ物と移す元は朱、移す先は黄の枠。下の行に「3手目: 3L を捨てる」
+    if (shown) {
+      const opText = (op) => (op[0] === 'f' ? `${x.caps[op[1]]}L に入れる` : op[0] === 'e' ? `${x.caps[op[1]]}L を捨てる` : `${x.caps[op[1]]}L から ${x.caps[op[2]]}L へ移す`);
+      replaySteps(key + ':path', row, x.path.length, Math.min(3000, x.path.length * 550), (k) => {
+        fixed = states[k];
+        const op = x.path[k - 1] ?? '';
+        [...row.children].forEach((col, i) => {
+          const jar = col.querySelector('.wq-jar');
+          const w = jar?.querySelector('.wq-water'), amt = jar?.querySelector('.wq-amt');
+          if (!w || !amt) return;
+          w.style.height = `${(fixed[i] / x.caps[i]) * 100}%`;
+          amt.textContent = `${fixed[i]}L`;
+          jar.classList.toggle('hit', k === x.path.length && fixed[i] === x.goal);
+          jar.classList.toggle('from', k < x.path.length && op !== '' && Number(op[1]) === i);
+          jar.classList.toggle('pick', k < x.path.length && op[0] === 'p' && Number(op[2]) === i);
+        });
+        count.textContent = (k ? `${k}手目: ${opText(op)}` : `最少 ${x.min}手の作り方`) + (k === x.path.length ? '　できた！' : '');
+      });
+    }
     const note = document.createElement('p');
     note.className = 'cc-log';
     if (me === null) note.textContent = '観戦中';

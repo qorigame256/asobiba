@@ -637,3 +637,20 @@ export function teamIntro(host, key, o, n, teamOf, k) {
     setTimeout(() => box.remove(), 2650);
   });
 }
+
+// 答えを見せる間の早送り（2026-11-26 の UI・UX の13回目。puzzle-games.md）: いちばん速かった人の動かし方・答えの手順などを、答えを見せる間（多くは4秒）に早送りで見せる。
+// key ごとに見せ始めた時刻を覚え（since）、描き直しても続きから動かす（あとから開いた画面は、開いた時から）。
+// n 段を ms ミリ秒で流し（wait ミリ秒おいてから）、paint(k) を k = 0〜n で呼ぶ（k はここまで見せた段の数。同じ k では続けて呼ばない）。
+// el が画面から外れたら止める（最初の1回は、まだ画面に付いていない el でも描く）。動きを減らす設定の端末では、すぐ最後の段（k = n）だけ描く。
+export function replaySteps(key, el, n, ms, paint, wait = 300) {
+  const tk = 'replay:' + key;
+  let last = -1;
+  const tick = () => {
+    if (last >= 0 && !el.isConnected) return;
+    const t = since(tk) - wait;
+    const k = quiet() || n <= 0 ? n : Math.max(0, Math.min(n, Math.floor((t / ms) * n)));
+    if (k !== last) { last = k; paint(k); }
+    if (k < n) setTimeout(tick, Math.max(16, Math.min(80, ms / n)));
+  };
+  tick();
+}

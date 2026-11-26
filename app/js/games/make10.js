@@ -11,12 +11,13 @@
 // 2026-10-28 の29回目の案「作る数」（本人が選んだ。分かれ目は Claude の判断）: 詳細設定で 10（最初）・毎回ばらばら（5〜20）。
 //   ばらばらのときは問題ごとに作る数と4つの数字を種から引き、答えのある組だけ出す（10 も出る）。1つの組だけなら計算は一瞬なので、一覧は作らずその場で解く。
 //   難しさの分け方は10と同じ（解き方の数が HARD_MAX 以下ならむずかしい）。問題に goal を持つのはばらばらのときだけ（10 のときの局面の形は前と同じ）。
+// 2026-11-26 の UI・UX の13回目（本人が全部採用）: 答えを見せる間に、答えの例を札が2枚ずつ合わさる動きで見せる（作りは merge と mergeSteps の上のコメント）。
 // 進行は難読漢字と同じ（ホストが時間を計って p = -1 の手を足す）: ready → next → open →（正解が出たら10秒 / 全員済み1.5秒 / 制限時間）→ close → shown → next …
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'try', q: 問題番号, text: 式（数字と + - * / ( ) だけ）, ms } / { p, t: 'pass', q }
 
 import { mulberry32, shuffle, esc } from './util.js';
 import { MAKE10 } from './make10-data.js';
-import { since, scoreChips, leaders, winnersText, timeBar, secText } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, secText, replaySteps } from './party.js';
 
 const ROUNDS = [[5, '5問'], [10, '10問'], [15, '15問']];
 const READY_MS = 3000;
@@ -154,6 +155,53 @@ export function evalExpr(text) {
   const v = expr();
   if (!v || i !== text.length) return null;
   return { v, nums: nums.sort((a, b) => a - b) };
+}
+
+// 答えの例を、計算の順の「2枚の札を1枚に合わせる」段に分ける（答えを見せる間の動き。2026-11-26 の UI・UX の13回目。puzzle-games.md）。
+// 返り値は3段の [{ a, b, op, id, v }]（a・b は合わせる札の id。最初の4枚は nums の並びの番号 0〜3、合わせてできた札は 4・5・6。v は [分子, 分母]）。
+// 数字は式の左から、nums のまだ使っていない同じ数の札に当てる。読めない式・4枚を使い切らない式は []
+export function mergeSteps(nums, text) {
+  if (typeof text !== 'string' || !Array.isArray(nums)) return [];
+  let i = 0, next = 4;
+  const used = new Set();
+  const steps = [];
+  const factor = () => {
+    const c = text[i];
+    if (c === '(') {
+      i++;
+      const v = expr();
+      if (!v || text[i] !== ')') return null;
+      i++;
+      return v;
+    }
+    if (c >= '1' && c <= '9') {
+      i++;
+      const k = nums.findIndex((n, j) => n === Number(c) && !used.has(j));
+      if (k < 0) return null;
+      used.add(k);
+      return { id: k, v: [Number(c), 1] };
+    }
+    return null;
+  };
+  const chain = (sub, ops) => {
+    let x = sub();
+    if (!x) return null;
+    while (ops.includes(text[i])) {
+      const op = text[i++];
+      const y = sub();
+      if (!y) return null;
+      const v = OPS[op](x.v, y.v);
+      if (!v) return null;
+      const id = next++;
+      steps.push({ a: x.id, b: y.id, op, id, v });
+      x = { id, v };
+    }
+    return x;
+  };
+  const term = () => chain(factor, '*/');
+  const expr = () => chain(term, '+-');
+  const r = expr();
+  return r && i === text.length && steps.length === 3 && used.size === 4 ? steps : [];
 }
 
 // 式がその問題の正解か（4つの数字をちょうど1回ずつ使って goal。ふつうは10）
@@ -376,6 +424,7 @@ export default {
       ans.className = 'kj-answer';
       ans.textContent = `答えの例: ${pretty(ex)} = ${goal}`;
       card.append(ans);
+      if (s.phase === 'shown') this.merge(card, nums, ex, key);
       // 正解した人の式（自分で組んだ式なので外から来た文字ではないが、数字と記号以外は apply で弾いている）
       const who = s.solved.map((v, p) => (v === null ? null : p)).filter((p) => p !== null);
       if (who.length) {
@@ -394,6 +443,62 @@ export default {
     wrap.append(note);
     root.append(wrap);
     this.note(s, me);
+  },
+
+  // 答えの例を、札が2枚ずつ合わさる動きで見せる（2026-11-26 の UI・UX の13回目。本人が全部採用。puzzle-games.md）。
+  // 答えを見せる間（4.5秒）に、計算の順に3段: 合わせる2枚が持ち上がって間に記号が出る → 右の札が左の札へ寄って消える → 左の札が計算した数（1/9 など）になる。
+  // 下の行に「① 1 ÷ 9 = 1/9」のように段の式を出す。最初の段は0.4秒、あとは0.9秒おき（party.js の replaySteps。描き直しても続きから。動きを減らす設定では最後の形だけ）
+  merge(card, nums, ex, key) {
+    const steps = mergeSteps(nums, ex);
+    const row = card.querySelector('.mk-nums');
+    if (steps.length !== 3 || !row) return;
+    const vals = new Map(nums.map((n, id) => [id, [n, 1]]));
+    for (const st of steps) vals.set(st.id, st.v);
+    const show = ([a, b]) => (a < 0 ? '−' : '') + (b === 1 ? String(Math.abs(a)) : `${Math.abs(a)}/${b}`);
+    const line = document.createElement('div');
+    line.className = 'mk-step';
+    card.append(line);
+    // k 段のあとの札の並び（合わせた札は、2枚のうち左にあった所に入る）
+    const stateAt = (k) => {
+      let items = nums.map((_, id) => id);
+      for (const st of steps.slice(0, k)) {
+        const at = Math.min(items.indexOf(st.a), items.indexOf(st.b));
+        items = items.filter((id) => id !== st.a && id !== st.b);
+        items.splice(at, 0, st.id);
+      }
+      return items;
+    };
+    const paintRow = (k, popId = -1) => {
+      row.innerHTML = stateAt(k).map((id) => {
+        const t = show(vals.get(id));
+        return `<span class="mk-num${t.length > 2 ? ' mk-frac' : ''}${id === popId ? ' mk-pop' : ''}${k === 3 ? ' mk-done' : ''}" data-id="${id}">${t}</span>`;
+      }).join('');
+      line.textContent = k ? `${'①②③'[k - 1]} ${show(vals.get(steps[k - 1].a))} ${pretty(steps[k - 1].op)} ${show(vals.get(steps[k - 1].b))} = ${show(steps[k - 1].v)}` : '';
+    };
+    row.classList.add('mk-merging');
+    let shownK = 0;
+    replaySteps(key + ':merge', row, 3, 2700, (k) => {
+      const prev = shownK;
+      shownK = k;
+      const st = steps[k - 1];
+      const A = st && row.querySelector(`[data-id="${st.a}"]`), B = st && row.querySelector(`[data-id="${st.b}"]`);
+      if (k !== prev + 1 || !A || !B || !row.isConnected) { paintRow(k); return; }
+      const ra = A.getBoundingClientRect(), rb = B.getBoundingClientRect(), r0 = row.getBoundingClientRect();
+      const [R, rl, rr] = ra.left <= rb.left ? [B, ra, rb] : [A, rb, ra]; // R（右の札）が左の札へ寄る
+      A.classList.add('mk-pick');
+      B.classList.add('mk-pick');
+      const op = document.createElement('span');
+      op.className = 'mk-merge-op';
+      op.textContent = pretty(st.op);
+      op.style.left = ((rl.right + rr.left) / 2 - r0.left) + 'px';
+      row.append(op);
+      setTimeout(() => {
+        if (shownK !== k || !R.isConnected) return;
+        R.style.transform = `translateX(${rl.left - rr.left}px)`;
+        R.style.opacity = '0';
+      }, 330);
+      setTimeout(() => { if (shownK === k && row.isConnected) paintRow(k, st.id); }, 650);
+    }, -500);
   },
 
   // 式を組むボタン。数字のボタンは押したら使えなくなり、⌫ で戻ると使えるようになる

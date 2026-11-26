@@ -12,7 +12,7 @@
 // 最後の1人まで続ける。同じ局面が4回・600手で引き分け。
 // 詳細設定「いつも成る」があり（局面に auto: true）なら、成れる手の成らない方を作らない（shogi.js と同じ）。
 
-import { grabbable, justDragged } from './util.js';
+import { grabbable, justDragged, promoFlip } from './util.js';
 
 const PAWN = 1;
 const SILVER = 4;
@@ -438,10 +438,17 @@ export function render(root, s, o) {
       const t = typeOf(v);
       const owner = ownerOf(v);
       const grp = svgEl('g', { transform: `translate(${x + 0.5} ${y + 0.5}) rotate(${ANGLE[(owner - bottom + 4) % 4]}) scale(0.9)`, class: `sg3-piece o${owner}${t > 8 ? ' promoted' : ''}` });
-      grp.append(svgEl('polygon', { points: '0,-0.5 0.34,-0.34 0.42,0.48 -0.42,0.48 -0.34,-0.34' }));
+      // 成った駒が裏返る（2026-11-26 の UI・UX の13回目。util.js の promoFlip）: 駒の中身を1つの g に入れ、駒の向きのまま横につぶす
+      const promo = s.last && !s.last.resign && s.last.t === i && s.last.pr;
+      const face = promo ? svgEl('g', { class: 'sg3-face' }) : grp;
+      face.append(svgEl('polygon', { points: '0,-0.5 0.34,-0.34 0.42,0.48 -0.42,0.48 -0.34,-0.34' }));
       const text = svgEl('text', { x: 0, y: 0.1, 'font-size': 0.56 });
       text.textContent = KANJI[t];
-      grp.append(text);
+      face.append(text);
+      if (promo) {
+        grp.append(face);
+        promoFlip(face, `sg${s.n}:${s.ply}:${s.keys[s.keys.length - 1]}`, o.fresh, (done) => { text.textContent = KANJI[done ? t : t - 8]; grp.classList.toggle('promoted', done); });
+      }
       svg.append(grp);
     }
     if (isTarget) svg.append(svgEl('circle', { cx: x + 0.5, cy: y + 0.5, r: v ? 0.46 : 0.16, class: v ? 'sg3-target take' : 'sg3-target' }));

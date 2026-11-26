@@ -28,13 +28,15 @@
 //   - CPU は、人がだれかそろえるまでは最初にそろえない（だれかがそろえてから 1.5〜8秒あとより前にはそろえない）。CPU は最初にそろえないので、
 //     だれかがそろえていれば、それは人。人が全員あきらめた・そろえられないまま終わるときは、CPU もあきらめる（部分点は手で送る）。
 //     どの席が CPU かは、ホストの端末で cpu() がこの2秒の間に呼ばれた席で見分ける（cpuSeats。代打から人が戻った席は呼ばれなくなるので人に戻る）。
+// 2026-11-26 の UI・UX の13回目（本人が全部採用。puzzle-games.md）: 答えを見せる間（4秒）に、いちばん速かった人の動かし方を早送りで見せる。
+//   動かし方はそろえた手の seq を局面の seqs に覚える（席ごと。次の問題で空に戻す）。0.3秒おいて1手0.09秒、全体を0.9〜2.8秒に収める（party.js の replaySteps）。
 // 進行（ホストが時間を計って p = -1 の手を足す）: ready → next → open → close → shown → next …（10を作れと同じ）
 // 手: { p: -1, t: 'next' | 'close' } / { p, t: 'done', q, seq, ms } / { p, t: 'pass', q, c? } / { p, t: 'part', q, c, n }
 //   part の n はその人のその問題の何回目の知らせか（1から）。前に受け取った n 以下は弾く（通信の行き違いで同じ・古い知らせが後から当たっても、古い枚数に戻らないように。
 //   2026-11-24 の Codex の点検のあと本人が推奨を承認。局面の partN に人ごとの最後の n を持つ）
 
 import { mulberry32, esc } from './util.js';
-import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText } from './party.js';
+import { since, scoreChips, leaders, winnersText, timeBar, afterBar, afterMs, secText, replaySteps } from './party.js';
 import { pointsOf } from './make10.js';
 
 const READY_MS = 3000;
@@ -284,6 +286,7 @@ export default {
         s.passed = Array(s.n).fill(false);
         s.parts = Array(s.n).fill(null);
         s.partN = Array(s.n).fill(0);
+        s.seqs = Array(s.n).fill(null);
         return s;
       }
       if (m.t === 'close' && s0.phase === 'open') {
@@ -329,6 +332,9 @@ export default {
     const s = clone(s0);
     s.step += 1;
     s.solved[m.p] = Math.round(m.ms);
+    // そろえた動かし方を覚える（答えを見せる間に、いちばん速かった人の分を早送りで見せる。2026-11-26 の UI・UX の13回目）
+    s.seqs = (s0.seqs ?? Array(s0.n).fill(null)).slice();
+    s.seqs[m.p] = m.seq;
     return s;
   },
 
@@ -420,16 +426,18 @@ export default {
         card.append(afterBar(key, limit, AFTER_MS));
       } else card.append(timeBar(key, limit, { secs: true }));
     }
-    else {
-      const t = document.createElement('div');
-      t.className = 'kj-sub';
-      t.textContent = s.last.winners.length ? `いちばん速かったのは ${s.last.winners.map((p) => (p === me ? 'あなた' : o.names[p])).join('・')}` : 'だれもそろえられませんでした（合っている札の数が点）';
-      card.append(t);
-    }
-
     const n = s.size;
     const start = s.qs[s.q].board;
     const z = zerosOf(start);
+    // いちばん速かった人の動かし方を、答えを見せる間に早送りで見せる（2026-11-26 の UI・UX の13回目。puzzle-games.md）。同じ速さが2人なら席の番号の小さい人
+    const route = s.phase === 'shown' && s.last.winners.length ? s.seqs?.[s.last.winners[0]] : null;
+    const rp = route ? { board: start.slice(), i: 0 } : null;
+    if (s.phase !== 'open') {
+      const t = document.createElement('div');
+      t.className = 'kj-sub';
+      t.textContent = s.last.winners.length ? `いちばん速かったのは ${s.last.winners.map((p) => (p === me ? 'あなた' : o.names[p])).join('・')}${route ? `（${route.length}手を早送り）` : ''}` : 'だれもそろえられませんでした（合っている札の数が点）';
+      card.append(t);
+    }
     if (loc?.key !== key) loc = { key, board: start.slice(), seq: '', sent: false, part: countOk(start), partN: 0, partTimer: null, hint: null };
     // o.canMove も見る: 観戦の人がほかの人の画面を選ぶと me にその席が来るので、見ているだけで動かせて「送った」が残り、
     // あとでその席に入るとそろえても送れなかった（2026-10-28 Codex の点検の指摘）
@@ -446,7 +454,7 @@ export default {
     const watched = () => (ui.s.solved[me] !== null ? solvedBoard(n, z) : (others.get(me)?.key === key && unpackBoard(others.get(me).b, n)) || start);
     const useHint = playing && s.rules.hint !== false;
     const draw = () => {
-      const b = s.phase === 'open' && me !== null ? (o.watching ? watched() : loc.board) : solvedBoard(n, z);
+      const b = s.phase === 'open' && me !== null ? (o.watching ? watched() : loc.board) : rp ? rp.board : solvedBoard(n, z);
       if (!tiles.length) for (let i = 0; i < b.length; i++) { const t = document.createElement('div'); tiles.push(t); grid.append(t); }
       const h = useHint && !loc.sent && loc.hint?.board === loc.board.join() ? loc.hint : null;
       b.forEach((v, i) => {
@@ -588,6 +596,13 @@ export default {
     };
     draw();
     askHint();
+    if (rp) {
+      replaySteps(key, grid, route.length, Math.min(2800, Math.max(900, route.length * 90)), (k) => {
+        if (k < rp.i) Object.assign(rp, { board: start.slice(), i: 0 });
+        for (; rp.i < k; rp.i++) rp.board = moveBlank(rp.board, n, route[rp.i]) ?? rp.board;
+        draw();
+      });
+    }
     wrap.append(grid, note);
     // ほかの人の盤を小さく並べる（2026-11-14 本人の依頼。並べ方は Claude の判断: 自分の盤の下に名前つきで。そろった人は ✓、あきらめた人は「あきらめ」の札（2026-11-22 本人の依頼））
     // 部屋を出た人・待合室へ行った人の席（o.sub。CPU が代わりに打つ）も並べる。o.cpu だけで外すと、そのあいだに描き直した端末では

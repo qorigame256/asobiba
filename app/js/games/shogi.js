@@ -32,8 +32,12 @@
 //   Claude の判断: 王手かどうかは局面から決める（送らない）ので、観戦の人の画面にも出る。出すのは新しく届いた手だけ（入り直し・ふりかえりでは出さない）。
 //   詰み（決着）の手では出さない。本将棋・5五将棋・3人将棋（指した人の駒がほかの人の玉に利いた）・3×4（ライオンに利いた）のどれでも効く。
 //   なしのときだけ局面に quiet: true を持つ（ありのときは今までと全く同じ形）。CPU の読みと apply の結果は変えない。
+// 成った駒が裏返る・詰みの理由（2026-11-26 の UI・UX の13回目。shogi.md）: 成った駒は、すべり終わってから裏返って成った字になる（util.js の promoFlip）。
+//   詰みで決着したら、詰んだ玉へ王手の線、玉のとなりで逃げられないマスに赤い ×、そのマスに利いている相手の駒から細い線を出す（mateWhy）。
+//   王手をかけた駒が玉のとなりなら、そのマスにも × が付き、守っている駒からの線が「取れない理由」になる。本将棋・駒落ち・5五将棋だけ（王手の線と同じ）。
+//   Claude の判断: 王手の知らせが「なし」でも出す（決着のあとの説明で、指している間の知らせではないため）。
 
-import { CPU_SETTING, PEEK_SETTING, peekMark, mulberry32, judgeOf, grabbable, justDragged } from './util.js';
+import { CPU_SETTING, PEEK_SETTING, peekMark, mulberry32, judgeOf, grabbable, justDragged, promoFlip } from './util.js';
 import * as three from './shogi3.js';
 import * as four from './shogi4.js';
 
@@ -203,6 +207,30 @@ function checkLines(board, sq, side) {
 }
 
 const kingSq = (board, side) => board.indexOf(KING * sgnOf(side));
+
+// 詰みの理由（2026-11-26。画面だけが使う）: side の玉（sq）が詰んでいるときの、王手の筋（checkLines）と、
+// 玉のとなりで逃げられないマス（自分の駒がいるマスは除く）とそこに利いている相手の駒。{ lines, nogo: [{ sq, from: [マス…] }] }
+// 玉をそのマスへ動かした盤で調べる（玉の後ろへ抜ける飛・角・香の利きも数えるため）
+function mateWhy(board, sq, side) {
+  const N = sizeOf(board);
+  const foe = 1 - side;
+  const r = Math.floor(sq / N);
+  const c = sq % N;
+  const nogo = [];
+  for (const [dr, dc] of [...ORTHO, ...DIAG]) {
+    const rr = r + dr;
+    const cc = c + dc;
+    if (rr < 0 || rr >= N || cc < 0 || cc >= N) continue;
+    const to = rr * N + cc;
+    if (board[to] * sgnOf(side) > 0) continue;
+    const b = board.slice();
+    b[to] = b[sq];
+    b[sq] = 0;
+    const from = checkLines(b, to, foe).map((x) => x.from);
+    if (from.length) nogo.push({ sq: to, from });
+  }
+  return { lines: checkLines(board, sq, foe), nogo };
+}
 
 function pawnOnFile(board, side, c, N) {
   const v = PAWN * sgnOf(side);
@@ -576,6 +604,10 @@ export default {
     // 王手の知らせが「なし」のときは今までどおり出さない（「なし」は状態の欄の「王手！」と赤いマスだけ、の決まりのため）。線を引く動きは新しく届いた手のときだけ
     const lines = inCheck && !s.quiet ? checkLines(s.board, checkedKing, 1 - s.turn) : [];
     const blockSq = new Set(lines.flatMap((x) => x.between));
+    // 詰みの理由（先頭のコメント）: 詰んだ側は手番の人（s.turn）
+    const mateK = s.result?.reason === '詰み' ? kingSq(s.board, s.turn) : -1;
+    const why = mateK >= 0 ? mateWhy(s.board, mateK, s.turn) : null;
+    const nogoSq = new Set(why?.nogo.map((x) => x.sq) ?? []);
     const cellAt = {};
 
     root.innerHTML = '';
@@ -658,8 +690,9 @@ export default {
       if (i === ui.from) cell.classList.add('selected');
       if (isTarget) { cell.classList.add('target'); cell.dataset.drop = i; } // data-drop: つまんだ駒を離せる所（2026-11-17）
       peekMark(cell, i, o, isTarget, () => ({ f: ui.from, d: ui.drop })); // 相手の迷いが見える（2026-11-11。main.js の o.peek・o.peekIn）: 相手の選び・PC のねらい
-      if (i === checkedKing) cell.classList.add('checked');
+      if (i === checkedKing || i === mateK) cell.classList.add('checked');
       if (blockSq.has(i)) cell.classList.add('sg-block');
+      if (nogoSq.has(i)) cell.classList.add('sg-nogo', ...(o.fresh ? ['pop-x'] : []));
       cellAt[i] = cell;
       if (s.trial && (i === trySq(0, N) || i === trySq(1, N))) cell.classList.add('try'); // トライのマスに薄い印
       if (v) {
@@ -673,6 +706,11 @@ export default {
         p.dataset.fly = moved ? `mv:${s.ply}` : `sq:${i}`;
         if (moved) Object.assign(p.dataset, s.last.d ? { flyFrom: `hand:${s.last.side}:${s.last.d}` } : { flyFrom: `sq:${s.last.f}`, flySlide: '', flyLift: '' }); // flyLift: 浮いたまま滑る（2026-11-09）
         if (owner !== bottom) p.dataset.flyBase = 'rotate(180deg)';
+        // 成った駒が裏返る（先頭のコメント）: すべり終わる 300ms のあとで（main.js の flyPlay の dur）
+        if (moved && s.last.pr) {
+          const shown = (done) => { p.textContent = KANJI[done ? t : base(t)]; p.classList.toggle('promoted', done); };
+          promoFlip(p, `sg:${s.ply}:${s.keys[s.keys.length - 1]}`, o.fresh, shown, 300);
+        }
         cell.append(p);
       }
       if (isTarget || isMovable) {
@@ -697,7 +735,14 @@ export default {
     }
     wrap.append(files, grid, ranks);
     root.append(wrap);
-    if (lines.length) {
+    // 王手の線（と詰みの理由の線）。[から, まで, 細い線か, 引き始めるまで（ms。新しく届いた手のときだけ線を引く動き）]
+    const segs = lines.map(({ from }) => [from, checkedKing, false, 150]);
+    if (why) {
+      // 詰みは、駒がすべり終わってから王手の線、続けて逃げられないマスへの細い線（× は CSS で同じころに出る）
+      for (const { from } of why.lines) segs.push([from, mateK, false, 400]);
+      why.nogo.forEach(({ sq, from }, k) => { for (const f of from) segs.push([f, sq, true, 850 + k * 90]); });
+    }
+    if (segs.length) {
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       svg.setAttribute('class', 'sg-check-svg');
       svg.setAttribute('aria-hidden', 'true');
@@ -705,12 +750,13 @@ export default {
       const g0 = grid.getBoundingClientRect();
       svg.setAttribute('viewBox', `0 0 ${g0.width} ${g0.height}`);
       const mid = (e) => { const r = e.getBoundingClientRect(); return [r.left + r.width / 2 - g0.left, r.top + r.height / 2 - g0.top]; };
-      for (const { from } of lines) {
+      for (const [from, to, thin, delay] of segs) {
         const [x1, y1] = mid(cellAt[from]);
-        const [x2, y2] = mid(cellAt[checkedKing]);
+        const [x2, y2] = mid(cellAt[to]);
         const p = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         Object.entries({ x1, y1, x2, y2 }).forEach(([k, v]) => p.setAttribute(k, v.toFixed(1)));
-        if (o.fresh) { const len = Math.hypot(x2 - x1, y2 - y1); p.style.cssText = `stroke-dasharray:${len};--len:${len}`; p.classList.add('draw'); }
+        if (thin) p.classList.add('thin');
+        if (o.fresh) { const len = Math.hypot(x2 - x1, y2 - y1); p.style.cssText = `stroke-dasharray:${len};--len:${len};animation-delay:${delay}ms`; p.classList.add('draw'); }
         svg.append(p);
       }
     }
@@ -753,4 +799,4 @@ export default {
 };
 
 // テスト用
-export const _test = { gaveCheck, legalMoves, attacked, kingSq, initialBoard, miniBoard, evaluate, trySq, checkLines };
+export const _test = { gaveCheck, legalMoves, attacked, kingSq, initialBoard, miniBoard, evaluate, trySq, checkLines, mateWhy };

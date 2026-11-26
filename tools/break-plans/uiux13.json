@@ -1,0 +1,61 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": ["app/js", "tools/probes/uiux13-logic.mjs"],
+  "cwd": "copy",
+  "build": ["node", "--input-type=module", "-e", "await import('./app/js/games/index.js')"],
+  "test": ["node", "tools/probes/uiux13-logic.mjs"],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: ([^（]*)",
+  "timeoutSec": 60,
+  "breaks": [
+    {
+      "name": "10を作れ: 合わせた札に新しい番号を付けない",
+      "file": "app/js/games/make10.js",
+      "old": "let i = 0, next = 4;",
+      "new": "let i = 0, next = 0;",
+      "expect": ["10を作れ: 残っている2枚を合わせる"]
+    },
+    {
+      "name": "15パズル: そろえた人の動かし方を残さない",
+      "file": "app/js/games/slide.js",
+      "old": "    s.seqs[m.p] = m.seq;",
+      "new": "    s.seqs[m.p] = null;",
+      "expect": ["15パズル: そろえた人の動かし方が残る"]
+    },
+    {
+      "name": "15パズル: 次の問題で動かし方を空に戻さない",
+      "file": "app/js/games/slide.js",
+      "old": "        s.seqs = Array(s.n).fill(null);",
+      "new": "        s.seqs = s0.seqs ?? Array(s.n).fill(null);",
+      "expect": ["15パズル: 次の問題で動かし方を空に戻す"]
+    },
+    {
+      "name": "迷路: ゴールした人の道を残さない",
+      "file": "app/js/games/meiro.js",
+      "old": "    s.seqs[m.p] = m.seq;",
+      "new": "    s.seqs[m.p] = '';",
+      "expect": ["迷路: ゴールした人の道が残る"]
+    },
+    {
+      "name": "一筆書き: 描き順を写さずに持つ",
+      "file": "app/js/games/hitofude.js",
+      "old": "    s.paths[m.p] = m.path.slice();",
+      "new": "    s.paths[m.p] = m.path;",
+      "expect": ["一筆書き: 描けた人の描き順が残る"]
+    },
+    {
+      "name": "詰みの理由: 玉をどかさずに利きを調べる",
+      "file": "app/js/games/shogi.js",
+      "old": "    b[sq] = 0;\n    const from = checkLines(b, to, foe)",
+      "new": "    b[sq] = b[to];\n    const from = checkLines(b, to, foe)",
+      "expect": ["飛車の王手: 玉の後ろも飛車が利いている"]
+    },
+    {
+      "name": "詰みの理由: 自分の駒のマスも数える",
+      "file": "app/js/games/shogi.js",
+      "old": "    if (board[to] * sgnOf(side) > 0) continue;",
+      "new": "    if (board[to] * sgnOf(side) > 99) continue;",
+      "expect": ["自分の駒のマスは除く"]
+    }
+  ]
+}

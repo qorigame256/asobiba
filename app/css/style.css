@@ -1537,6 +1537,17 @@ main.slow-zoom > section > #board { position: relative; z-index: 2; } /* 下へ�
 .ss-hand.selected { border-color: var(--accent) !important; background: var(--soft, #ffe2d4) !important; transform: translateY(-4px); }
 .ss-hand.gone .ss-fingers { opacity: .3; }
 .ss-hand.pop { animation: pop .3s ease-out; }
+/* 戦争のタッチの動き（13回目。ss- はシーソーにのせると共通なので、足した分は snt-。時間は sensou.js の touchAnim と合わせる） */
+.ss-hand.snt-reach { position: relative; z-index: 6; animation: snt-reach .48s ease-in-out; }
+@keyframes snt-reach { 0%, 100% { transform: none; } 50% { transform: translate(var(--dx, 0), var(--dy, 0)) scale(1.08); } }
+.ss-hand.snt-hit { animation: snt-hit .3s ease-out; }
+@keyframes snt-hit { 0%, 100% { transform: none; } 30% { transform: translateX(-4px) rotate(-4deg); } 65% { transform: translateX(3px) rotate(3deg); } }
+.ss-hand .ss-finger { transition: height .08s ease-out, background-color .08s; }
+.ss-hand.snt-full .ss-finger.up { background: #f08a5d; }
+.ss-hand.snt-burst { position: relative; }
+.ss-hand.snt-burst::after { content: '💥'; position: absolute; left: 50%; top: 40%; font-size: 2rem; pointer-events: none; animation: snt-boom .6s ease-out forwards; }
+@keyframes snt-boom { 0% { transform: translate(-50%, -50%) scale(.3); opacity: 1; } 55% { transform: translate(-50%, -50%) scale(1.25); opacity: 1; } 100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ss-hand.snt-reach, .ss-hand.snt-hit { animation: none; } .ss-hand .ss-finger { transition: none; } .ss-hand.snt-burst::after { display: none; } }
 .ss-fingers { display: flex; align-items: flex-end; gap: 3px; height: 34px; }
 .ss-fingers.left { flex-direction: row-reverse; }
 .ss-finger { width: 9px; height: 10px; border-radius: 5px 5px 2px 2px; background: #e6d6c3; }
@@ -1566,6 +1577,15 @@ main.slow-zoom > section > #board { position: relative; z-index: 2; } /* 下へ�
 .ys-choices { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; justify-content: center; }
 .board button.ys-choice { min-width: 44px; height: 44px; border-radius: 10px; background: var(--field); color: var(--ink); border: 1.5px solid var(--line); font-size: 1.15rem; font-weight: 800; cursor: pointer; }
 .board button.ys-choice.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+/* 指スマの数え上げ（13回目。ys- はあっち向いてホイと共通なので、足した分は ysm-） */
+.ysm-t { position: relative; display: inline-block; transition: transform .15s, filter .15s, opacity .15s; }
+.ysm-t.lit { transform: translateY(-3px) scale(1.12); filter: drop-shadow(0 0 4px rgba(255, 190, 40, .9)); }
+.ysm-t.lit::after { content: attr(data-n); position: absolute; top: 3px; right: -7px; min-width: 1.25em; height: 1.25em; padding: 0 .15em; border-radius: 999px; background: #e8a317; color: #fff; font-size: .5em; font-weight: 800; line-height: 1.25em; text-align: center; }
+.ysm-t.lit.over::after { background: #c62d1f; }
+.ysm-t.ysm-down { animation: ysm-down .6s ease-in forwards; }
+.ysm-t.ysm-down.still { animation: none; opacity: .25; transform: translateY(6px) scale(.85); }
+@keyframes ysm-down { to { opacity: .25; transform: translateY(6px) scale(.85); } }
+@media (prefers-reduced-motion: reduce) { .ysm-t { transition: none; } .ysm-t.ysm-down { animation: none; opacity: .25; } }
 .ys .cc-actions .btn:disabled { opacity: .4; cursor: default; }
 
 /* ---------- 神経衰弱 ---------- */
@@ -1720,6 +1740,17 @@ main.slow-zoom > section > #board { position: relative; z-index: 2; } /* 下へ�
 .mk-nums { display: flex; justify-content: center; gap: 10px; margin: 6px 0 8px; }
 .mk-goal { font-size: 1.3rem; font-weight: 800; color: var(--accent); margin: 2px 0 6px; }
 .mk-num { width: 2.6em; height: 2.6em; display: grid; place-items: center; font-size: clamp(1.6rem, 8vw, 2.2rem); font-weight: 800; border: 2px solid var(--line); border-radius: 12px; background: var(--field); }
+/* 答えの例を札が2枚ずつ合わさる動きで見せる（2026-11-26 の UI・UX の13回目。make10.js の merge） */
+.mk-nums.mk-merging { position: relative; }
+.mk-merging .mk-num { transition: transform .28s ease-in, opacity .28s, border-color .15s; }
+.mk-num.mk-frac { font-size: clamp(1rem, 5vw, 1.35rem); width: calc(2.6em * 1.6); height: calc(2.6em * 1.6); }
+.mk-num.mk-pick { border-color: var(--accent); transform: translateY(-6px); }
+.mk-num.mk-pop { animation: mk-pop .32s ease-out; }
+.mk-num.mk-done { background: #fff5cf; border-color: #d9a400; color: #2d2a26; box-shadow: 0 0 0 5px rgba(243, 199, 75, .45); }
+.mk-merge-op { position: absolute; top: -14px; width: 30px; height: 30px; margin-left: -15px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 800; font-size: 1.1rem; animation: mk-pop .25s ease-out; z-index: 1; }
+.mk-step { margin-top: 4px; font-weight: 700; font-variant-numeric: tabular-nums; min-height: 1.5em; }
+@keyframes mk-pop { 0% { transform: scale(.6); opacity: 0; } 70% { transform: scale(1.12); opacity: 1; } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .mk-merging .mk-num, .mk-num.mk-pop, .mk-merge-op { transition: none; animation: none; } }
 .mk-pad { display: flex; flex-direction: column; gap: 8px; touch-action: manipulation; }
 .mk-line { min-height: 2.2em; padding: 6px 12px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--field); font-size: 1.5rem; font-weight: 700; text-align: center; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .mk-line.empty { font-size: .95rem; font-weight: 400; color: var(--muted); line-height: 2.2; }
@@ -1754,6 +1785,28 @@ main.slow-zoom > section > #board { position: relative; z-index: 2; } /* 下へ�
 .board button.kr-card.miss { background: #f8d9d4; border-color: #c0392b; }
 .ac-choices { gap: 10px; }
 .board button.ac-choice { min-width: 64px; height: 64px; font-size: 2rem; }
+/* あっち向いてホイのホイの動き（13回目。ac- は玉入れなどの動くゲームと共通なので、足した分は acm-） */
+.acm-show { position: relative; }
+.acm-finger, .acm-face { display: inline-block; transition: transform .2s ease-out; }
+.acm-finger.to-u { transform: translateY(-5px); }
+.acm-finger.to-d { transform: translateY(5px); }
+.acm-finger.to-l { transform: translateX(-7px); }
+.acm-finger.to-r { transform: translateX(7px); }
+.acm-finger.swing { animation: acm-swing .3s ease-out; }
+@keyframes acm-swing { 0% { scale: .6; } 60% { scale: 1.25; } 100% { scale: 1; } }
+.acm-face { position: relative; }
+.acm-face.to-u { transform: translateY(-5px) rotateX(25deg); }
+.acm-face.to-d { transform: translateY(5px) rotateX(-25deg); }
+.acm-face.to-l { transform: translateX(-7px) rotate(-14deg); }
+.acm-face.to-r { transform: translateX(7px) rotate(14deg); }
+.acm-face.hit::after { content: ''; position: absolute; inset: -3px; border: 3px solid #d23b3b; border-radius: 50%; pointer-events: none; }
+.acm-face.hit.ring::after { animation: acm-ring .45s ease-out; }
+@keyframes acm-ring { 0% { transform: scale(1.8); opacity: 0; } 100% { transform: none; opacity: 1; } }
+.acm-arrow { display: inline-block; opacity: 0; transform: scale(.4); transition: opacity .2s, transform .2s ease-out; }
+.acm-arrow.on { opacity: 1; transform: none; }
+.acm-plus { position: absolute; left: 50%; top: -6px; padding: 0 8px; border-radius: 999px; background: #e8a317; color: #fff; font-size: .8rem; font-weight: 900; line-height: 1.6; white-space: nowrap; pointer-events: none; animation: acm-plus 1.1s ease-out forwards; }
+@keyframes acm-plus { 0% { transform: translate(-50%, 10px) scale(.6); opacity: 0; } 25% { transform: translate(-50%, 0) scale(1.1); opacity: 1; } 75% { transform: translate(-50%, -6px); opacity: 1; } 100% { transform: translate(-50%, -14px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .acm-finger, .acm-face, .acm-arrow { transition: none; } .acm-finger.swing, .acm-face.hit.ring::after { animation: none; } .acm-plus { display: none; } }
 .sl-grid { --n: 4; display: grid; grid-template-columns: repeat(var(--n), 1fr); gap: 6px; width: min(100%, 360px); margin: 0 auto; touch-action: manipulation; }
 .board .sl-tile { display: grid; place-items: center; user-select: none; -webkit-user-select: none; aspect-ratio: 1; border-radius: 10px; border: 2px solid var(--line); background: var(--field); color: var(--ink); font: inherit; font-size: clamp(1.3rem, 7vw, 2rem); font-weight: 800; cursor: pointer; }
 .board .sl-tile.ok { border-color: #2f8a4a; }
@@ -2401,6 +2454,22 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .tb-player.mine { border-width: 2.5px; }
 .tb-player.out { opacity: .55; }
 .tb-player.shake { animation: tb-shake .4s ease-out; border-color: #e04b3c; }
+/* 撃ち合いを飛ぶ線で見せる（2026-11-26 の UI・UX の13回目。tamebeam.js の beams）。遅れ（animation-delay）は JS が入れる。
+   名前は tbm-（tb- はてんびん当ての .tb-beam・.tb-pan などとぶつかる） */
+.tb-players { position: relative; }
+.tbm-rays { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; overflow: visible; }
+.tbm-ray { stroke: #3aa0ff; stroke-width: 5; stroke-linecap: round; filter: drop-shadow(0 0 4px #3aa0ff); animation: tbm-fly .42s linear forwards, tbm-fade .5s ease-in forwards; }
+.tbm-ray.big { stroke: #ff8a00; stroke-width: 10; filter: drop-shadow(0 0 6px #ff8a00); }
+@keyframes tbm-fly { to { stroke-dashoffset: 0; } }
+@keyframes tbm-fade { to { opacity: 0; } }
+.tbm-fx { position: absolute; z-index: 4; width: 2em; height: 2em; margin: -1em 0 0 -1em; display: grid; place-items: center; font-size: 1.6rem; line-height: 1; pointer-events: none; }
+.tbm-fx.spark { animation: tbm-spark .6s ease-out both; }
+.tbm-fx.shield { animation: tbm-shield 1.4s ease-out both; }
+.tbm-fx.shield.break { animation: tbm-shield-break .44s ease-out both; }
+@keyframes tbm-spark { 0% { transform: scale(.3); opacity: 0; } 30% { transform: scale(1.3); opacity: 1; } 100% { transform: scale(1.7); opacity: 0; } }
+@keyframes tbm-shield { 0% { transform: scale(.4); opacity: 0; } 15% { transform: scale(1); opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes tbm-shield-break { 0% { transform: scale(.4); opacity: 0; } 30% { transform: scale(1); opacity: 1; } 90% { opacity: 1; } 100% { transform: scale(1.4); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .tbm-rays, .tbm-fx { display: none; } }
 @keyframes tb-shake { 0%, 100% { transform: none; } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
 @media (prefers-reduced-motion: reduce) { .tb-player.shake { animation: none; } }
 .tb-name { font-weight: 700; font-size: .88rem; }
@@ -2816,14 +2885,23 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .board button.aj-btn.ans { opacity: 1; box-shadow: 0 0 0 4px var(--win); }
 /* じゃんけん階段 */
 .kd-stairs { display: flex; flex-direction: column; gap: 6px; background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 8px; }
-.kd-row { display: grid; grid-template-columns: 5.5em 1fr 4.2em; gap: 8px; align-items: center; font-size: .88rem; }
+.kd-row { display: grid; grid-template-columns: auto 1fr 4.2em; gap: 8px; align-items: center; font-size: .88rem; }
 .kd-row.mine { font-weight: 800; }
 .kd-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.kd-track { position: relative; height: 16px; border-radius: 999px; background: repeating-linear-gradient(90deg, var(--field) 0 9px, var(--line) 9px 10px); border: 1px solid var(--line); overflow: hidden; }
-.kd-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; transition: width .6s ease-out; }
-.kd-fill.up { box-shadow: 0 0 8px var(--win); }
-.kd-goal { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); font-size: .8rem; }
 .kd-num { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+/* 本物の階段（2026-11-26 の UI・UX の13回目。kaidan.js の「階段」のコメント） */
+.kd-hill { position: relative; height: 150px; margin: 4px 2px 6px; }
+.kd-step { position: absolute; bottom: 0; background: var(--line); border-top: 2px solid var(--muted); box-sizing: border-box; }
+.kd-step.goal { background: #f6e2a0; border-top-color: #d9a400; }
+.kd-flag { position: absolute; transform: translateX(-50%); font-size: 1rem; line-height: 1; }
+.kd-piece { position: absolute; width: 20px; height: 20px; margin-left: -10px; border-radius: 50%; color: #fff; font-size: .66rem; font-weight: 800; display: grid; place-items: center; border: 2px solid #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, .3); overflow: hidden; transition: left .2s linear, bottom .2s linear; z-index: 1; }
+.kd-piece.mine { z-index: 2; outline: 2px solid var(--ink); }
+.kd-piece.hop { animation: kd-hop .24s ease-out; }
+@keyframes kd-hop { 50% { transform: translateY(-12px); } }
+.kd-chant { position: absolute; left: 4px; top: 0; font-weight: 800; font-size: 1.5rem; letter-spacing: .06em; color: var(--accent); }
+.kd-chant span { display: inline-block; animation: mk-pop .25s ease-out; }
+.kd-dot { width: 12px; height: 12px; border-radius: 50%; }
+@media (prefers-reduced-motion: reduce) { .kd-piece { transition: none; } .kd-piece.hop, .kd-chant span { animation: none; } }
 .board button.kd-choice { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; height: 72px; }
 .kd-choice small { font-size: .72rem; font-weight: 700; }
 /* 椅子取りゲーム */
@@ -3703,6 +3781,17 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 .sg-check-svg line { stroke: #d6362a; stroke-width: 3.5; stroke-linecap: round; opacity: .8; }
 .sg-check-svg line.draw { stroke-dashoffset: var(--len); animation: va-draw .45s ease-out .15s forwards; }
 @media (prefers-reduced-motion: reduce) { .sg-check-svg line.draw { animation: none; stroke-dashoffset: 0; } }
+/* 詰みの理由（13回目。shogi.js の mateWhy）: 逃げられないマスに赤い ×、そこに利いている駒から細い線。時間は shogi.js の segs と合わせる */
+.sg-check-svg line.thin { stroke-width: 1.8; opacity: .7; }
+.sg .sg-cell.sg-nogo::after { content: '×'; position: absolute; inset: 0; display: grid; place-items: center; color: #d6362a; font-size: clamp(1.1rem, 7vw, 2.1rem); font-weight: 900; line-height: 1; text-shadow: 0 0 3px #fff, 0 0 3px #fff; pointer-events: none; z-index: 3; }
+.sg .sg-cell.sg-nogo:has(.sg-piece)::after { place-items: start end; padding: 0 3% 0 0; font-size: clamp(.8rem, 4.2vw, 1.3rem); } /* 駒のあるマス（王手をかけた駒など）は、駒の字が読めるように角へ小さく */
+.sg .sg-cell.sg-nogo.pop-x::after { animation: sg-x .3s cubic-bezier(.3, 1.6, .5, 1) .85s both; }
+@keyframes sg-x { from { transform: scale(2.2); opacity: 0; } to { transform: none; opacity: 1; } }
+/* 成った駒が裏返る（13回目。util.js の promoFlip。.34s は PROMO_MS と合わせる。scale で動かすので、すべる動きの transform とぶつからない） */
+.promo-flip { animation: promo-flip .34s ease-in-out both; }
+@keyframes promo-flip { 0%, 100% { scale: 1 1; } 50% { scale: 0 1; } }
+g.promo-flip { transform-box: fill-box; transform-origin: center; }
+@media (prefers-reduced-motion: reduce) { .sg .sg-cell.sg-nogo.pop-x::after, .promo-flip { animation: none; } }
 /* 一斉に裏返して見せる（2026-11-16 の UI・UX の7回目。party.js の flipTimes・flipCard） */
 .flip-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 10px; margin: 8px 0 4px; }
 .flip-card { display: grid; justify-items: center; gap: 3px; max-width: 8em; }

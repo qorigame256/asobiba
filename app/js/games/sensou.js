@@ -10,6 +10,11 @@
 // 決着が付かずに続くことがあるので、手数が決めた数に達したら引き分けにする。前は 人数×40（Claude の判断）だったが、2026-10-26 本人の決定で
 // 詳細設定「引き分けまでの手数」（limit。40・60・80・100手。最初は40。人数に関係なく全体の手数）にした。
 // 手: { p, t: 'atk', from: 自分の手 0左|1右, to: 相手の番号, hand: 相手の手 0|1 } / { p, t: 'split', h: [左, 右] }
+// タッチの動き（2026-11-26 の UI・UX の13回目。touchAnim）: タッチした手が相手の手まで伸びて戻り、触れたら相手の指が1本ずつ立つ。
+//   ちょうど5本（「5本を超えた手」が「消える」ならそれ以上も）で手がはじけて消える。超えて残るときは5本立ってから数え直す。
+//   CPU が0.7秒で次を打つので、全部で0.6秒ほどに収めた。時刻で進めるので、途中で描き直しても続きから動く。
+
+import { replaySteps, seen, since } from './party.js';
 
 const MAX_FINGERS = 4;
 const LIMITS = [40, 60, 80, 100];
@@ -169,6 +174,10 @@ export default {
     const draw = () => this.render(root, s, o);
     const res = this.result(s);
 
+    const L = s.last;
+    const tkey = L?.t === 'atk' ? `ss:${s.step}:${L.p}:${L.from}:${L.to}:${L.hand}:${L.before}:${L.add}:${s.hands.join('/')}` : '';
+    const touching = !!tkey && (o.fresh || seen('replay:' + tkey));
+
     root.innerHTML = '';
     root.className = 'board ss';
 
@@ -202,7 +211,8 @@ export default {
         const e = handEl(v, h, click ? 'button' : 'div');
         if (click) { e.onclick = click; e.classList.add(p === me ? 'usable' : 'target'); }
         if (p === me && chosen?.from === h) e.classList.add('selected');
-        if (o.fresh && s.last?.t === 'atk' && s.last.to === p && s.last.hand === h) e.classList.add('pop');
+        e.dataset.ph = `${p}:${h}`;
+        if (o.fresh && !touching && s.last?.t === 'atk' && s.last.to === p && s.last.hand === h) e.classList.add('pop');
         if (o.fresh && s.last?.t === 'split' && s.last.p === p) e.classList.add('pop');
         hands.append(e);
       }
@@ -220,10 +230,10 @@ export default {
     log.textContent = logText(s, nameP);
     root.append(log);
 
-    if (me === null) return;
-    root.append(panel(me));
+    if (me !== null) root.append(panel(me));
+    if (touching) touchAnim(root, L, tkey);
 
-    if (!can) return;
+    if (me === null || !can) return;
     const hint = document.createElement('p');
     hint.className = 'ss-hint';
     if (chosen?.split) hint.textContent = '分け方を選んでください';
@@ -269,6 +279,41 @@ export default {
     if (actions.childElementCount) root.append(actions);
   },
 };
+
+// タッチの動き（先頭のコメント）。a はタッチした手、b はタッチされた手（どちらも描き終わった盤の中）
+const STEP_MS = 90; // 指が1本立つ間
+const WAIT_MS = 150; // 触れるまで（動き始めから 150 + 90 = 240ms で触れる）
+const REACH_MS = 480; // 伸びて戻るまで（半分で触れる。CSS の snt-reach と合わせる）
+function touchAnim(root, L, key) {
+  const a = root.querySelector(`[data-ph="${L.p}:${L.from}"]`);
+  const b = root.querySelector(`[data-ph="${L.to}:${L.hand}"]`);
+  if (!a || !b) return;
+  const t = since('replay:' + key);
+  if (t < REACH_MS) {
+    const ra = a.getBoundingClientRect();
+    const rb = b.getBoundingClientRect();
+    a.style.setProperty('--dx', `${Math.round((rb.left + rb.width / 2 - ra.left - ra.width / 2) * 0.8)}px`);
+    a.style.setProperty('--dy', `${Math.round((rb.top + rb.height / 2 - ra.top - ra.height / 2) * 0.8)}px`);
+    a.style.animationDelay = `${-Math.round(t)}ms`;
+    a.classList.add('snt-reach');
+  }
+  const fingers = [...b.querySelectorAll('.ss-finger')];
+  const label = b.querySelector('.ss-count');
+  const side = HAND_NAME[L.hand][0];
+  const n = L.add + 1; // 0: 触れる前 / 1: 触れた / 2〜: 1本ずつ立つ
+  replaySteps(key, b, n, n * STEP_MS, (k) => {
+    const v = L.before + Math.max(0, k - 1);
+    const burst = L.after === 0 && v >= 5;
+    const shown = burst ? 0 : v > 5 ? v - 5 : v;
+    fingers.forEach((f, i) => f.classList.toggle('up', i < shown));
+    b.classList.toggle('gone', burst);
+    b.classList.toggle('snt-full', v === 5 && !burst);
+    // はじける絵は動き終わってすぐの間だけ（あとで描き直したときに、もう一度はじけないように）
+    b.classList.toggle('snt-burst', burst && since('replay:' + key) < WAIT_MS + n * STEP_MS + 600);
+    if (k === 1) b.classList.add('snt-hit');
+    if (label) label.textContent = shown ? `${side} ${shown}` : `${side} ×`;
+  }, WAIT_MS);
+}
 
 function handEl(v, side, tag) {
   const e = document.createElement(tag);

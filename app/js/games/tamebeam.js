@@ -27,6 +27,9 @@ const ICON = { charge: '🔋', guard: '🛡️', beam: '⚡', big: '💥' };
 const LIMIT = 100;
 const TIMES = [5, 10, 20];
 const GRACE_MS = 1000; // ゲストの手が届くのを待つ分
+const BEAM_FLY = 420; // 飛ぶ線が届くまで（beams）
+const BEAM_END = 1400; // 飛ぶ線と印が消え終わるまで
+const beamAt = new Map(); // 回の鍵 → 一斉に開いたのを見た時刻
 
 const clone = (s) => ({ ...s, life: s.life.slice(), charge: s.charge.slice(), picks: s.picks.slice(), outAt: s.outAt.slice() });
 const active = (s, p) => s.life[p] > 0;
@@ -194,6 +197,16 @@ export default {
     // （2026-11-22 本人の依頼「観戦者が他プレイヤーのためを見れるようにする」。前は選んだ人以外が「？」になっていた）
     const chargeText = (p) => (s.rules.hide && me !== null && !o.watching && p !== me && !res ? '？' : String(s.charge[p]));
 
+    // 撃ち合いを飛ぶ線で見せる（下の beams）。一斉に開いた瞬間を見た画面だけ、その時刻から BEAM_END まで（描き直しても続きから）
+    // 局面に種が無い（選ぶ時間なしのとき）ので、回の番号にライフとためを足して、次の対局の同じ回と見分ける。同じ鍵でも3秒たっていれば新しく始める
+    const bkey = L ? `${s.seed ?? ''}:${L.round}:${s.life.join()}:${s.charge.join()}` : '';
+    if (L && anim && L.ev.length && !(Date.now() - (beamAt.get(bkey) ?? -Infinity) < 3000)) {
+      beamAt.set(bkey, Date.now());
+      if (beamAt.size > 30) beamAt.delete(beamAt.keys().next().value);
+    }
+    const bt = beamAt.has(bkey) ? Date.now() - beamAt.get(bkey) : Infinity;
+    const beaming = bt < BEAM_END && !(typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
+
     root.innerHTML = '';
     root.className = 'board tb';
 
@@ -233,7 +246,11 @@ export default {
     for (const p of seats) {
       const box = document.createElement('div');
       const out = !active(s, p);
-      box.className = 'tb-player' + (p === me ? ' mine' : '') + (out ? ' out' : '') + (L && L.hit.includes(p) && anim ? ' shake' : '');
+      // 当たった札は揺れる。飛ぶ線を見せているときは、線が届いたときに揺らす
+      const shake = L && L.hit.includes(p) && (beaming ? bt < BEAM_FLY + 400 : anim);
+      box.className = 'tb-player' + (p === me ? ' mine' : '') + (out ? ' out' : '') + (shake ? ' shake' : '');
+      if (shake && beaming) box.style.animationDelay = `${BEAM_FLY - bt}ms`;
+      box.dataset.p = p;
       const head = document.createElement('div');
       head.className = 'tb-name';
       head.textContent = nameP(p);
@@ -263,6 +280,7 @@ export default {
       grid.append(box);
     }
     root.append(grid);
+    if (beaming) this.beams(grid, L, bt);
 
     // 選ぶ時間の帯（各自の画面に出てからの時間。締め切りはホストの時計）
     if (s.rules.time && !res) root.append(timeBar(`tb:${s.seed}:${s.round}`, s.rules.time * 1000, { secs: true }));
@@ -324,5 +342,76 @@ export default {
     }
     pickBox.append(row);
     root.append(pickBox);
+  },
+
+  // 撃ち合いを飛ぶ線で見せる（2026-11-26 の UI・UX の13回目。本人が全部採用。extra-games.md）: 一斉に開いたら、ビームが撃った人の札のまん中から狙った人の札へ飛ぶ（0.42秒）。
+  // 当たり … 狙った札のまん中まで届いて 💥、札が揺れる。ガード … 札のふちで 🛡️ に止まる。大ビームがガードを破った … 🛡️ が出て、届いたら 💥。
+  // 相殺 … 2人の線がまん中でぶつかって ✨。ビームが大ビームに負けた … ビームはまん中で ✨（大ビームはそのまま相手へ届く）。
+  // 線は札の上を通る（札が隣り合っているので、札の下だとすき間しか見えないため）。0.9秒から消え始め、1.4秒で消える。字の帯（tb-last）は今までどおり。
+  // bt は開いてからの時間（描き直したときは、CSS の動きを負の遅れで続きから始める）
+  beams(grid, L, bt) {
+    const r0 = grid.getBoundingClientRect();
+    if (!r0.width) return;
+    const rect = (p) => {
+      const r = grid.querySelector(`.tb-player[data-p="${p}"]`)?.getBoundingClientRect();
+      return r && { x: r.left - r0.left + r.width / 2, y: r.top - r0.top + r.height / 2, hw: r.width / 2, hh: r.height / 2 };
+    };
+    // to の札のふちのうち、from から来た所
+    const edge = (from, to) => {
+      const dx = from.x - to.x, dy = from.y - to.y;
+      const k = Math.min(dx ? to.hw / Math.abs(dx) : Infinity, dy ? to.hh / Math.abs(dy) : Infinity, 1);
+      return { x: to.x + dx * k, y: to.y + dy * k };
+    };
+    const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'tbm-rays'); // tb- で始まる名前はてんびん当て（tenbin.js の .tb-beam など）とぶつかるので tbm- にする
+    svg.setAttribute('viewBox', `0 0 ${r0.width} ${r0.height}`);
+    grid.append(svg);
+    const beam = (a, b, big) => {
+      const l = document.createElementNS(NS, 'line');
+      l.setAttribute('x1', a.x);
+      l.setAttribute('y1', a.y);
+      l.setAttribute('x2', b.x);
+      l.setAttribute('y2', b.y);
+      l.setAttribute('class', 'tbm-ray' + (big ? ' big' : ''));
+      const len = Math.max(1, Math.hypot(b.x - a.x, b.y - a.y));
+      l.style.strokeDasharray = `${len}`;
+      l.style.strokeDashoffset = `${len}`;
+      l.style.animationDelay = `${-bt}ms, ${900 - bt}ms`;
+      svg.append(l);
+    };
+    const fx = (cls, at, text, from) => {
+      const d = document.createElement('div');
+      d.className = 'tbm-fx ' + cls;
+      d.textContent = text;
+      d.style.left = at.x + 'px';
+      d.style.top = at.y + 'px';
+      d.style.animationDelay = `${from - bt}ms`;
+      grid.append(d);
+    };
+    for (const e of L.ev) {
+      const a = rect(e.from), t = rect(e.to);
+      const pa = L.picks[e.from], pt = L.picks[e.to];
+      if (!a || !t || !pa || !pt) continue;
+      if (e.kind === 'cancel') {
+        const m = mid(a, t);
+        beam(a, m, pa.a === 'big');
+        beam(t, m, pt.a === 'big');
+        fx('spark', m, '✨', BEAM_FLY);
+      } else if (e.kind === 'lose') {
+        const m = mid(a, t);
+        beam(a, m, false);
+        fx('spark', m, '✨', BEAM_FLY);
+      } else if (e.kind === 'block') {
+        const g = edge(a, t);
+        beam(a, g, false);
+        fx('shield', g, '🛡️', 0);
+      } else {
+        beam(a, t, pa.a === 'big');
+        if (pt.a === 'guard') fx('shield break', edge(a, t), '🛡️', 0);
+        fx('spark', t, '💥', BEAM_FLY);
+      }
+    }
   },
 };
