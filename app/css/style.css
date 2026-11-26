@@ -4214,3 +4214,24 @@ g.promo-flip { transform-box: fill-box; transform-origin: center; }
 .kw .kw-goal.bottom { bottom: 1px; left: 8px; right: 8px; height: 5px; }
 .kw .kw-goal.left { left: 1px; top: 8px; bottom: 8px; width: 5px; }
 .kw .kw-goal.right { right: 1px; top: 8px; bottom: 8px; width: 5px; }
+/* ---------- 灯りの陣取り（akari.js。2026-11-27） ---------- */
+/* 夜の盤に色の灯り。陣地はその人の色で薄く照らす。地の色はどの色の組でも同じ（夜の盤なので字も白で直に書く） */
+.ak .ak-grid { display: grid; grid-template-columns: repeat(var(--n, 9), 1fr); gap: 3px; aspect-ratio: 1; padding: 8px; box-sizing: border-box; background: #161b2c; border-radius: 10px; touch-action: manipulation; }
+.ak .p0 { --pc: var(--p0); } .ak .p1 { --pc: var(--p1); } .ak .p2 { --pc: var(--p2); } .ak .p3 { --pc: var(--p3); }
+.board .ak-cell { position: relative; display: grid; place-items: center; min-width: 0; padding: 0; background: #262d45; border-radius: 3px; transition: background-color .35s; }
+.board .ak-cell.own { background: color-mix(in srgb, var(--pc) 42%, #262d45); }
+.board .ak-cell.tie { background: repeating-linear-gradient(45deg, #2c3350 0 4px, #3a425f 4px 8px); }
+.board .ak-cell.own.win { background: color-mix(in srgb, var(--pc) 62%, #262d45); }
+.board .ak-cell.chg { animation: ak-chg .6s ease-out; }
+@keyframes ak-chg { from { filter: brightness(1.9); } }
+.board button.ak-cell.playable { cursor: pointer; }
+.board button.ak-cell.playable:hover { outline: 2px solid #fff; outline-offset: -2px; }
+/* PC でのせたマスに置いたとき: 自分の陣地になる所は明るく、並んでだれのものでもなくなる所は縞 */
+.board .ak-cell.pv { background: color-mix(in srgb, var(--pt, #fff) 55%, #262d45); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .75); }
+.board .ak-cell.pv-lose { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .45); filter: brightness(.7); }
+.ak .ak-lamp { width: 66%; height: 66%; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #fff 0 14%, var(--pc) 46%, color-mix(in srgb, var(--pc) 70%, #000) 100%);
+  box-shadow: 0 0 6px 2px color-mix(in srgb, var(--pc) 80%, transparent), 0 0 16px 5px color-mix(in srgb, var(--pc) 45%, transparent); }
+.ak .ak-lamp.last { outline: 2px solid #fff; outline-offset: 2px; }
+.ak .ak-lamp.pop { animation: pop .35s ease-out; }
+.ak-left { margin-left: 3px; opacity: .8; font-size: .85em; }
+@media (prefers-reduced-motion: reduce) { .board .ak-cell.chg, .ak .ak-lamp.pop { animation: none; } .board .ak-cell { transition: none; } }

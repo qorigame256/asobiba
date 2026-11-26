@@ -13610,6 +13610,59 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('kabe OK');
 }
 
+// 灯りの陣取り（2026-11-27。akari.js）
+{
+  const AK = GAMES.akari;
+  const { scoresOf } = await import('../app/js/games/akari.js');
+  const { seatPoints } = await import('../app/js/games/index.js');
+  const at = (r, c) => r * 9 + c;
+  assert.deepEqual([2, 3, 4].map((n) => AK.init({ rules: { players: n } }).per), [6, 5, 4], '灯りの陣取り: 灯りは 2人 6・3人 5・4人 4個');
+  let s = AK.init({ rules: {} });
+  assert.deepEqual(scoresOf(s), [0, 0], '灯りの陣取り: 灯りが無いうちはだれの陣地も無い');
+  s = AK.apply(s, at(4, 0));
+  assert.deepEqual(scoresOf(s), [81, 0], '灯りの陣取り: 灯りが1つなら盤の全部がその人の陣地');
+  assert.equal(AK.apply(s, at(4, 0)), null, '灯りの陣取り: 灯りのあるマスには置けない');
+  s = AK.apply(s, at(4, 8)); // 左の端と右の端のまん中の段。4列目はどちらからも同じ近さ
+  assert.deepEqual(scoresOf(s), [36, 36], '灯りの陣取り: 近さが同じマス（まん中の列の9マス）はだれの陣地でもない');
+  // まっすぐの距離: (0,0) の赤と (0,3)・(3,0) の青。(2,2) は赤まで 8、青まで 1+4=5 → 青
+  let d = AK.init({ rules: {} });
+  d = { ...d, lamps: d.lamps.slice() };
+  for (const [c, p] of [[at(0, 0), 0], [at(0, 3), 1], [at(3, 0), 1]]) { d.lamps[c] = p; d.order = [...d.order, c]; }
+  const sc0 = scoresOf(d);
+  d.order = [...d.order, at(8, 8)]; d.lamps[at(8, 8)] = 0;
+  assert.ok(scoresOf(d)[0] > sc0[0], '灯りの陣取り: 灯りを足すと陣地が広がる');
+  // 同じ人の灯りどうしが同じ近さなら、その人の陣地
+  let same = AK.init({ rules: {} });
+  same = AK.apply(same, at(0, 0)); same = AK.apply(same, at(8, 8)); same = AK.apply(same, at(0, 8));
+  assert.equal(scoresOf(same).reduce((a, b) => a + b, 0) + 0, 81 - [...Array(81).keys()].filter((x) => {
+    const dd = (c) => (Math.floor(x / 9) - Math.floor(c / 9)) ** 2 + (x % 9 - c % 9) ** 2;
+    const m = Math.min(dd(at(0, 0)), dd(at(8, 8)), dd(at(0, 8)));
+    return dd(at(8, 8)) === m && (dd(at(0, 0)) === m || dd(at(0, 8)) === m);
+  }).length, '灯りの陣取り: 同じ人の灯りどうしが同じ近さのマスはその人の陣地・ちがう人と並んだらだれのものでもない');
+  // 順番・終わり・勝ち
+  for (const n of [2, 3, 4]) {
+    let x = AK.init({ rules: { players: n } });
+    const seen = [];
+    for (let i = 0; !AK.result(x); i++) {
+      seen.push(AK.turn(x));
+      const nx = AK.apply(x, AK.cpu(x, AK.turn(x), { cpu: ['weak', 'normal', 'strong'][i % 3] }));
+      assert.ok(nx && i < 30, `灯りの陣取り: ${n}人で CPU どうしが最後まで`);
+      x = nx;
+    }
+    assert.equal(seen.length, n * x.per, `灯りの陣取り: ${n}人は全部で ${n * x.per} 手`);
+    assert.ok(seen.every((p, i) => p === i % n), `灯りの陣取り: ${n}人は席の順に回る`);
+    const r = AK.result(x);
+    assert.deepEqual(r.scores, scoresOf(x), '灯りの陣取り: 結果の点は陣地の広さ');
+    const top = Math.max(...r.scores);
+    const tops = r.scores.filter((v) => v === top).length;
+    assert.equal(r.winner, tops === 1 ? r.scores.indexOf(top) : null, '灯りの陣取り: 一番広い人の勝ち・並んだら引き分け');
+    assert.equal(AK.apply(x, x.lamps.indexOf(null)), null, '灯りの陣取り: 全部置いたあとは置けない');
+    const pts = seatPoints(r, n);
+    assert.ok(r.scores.every((v, p) => r.scores.every((w, q) => (v > w) === (pts[p] > pts[q]))), `灯りの陣取り: ${n}人の成績表の点は広さの順`);
+  }
+  console.log('akari OK');
+}
+
 // 2026-11-25 の47回目の案: かべ置きレースの壁の数・積み上げタワーの10段勝負・音当ての和音
 {
   // かべ置きレース 壁の数

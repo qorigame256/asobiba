@@ -1,0 +1,79 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "app/fonts",
+    "app/voice",
+    "app/sounds",
+    "tools/test-logic.mjs",
+    "tools/font-chars.json",
+    "tools/font-texts.mjs",
+    "tools/voice-texts.mjs",
+    "tools/probes/uiux13-logic.mjs"
+  ],
+  "cwd": "copy",
+  "env": {
+    "QUICK": "1",
+    "SEED": "1"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 300,
+  "breaks": [
+    {
+      "name": "灯りの陣取り: ちがう人と同じ近さでも、だれのものでもなくしない",
+      "file": "app/js/games/akari.js",
+      "old": "} else if (d === best[x] && who[x] !== p) who[x] = -1;",
+      "new": "}",
+      "expect": [
+        "灯りの陣取り: 近さが同じマス（まん中の列の9マス）はだれの陣地でもない"
+      ]
+    },
+    {
+      "name": "灯りの陣取り: 同じ人の灯りどうしの同じ近さも、だれのものでもなくする",
+      "file": "app/js/games/akari.js",
+      "old": "} else if (d === best[x] && who[x] !== p) who[x] = -1;",
+      "new": "} else if (d === best[x]) who[x] = -1;",
+      "expect": [
+        "灯りの陣取り: 同じ人の灯りどうしが同じ近さのマスはその人の陣地・ちがう人と並んだらだれのものでもない"
+      ]
+    },
+    {
+      "name": "灯りの陣取り: 灯りのあるマスにも置ける",
+      "file": "app/js/games/akari.js",
+      "old": "c >= s0.lamps.length || s0.lamps[c] !== null) return null;",
+      "new": "c >= s0.lamps.length) return null;",
+      "expect": [
+        "灯りの陣取り: 灯りのあるマスには置けない"
+      ]
+    },
+    {
+      "name": "灯りの陣取り: 2人の灯りを5個にする",
+      "file": "app/js/games/akari.js",
+      "old": "const PER = { 2: 6, 3: 5, 4: 4 };",
+      "new": "const PER = { 2: 5, 3: 5, 4: 4 };",
+      "expect": [
+        "灯りの陣取り: 灯りは 2人 6・3人 5・4人 4個"
+      ]
+    },
+    {
+      "name": "灯りの陣取り: 順番を逆に回す",
+      "file": "app/js/games/akari.js",
+      "old": "s.turn = (s0.turn + 1) % s0.n;",
+      "new": "s.turn = (s0.turn + s0.n - 1) % s0.n;",
+      "expect": [
+        "灯りの陣取り: 3人は席の順に回る"
+      ]
+    }
+  ]
+}

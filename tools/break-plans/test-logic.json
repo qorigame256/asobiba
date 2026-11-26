@@ -9,7 +9,8 @@
     "tools/test-logic.mjs",
     "tools/font-chars.json",
     "tools/font-texts.mjs",
-    "tools/voice-texts.mjs"
+    "tools/voice-texts.mjs",
+    "tools/probes/uiux13-logic.mjs"
   ],
   "cwd": "copy",
   "env": {
