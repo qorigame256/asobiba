@@ -137,6 +137,29 @@ function akariCpu(s, rules) {
 
 let ui = { key: null, hide: false }; // 「隠して置く」を押しているか（通信で描き直されても消えないよう外に持つ）
 
+// はね返った灯り（render の ak-hit）を、状態の欄のその人の残りの灯りの数（info の data-left）へ飛ばす。見つからなければその場で消す
+function bounceBack(hit, p) {
+  if (!hit.isConnected) return;
+  const to = document.querySelector(`.ak-left[data-left="${p}"]`);
+  const a = hit.getBoundingClientRect();
+  const b = to?.getBoundingClientRect();
+  if (!b?.width || !a.width) { hit.remove(); return; }
+  const fly = hit.cloneNode(true);
+  fly.classList.remove('ak-hit');
+  Object.assign(fly.style, { position: 'fixed', left: a.left + 'px', top: a.top + 'px', width: a.width + 'px', height: a.height + 'px', margin: '0', zIndex: '60', pointerEvents: 'none' });
+  document.body.append(fly);
+  hit.remove();
+  const dx = b.left + b.width / 2 - (a.left + a.width / 2);
+  const dy = b.top + b.height / 2 - (a.top + a.height / 2);
+  const anim = fly.animate([
+    { transform: 'none', opacity: 1 },
+    { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 40}px) scale(1.1)`, opacity: 1, offset: 0.45 },
+    { transform: `translate(${dx}px, ${dy}px) scale(.4)`, opacity: 0.2 },
+  ], { duration: 620, easing: 'ease-in-out' });
+  anim.onfinish = () => { fly.remove(); to.classList.remove('ak-got'); void to.offsetWidth; to.classList.add('ak-got'); };
+  anim.oncancel = () => fly.remove();
+}
+
 export default {
   id: 'akari',
   name: '灯りの陣取り',
@@ -203,7 +226,8 @@ export default {
     const v = over ? s : viewOf(s, -1); // 広さは、だれの隠し灯りも入れずに数える（決着したら全部）
     const sc = scoresOf(v);
     const left = (p) => s.per - s.order.filter((c) => s.lamps[c] === p).length;
-    let html = sc.map((x, p) => `<b class="pl p${col(p)}">${this.players[col(p)]} ${x}</b><small class="ak-left">🏮${left(p)}</small>`).join('　');
+    // data-roll: 置いて広さが変わったら数字が回り「+4」「−1」が浮かぶ（main.js の rollNums）。data-left: はね返った灯りが飛んでいく先（render）
+    let html = sc.map((x, p) => `<b class="pl p${col(p)}">${this.players[col(p)]} <span data-roll="ak${p}" data-v="${x}">${x}</span></b><small class="ak-left" data-left="${p}">🏮${left(p)}</small>`).join('　');
     if (s.found) html += `<br>${this.players[col(s.found.q)]}の隠し灯りが見つかった`;
     else if (!over && v !== s) html += '<br><small>隠し灯りは数えていない（終わったら開く）</small>';
     return html;
@@ -223,10 +247,36 @@ export default {
     if (ui.key !== key) ui = { key, hide: false };
     const canHide = o.canMove && !res && !!s.hide && s.hide[s.turn] === null;
     const hiding = canHide && ui.hide;
-    // さっき置いた灯りで持ち主が変わったマス（ふわっと塗り直す）。見えない灯りなら何も変わらない
-    const before = o.fresh && s.last !== null && v.order[v.order.length - 1] === s.last ? field(v, v.order.slice(0, -1)).who : null;
+    const quiet = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // 光が広がって陣地が移る（2026-11-27 の UI・UX の14回目）: さっき置いた灯り（src）から近い順に、持ち主が変わったマスを波のように塗り替える。
+    // 見えない灯りなら何も変わらない。隠し灯りが見つかった手では、見つかった灯りから（その灯りが今まで見えていなかった人の画面だけ）。
+    // 決着の手では塗り替えず、下の数え上げにする（2つの動きを同じマスに重ねないため。Claude の判断）
+    let src = null;
+    let before = null;
+    if (o.fresh && !res) {
+      if (s.found) {
+        if (me !== null && me !== s.found.q && v.lamps[s.found.c] !== null) { src = s.found.c; before = field(v, v.order.filter((c) => c !== src)).who; }
+      } else if (s.last !== null && v.order[v.order.length - 1] === s.last) { src = s.last; before = field(v, v.order.slice(0, -1)).who; }
+    }
+    const fromBg = (p) => (p >= 0 ? `color-mix(in srgb, var(--p${col(p)}) 42%, #262d45)` : v.order.length > 1 ? '#33395a' : '#262d45');
+    // 終わったら陣地を数え上げる（同じ14回目）: 決着の手が届いたとき、1人ずつ自分の陣地が1マスずつ灯り、盤の下の数が0から数え上がる。
+    // 判子と勝ち負けの音は数え終わるまで待たせる（grid の data-end-hold。main.js の render が見る）
+    const counting = !!res && !!o.fresh && !quiet;
+    const cntAt = new Array(s.k * s.k).fill(null); // マスが灯る時刻（ms）
+    let cntEnd = 0;
+    if (counting) {
+      const total = sc.reduce((a, b) => a + b, 0);
+      const step = Math.min(60, 1500 / Math.max(1, total));
+      let t = 500; // 開いた隠し灯りの「ポン」を見てから
+      for (let p = 0; p < s.n; p++) {
+        for (let c = 0; c < f.who.length; c++) if (f.who[c] === p) { cntAt[c] = t; t += step; }
+        t += 260;
+      }
+      cntEnd = t;
+    }
     const grid = document.createElement('div');
     grid.className = 'ak-grid' + (hiding ? ' hiding' : '');
+    if (counting) grid.dataset.endHold = String(Math.round(cntEnd + 200));
     grid.style.setProperty('--pt', `var(--p${col(s.turn)})`); // のせたマスの見せ方に使う、番の人の色
     const cells = [];
     const clearPv = () => { for (const e of cells) e.classList.remove('pv', 'pv-lose'); };
@@ -234,8 +284,16 @@ export default {
       const e = document.createElement('button');
       e.type = 'button';
       const w = f.who[c];
-      e.className = 'ak-cell' + (w >= 0 ? ' own p' + col(w) : v.order.length ? ' tie' : '')
-        + (before && before[c] !== w ? ' chg' : '') + (res && w >= 0 && sc[w] === top ? ' win' : '');
+      e.className = 'ak-cell' + (w >= 0 ? ' own p' + col(w) : v.order.length ? ' tie' : '') + (res && w >= 0 && sc[w] === top ? ' win' : '');
+      if (before && before[c] !== w) {
+        e.classList.add('wave');
+        e.style.setProperty('--from', fromBg(before[c]));
+        e.style.setProperty('--wd', Math.round(Math.sqrt(dist2(s.k, src, c)) * 90) + 'ms');
+      }
+      if (counting) {
+        e.classList.add(cntAt[c] === null ? 'cnt-wait' : 'cnt');
+        e.style.setProperty('--cd', Math.round(cntAt[c] ?? cntEnd) + 'ms');
+      }
       const lp = v.lamps[c];
       if (lp !== null) {
         const l = document.createElement('span');
@@ -269,6 +327,37 @@ export default {
       grid.append(e);
     }
     root.append(grid);
+    // 決着のあとの盤の下の数（数え上げの間は0から増える）
+    if (res) {
+      const row = document.createElement('div');
+      row.className = 'ak-count';
+      const nums = sc.map((x, p) => {
+        const b = document.createElement('b');
+        b.className = 'pl p' + col(p);
+        b.textContent = this.players[col(p)] + ' ';
+        const n = document.createElement('span');
+        n.textContent = counting ? '0' : String(x);
+        b.append(n);
+        row.append(b);
+        return n;
+      });
+      root.append(row);
+      if (counting) {
+        cntAt.forEach((t, c) => {
+          if (t === null) return;
+          const p = f.who[c];
+          setTimeout(() => { if (nums[p].isConnected) nums[p].textContent = String(Number(nums[p].textContent) + 1); }, t);
+        });
+      }
+    }
+    // 見つけた灯りがはね返る（同じ14回目）: ほかの人の隠し灯りのマスを選んだ人の灯りが、落ちてきて当たり、その人の残りの灯りの数（状態の欄）へはね返る
+    if (o.fresh && s.found && !res && !quiet) {
+      const hit = document.createElement('span');
+      hit.className = 'ak-lamp ak-hit p' + col(s.found.by);
+      hit.setAttribute('aria-hidden', 'true');
+      cells[s.found.c].append(hit);
+      setTimeout(() => bounceBack(hit, s.found.by), 420); // 測るのは描き直しが済んでから（CLAUDE.md の「描き直しの途中で測らない」）
+    }
     // 隠し灯り（詳細設定 hide）: 押すと次に置く灯りが隠し灯りになる。もう一度押すとやめる
     if (canHide) {
       const b = document.createElement('button');

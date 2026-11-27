@@ -47,7 +47,7 @@ export function peekMark(e, i, o, isTarget, sel) {
 }
 
 // あぶない所の知らせ（2026-11-12 本人の選択。board-games.md）: 自分のターンのあいだ、ほかの人が次の一手で勝てる所に赤い「！」を出す。
-// マルバツ（3×3・広い盤・消える）・四目並べ・五目並べ・立体四目並べ。ゲームは render の o.rules（main.js が渡す詳細設定の値）で見る。
+// マルバツ（3×3・広い盤・消える）・四目並べ・五目並べ・立体四目並べ・色うつり四目（2026-11-27）。ゲームは render の o.rules（main.js が渡す詳細設定の値）で見る。
 // 好みの設定なので、おまかせでは抽選しない（main.js の KEEP_KEYS に danger）
 export const DANGER_SETTING = {
   key: 'danger', label: 'あぶない所の知らせ', desc: 'ありなら自分のターンのあいだ、ほかの人が次の一手で勝てる所に赤い「！」を出す', def: 'off',

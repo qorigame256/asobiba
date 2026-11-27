@@ -2686,13 +2686,15 @@ function renderPage() {
   if (tapGhost && tapGhost.k === ghostKey() && twoTapOn(game) && opts.canMove) status.insertAdjacentHTML('beforeend', '<div class="status-sub tap-hint">👆 同じ所をもう一度押すと置きます</div>');
   lineHold.until = 0;
   const hold = slow ? slowFinish(board) : 0;
-  if (hold) status.querySelector('.scenes:not(.still)')?.style.setProperty('--hold', hold + 'ms'); // 名場面は判子のあと（決め手のスローでは判子が遅れるので、その分待つ。2026-11-12 の Codex の点検）
+  // 決着の演出を盤が見せている間（灯りの陣取りの数え上げ。2026-11-27 の UI・UX の14回目）: ゲームが盤の中の要素に data-end-hold（ms）を付けたら、勝ち負けの音・判子をその分待たせる
+  const endHold = fresh && res && !hold && !lessMotion() ? Number(board.querySelector('[data-end-hold]')?.dataset.endHold) || 0 : 0;
+  if (hold || endHold) status.querySelector('.scenes:not(.still)')?.style.setProperty('--hold', (hold || endHold) + 'ms'); // 名場面は判子のあと（決め手のスローでは判子が遅れるので、その分待つ。2026-11-12 の Codex の点検）
   rollNums(status); // 点の数字が回る（2026-11-10）
   rollNums(board);
   if (beginner && opts.canMove && BEG_GAMES.has(S.gameId) && [...board.querySelectorAll('.playable, .usable, button')].some((e) => getComputedStyle(e).getPropertyValue('--beg').trim() === '1')) {
     status.insertAdjacentHTML('beforeend', '<div class="status-sub beg-hint">🔰 光っている所が、いま選べる所です</div>');
   }
-  if (fresh) moveSound(game, st, res, prevLen, opts.canMove, hold);
+  if (fresh) moveSound(game, st, res, prevLen, opts.canMove, hold, endHold);
   if (!opts.canMove && S.couldMove !== false) S.waitFrom = Date.now();
   S.couldMove = opts.canMove;
 
@@ -4491,7 +4493,7 @@ function flyAnim(e, f, to) {
 
 // 新しく打たれた手の音。何手かまとめて届いたときは最後の手の音だけ。対局が終わったら勝ち負けの音。
 // 音はゲームの sound(前の局面, 今の局面, 手, 自分の番号) が名前で返す（無ければ盤のゲームは place、カードゲームは card）
-function moveSound(game, st, res, prevLen, mine, hold = 0) {
+function moveSound(game, st, res, prevLen, mine, hold = 0, endHold = 0) {
   const before = replay({ ...S, moves: S.moves.slice(0, prevLen) });
   if (!before) return;
   const me = myPlayer();
@@ -4511,7 +4513,7 @@ function moveSound(game, st, res, prevLen, mine, hold = 0) {
       for (let k = steps.length - 1; k >= 0 && !cut; k--) { try { cut = game.cutin(...steps[k], me); } catch { cut = null; } }
     }
     if (cut) cutInFx(cut);
-    const gap = cut && !lessMotion() ? END_AFTER_CUT : 0;
+    const gap = Math.max(cut && !lessMotion() ? END_AFTER_CUT : 0, endHold); // endHold: 盤の決着の演出が終わるまで（render の data-end-hold）
     const key = timerKey();
     const finish = () => {
       // 決め手のスロー（slowFinish）のときは、石が着いたときに置いた音、一拍おいてから勝ち負けの音・判子（押して飛ばせばすぐ）

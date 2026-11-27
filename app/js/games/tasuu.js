@@ -73,6 +73,62 @@ export function scoresOf(s) {
   });
   return sc;
 }
+// 決まった陣地の石を、人ごとの列に並べた形（2026-11-27 の UI・UX の14回目「数比べ」）。列は席の順、いちばん多い人の列（取った人）に lead。
+// stones: 置いた順の石の要素（無ければ作る）。返すのは入れ物
+function groupEl(n, z, w, stones) {
+  const grp = document.createElement('div');
+  grp.className = 'tsu-grp';
+  const seats = [...new Set(z)].sort((a, b) => a - b);
+  grp.style.setProperty('--nc', seats.length);
+  const cols = new Map(seats.map((p) => {
+    const c = document.createElement('div');
+    c.className = 'tsu-col p' + col(p) + (p === w ? ' lead' : '');
+    grp.append(c);
+    return [p, c];
+  }));
+  z.forEach((p, k) => {
+    const sl = document.createElement('span');
+    sl.className = 'tsu-slot';
+    sl.append(stones?.[k] ?? Object.assign(document.createElement('span'), { className: 'tsu-stone p' + col(p) }));
+    cols.get(p).append(sl);
+  });
+  return grp;
+}
+// 数比べの動き: いまの石の置き場（slots）を、人ごとの列（groupEl）へ滑らせて並べ替え、取った人の列を光らせてから、点の札をその人の点の数字（状態の欄）へ飛ばす。
+// 測るのは描き直しが済んでから（setTimeout。CLAUDE.md の「描き直しの途中で測らない」）。途中で描き直されたら（要素が外れたら）やめる
+function regroupLater(box, slots, stones, z, n, w, pt, delay) {
+  setTimeout(() => {
+    if (!box.isConnected || !slots.isConnected) return;
+    const first = stones.map((e) => e.getBoundingClientRect());
+    const grp = groupEl(n, z, -2, stones.map((e) => { e.classList.remove('pop', 'last', 'drop'); return e; }));
+    slots.replaceWith(grp);
+    stones.forEach((e, k) => {
+      const l = e.getBoundingClientRect();
+      e.animate([{ transform: `translate(${first[k].left - l.left}px, ${first[k].top - l.top}px)` }, { transform: 'none' }], { duration: 460, easing: 'cubic-bezier(.2, .8, .2, 1)' });
+    });
+    setTimeout(() => {
+      if (!grp.isConnected) return;
+      if (w >= 0) grp.querySelector(`.tsu-col.p${col(w)}`)?.classList.add('lead');
+      const to = w >= 0 ? document.querySelector(`[data-roll="tsu${w}"]`) : null;
+      const a = pt.getBoundingClientRect();
+      const b = to?.getBoundingClientRect();
+      if (!b?.width || !a.width) return;
+      const fly = pt.cloneNode(true);
+      fly.classList.add('tsu-fly');
+      Object.assign(fly.style, { position: 'fixed', left: a.left + 'px', top: a.top + 'px', width: a.width + 'px', height: a.height + 'px', margin: '0', zIndex: '60', pointerEvents: 'none' });
+      document.body.append(fly);
+      const dx = b.left + b.width / 2 - (a.left + a.width / 2);
+      const dy = b.top + b.height / 2 - (a.top + a.height / 2);
+      const anim = fly.animate([
+        { transform: 'none', opacity: 1 },
+        { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 30}px) scale(1.15)`, opacity: 1, offset: 0.45 },
+        { transform: `translate(${dx}px, ${dy}px) scale(.45)`, opacity: 0.25 },
+      ], { duration: 650, easing: 'ease-in-out' });
+      anim.onfinish = anim.oncancel = () => fly.remove();
+    }, 560);
+  }, delay);
+}
+
 const doneAt = (s, i) => s.zones[i].length >= CAP || !!s.shut?.[i]; // 埋まったか締め切った陣地
 const legalOf = (s) => s.zones.map((z, i) => (doneAt(s, i) ? -1 : i)).filter((i) => i >= 0);
 
@@ -346,6 +402,7 @@ export default {
   render(root, s, o) {
     root.innerHTML = '';
     root.className = 'board tsu';
+    const quiet = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
     const res = this.result(s);
     const sc = scoresOf(s);
     const top = res ? Math.max(...sc) : null;
@@ -369,19 +426,26 @@ export default {
       pt.className = 'tsu-pt';
       pt.textContent = s.pts[i];
       box.append(pt);
+      // 数比べ（2026-11-27 の UI・UX の14回目）: 決まった陣地の石は人ごとの列に並べて出す。いま決まった陣地は、置き場の形で描いてから列へ並べ替える（regroupLater）
+      const justDone = w !== null && !quiet && ((o.fresh && s.last === i && !s.tog) || hit);
+      if (w !== null && !justDone) box.append(groupEl(s.n, z, w));
+      else {
       // 石の置き場（下から順に積む。空きも描く。2回押しの薄い石はこの空きに入る）
       const slots = document.createElement('div');
       slots.className = 'tsu-slots';
+      const stoneEls = [];
       for (let k = CAP - 1; k >= 0; k--) {
         const sl = document.createElement('span');
         sl.className = 'tsu-slot';
         if (k < z.length) {
           const st = document.createElement('span');
           const last = s.last === i && k === z.length - 1;
-          const pop = (last && o.fresh) || k >= z.length - fresh;
-          st.className = 'tsu-stone p' + col(z[k]) + (last ? ' last' : '') + (pop ? ' pop' : '');
+          const isNew = k >= z.length - fresh; // 一斉に置く: この回に入った石（せーので落ちる）
+          const pop = (last && o.fresh) || isNew;
+          st.className = 'tsu-stone p' + col(z[k]) + (last ? ' last' : '') + (pop ? (isNew && !quiet ? ' drop' : ' pop') : '');
           if (last) st.dataset.last = '';
           sl.append(st);
+          stoneEls[k] = st;
         } else if (mine === i && k === z.length) {
           const st = document.createElement('span');
           st.className = 'tsu-stone pend p' + col(me);
@@ -390,6 +454,20 @@ export default {
         slots.append(sl);
       }
       box.append(slots);
+      if (justDone) regroupLater(box, slots, stoneEls, z, s.n, w, pt, hit ? 1250 : 450); // 一斉に置く回は石が落ちてから
+      }
+      // 一斉に置く: 重なってはじかれた石は、陣地の上に浮かんでから寄ってぶつかり、弾け飛ぶ（せーので落ちる。同じ14回目）
+      if (hit && !quiet) {
+        const out = s.rev.picks.map((x, p) => (x === i && !s.rev.got[p] ? p : -1)).filter((p) => p >= 0);
+        out.forEach((p, k) => {
+          const b = document.createElement('span');
+          b.className = 'tsu-stone tsu-burst p' + col(p);
+          b.setAttribute('aria-hidden', 'true');
+          b.style.setProperty('--sx', `${(k - (out.length - 1) / 2) * 26}px`);
+          b.style.setProperty('--dir', k < (out.length - 1) / 2 ? -1 : 1);
+          box.append(b);
+        });
+      }
       // 席ごとの数（いちばん多い人が分かるように）と、決まったあとの持ち主
       const tally = document.createElement('div');
       tally.className = 'tsu-tally';
@@ -399,6 +477,7 @@ export default {
         tally.innerHTML = c.map((v, p) => (v ? `<b class="p${col(p)}${v === mx ? ' lead' : ''}">${v}</b>` : '')).filter(Boolean).join('');
       }
       box.append(tally);
+      if (box.classList.contains('bounce') && !quiet) box.style.animationDelay = '.85s'; // はじかれた石がぶつかるときに揺れる
       box.setAttribute('aria-label', `${s.pts[i]}点の陣地（石 ${z.length}/${CAP}）`);
       if (o.canMove && w === null) {
         box.classList.add('playable', 'p' + col(s.turn));

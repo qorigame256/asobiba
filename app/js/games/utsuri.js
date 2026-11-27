@@ -16,7 +16,7 @@
 // Claude の判断: 直前に動いた駒は動かせない決まりはそのまま。番が来たのに動かせる駒が無い人の負けもそのまま（自分の色ばかりになると起きうる）。
 //   ありのときだけ局面に lockOwn: true を持つ（なしなら今までと同じ局面）。
 
-import { CPU_SETTING, PEEK_SETTING, peekMark, boardCpu, boardJudge, grabbable, justDragged, winLine, col } from './util.js';
+import { CPU_SETTING, PEEK_SETTING, DANGER_SETTING, dangerMoves, dangerOn, peekMark, boardCpu, boardJudge, grabbable, justDragged, winLine, col } from './util.js';
 
 const N = 6;
 const CELLS = N * N;
@@ -92,6 +92,28 @@ export function lineAt(b, d, p) {
 
 /* ---------- CPU ---------- */
 
+// 崩した並びが割れる（2026-11-27 の UI・UX の14回目）: 盤 b のマス f を通る、色 q の3つ以上の並び（いちばん長いもの。端から順のマス。無ければ null）
+export function runAt(b, f, q) {
+  const r0 = Math.floor(f / N);
+  const c0 = f % N;
+  let best = null;
+  for (const [dr, dc] of [[0, 1], [1, 0], [1, 1], [1, -1]]) {
+    let r = r0;
+    let c = c0;
+    while (r - dr >= 0 && r - dr < N && c - dc >= 0 && c - dc < N && b[(r - dr) * N + c - dc] === q) { r -= dr; c -= dc; }
+    const run = [];
+    for (; r >= 0 && r < N && c >= 0 && c < N && b[r * N + c] === q; r += dr, c += dc) run.push(r * N + c);
+    if (run.length >= NEED - 1 && (!best || run.length > best.length)) best = run;
+  }
+  return best;
+}
+
+// あぶない所の知らせ（2026-11-27 の UI・UX の14回目。詳細設定 danger。util.js の dangerMoves）: 相手がいまの盤で駒を1つ動かして4つ並べられる行き先のマス（Set）。
+// 相手の次の番では、いま自分が動かす駒が「直前に動いた駒」になるので、相手の直前の駒の縛りは外して数える（Claude の判断）。game は色うつり四目（render の this）
+export function dangerCells(game, s) {
+  return new Set([...dangerMoves(game, { ...s, last: null }, 2, (t) => legalOf(t))].map((m) => m % CELLS));
+}
+
 // p から見た点数: 4つの窓ごとに、相手の色が無ければ自分の色の数で足し、自分の色が無ければ相手の色の数で引く。
 // 窓の中の色の無い駒・空きは、あとで自分の色にできる所として少しだけ数える
 const W = [0, 1, 5, 24];
@@ -114,6 +136,31 @@ export function score(s, p) {
 
 let ui = { key: null, from: null }; // 選んでいる駒（通信で描き直されても消えないよう外に持つ）
 
+// 崩した並び run（端から順のマス）に、その人の色の線を出し、マス f の所で2つに割って落とす。線は盤の入れ物（grid）の中に置き、動き終わったら消す
+function crackLine(grid, run, f, q) {
+  if (!grid.isConnected) return;
+  const g = grid.getBoundingClientRect();
+  const ctr = (i) => { const r = grid.children[i].getBoundingClientRect(); return [r.left + r.width / 2 - g.left, r.top + r.height / 2 - g.top]; };
+  const a = ctr(run[0]);
+  const z = ctr(run[run.length - 1]);
+  const k = run.indexOf(f);
+  // 割れる所: 動かした駒の真ん中。端の駒なら、となりの駒との間
+  const m = k > 0 && k < run.length - 1 ? ctr(f) : (() => { const p = ctr(f); const n = ctr(run[k === 0 ? 1 : run.length - 2]); return [(p[0] + n[0]) / 2, (p[1] + n[1]) / 2]; })();
+  const ang = Math.atan2(z[1] - a[1], z[0] - a[0]) * 180 / Math.PI;
+  [[a, m, -1], [m, z, 1]].forEach(([p, e, dir]) => {
+    const len = Math.hypot(e[0] - p[0], e[1] - p[1]);
+    if (len < 2) return;
+    const bar = document.createElement('span');
+    bar.className = 'ut-crack p' + col(q);
+    bar.setAttribute('aria-hidden', 'true');
+    Object.assign(bar.style, { left: p[0] + 'px', top: p[1] + 'px', width: len + 'px' });
+    bar.style.setProperty('--a', ang + 'deg');
+    bar.style.setProperty('--dir', dir);
+    bar.addEventListener('animationend', () => bar.remove());
+    grid.append(bar);
+  });
+}
+
 export default {
   id: 'utsuri',
   name: '色うつり四目',
@@ -124,6 +171,7 @@ export default {
   players: ['赤', '青'],
   settings: [
     { key: 'lockOwn', label: '自分の色は動かせない', desc: '動かせるのは色の無い駒と相手の色の駒だけ。自分の色の駒は、相手に動かされるまでそのまま', def: false, choices: [[false, 'なし'], [true, 'あり']] },
+    DANGER_SETTING,
     PEEK_SETTING,
     CPU_SETTING,
   ],
@@ -189,6 +237,7 @@ export default {
     const movable = new Set(legal.map((m) => Math.floor(m / CELLS)));
     const targets = new Set(ui.from === null ? [] : legal.filter((m) => Math.floor(m / CELLS) === ui.from).map((m) => m % CELLS));
     const win = new Set(s.won?.cells ?? []);
+    const danger = dangerOn(o) && !over ? dangerCells(this, s) : new Set();
 
     root.innerHTML = '';
     root.className = 'board ut';
@@ -205,6 +254,7 @@ export default {
       if (s.last && (s.last.d === i || s.last.f === i)) cell.classList.add('last');
       if (i === ui.from) cell.classList.add('selected');
       if (isTarget) { cell.classList.add('target'); cell.dataset.drop = i; } // data-drop: つまんだ駒を離せる所
+      if (danger.has(i)) cell.classList.add('danger');
       peekMark(cell, i, o, isTarget, () => ({ f: ui.from, d: null })); // 相手の迷いが見える（main.js の o.peek・o.peekIn）
       if (v !== null) {
         const disc = document.createElement('span');
@@ -240,6 +290,14 @@ export default {
     }
     root.append(grid);
     if (winEls.length) winLine(grid, winEls, o.fresh, 'ut:' + [...win].join(','), 420);
+    // 崩した並びが割れる（同じ14回目）: 相手の色の駒を動かして、その駒を通る相手の3つ以上の並びを崩したとき、その並びに線を出し、動かした駒の所で2つに割って落とす
+    if (o.fresh && s.last && s.last.was !== NONE && s.last.was !== s.board[s.last.d] && !(typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)) {
+      const b0 = s.board.slice();
+      b0[s.last.d] = null;
+      b0[s.last.f] = s.last.was;
+      const run = runAt(b0, s.last.f, s.last.was);
+      if (run) setTimeout(() => crackLine(grid, run, s.last.f, s.last.was), 0); // 測るのは描き直しが済んでから（CLAUDE.md の「描き直しの途中で測らない」）
+    }
     o.peek?.({ f: ui.from, d: null, a: null }); // 相手の迷いが見える: いまの選びを知らせる
   },
 };

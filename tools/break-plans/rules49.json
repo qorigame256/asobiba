@@ -10,7 +10,7 @@
     "tools/font-chars.json",
     "tools/font-texts.mjs",
     "tools/voice-texts.mjs",
-    "tools/probes/uiux13-logic.mjs"
+    "tools/probes/uiux13-logic.mjs", "tools/probes/uiux14-logic.mjs"
   ],
   "cwd": "copy",
   "env": {

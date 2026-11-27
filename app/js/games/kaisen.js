@@ -417,6 +417,7 @@ let plc = { key: null, ships: [], sel: 0, vert: false }; // 並べている途�
 // 「✎ メモ」を押している間は、マスを押すと撃たずに × を付け外しする（相手の番の間も付けられる）。key は自分の船の並び（対局が替わったら消す）
 let ksMemo = { key: null, cells: new Set(), on: false };
 let sonarMode = null; // ソナーで調べる所を選んでいる途中なら「手の数:自分の番号」（描き直しで消えないよう外に持つ）
+let fxKey = null; // 着弾の動きを付けた手（同じ手で描き直したとき、推理のメモの付け外しなど、もう一度落とさない）
 let salvoSel = { key: null, cells: [] }; // サルボで選んでいる途中のマス（この端末だけ。手の一覧に入れない。key は「手の数:自分の番号」）
 
 const game = {
@@ -546,7 +547,28 @@ const game = {
     return `${who}の弾は${l.hit ? '<b>命中！</b>' : 'はずれ'}${more}`;
   },
 
+  // 着弾（2026-11-27 の UI・UX の14回目）: 新しく撃ったマス（.last のうち撃ったあとのあるもの）に、弾が上から落ちてきて、はずれは水しぶきの輪、当たり（沈めたも）は火花。
+  // 印（・と ✕）と当たりの色は、弾が着いてから出す。サルボは1発ずつ少しずらす。沈めたときに船の形を出す動きは本人が不採用にした
   render(root, s, o) {
+    this.renderSeas(root, s, o);
+    if (!o.fresh || !s.last || s.last.placed || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
+    const key = `${o.me}:${s.turn}:${JSON.stringify(s.last)}`;
+    if (fxKey === key) return;
+    fxKey = key;
+    let k = 0;
+    for (const c of root.querySelectorAll('.ks-cell.last')) {
+      if (!c.matches('.hit, .miss')) continue;
+      c.classList.add('impact');
+      c.style.setProperty('--d', `${k++ * 140}ms`);
+      const shell = document.createElement('span');
+      shell.className = 'ks-shell';
+      const fx = document.createElement('span');
+      fx.className = 'ks-fx ' + (c.classList.contains('hit') ? 'hit' : 'miss');
+      for (const e of [shell, fx]) { e.setAttribute('aria-hidden', 'true'); c.append(e); }
+    }
+  },
+
+  renderSeas(root, s, o) {
     const me = Number.isInteger(o.me) && o.me >= 0 ? o.me : null; // 観戦（-1）と同じ画面（null）はどちらの船も見せない
     root.innerHTML = '';
     root.className = 'board ks';

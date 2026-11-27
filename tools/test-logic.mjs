@@ -14173,5 +14173,7 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
 
 // 2026-11-26 の UI・UX の13回目（10を作れの合わさる順・早送りの元になる解き方・将棋の詰みの理由）。中身は tools/probes/uiux13-logic.mjs（壊す確認はそちらだけで流す）
 await import('./probes/uiux13-logic.mjs');
+// 2026-11-27 の UI・UX の14回目（重さの手番の動いた順・色うつり四目の崩した並びとあぶない所）。中身は tools/probes/uiux14-logic.mjs（壊す確認はそちらだけで流す）
+await import('./probes/uiux14-logic.mjs');
 
 console.log(QUICK ? 'QUICK OK（軽い流し方。コミットの前は QUICK を付けずに全部を流す）' : 'ALL OK');

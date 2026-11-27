@@ -205,6 +205,9 @@ export default {
     const res = this.result(s);
     const top = res ? Math.max(...scoresOf(s)) : null;
     const sc = res ? scoresOf(s) : null;
+    // 続けて引けるときの「もう1本！」（2026-11-27 の UI・UX の14回目）: 四角を取って同じ人の番が続くとき、取った四角の上に跳ねて出す
+    // （あなたのターンの帯は長く待ったあとの番でしか出ず、続けて引けることに気づきにくいため）。決着の手と「四角を取っても交代」では出さない
+    const againBox = fresh !== null && !res && s.lines[fresh] === s.turn ? boxesOf(s, fresh).find((b) => s.boxes[b] === s.turn) ?? null : null;
     for (let gr = 0; gr <= s.h * 2; gr++) {
       for (let gc = 0; gc <= s.w * 2; gc++) {
         const r = gr >> 1;
@@ -222,6 +225,13 @@ export default {
             + (owner !== null && res && sc[owner] === top ? ' win' : '');
           if (owner !== null) e.textContent = this.players[col(owner)][0] + (gold ? '★' : '');
           else if (gold) { e.textContent = '★'; e.title = '金の四角（2点）'; }
+          if (b === againBox) {
+            const a = document.createElement('span');
+            a.className = 'dt-again p' + col(s.turn);
+            a.textContent = 'もう1本！';
+            e.classList.add('has-again');
+            e.append(a);
+          }
         } else {
           const i = gr % 2 === 0 ? r * s.w + c : H + r * (s.w + 1) + c;
           e = document.createElement('button');

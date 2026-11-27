@@ -1,0 +1,77 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "tools/probes/uiux14-logic.mjs"
+  ],
+  "cwd": "copy",
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/probes/uiux14-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: ([^（]*)",
+  "timeoutSec": 60,
+  "breaks": [
+    {
+      "name": "重さの手番: 待つ手を hist に入れない",
+      "file": "app/js/games/omosa.js",
+      "old": "ply, won: null, hist: [...(s.hist ?? []), p * 5 + 4] };",
+      "new": "ply, won: null, hist: s.hist ?? [] };",
+      "expect": [
+        "重さの手番: 6手目の hist"
+      ]
+    },
+    {
+      "name": "重さの手番: 駒の種類でなく重さを入れる",
+      "file": "app/js/games/omosa.js",
+      "old": "hist: [...(s.hist ?? []), p * 5 + kindOf(v)] };",
+      "new": "hist: [...(s.hist ?? []), p * 5 + WEIGHT[kindOf(v)]] };",
+      "expect": [
+        "重さの手番: 2手目の hist"
+      ]
+    },
+    {
+      "name": "色うつり四目: 並びを2つから数える",
+      "file": "app/js/games/utsuri.js",
+      "old": "if (run.length >= NEED - 1 && (!best || run.length > best.length)) best = run;",
+      "new": "if (run.length >= NEED - 2 && (!best || run.length > best.length)) best = run;",
+      "expect": [
+        "色うつり四目: 2つだけの並びは返さない"
+      ]
+    },
+    {
+      "name": "色うつり四目: 並びの端まで戻らない",
+      "file": "app/js/games/utsuri.js",
+      "old": "    while (r - dr >= 0 && r - dr < N && c - dc >= 0 && c - dc < N && b[(r - dr) * N + c - dc] === q) { r -= dr; c -= dc; }\n",
+      "new": "",
+      "expect": [
+        "色うつり四目: 横の3つ"
+      ]
+    },
+    {
+      "name": "色うつり四目: いちばん長い並びでなく最初の並びを返す",
+      "file": "app/js/games/utsuri.js",
+      "old": "(!best || run.length > best.length)",
+      "new": "!best",
+      "expect": [
+        "色うつり四目: 先に見る横の3つより長い斜めの4つを返す"
+      ]
+    },
+    {
+      "name": "色うつり四目: あぶない所で相手の直前の駒の縛りを外さない",
+      "file": "app/js/games/utsuri.js",
+      "old": "dangerMoves(game, { ...s, last: null }, 2,",
+      "new": "dangerMoves(game, s, 2,",
+      "expect": [
+        "色うつり四目: 相手の直前の駒の縛りは外して数える"
+      ]
+    }
+  ]
+}

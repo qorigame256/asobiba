@@ -35,6 +35,7 @@ const KIND = ['王', '兵', '槍', '騎'];
 export const WEIGHT = [2, 1, 3, 3];
 const MAX_PLY = 200;
 const SPAN = 4; // 物差しの目盛りの数（小さい方の時計から3先まで）
+const HIST = 14; // 動いた順の帯に出す数（新しい方から。スマホの幅で1行に収まる数。Claude の判断）
 export const WAIT = CELLS * CELLS; // 待つ手
 export const WAITS = 3; // 1人が待てる回数（決め方はファイルの先頭）
 
@@ -153,7 +154,7 @@ export default {
   judge(s) { return boardJudge(this, s, legalOf, score, 2, 4); },
 
   init({ rules = {} } = {}) {
-    const s = { board: startBoard(), t: [0, 0], mv: -1, turn: 0, taken: [[], []], last: null, ply: 0, won: null };
+    const s = { board: startBoard(), t: [0, 0], mv: -1, turn: 0, taken: [[], []], last: null, ply: 0, won: null, hist: [] };
     return rules.wait === true ? { ...s, wait: [WAITS, WAITS] } : s;
   },
 
@@ -168,7 +169,7 @@ export default {
       const wait = s.wait.map((v, q) => (q === p ? v - 1 : v));
       const turn = nextTurn(t, p);
       const ply = s.ply + 1;
-      const next = { ...s, t, wait, mv: p, turn, last: { f: -1, d: -1, cap: null, wait: true }, ply, won: null };
+      const next = { ...s, t, wait, mv: p, turn, last: { f: -1, d: -1, cap: null, wait: true }, ply, won: null, hist: [...(s.hist ?? []), p * 5 + 4] };
       if (stuckOf(next, s.board, turn)) next.won = { winner: 1 - turn, stuck: true };
       else if (ply >= MAX_PLY) next.won = { winner: null, long: true };
       return next;
@@ -192,7 +193,7 @@ export default {
     if (cap === KING) won = { winner: p, king: d };
     else if (stuckOf(s, board, turn)) won = { winner: 1 - turn, stuck: true };
     else if (ply >= MAX_PLY) won = { winner: null, long: true };
-    return { ...s, board, t, mv: p, turn, taken, last: { f, d, cap }, ply, won };
+    return { ...s, board, t, mv: p, turn, taken, last: { f, d, cap }, ply, won, hist: [...(s.hist ?? []), p * 5 + kindOf(v)] };
   },
 
   result(s) { return s.won ? { ...s.won, cells: [] } : null; },
@@ -251,6 +252,13 @@ export default {
       if (o.fresh && s.mv === p && s.last) { mine.classList.add('step'); mine.style.setProperty('--dx', s.last.wait ? -1 : -WEIGHT[kindOf(s.board[s.last.d])]); }
       track.append(mine);
       row.append(name, track);
+      // 続けて動けるときの「もう1手！」（2026-11-27 の UI・UX の14回目）: 動かしたあとも同じ人の番のとき、その人の行に跳ねて出す（あなたのターンの帯は長く待ったあとの番でしか出ないため）
+      if (o.fresh && !over && s.mv === p && s.turn === p && !add) {
+        const again = document.createElement('span');
+        again.className = 'om-again';
+        again.textContent = 'もう1手！';
+        row.append(again);
+      }
       if (add && p === s.turn) {
         const after = s.t.slice();
         after[p] += add;
@@ -272,6 +280,26 @@ export default {
       w.textContent = `⏳ 待つ（時計 +1・あと${s.wait[s.turn]}回）`;
       w.onclick = () => { ui = { ...ui, from: null }; o.onMove(WAIT); };
       clock.append(w);
+    }
+    // 動いた順の帯（同じ14回目）: これまで動いた順を、動かした駒の字の丸で並べる（待つは ⏳）。同じ人が続けて動いた所は1本の帯にまとめる。
+    // 長くなったら新しい方の HIST だけ（古い方は「…」）。hist の無い古い局面（この版より前の手の一覧）では出さない
+    if (s.hist?.length) {
+      const strip = document.createElement('div');
+      strip.className = 'om-hist';
+      strip.setAttribute('aria-label', '動いた順');
+      const from = Math.max(0, s.hist.length - HIST);
+      if (from > 0) strip.append('…');
+      let run = null;
+      for (let k = from; k < s.hist.length; k++) {
+        const p = Math.floor(s.hist[k] / 5);
+        const kind = s.hist[k] % 5;
+        if (!run || run.p !== p) { run = { p, el: document.createElement('span') }; run.el.className = 'om-run p' + p; strip.append(run.el); }
+        const dot = document.createElement('span');
+        dot.className = 'om-dot' + (o.fresh && k === s.hist.length - 1 ? ' pop' : '');
+        dot.textContent = kind === 4 ? '⏳' : KIND[kind];
+        run.el.append(dot);
+      }
+      clock.append(strip);
     }
     root.append(clock);
 
