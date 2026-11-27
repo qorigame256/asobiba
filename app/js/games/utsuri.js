@@ -11,6 +11,10 @@
 //
 // 局面: { board: マスごとの駒（null 空き・-1 色の無い駒・0/1 その席の色）, turn, last: { f, d, was: 動かす前の色 } か null, ply, won }。
 // 手 = 動かす駒のマス * 36 + 行き先のマス（マス = 段*6+列。段0が一番上）。
+//
+// 「自分の色は動かせない」（2026-11-27 の49回目の案。本人が選んだ。詳細設定 lockOwn、最初は なし）: 動かせるのは色の無い駒と相手の色の駒だけ。
+// Claude の判断: 直前に動いた駒は動かせない決まりはそのまま。番が来たのに動かせる駒が無い人の負けもそのまま（自分の色ばかりになると起きうる）。
+//   ありのときだけ局面に lockOwn: true を持つ（なしなら今までと同じ局面）。
 
 import { CPU_SETTING, PEEK_SETTING, peekMark, boardCpu, boardJudge, grabbable, justDragged, winLine, col } from './util.js';
 
@@ -51,11 +55,11 @@ for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
   }
 }
 
-// lock（直前に動いた駒のマス）を除いた、動かせる手の一覧
-export function movesOf(b, lock) {
+// lock（直前に動いた駒のマス）と、色が skip の駒（自分の色は動かせないときの自分の色。無ければ undefined）を除いた、動かせる手の一覧
+export function movesOf(b, lock, skip) {
   const out = [];
   for (let f = 0; f < CELLS; f++) {
-    if (b[f] === null || f === lock) continue;
+    if (b[f] === null || f === lock || b[f] === skip) continue;
     const r = Math.floor(f / N);
     const c = f % N;
     for (const [dr, dc] of ORTH) {
@@ -68,6 +72,8 @@ export function movesOf(b, lock) {
   return out;
 }
 const lockOf = (s) => (s.last ? s.last.d : -1);
+// 番の人（p）が打てる手
+const legalOf = (s, p = s.turn) => movesOf(s.board, lockOf(s), s.lockOwn ? p : undefined);
 
 // マス d を通る、色 p のいちばん長い並び（4つ以上の並びのマスをまとめて返す。無ければ空）
 export function lineAt(b, d, p) {
@@ -117,6 +123,7 @@ export default {
   keepColor: true, // 続けて遊ぶ間は、その人の色を変えない（util.js の col）
   players: ['赤', '青'],
   settings: [
+    { key: 'lockOwn', label: '自分の色は動かせない', desc: '動かせるのは色の無い駒と相手の色の駒だけ。自分の色の駒は、相手に動かされるまでそのまま', def: false, choices: [[false, 'なし'], [true, 'あり']] },
     PEEK_SETTING,
     CPU_SETTING,
   ],
@@ -124,23 +131,24 @@ export default {
   // CPU: 何手先まで読むかで強さを変える（4手読みは1手に最長2.4秒かかり、引き分けばかりで強くもならなかったので つよい は3手）。
   //   実測（強い方の勝ち・負け・引き分け。2026-11-27）: ふつう-よわい 23・4・3（30局）、つよい-ふつう 6・0・14（20局）、つよい-よわい 27・0・3（30局）。1手の最長 約80ms
   cpu(s, p, rules) {
-    return boardCpu(this, s, rules, (x) => movesOf(x.board, lockOf(x)), score, {
+    return boardCpu(this, s, rules, (x) => legalOf(x), score, {
       depth: { weak: 1, normal: 2, strong: 3 }, mistake: { weak: 0.4, normal: 0.15, strong: 0 },
     });
   },
 
   // 形勢（util.js の boardJudge）: 4つの窓の数え方を2手先まで読む
-  judge(s) { return boardJudge(this, s, (x) => movesOf(x.board, lockOf(x)), score, 2, 30); },
+  judge(s) { return boardJudge(this, s, (x) => legalOf(x), score, 2, 30); },
 
-  init() {
-    return { board: startBoard(), turn: 0, last: null, ply: 0, won: null };
+  init({ rules = {} } = {}) {
+    const s = { board: startBoard(), turn: 0, last: null, ply: 0, won: null };
+    return rules.lockOwn === true ? { ...s, lockOwn: true } : s;
   },
 
   turn(s) { return s.turn; },
 
   apply(s, m) {
     if (s.won || !Number.isInteger(m) || m < 0 || m >= CELLS * CELLS) return null;
-    if (!movesOf(s.board, lockOf(s)).includes(m)) return null;
+    if (!legalOf(s).includes(m)) return null;
     const f = Math.floor(m / CELLS);
     const d = m % CELLS;
     const p = s.turn;
@@ -153,7 +161,7 @@ export default {
     let won = null;
     if (line.length) won = { winner: p, cells: line };
     else if (ply >= MAX_PLY) won = { winner: null, long: true, cells: [] };
-    else if (!movesOf(board, d).length) won = { winner: p, stuck: true, cells: [] };
+    else if (!movesOf(board, d, s.lockOwn ? 1 - p : undefined).length) won = { winner: p, stuck: true, cells: [] };
     return { ...s, board, turn: 1 - p, last: { f, d, was }, ply, won };
   },
 
@@ -177,7 +185,7 @@ export default {
     if (ui.key !== key) ui = { key, from: null };
     const can = o.canMove && !over;
     const lock = lockOf(s);
-    const legal = can ? movesOf(s.board, lock) : [];
+    const legal = can ? legalOf(s) : [];
     const movable = new Set(legal.map((m) => Math.floor(m / CELLS)));
     const targets = new Set(ui.from === null ? [] : legal.filter((m) => Math.floor(m / CELLS) === ui.from).map((m) => m % CELLS));
     const win = new Set(s.won?.cells ?? []);

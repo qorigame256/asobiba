@@ -1,0 +1,118 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "app/fonts",
+    "app/voice",
+    "app/sounds",
+    "tools/test-logic.mjs",
+    "tools/font-chars.json",
+    "tools/font-texts.mjs",
+    "tools/voice-texts.mjs",
+    "tools/probes/uiux13-logic.mjs"
+  ],
+  "cwd": "copy",
+  "env": {
+    "QUICK": "1",
+    "SEED": "1"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 300,
+  "breaks": [
+    {
+      "name": "重さの手番: 待っても残りの回数が減らない",
+      "file": "app/js/games/omosa.js",
+      "old": "(q === p ? v - 1 : v)",
+      "new": "(q === p ? v : v)",
+      "expect": ["重さの手番: 待つと駒は動かず時計が1進み、残りの回数が減る"]
+    },
+    {
+      "name": "重さの手番: 待つが残っていても動かせなければ負け",
+      "file": "app/js/games/omosa.js",
+      "old": "const stuckOf = (s, board, turn) => !hasMove(board, turn) && !canWait(s, turn);",
+      "new": "const stuckOf = (s, board, turn) => !hasMove(board, turn);",
+      "expect": ["重さの手番: 待つが残っていれば、動かせる駒が無くても続く"]
+    },
+    {
+      "name": "灯りの陣取り: 隠し灯りがほかの人に見える",
+      "file": "app/js/games/akari.js",
+      "old": "  for (const c of s.order) if (hiddenFrom(s, c, viewer)) lamps[c] = null;",
+      "new": "  for (const c of s.order) if (hiddenFrom(s, c, viewer) && false) lamps[c] = null;",
+      "expect": ["灯りの陣取り: ほかの人からは隠し灯りが見えない"]
+    },
+    {
+      "name": "灯りの陣取り: CPU がほかの人の隠し灯りを見る",
+      "file": "app/js/games/akari.js",
+      "old": "const c = akariCpu(viewOf(s, s.turn), rules);",
+      "new": "const c = akariCpu(s, rules);",
+      "expect": ["灯りの陣取り: CPU はほかの人の隠し灯りを知らずに選ぶ（空の盤と同じ手）"]
+    },
+    {
+      "name": "灯りの陣取り: 見つけた人の番が次の人へ進む",
+      "file": "app/js/games/akari.js",
+      "old": "found: { c, q, by: s0.turn } };",
+      "new": "found: { c, q, by: s0.turn }, turn: (s0.turn + 1) % s0.n };",
+      "expect": ["灯りの陣取り: 隠し灯りのマスを選ぶと見つかって、選んだ人がもう一度選ぶ"]
+    },
+    {
+      "name": "灯りの陣取り: 最後の1つでも薄い灯りを出す",
+      "file": "app/js/games/akari.js",
+      "old": "s.order.length + 1 >= s.n * s.per",
+      "new": "s.order.length + 1 > s.n * s.per",
+      "expect": ["灯りの陣取り: 最後の1つだけ薄い灯りを出さない"]
+    },
+    {
+      "name": "多数決の陣地: 重なっても締め切らない",
+      "file": "app/js/games/tasuu.js",
+      "old": "{ shut[z] = true; continue; }",
+      "new": "{ shut[z] = false; continue; }",
+      "expect": ["多数決の陣地: 空きより多く来た陣地は、石が全部はじかれて締め切り"]
+    },
+    {
+      "name": "多数決の陣地: ちょうど入るときも締め切る",
+      "file": "app/js/games/tasuu.js",
+      "old": "if (who.length > CAP - zones[z].length)",
+      "new": "if (who.length >= CAP - zones[z].length)",
+      "expect": ["多数決の陣地: 空きにちょうど入るなら全部入る"]
+    },
+    {
+      "name": "多数決の陣地: 一斉に置くにもおまけ点",
+      "file": "app/js/games/tasuu.js",
+      "old": "{ ...s, bonus: new Array(n).fill(0), tog: true,",
+      "new": "{ ...s, bonus: BONUS[n].slice(), tog: true,",
+      "expect": ["多数決の陣地: 一斉に置くではおまけ点なし"]
+    },
+    {
+      "name": "多数決の陣地: 回がそろう手でも薄い石を出す",
+      "file": "app/js/games/tasuu.js",
+      "old": "s.pend.filter((x) => x === null).length === 1;",
+      "new": "s.pend.filter((x) => x === null).length === 0;",
+      "expect": ["多数決の陣地: 回がそろう手だけ薄い石を出さない"]
+    },
+    {
+      "name": "色うつり四目: 自分の色も動かせる",
+      "file": "app/js/games/utsuri.js",
+      "old": "movesOf(s.board, lockOf(s), s.lockOwn ? p : undefined)",
+      "new": "movesOf(s.board, lockOf(s), undefined)",
+      "expect": ["色うつり四目: 自分の色は動かせないでは、自分の色の駒を動かす手は打てない"]
+    },
+    {
+      "name": "色うつり四目: 動かせない負けで自分の色を数える",
+      "file": "app/js/games/utsuri.js",
+      "old": "movesOf(board, d, s.lockOwn ? 1 - p : undefined)",
+      "new": "movesOf(board, d, undefined)",
+      "expect": ["色うつり四目: 動かせるのが自分の色の駒だけなら負け"]
+    }
+  ]
+}

@@ -13,7 +13,15 @@
 //
 // 局面: { board: マスごとの駒（null か 席*4+種類。種類 0 王・1 兵・2 槍・3 騎）, t: [席ごとの時計], mv: 直前に動いた席（始めは -1）, turn,
 //   taken: [席ごとの取った駒の種類], last: { f, d, cap: 取った駒の種類か null }, ply, won }。
-// 手 = 動かす駒のマス * 36 + 行き先のマス（マス = 段*6+列。段0が一番上）。
+// 手 = 動かす駒のマス * 36 + 行き先のマス（マス = 段*6+列。段0が一番上）。待つ手は WAIT（36*36）。
+//
+// 「待つ」（2026-11-27 の49回目の案。本人が選んだ。詳細設定 wait、最初は なし）: 駒を動かさずに、自分の時計を1つ進めて番を回せる。
+// Claude の判断: 時計が進むのは1だけ（兵と同じ）。待ったあとも時計が遅れていれば続けて自分の番。
+//   待てるのは1人3回まで（WAITS）。回数を決めないと、つよいどうしは手の75%が待つになり、にらみ合いで引き分けが増えた
+//   （40局で 1番手 19勝・2番手 7勝・引き分け 14、平均82手）。3回では 24・11・5（平均43手、待つは1局に約2回）で、待つなしの 33・19・8（60局）と偏りが近い。
+//   1回 18・16・6、2回 27・8・5、5回 20・13・7（平均56手）。2026-11-27 の実測。
+//   動かせる駒が無くても待つが残っていれば負けにならない（待つしかない）。
+//   ありのときだけ局面に wait: [席ごとの残りの回数] を持つ（なしなら今までと同じ局面）。直前の手が待つなら last は { f: -1, d: -1, cap: null, wait: true }。
 
 import { CPU_SETTING, PEEK_SETTING, peekMark, boardCpu, boardJudge, grabbable, justDragged } from './util.js';
 
@@ -27,6 +35,8 @@ const KIND = ['王', '兵', '槍', '騎'];
 export const WEIGHT = [2, 1, 3, 3];
 const MAX_PLY = 200;
 const SPAN = 4; // 物差しの目盛りの数（小さい方の時計から3先まで）
+export const WAIT = CELLS * CELLS; // 待つ手
+export const WAITS = 3; // 1人が待てる回数（決め方はファイルの先頭）
 
 const owner = (v) => v >> 2;
 const kindOf = (v) => v & 3;
@@ -90,6 +100,11 @@ function movesOf(b, p) {
   return cap.concat(quiet);
 }
 const hasMove = (b, p) => b.some((v, f) => v !== null && owner(v) === p && targetsOf(b, f).length > 0);
+// 手番の人が打てる手（待つがありなら、最後に待つ手）
+const canWait = (s, p) => !!s.wait && s.wait[p] > 0;
+const legalOf = (s) => (canWait(s, s.turn) ? [...movesOf(s.board, s.turn), WAIT] : movesOf(s.board, s.turn));
+// 番が来た人が何も打てない（動かせる駒が無く、待つも残っていない）
+const stuckOf = (s, board, turn) => !hasMove(board, turn) && !canWait(s, turn);
 
 /* ---------- CPU ---------- */
 
@@ -120,6 +135,7 @@ export default {
   ready: true,
   players: ['1番手（黒）', '2番手（赤）'],
   settings: [
+    { key: 'wait', label: '待つ', desc: '駒を動かさずに、自分の時計を1つ進めて番を回せる', def: false, choices: [[false, 'なし'], [true, 'あり']] },
     PEEK_SETTING,
     CPU_SETTING,
   ],
@@ -128,22 +144,35 @@ export default {
   //   よわい も2手読む（1手だと、次に王を取られる手を平気で打ち、抵抗にならなかった）。そのぶん適当に打つ割合を4割にした。
   //   40局の実測（強い方の勝ち・負け・引き分け。2026-11-27）: ふつう-よわい 37・3・0、つよい-ふつう 39・0・1。1手の最長 35ms
   cpu(s, p, rules) {
-    return boardCpu(this, s, rules, (x) => movesOf(x.board, x.turn), score, {
+    return boardCpu(this, s, rules, legalOf, score, {
       depth: { weak: 2, normal: 3, strong: 4 }, mistake: { weak: 0.4, normal: 0.1, strong: 0 },
     });
   },
 
   // 形勢（util.js の boardJudge）: 駒の値打ちと時計の遅れを2手先まで読む
-  judge(s) { return boardJudge(this, s, (x) => movesOf(x.board, x.turn), score, 2, 4); },
+  judge(s) { return boardJudge(this, s, legalOf, score, 2, 4); },
 
-  init() {
-    return { board: startBoard(), t: [0, 0], mv: -1, turn: 0, taken: [[], []], last: null, ply: 0, won: null };
+  init({ rules = {} } = {}) {
+    const s = { board: startBoard(), t: [0, 0], mv: -1, turn: 0, taken: [[], []], last: null, ply: 0, won: null };
+    return rules.wait === true ? { ...s, wait: [WAITS, WAITS] } : s;
   },
 
   turn(s) { return s.turn; },
 
   apply(s, m) {
-    if (s.won || !Number.isInteger(m) || m < 0 || m >= CELLS * CELLS) return null;
+    if (s.won || !Number.isInteger(m) || m < 0 || m > WAIT || (m === WAIT && !canWait(s, s.turn))) return null;
+    if (m === WAIT) {
+      const p = s.turn;
+      const t = s.t.slice();
+      t[p] += 1;
+      const wait = s.wait.map((v, q) => (q === p ? v - 1 : v));
+      const turn = nextTurn(t, p);
+      const ply = s.ply + 1;
+      const next = { ...s, t, wait, mv: p, turn, last: { f: -1, d: -1, cap: null, wait: true }, ply, won: null };
+      if (stuckOf(next, s.board, turn)) next.won = { winner: 1 - turn, stuck: true };
+      else if (ply >= MAX_PLY) next.won = { winner: null, long: true };
+      return next;
+    }
     const f = Math.floor(m / CELLS);
     const d = m % CELLS;
     const v = s.board[f];
@@ -161,7 +190,7 @@ export default {
     const ply = s.ply + 1;
     let won = null;
     if (cap === KING) won = { winner: p, king: d };
-    else if (!hasMove(board, turn)) won = { winner: 1 - turn, stuck: true };
+    else if (stuckOf(s, board, turn)) won = { winner: 1 - turn, stuck: true };
     else if (ply >= MAX_PLY) won = { winner: null, long: true };
     return { ...s, board, t, mv: p, turn, taken, last: { f, d, cap }, ply, won };
   },
@@ -175,6 +204,7 @@ export default {
     let html = `取った駒　<b>1番手 ${tk(0)}</b>　−　<b class="om-red">2番手 ${tk(1)}</b>`;
     if (s.won?.long) html += `<br>${MAX_PLY}手になったので引き分け`;
     else if (s.won?.stuck) html += `<br>${this.players[1 - s.won.winner]}は動かせる駒が無くなった`;
+    else if (s.last?.wait && !s.won && s.gave === undefined) html += `<br>${s.mv === 0 ? '1番手' : '2番手'}は待った（時計 +1）`;
     return html;
   },
 
@@ -186,7 +216,7 @@ export default {
     const key = `${s.ply}:${o.me}`;
     if (ui.key !== key) ui = { key, from: null };
     const can = o.canMove && !over;
-    const legal = can ? movesOf(s.board, s.turn) : [];
+    const legal = can ? movesOf(s.board, s.turn) : []; // 駒を動かす手（待つ手は下のボタン）
     const movable = new Set(legal.map((m) => Math.floor(m / CELLS)));
     const targets = new Set(ui.from === null ? [] : legal.filter((m) => Math.floor(m / CELLS) === ui.from).map((m) => m % CELLS));
 
@@ -218,7 +248,7 @@ export default {
       };
       const mine = tok(s.t[p], 'p' + p);
       mine.textContent = s.t[p];
-      if (o.fresh && s.mv === p && s.last) { mine.classList.add('step'); mine.style.setProperty('--dx', -WEIGHT[kindOf(s.board[s.last.d])]); }
+      if (o.fresh && s.mv === p && s.last) { mine.classList.add('step'); mine.style.setProperty('--dx', s.last.wait ? -1 : -WEIGHT[kindOf(s.board[s.last.d])]); }
       track.append(mine);
       row.append(name, track);
       if (add && p === s.turn) {
@@ -233,6 +263,15 @@ export default {
         row.append(tag);
       }
       clock.append(row);
+    }
+    // 待つ（詳細設定 wait）: 番の人だけに出す
+    if (canWait(s, s.turn) && can) {
+      const w = document.createElement('button');
+      w.type = 'button';
+      w.className = 'btn secondary om-wait';
+      w.textContent = `⏳ 待つ（時計 +1・あと${s.wait[s.turn]}回）`;
+      w.onclick = () => { ui = { ...ui, from: null }; o.onMove(WAIT); };
+      clock.append(w);
     }
     root.append(clock);
 

@@ -15,6 +15,15 @@
 //
 // 局面: { n, pts: 陣地ごとの点, bonus: 席ごとのおまけ点, zones: 陣地ごとに置いた人の席を置いた順に並べた配列, turn, last: 直前に置いた陣地（無ければ null）, moves: 置いた数 }。
 // 手 = 陣地の番号 0〜4。
+//
+// 「一斉に置く」（2026-11-27 の49回目の案。本人が選んだ。詳細設定 together、最初は なし）: 1回ごとに全員がこっそり陣地を選び、そろったら同時に開いて置く。
+// Claude の判断: 盤のゲームは番の人が1人ずつ打つ作りなので、選ぶのは席の順だが、全員が選び終わるまでほかの人の選びは画面に出さない（自分の選びだけ薄く出す）。
+//   簡易の隠し方（全員の端末が知っている）。CPU はほかの人の選びを見ないで選ぶ。「相手の迷いを見せる」は使わない（noPeek）。
+//   1つの陣地に空きより多くの石が来たら、その陣地を選んだ石は全部はじかれ（置かれない）、その陣地はその場で締め切り、いまの石で決まる（石が5つ無くても）。
+//   はじめは「先に入る人から入れる」にしたが、最後の1つの空きを毎回同じ席が取り、2人のつよいどうしで 1番手 74勝・2番手 24勝（100局）と偏ったため、席で差の出ないこの形にした。
+//   全部の陣地が埋まるか締め切られたら終わり。おまけ点は付けない（実測は BONUS の下）。
+//   ありのときだけ局面に tog: true・pend: [席ごとのこの回の選び か null]・shut: [陣地ごとの締め切りか]・rev: 直前に開いた回 { picks: 選び, got: 入ったか } を持つ（なしなら今までと同じ局面）。
+//   turn はまだ選んでいない人のうち席の番号の小さい人。
 
 import { CPU_SETTING, TAP_PEEK_SETTING, col, mulberry32, shuffle, judgeOf } from './util.js';
 
@@ -23,6 +32,23 @@ const CAP = 5;
 const POINTS = [2, 3, 4, 5, 6];
 // 後の席のおまけ点（決め方と実測はファイルの先頭）
 export const BONUS = { 2: [0, 4], 3: [0, 1, 2], 4: [0, 1, 2, 2] };
+// 一斉に置くときは、おまけ点を付けない。席で差が出ないため（つよいどうし、2026-11-27 の実測）:
+//   2人 1番手 38勝・2番手 37勝・引き分け 125（200局）、3人 35・29・42・引き分け 14（120局）、4人 13・11・14・10・引き分け 72（120局）。
+//   強さの順: ふつう-よわい 90・5・5、つよい-ふつう 75・9・16 と 81・7・12（各100局）。1手の最長 33ms
+
+// 一斉に置く: そろった回の選びを置く。空きより多く来た陣地は全部はじいて締め切る。席ごとに入ったかを返す（zones と shut を書き換える）
+function placeRound(zones, shut, picks, n) {
+  const got = new Array(n).fill(false);
+  for (let z = 0; z < ZONES; z++) {
+    const who = [];
+    for (let p = 0; p < n; p++) if (picks[p] === z) who.push(p);
+    if (!who.length) continue;
+    if (who.length > CAP - zones[z].length) { shut[z] = true; continue; }
+    zones[z] = [...zones[z], ...who];
+    for (const p of who) got[p] = true;
+  }
+  return got;
+}
 
 // 陣地 z の石の数（席ごと）
 const countIn = (n, z) => {
@@ -30,9 +56,9 @@ const countIn = (n, z) => {
   for (const p of z) c[p]++;
   return c;
 };
-// 埋まった陣地を取った人（並んだら -1。埋まっていなければ null）
-export function ownerOf(n, z) {
-  if (z.length < CAP) return null;
+// 埋まった（shut なら締め切った）陣地を取った人（並んだら -1。石が無いときも -1。埋まっていなければ null）
+export function ownerOf(n, z, shut = false) {
+  if (z.length < CAP && !shut) return null;
   const c = countIn(n, z);
   const top = Math.max(...c);
   const w = c.map((v, p) => (v === top ? p : -1)).filter((p) => p >= 0);
@@ -42,17 +68,18 @@ export function ownerOf(n, z) {
 export function scoresOf(s) {
   const sc = s.bonus.slice();
   s.zones.forEach((z, i) => {
-    const w = ownerOf(s.n, z);
+    const w = ownerOf(s.n, z, !!s.shut?.[i]);
     if (w !== null && w >= 0) sc[w] += s.pts[i];
   });
   return sc;
 }
-const legalOf = (s) => s.zones.map((z, i) => (z.length < CAP ? i : -1)).filter((i) => i >= 0);
+const doneAt = (s, i) => s.zones[i].length >= CAP || !!s.shut?.[i]; // 埋まったか締め切った陣地
+const legalOf = (s) => s.zones.map((z, i) => (doneAt(s, i) ? -1 : i)).filter((i) => i >= 0);
 
 /* ---------- CPU ---------- */
 
 // 速く数えるため、CPU の中では陣地ごと・席ごとの石の数（cnt[陣地][席]）と陣地の石の数（len）で持つ
-const countsOf = (s) => ({ cnt: s.zones.map((z) => countIn(s.n, z)), len: s.zones.map((z) => z.length) });
+const countsOf = (s) => ({ cnt: s.zones.map((z) => countIn(s.n, z)), len: s.zones.map((z, i) => (s.shut?.[i] ? CAP : z.length)) }); // 締め切った陣地は埋まったと数える
 // 埋まった陣地を取った人（並んだら -1）
 function winnerOfCnt(c) {
   let top = -1, who = -1;
@@ -170,11 +197,54 @@ function weakPick(s) {
   }
   return good.length ? good : safe.length ? safe : moves;
 }
+// 一斉に置く: 手ごとに「この回のほかの人の選びは空いた陣地から適当（実際の選びは見ない）、そのあとも全員が適当に選んで最後まで行く」試しを tries 回して、
+// 自分の点 − ほかの人でいちばん多い人の点の平均がいちばん良い手
+function rolloutTog(s, tries) {
+  const { cnt: c0, len: l0 } = countsOf(s);
+  const moves = legalOf(s);
+  const n = s.n;
+  const me = s.turn;
+  let bestV = -Infinity;
+  let top = [];
+  for (const m of moves) {
+    let sum = 0;
+    for (let t = 0; t < tries; t++) {
+      const cnt = c0.map((c) => c.slice());
+      const len = l0.slice();
+      const pick = new Array(n);
+      const many = new Array(ZONES);
+      for (let first = true; ; first = false) {
+        const open = [];
+        for (let i = 0; i < ZONES; i++) if (len[i] < CAP) open.push(i);
+        if (!open.length) break;
+        many.fill(0);
+        for (let p = 0; p < n; p++) { pick[p] = first && p === me ? m : open[Math.floor(Math.random() * open.length)]; many[pick[p]]++; }
+        for (let i = 0; i < ZONES; i++) if (many[i] > CAP - len[i]) { len[i] = CAP; many[i] = -1; } // 空きより多く来たら締め切り（石は入らない）
+        for (let p = 0; p < n; p++) { const z = pick[p]; if (many[z] > 0) { cnt[z][p]++; len[z]++; } }
+      }
+      const sc = s.bonus.slice();
+      for (let i = 0; i < ZONES; i++) { const w = winnerOfCnt(cnt[i]); if (w >= 0) sc[w] += s.pts[i]; }
+      let other = -Infinity;
+      for (let p = 0; p < n; p++) if (p !== me && sc[p] > other) other = sc[p];
+      sum += sc[me] - other;
+    }
+    const v = sum / tries;
+    if (v > bestV) { bestV = v; top = [m]; } else if (v === bestV) top.push(m);
+  }
+  return top;
+}
+// 一斉に置くの強さ: よわい 4割は適当・ほかは試し6回、ふつう 1割は適当・試し40回、つよい 試し300回
+const LEVEL_TOG = { weak: { slip: 0.4, tries: 6 }, normal: { slip: 0.1, tries: 40 }, strong: { slip: 0, tries: 300 } };
+
 function tasuuCpu(s, rules) {
-  const lv = LEVEL[rules?.cpu] ?? LEVEL.weak;
   const moves = legalOf(s);
   const pick = (a) => a[Math.floor(Math.random() * a.length)];
   if (moves.length === 1) return moves[0];
+  if (s.tog) {
+    const lt = LEVEL_TOG[rules?.cpu] ?? LEVEL_TOG.weak;
+    return Math.random() < lt.slip ? pick(moves) : pick(rolloutTog(s, lt.tries));
+  }
+  const lv = LEVEL[rules?.cpu] ?? LEVEL.weak;
   if (Math.random() < (s.n === 2 && lv.slip2 !== undefined ? lv.slip2 : lv.slip)) return pick(moves);
   if (!lv.tries) return pick(weakPick(s));
   return pick(s.n === 2 ? best2(s) : rollout(s, lv.tries));
@@ -182,7 +252,7 @@ function tasuuCpu(s, rules) {
 
 // 形勢（2人の観戦の帯・ふりかえり）: 読み切りの点の差（おまけ点を入れる）を、1番手から見た −100〜100 にする（Math.random を使わない）
 function judge2(s) {
-  if (s.n !== 2) return null;
+  if (s.n !== 2 || s.tog) return null; // 一斉に置くは読み切れない（同時に選ぶため）
   const sc = scoresOf(s);
   const res = s.moves >= ZONES * CAP;
   if (res) return sc[0] === sc[1] ? 0 : sc[0] > sc[1] ? 100 : -100;
@@ -191,8 +261,23 @@ function judge2(s) {
   return d === 0 ? 0 : judgeOf(d, 4);
 }
 
+const fullOf = (s) => s.zones.every((_, i) => doneAt(s, i)); // 全部の陣地が埋まるか締め切った
+
 function applyMove(s0, z) {
-  if (!Number.isInteger(z) || z < 0 || z >= ZONES || !s0.zones[z] || s0.zones[z].length >= CAP) return null;
+  if (!Number.isInteger(z) || z < 0 || z >= ZONES || !s0.zones[z] || doneAt(s0, z)) return null;
+  if (s0.tog) {
+    if (fullOf(s0)) return null;
+    const pend = s0.pend.slice();
+    pend[s0.turn] = z;
+    const next = pend.indexOf(null);
+    if (next >= 0) return { ...s0, pend, turn: next };
+    // 全員そろった: 同時に開いて置く
+    const zones = s0.zones.slice();
+    const shut = s0.shut.slice();
+    const got = placeRound(zones, shut, pend, s0.n);
+    const placed = got.filter(Boolean).length;
+    return { ...s0, zones, shut, pend: new Array(s0.n).fill(null), turn: 0, rev: { picks: pend, got }, moves: s0.moves + placed };
+  }
   const zones = s0.zones.slice();
   zones[z] = [...zones[z], s0.turn];
   return { ...s0, zones, turn: (s0.turn + 1) % s0.n, last: z, moves: s0.moves + 1 };
@@ -209,9 +294,13 @@ export default {
   seatCount(rules) { return rules?.players ?? 2; },
   settings: [
     { key: 'players', label: '人数', desc: '順番に石を置く人数（石は全部で25個）', def: 2, choices: [[2, '2人'], [3, '3人'], [4, '4人']] },
+    { key: 'together', label: '一斉に置く', desc: '1回ごとに全員がこっそり陣地を選び、そろったら同時に開いて置く（おまけ点なし）。入りきらない陣地は、その回の「先に入る人」から入れる', def: false, choices: [[false, 'なし'], [true, 'あり']] },
     TAP_PEEK_SETTING,
     CPU_SETTING,
   ],
+  noPeek(rules) { return rules?.together === true; }, // 一斉に置くときは「相手の迷いを見せる」を使わない（main.js の peekOn）
+  // 2回押して置くの薄い石（main.js の ghostOne）を、回がそろう手では出さない（当てた局面にはほかの人の選びが開いているため）
+  noGhost(s) { return !!s.tog && s.pend.filter((x) => x === null).length === 1; },
 
   cpu(s, p, rules) { return tasuuCpu(s, rules); },
   judge(s) { return judge2(s); },
@@ -219,7 +308,8 @@ export default {
   init({ rules = {}, seed = 0 } = {}) {
     const n = [2, 3, 4].includes(rules.players) ? rules.players : 2;
     const pts = shuffle(POINTS, mulberry32((seed ^ 0x7a50) >>> 0));
-    return { n, pts, bonus: BONUS[n].slice(), zones: Array.from({ length: ZONES }, () => []), turn: 0, last: null, moves: 0 };
+    const s = { n, pts, bonus: BONUS[n].slice(), zones: Array.from({ length: ZONES }, () => []), turn: 0, last: null, moves: 0 };
+    return rules.together === true ? { ...s, bonus: new Array(n).fill(0), tog: true, pend: new Array(n).fill(null), shut: new Array(ZONES).fill(false), rev: null } : s;
   },
 
   turn(s) { return s.turn; },
@@ -227,7 +317,7 @@ export default {
   apply(s0, z) { return applyMove(s0, z); },
 
   result(s) {
-    if (s.moves < ZONES * CAP) return null;
+    if (s.tog ? !fullOf(s) : s.moves < ZONES * CAP) return null;
     const sc = scoresOf(s);
     const top = Math.max(...sc);
     const winners = sc.map((v, p) => (v === top ? p : -1)).filter((p) => p >= 0);
@@ -237,7 +327,20 @@ export default {
   info(s) {
     const sc = scoresOf(s);
     return sc.map((v, p) => `<b class="pl p${col(p)}">${this.players[col(p)]} <span data-roll="tsu${p}" data-v="${v}">${v}</span>点</b>`
-      + (s.bonus[p] ? `<small class="tsu-bonus">おまけ${s.bonus[p]}</small>` : '')).join('　');
+      + (s.bonus[p] ? `<small class="tsu-bonus">おまけ${s.bonus[p]}</small>` : '')
+      + (s.tog && !this.result(s) ? `<small class="tsu-pick">${s.pend[p] !== null ? '✓' : '…'}</small>` : '')).join('　')
+      + (s.tog ? this.bounceText(s) : '');
+  },
+
+  // 一斉に置く: 直前に開いた回で、空きより多く来て締め切った陣地（だれの石がはじかれたか）
+  bounceText(s) {
+    if (!s.rev) return '';
+    const out = [];
+    for (let i = 0; i < ZONES; i++) {
+      const who = s.rev.picks.map((z, p) => (z === i && !s.rev.got[p] ? p : -1)).filter((p) => p >= 0);
+      if (who.length) out.push(`${s.pts[i]}点の陣地に ${who.map((p) => this.players[col(p)]).join('・')} が重なって締め切り`);
+    }
+    return out.length ? `<br><small>${out.join('／')}</small>` : '';
   },
 
   render(root, s, o) {
@@ -248,13 +351,19 @@ export default {
     const top = res ? Math.max(...sc) : null;
     const row = document.createElement('div');
     row.className = 'tsu-row';
+    const me = Number.isInteger(o.me) && o.me >= 0 ? o.me : null;
+    const mine = s.tog && me !== null ? s.pend[me] : null; // 一斉に置く: この回の自分の選び（自分の画面にだけ薄く出す）
     s.zones.forEach((z, i) => {
-      const w = ownerOf(s.n, z);
+      const w = ownerOf(s.n, z, !!s.shut?.[i]);
       const c = countIn(s.n, z);
+      // 一斉に置く: 直前に開いた回で、この陣地に入った石の数・この陣地が開いた回に選ばれたか
+      const fresh = s.tog && o.fresh && s.rev ? s.rev.picks.filter((x, p) => x === i && s.rev.got[p]).length : 0;
+      const hit = s.tog && o.fresh && !!s.rev && s.rev.picks.includes(i);
       const box = document.createElement('button');
       box.type = 'button';
       box.className = 'tsu-zone' + (w !== null ? (w >= 0 ? ` won p${col(w)}` : ' tie') : '')
-        + (w !== null && w >= 0 && res && sc[w] === top ? ' win' : '') + (o.fresh && s.last === i && w !== null ? ' just' : '');
+        + (w !== null && w >= 0 && res && sc[w] === top ? ' win' : '') + ((o.fresh && s.last === i) || hit ? (w !== null ? ' just' : '') : '')
+        + (s.shut?.[i] ? ' shut' : '') + (hit && s.shut?.[i] && fresh === 0 && s.rev.picks.filter((x) => x === i).length ? ' bounce' : '');
       // 点の札
       const pt = document.createElement('div');
       pt.className = 'tsu-pt';
@@ -269,8 +378,13 @@ export default {
         if (k < z.length) {
           const st = document.createElement('span');
           const last = s.last === i && k === z.length - 1;
-          st.className = 'tsu-stone p' + col(z[k]) + (last ? ' last' : '') + (last && o.fresh ? ' pop' : '');
+          const pop = (last && o.fresh) || k >= z.length - fresh;
+          st.className = 'tsu-stone p' + col(z[k]) + (last ? ' last' : '') + (pop ? ' pop' : '');
           if (last) st.dataset.last = '';
+          sl.append(st);
+        } else if (mine === i && k === z.length) {
+          const st = document.createElement('span');
+          st.className = 'tsu-stone pend p' + col(me);
           sl.append(st);
         }
         slots.append(sl);
@@ -279,14 +393,14 @@ export default {
       // 席ごとの数（いちばん多い人が分かるように）と、決まったあとの持ち主
       const tally = document.createElement('div');
       tally.className = 'tsu-tally';
-      if (w !== null) tally.textContent = w >= 0 ? `${this.players[col(w)]}の陣地` : 'だれも取らない';
+      if (w !== null) tally.textContent = (s.shut?.[i] ? '締め切り・' : '') + (w >= 0 ? `${this.players[col(w)]}の陣地` : 'だれも取らない');
       else if (z.length) {
         const mx = Math.max(...c);
         tally.innerHTML = c.map((v, p) => (v ? `<b class="p${col(p)}${v === mx ? ' lead' : ''}">${v}</b>` : '')).filter(Boolean).join('');
       }
       box.append(tally);
       box.setAttribute('aria-label', `${s.pts[i]}点の陣地（石 ${z.length}/${CAP}）`);
-      if (o.canMove && z.length < CAP) {
+      if (o.canMove && w === null) {
         box.classList.add('playable', 'p' + col(s.turn));
         box.onclick = () => o.onMove(i);
       } else {

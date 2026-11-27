@@ -5400,7 +5400,9 @@ let lastTap = null; // 盤の中で最後に押した物（押した手の印を
 el('board').addEventListener('click', (e) => { lastTap = e.target; }, true);
 const ghostKey = () => `${timerKey()}:${S.moves.length}:${S.undo ?? 0}`;
 const twoTapOn = (game) => !!viewPref.twoTap && TWO_TAP_GAMES.has(S.gameId) && !game.multi && !game.live;
-const peekOn = () => S?.mode === 'online' && !!GAMES[S.gameId]?.settings?.some((x) => x.key === 'peek') && rulesOf(S.gameId, S.rules).peek !== 'off';
+// noPeek(詳細設定) が true のゲームは使わない（2026-11-27。隠し灯り・一斉に置くのように、1回目に押した所を見せると隠した手が分かってしまう遊び方）
+const peekOn = () => S?.mode === 'online' && !!GAMES[S.gameId]?.settings?.some((x) => x.key === 'peek') && rulesOf(S.gameId, S.rules).peek !== 'off'
+  && !GAMES[S.gameId].noPeek?.(rulesOf(S.gameId, S.rules));
 function tapFirst(game, move) {
   if (!twoTapOn(game)) return false;
   const sig = JSON.stringify(move);
@@ -5434,6 +5436,8 @@ function drawGhosts(game, st, board) {
   if (pk && pk.m !== undefined && TWO_TAP_GAMES.has(S.gameId)) ghostOne(game, st, board, pk.m, 'peek-ghost', -1);
 }
 function ghostOne(game, st, board, move, cls, at) {
+  // noGhost(局面, 手) が true の手は、当てた局面を描かず押した物に輪だけ付ける（2026-11-27。当てると隠した物が開く手: 隠し灯りの最後の1つ・一斉に置くの回がそろう手）
+  if (game.noGhost?.(st, move)) { if (at >= 0) board.querySelectorAll('*')[at]?.classList.add(cls + '-ring'); return; }
   let next = null;
   try { next = game.apply(st, move); } catch { next = null; }
   if (!next) return;

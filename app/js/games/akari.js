@@ -8,11 +8,35 @@
 //   もう一回では先手と後手が入れ替わる）。距離は2乗のまま整数で比べる（端末ごとに丸めがずれないように）。
 //
 // 局面: { n, k: 一辺, per: 1人の灯りの数, lamps: マスごとに灯りを置いた人の席（無ければ null）, order: 置いた順のマス, turn, last }。手 = マスの番号（段*k+列）。
+//
+// 「隠し灯り」（2026-11-27 の49回目の案。本人が選んだ。詳細設定 hide、最初は なし）: 1人1つだけ、置いた場所をほかの人に見せずに灯りを置ける。全部置き終えたら開く。
+// Claude の判断: 隠し灯りの手 = マス + HIDE。いつ使うかは自由。隠し灯りもほかの灯りと同じく陣地を作るが、画面（と状態の欄の広さ）では
+//   置いた人にだけ見え、ほかの人・観戦の人には空きマスに見える。ほかの人がそのマスを選ぶと、その灯りが「見つかって」全員に見えるようになり、
+//   選んだ人はもう一度選ぶ（灯りは減らない）。自分の隠し灯りのマスには置けない（ふつうの灯りと同じ）。
+//   簡易の隠し方（全員の端末が場所を知っている）。CPU はほかの人の隠し灯りを見ないで選ぶ（viewOf）。CPU は自分の残りの灯りが2つのときに隠す。
+//   隠すときは「相手の迷いを見せる」を使わない（1回目に押した所が見えてしまうため。noPeek）。
+//   ありのときだけ局面に hide: [席ごとの隠し灯りのマス か null]・open: [席ごとの見つかったか] を持つ（なしなら今までと同じ局面）。
+//   見つかった直後は found: { c, q: 灯りの持ち主, by: 選んだ人 } を持ち、次に灯りを置いたら消す。
 
 import { CPU_SETTING, TAP_PEEK_SETTING, col } from './util.js';
 
 const SIZE = 9;
 const PER = { 2: 6, 3: 5, 4: 4 };
+export const HIDE = 100; // 隠し灯りの手 = マス + HIDE（盤は 81 マス）
+
+// マス c の灯りが、席 viewer から見えない（ほかの人の、まだ見つかっていない隠し灯り）か。決着の判定・点はいつも全部の灯りで数える
+function hiddenFrom(s, c, viewer) {
+  if (!s.hide) return false;
+  const q = s.hide.indexOf(c);
+  return q >= 0 && !s.open[q] && q !== viewer;
+}
+// 席 viewer から見た局面（見えない灯りを除く）。viewer が null・undefined（同じ画面の対局）なら全部見える。-1 はだれの隠し灯りも見えない（観戦・状態の欄）
+export function viewOf(s, viewer) {
+  if (!s.hide || viewer === null || viewer === undefined || !s.order.some((c) => hiddenFrom(s, c, viewer))) return s;
+  const lamps = s.lamps.slice();
+  for (const c of s.order) if (hiddenFrom(s, c, viewer)) lamps[c] = null;
+  return { ...s, lamps, order: s.order.filter((c) => lamps[c] !== null) };
+}
 
 const dist2 = (k, a, b) => {
   const dr = Math.floor(a / k) - Math.floor(b / k);
@@ -111,6 +135,8 @@ function akariCpu(s, rules) {
   return pick(rated.filter((r) => r.v === topV)).c;
 }
 
+let ui = { key: null, hide: false }; // 「隠して置く」を押しているか（通信で描き直されても消えないよう外に持つ）
+
 export default {
   id: 'akari',
   name: '灯りの陣取り',
@@ -122,24 +148,44 @@ export default {
   seatCount(rules) { return rules?.players ?? 2; },
   settings: [
     { key: 'players', label: '人数', desc: '順番に灯りを置く人数（灯りは 2人 6個・3人 5個・4人 4個ずつ）', def: 2, choices: [[2, '2人'], [3, '3人'], [4, '4人']] },
+    { key: 'hide', label: '隠し灯り', desc: '1人1つだけ、置いた場所をほかの人に見せずに灯りを置ける（全部置き終えたら開く）。ほかの人の隠し灯りのマスを選ぶと、その灯りが見つかって表になり、選んだ人はもう一度選ぶ', def: false, choices: [[false, 'なし'], [true, 'あり']] },
     TAP_PEEK_SETTING,
     CPU_SETTING,
   ],
+  noPeek(rules) { return rules?.hide === true; }, // 隠し灯りがあるときは「相手の迷いを見せる」を使わない（main.js の peekOn）
+  // 2回押して置くの薄い灯り（main.js の ghostOne）を、最後の1つでは出さない（当てた局面は決着で、まだ見えない隠し灯りが開くため）
+  noGhost(s) { return !!s.hide && s.order.length + 1 >= s.n * s.per && s.hide.some((c, q) => c !== null && !s.open[q]); },
 
-  cpu(s, p, rules) { return akariCpu(s, rules); },
+  cpu(s, p, rules) {
+    const c = akariCpu(viewOf(s, s.turn), rules); // ほかの人の隠し灯りは見ないで選ぶ
+    const mine = s.order.filter((x) => s.lamps[x] === s.turn).length;
+    return s.hide && s.hide[s.turn] === null && s.per - mine === 2 ? c + HIDE : c;
+  },
 
   init({ rules = {} } = {}) {
     const n = [2, 3, 4].includes(rules.players) ? rules.players : 2;
-    return { n, k: SIZE, per: PER[n], lamps: new Array(SIZE * SIZE).fill(null), order: [], turn: 0, last: null };
+    const s = { n, k: SIZE, per: PER[n], lamps: new Array(SIZE * SIZE).fill(null), order: [], turn: 0, last: null };
+    return rules.hide === true ? { ...s, hide: new Array(n).fill(null), open: new Array(n).fill(false) } : s;
   },
 
   turn(s) { return s.turn; },
 
-  apply(s0, c) {
-    if (!Number.isInteger(c) || c < 0 || c >= s0.lamps.length || s0.lamps[c] !== null) return null;
-    if (s0.order.length >= s0.n * s0.per) return null;
+  apply(s0, m) {
+    if (!Number.isInteger(m)) return null;
+    const hide = m >= HIDE;
+    const c = hide ? m - HIDE : m;
+    if (c < 0 || c >= s0.lamps.length || s0.order.length >= s0.n * s0.per) return null;
+    if (hide && (!s0.hide || s0.hide[s0.turn] !== null)) return null;
+    if (s0.lamps[c] !== null) {
+      // ほかの人の、まだ見つかっていない隠し灯りのマス: その灯りが見つかって表になり、選んだ人はもう一度選ぶ
+      if (!hiddenFrom(s0, c, s0.turn)) return null;
+      const q = s0.hide.indexOf(c);
+      return { ...s0, open: s0.open.map((v, i) => v || i === q), found: { c, q, by: s0.turn } };
+    }
     const s = { ...s0, lamps: s0.lamps.slice(), order: [...s0.order, c], last: c };
+    delete s.found;
     s.lamps[c] = s0.turn;
+    if (hide) s.hide = s0.hide.map((v, i) => (i === s0.turn ? c : v));
     s.turn = (s0.turn + 1) % s0.n;
     return s;
   },
@@ -153,23 +199,34 @@ export default {
   },
 
   info(s) {
-    const sc = scoresOf(s);
+    const over = !!this.result(s);
+    const v = over ? s : viewOf(s, -1); // 広さは、だれの隠し灯りも入れずに数える（決着したら全部）
+    const sc = scoresOf(v);
     const left = (p) => s.per - s.order.filter((c) => s.lamps[c] === p).length;
-    return sc.map((v, p) => `<b class="pl p${col(p)}">${this.players[col(p)]} ${v}</b><small class="ak-left">🏮${left(p)}</small>`).join('　');
+    let html = sc.map((x, p) => `<b class="pl p${col(p)}">${this.players[col(p)]} ${x}</b><small class="ak-left">🏮${left(p)}</small>`).join('　');
+    if (s.found) html += `<br>${this.players[col(s.found.q)]}の隠し灯りが見つかった`;
+    else if (!over && v !== s) html += '<br><small>隠し灯りは数えていない（終わったら開く）</small>';
+    return html;
   },
 
   render(root, s, o) {
     root.innerHTML = '';
     root.className = 'board ak';
     root.style.setProperty('--n', s.k);
-    const f = field(s);
     const res = this.result(s);
+    const me = Number.isInteger(o.me) ? o.me : null;
+    const v = res ? s : viewOf(s, me); // この画面から見える灯り（ほかの人の隠し灯りを除く。決着したら全部）
+    const f = field(v);
     const sc = res ? countOf(s.n, f.who) : null;
     const top = res ? Math.max(...sc) : null;
-    // さっき置いた灯りで持ち主が変わったマス（ふわっと塗り直す）
-    const before = o.fresh && s.last !== null ? field(s, s.order.slice(0, -1)).who : null;
+    const key = `${s.order.length}:${me}`;
+    if (ui.key !== key) ui = { key, hide: false };
+    const canHide = o.canMove && !res && !!s.hide && s.hide[s.turn] === null;
+    const hiding = canHide && ui.hide;
+    // さっき置いた灯りで持ち主が変わったマス（ふわっと塗り直す）。見えない灯りなら何も変わらない
+    const before = o.fresh && s.last !== null && v.order[v.order.length - 1] === s.last ? field(v, v.order.slice(0, -1)).who : null;
     const grid = document.createElement('div');
-    grid.className = 'ak-grid';
+    grid.className = 'ak-grid' + (hiding ? ' hiding' : '');
     grid.style.setProperty('--pt', `var(--p${col(s.turn)})`); // のせたマスの見せ方に使う、番の人の色
     const cells = [];
     const clearPv = () => { for (const e of cells) e.classList.remove('pv', 'pv-lose'); };
@@ -177,25 +234,28 @@ export default {
       const e = document.createElement('button');
       e.type = 'button';
       const w = f.who[c];
-      e.className = 'ak-cell' + (w >= 0 ? ' own p' + col(w) : s.order.length ? ' tie' : '')
+      e.className = 'ak-cell' + (w >= 0 ? ' own p' + col(w) : v.order.length ? ' tie' : '')
         + (before && before[c] !== w ? ' chg' : '') + (res && w >= 0 && sc[w] === top ? ' win' : '');
-      const lp = s.lamps[c];
+      const lp = v.lamps[c];
       if (lp !== null) {
         const l = document.createElement('span');
-        l.className = 'ak-lamp p' + col(lp) + (c === s.last ? ' last' : '') + (o.fresh && c === s.last ? ' pop' : '');
+        const hid = s.hide && s.hide[lp] === c; // 隠し灯り（置いた人の画面と、見つかったあと・決着のあと）
+        const shown = hid && (res || s.open[lp]); // 開いた隠し灯り
+        l.className = 'ak-lamp p' + col(lp) + (c === s.last ? ' last' : '') + (o.fresh && c === s.last ? ' pop' : '')
+          + (hid && !shown ? ' hid' : '') + (o.fresh && shown && (res || s.found?.c === c) ? ' pop open' : '');
         if (c === s.last) l.dataset.last = '';
         e.append(l);
         e.tabIndex = -1;
-        e.setAttribute('aria-label', `${this.players[col(lp)]}の灯り`);
+        e.setAttribute('aria-label', `${this.players[col(lp)]}の${hid ? '隠し' : ''}灯り`);
       } else if (o.canMove) {
         e.classList.add('playable', 'p' + col(s.turn));
-        e.setAttribute('aria-label', '灯りを置く');
-        e.onclick = () => o.onMove(c);
+        e.setAttribute('aria-label', hiding ? '隠し灯りを置く' : '灯りを置く');
+        e.onclick = () => o.onMove(hiding ? c + HIDE : c);
         // PC でマスにのせたら、置いたときに自分の陣地になる所（と、ほかの人から取れる所）を明るく見せる
         e.addEventListener('pointerenter', (ev) => {
           if (ev.pointerType !== 'mouse') return;
           clearPv();
-          const after = whoAfter(s, f, c, s.turn);
+          const after = whoAfter(v, f, c, s.turn);
           after.forEach((v, x) => {
             if (v === s.turn && f.who[x] !== s.turn) cells[x].classList.add('pv');
             else if (v !== f.who[x] && f.who[x] >= 0) cells[x].classList.add('pv-lose'); // 並んでだれのものでもなくなる所
@@ -209,5 +269,15 @@ export default {
       grid.append(e);
     }
     root.append(grid);
+    // 隠し灯り（詳細設定 hide）: 押すと次に置く灯りが隠し灯りになる。もう一度押すとやめる
+    if (canHide) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn secondary ak-hide' + (hiding ? ' on' : '');
+      b.textContent = hiding ? '🙈 隠して置く（やめる）' : '🙈 隠して置く（1回だけ）';
+      b.setAttribute('aria-pressed', hiding ? 'true' : 'false');
+      b.onclick = () => { ui = { ...ui, hide: !ui.hide }; this.render(root, s, o); };
+      root.append(b);
+    }
   },
 };

@@ -4234,6 +4234,11 @@ g.promo-flip { transform-box: fill-box; transform-origin: center; }
 .ak .ak-lamp.last { outline: 2px solid #fff; outline-offset: 2px; }
 .ak .ak-lamp.pop { animation: pop .35s ease-out; }
 .ak-left { margin-left: 3px; opacity: .8; font-size: .85em; }
+/* 隠し灯り（詳細設定 hide）: 置いた人の画面では点線の輪で薄く出す。押している間は盤を点線で囲む */
+.ak .ak-lamp.hid { opacity: .55; outline: 2px dashed #fff; outline-offset: 2px; }
+.ak .ak-grid.hiding { box-shadow: 0 0 0 3px #161b2c, 0 0 0 5px var(--pt); outline: 2px dashed #fff; outline-offset: -5px; }
+.ak .ak-hide { display: block; margin: 8px auto 0; padding: 4px 14px; font-size: .85rem; }
+.ak .ak-hide.on { background: var(--accent); color: #fff; }
 @media (prefers-reduced-motion: reduce) { .board .ak-cell.chg, .ak .ak-lamp.pop { animation: none; } .board .ak-cell { transition: none; } }
 /* ---------- 重さの手番（omosa.js。2026-11-27） ---------- */
 /* 盤と駒ははさみ将棋と同じ .sg。駒の右下に重さの数字、盤の上に2人の時計の物差し（小さい方の時計から4目盛り） */
@@ -4256,6 +4261,7 @@ g.promo-flip { transform-box: fill-box; transform-origin: center; }
 .om-tok.step { animation: om-step .45s ease-out; }
 @keyframes om-step { from { transform: translateX(calc(var(--dx) * 100%)); } }
 .om-tag { font-size: .78rem; font-weight: 700; white-space: nowrap; color: var(--accent); }
+.om-clock .om-wait { justify-self: center; margin-top: 2px; padding: 4px 14px; font-size: .85rem; } /* 待つ（詳細設定 wait） */
 @media (prefers-reduced-motion: reduce) { .om-tok.step { animation: none; } .om-tok { transition: none; } }
 /* ---------- 多数決の陣地（tasuu.js。2026-11-27） ---------- */
 /* 5つの陣地を札のように横に並べる。石は下から積む。取った陣地はその人の色で縁取り、並んでだれも取らない陣地は縞 */
@@ -4281,7 +4287,13 @@ g.promo-flip { transform-box: fill-box; transform-origin: center; }
 .tsu-tally b { color: var(--pc); opacity: .75; }
 .tsu-tally b.lead { opacity: 1; text-decoration: underline; text-underline-offset: 2px; }
 .tsu-bonus { margin-left: 3px; opacity: .8; font-size: .8em; }
-@media (prefers-reduced-motion: reduce) { .board .tsu-zone.just, .tsu-stone.pop { animation: none; } .board .tsu-zone { transition: none; } }
+/* 一斉に置く（詳細設定 together）: 自分の選びは薄い石・選んだか（✓ …）・重なって締め切った陣地は鍵の模様と小さく揺れる */
+.tsu-stone.pend { opacity: .4; outline: 2px dashed var(--pc); outline-offset: 1px; }
+.tsu-pick { margin-left: 2px; opacity: .8; font-size: .8em; }
+.board .tsu-zone.shut .tsu-pt::before { content: '🔒'; font-size: .45em; vertical-align: middle; margin-right: 1px; }
+.board .tsu-zone.bounce { animation: tsu-bounce .5s ease-out; }
+@keyframes tsu-bounce { 20% { transform: translateX(-4px); } 40% { transform: translateX(4px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(2px); } }
+@media (prefers-reduced-motion: reduce) { .board .tsu-zone.just, .board .tsu-zone.bounce, .tsu-stone.pop { animation: none; } .board .tsu-zone { transition: none; } }
 /* ---------- 色うつり四目（utsuri.js。2026-11-27） ---------- */
 /* 6×6 の木の盤に丸い駒。色の無い駒は白、席の色の駒はその色。直前に動いた駒（動かせない）に 🔒。盤の地はどの色の組でも同じ明るい木の色を直に書く（駒と線の色が暗いため） */
 .ut .ut-grid { position: relative; display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; width: var(--board); aspect-ratio: 1; margin: 0 auto; padding: 6px; box-sizing: border-box; background: #c99a5b; border-radius: 10px; touch-action: manipulation; }

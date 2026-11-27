@@ -13868,6 +13868,176 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('utsuri OK');
 }
 
+// 2026-11-27 の49回目の案: 重さの手番の待つ・灯りの陣取りの隠し灯り・多数決の陣地の一斉に置く・色うつり四目の自分の色は動かせない
+{
+  const OM = GAMES.omosa;
+  const { WAIT, WAITS } = await import('../app/js/games/omosa.js');
+  const AK = GAMES.akari;
+  const { HIDE, viewOf, scoresOf: akScores } = await import('../app/js/games/akari.js');
+  const TS = GAMES.tasuu;
+  const { ownerOf, scoresOf: tsScores } = await import('../app/js/games/tasuu.js');
+  const UT = GAMES.utsuri;
+  const { movesOf } = await import('../app/js/games/utsuri.js');
+  // どれも最初の値（なし）のときは今までと同じ局面
+  assert.deepEqual([OM.init({ rules: {} }).wait, AK.init({ rules: {} }).hide, TS.init({ rules: {}, seed: 1 }).tog, UT.init({ rules: {} }).lockOwn], [undefined, undefined, undefined, undefined], '49回目の案: なしのときは局面に新しい欄を持たない');
+
+  // 重さの手番の待つ
+  {
+    const at = (r, c) => r * 6 + c;
+    assert.equal(OM.apply(OM.init({ rules: {} }), WAIT), null, '重さの手番: 待つなしでは待てない');
+    let s = OM.init({ rules: { wait: true } });
+    assert.deepEqual(s.wait, [WAITS, WAITS], '重さの手番: 待つは1人3回まで');
+    assert.equal(WAITS, 3, '重さの手番: 待てる回数は3');
+    s = OM.apply(s, WAIT);
+    assert.deepEqual([s.t, s.turn, s.wait, s.last.wait, s.board.join()], [[1, 0], 1, [2, 3], true, OM.init({ rules: {} }).board.join()], '重さの手番: 待つと駒は動かず時計が1進み、残りの回数が減る');
+    const s2 = OM.apply({ ...OM.init({ rules: { wait: true } }), t: [0, 3] }, WAIT);
+    assert.equal(s2.turn, 0, '重さの手番: 待ったあとも時計が遅れていれば続けて自分の番');
+    assert.equal(OM.apply({ ...OM.init({ rules: { wait: true } }), wait: [0, 3] }, WAIT), null, '重さの手番: 3回待ったらもう待てない');
+    // 動かせる駒が無くても、待つが残っていれば負けにならない（2番手の駒が下の端の兵だけ）
+    const only = (list) => { const b = Array(36).fill(null); for (const [i, v] of list) b[i] = v; return b; };
+    const blocked = { ...OM.init({ rules: { wait: true } }), board: only([[at(4, 0), 0], [at(5, 5), 5], [at(1, 1), 1]]) };
+    const st = OM.apply(blocked, at(1, 1) * 36 + at(0, 1));
+    assert.equal(OM.result(st), null, '重さの手番: 待つが残っていれば、動かせる駒が無くても続く');
+    const st2 = OM.apply({ ...blocked, wait: [3, 0] }, at(1, 1) * 36 + at(0, 1));
+    assert.equal(OM.result(st2)?.winner, 0, '重さの手番: 待つも残っていなければ、動かせる駒が無い人の負け');
+    const st3 = OM.apply({ ...blocked, wait: [3, 1], turn: 1, t: [0, 0], mv: 0 }, WAIT); // 2番手が最後の待つを使う → 1番手の番
+    assert.deepEqual([OM.result(st3), st3.turn], [null, 0], '重さの手番: 最後の待つを使っても、相手の番なら続く');
+    assert.equal(OM.result(OM.apply(st3, at(1, 1) * 36 + at(0, 1)))?.winner, 0, '重さの手番: 待つを使い切って駒も動かせない人に番が来たら負け');
+    for (const lv of ['weak', 'normal', 'strong']) {
+      let x = OM.init({ rules: { wait: true } });
+      for (let i = 0; !OM.result(x); i++) {
+        const nx = OM.apply(x, OM.cpu(x, OM.turn(x), { cpu: lv, wait: true }));
+        assert.ok(nx && i < 200, `重さの手番: 待つありで CPU（${lv}）どうしが最後まで`);
+        assert.ok(nx.wait.every((v) => v >= 0 && v <= WAITS), '重さの手番: 待つの残りは 0〜3');
+        x = nx;
+      }
+    }
+  }
+
+  // 灯りの陣取りの隠し灯り
+  {
+    assert.equal(AK.apply(AK.init({ rules: {} }), 40 + HIDE), null, '灯りの陣取り: 隠し灯りなしでは隠して置けない');
+    let s = AK.init({ rules: { hide: true } });
+    assert.deepEqual([s.hide, s.open], [[null, null], [false, false]], '灯りの陣取り: 隠し灯りは1人1つ');
+    s = AK.apply(s, 40 + HIDE); // 1番手がまん中に隠して置く
+    assert.deepEqual([s.hide, s.lamps[40], s.turn], [[40, null], 0, 1], '灯りの陣取り: 隠し灯りもその人の灯りで、次の人の番');
+    assert.equal(viewOf(s, 1).lamps[40], null, '灯りの陣取り: ほかの人からは隠し灯りが見えない');
+    assert.equal(viewOf(s, -1).lamps[40], null, '灯りの陣取り: 観戦の人からも見えない');
+    assert.equal(viewOf(s, 0).lamps[40], 0, '灯りの陣取り: 置いた人には見える');
+    assert.deepEqual(akScores(s), [81, 0], '灯りの陣取り: 点は隠し灯りも入れて数える');
+    const f = AK.apply(s, 40); // 2番手が同じマスを選ぶ → 見つかる
+    assert.deepEqual([f.open, f.turn, f.order.length, f.found], [[true, false], 1, 1, { c: 40, q: 0, by: 1 }], '灯りの陣取り: 隠し灯りのマスを選ぶと見つかって、選んだ人がもう一度選ぶ');
+    assert.equal(viewOf(f, 1).lamps[40], 0, '灯りの陣取り: 見つかった隠し灯りは全員に見える');
+    assert.equal(AK.apply(f, 40), null, '灯りの陣取り: 見つかったあとは、ふつうの灯りと同じく置けない');
+    const g = AK.apply(f, 0);
+    assert.equal(g.found, undefined, '灯りの陣取り: 灯りを置いたら見つかった知らせは消える');
+    assert.equal(AK.turn(g), 0, '灯りの陣取り: 見つけた人が置いたら次の人');
+    assert.equal(AK.apply(g, 1 + HIDE), null, '灯りの陣取り: 隠し灯りは1人1回だけ（見つかったあとも）');
+    const own = AK.apply(AK.apply(AK.init({ rules: { hide: true } }), 40 + HIDE), 0);
+    assert.equal(AK.apply(own, 40), null, '灯りの陣取り: 自分の隠し灯りのマスには置けない');
+    assert.ok(AK.noPeek({ hide: true }) && !AK.noPeek({}), '灯りの陣取り: 隠し灯りのときは相手の迷いを見せない');
+    // CPU どうしで最後まで。CPU は残り2つのときに隠す・ほかの人の隠し灯りを見ない
+    for (const n of [2, 3, 4]) {
+      let x = AK.init({ rules: { players: n, hide: true } });
+      for (let i = 0; !AK.result(x); i++) {
+        const p = AK.turn(x);
+        const m = AK.cpu(x, p, { cpu: ['weak', 'normal', 'strong'][i % 3] });
+        const nx = AK.apply(x, m);
+        assert.ok(nx && i < 40, `灯りの陣取り: 隠し灯りありの ${n}人で CPU どうしが最後まで`);
+        x = nx;
+      }
+      assert.ok(x.hide.every((c) => c !== null), `灯りの陣取り: ${n}人の CPU はみんな隠し灯りを使う`);
+      assert.equal(x.order.length, n * x.per, `灯りの陣取り: ${n}人で灯りは全部で ${n * x.per} 個`);
+      assert.deepEqual(AK.result(x).scores, akScores(x), '灯りの陣取り: 結果の点は隠し灯りも入れた広さ');
+    }
+    // CPU はほかの人の隠し灯りを見ない: 2番手の CPU（つよい）から見て、1番手の隠し灯りのマスが空いて見える
+    let h = AK.init({ rules: { hide: true } });
+    h = AK.apply(h, 40 + HIDE);
+    const keepRandom = Math.random;
+    let withHidden, onEmpty;
+    Math.random = () => 0.999; // 適当に打たず、並んだ手からはいつも同じものを選ばせる
+    try {
+      withHidden = AK.cpu(h, 1, { cpu: 'strong' });
+      onEmpty = AK.cpu({ ...AK.init({ rules: { hide: true } }), turn: 1 }, 1, { cpu: 'strong' });
+    } finally { Math.random = keepRandom; }
+    assert.equal(withHidden, onEmpty, '灯りの陣取り: CPU はほかの人の隠し灯りを知らずに選ぶ（空の盤と同じ手）');
+    // 2回押しの薄い灯りは、まだ見えない隠し灯りが開く最後の1つでは出さない
+    let last = AK.init({ rules: { hide: true } });
+    last = AK.apply(last, 0 + HIDE);
+    for (let c = 1; last.order.length < 11; c++) last = AK.apply(last, c);
+    assert.ok(AK.noGhost(last) && !AK.noGhost(AK.init({ rules: { hide: true } })), '灯りの陣取り: 最後の1つだけ薄い灯りを出さない');
+  }
+
+  // 多数決の陣地の一斉に置く
+  {
+    let s = TS.init({ rules: { together: true }, seed: 5 });
+    assert.deepEqual(s.bonus, [0, 0], '多数決の陣地: 一斉に置くではおまけ点なし');
+    s = TS.apply(s, 2);
+    assert.deepEqual([s.zones[2], s.pend, TS.turn(s)], [[], [2, null], 1], '多数決の陣地: 選んだだけでは置かれず、次の人が選ぶ');
+    s = TS.apply(s, 2);
+    assert.deepEqual([s.zones[2], s.pend, TS.turn(s), s.rev.got, s.moves], [[0, 1], [null, null], 0, [true, true], 2], '多数決の陣地: 全員そろったら同時に置く');
+    // 空きより多く来たら、全部はじいて締め切り（いまの石で決まる）
+    let t = { ...TS.init({ rules: { together: true }, seed: 5 }) };
+    t = { ...t, zones: t.zones.map((z, i) => (i === 0 ? [0, 0, 1, 0] : z)), moves: 4 };
+    t = TS.apply(TS.apply(t, 0), 0);
+    assert.deepEqual([t.zones[0], t.shut[0], t.rev.got], [[0, 0, 1, 0], true, [false, false]], '多数決の陣地: 空きより多く来た陣地は、石が全部はじかれて締め切り');
+    assert.equal(ownerOf(2, t.zones[0], true), 0, '多数決の陣地: 締め切った陣地は、いまの石のいちばん多い人の陣地');
+    assert.equal(tsScores(t)[0], t.pts[0], '多数決の陣地: 締め切った陣地の点も取れる');
+    assert.equal(TS.apply(t, 0), null, '多数決の陣地: 締め切った陣地は選べない');
+    let u = TS.init({ rules: { players: 3, together: true }, seed: 5 });
+    u = { ...u, zones: u.zones.map((z, i) => (i === 1 ? [0, 1, 2] : z)), moves: 3 };
+    u = [1, 1, 3].reduce((x, z) => TS.apply(x, z), u);
+    assert.deepEqual([u.zones[1], u.shut[1], u.zones[3]], [[0, 1, 2, 0, 1], false, [2]], '多数決の陣地: 空きにちょうど入るなら全部入る');
+    assert.equal(ownerOf(3, [], true), -1, '多数決の陣地: 石の無いまま締め切った陣地はだれも取らない');
+    assert.ok(TS.noPeek({ together: true }) && !TS.noPeek({}), '多数決の陣地: 一斉に置くときは相手の迷いを見せない');
+    const g0 = TS.init({ rules: { players: 3, together: true }, seed: 5 });
+    assert.deepEqual([TS.noGhost(g0), TS.noGhost(TS.apply(TS.apply(g0, 0), 1))], [false, true], '多数決の陣地: 回がそろう手だけ薄い石を出さない');
+    assert.equal(TS.judge(s), null, '多数決の陣地: 一斉に置くは形勢を数えない');
+    for (const n of [2, 3, 4]) {
+      let x = TS.init({ rules: { players: n, together: true }, seed: 50 + n });
+      for (let i = 0; !TS.result(x); i++) {
+        const p = TS.turn(x);
+        const real = x.pend.slice();
+        // CPU はほかの人のこの回の選びを見ない: 選びを消した局面でも同じ候補から選ぶ（ここでは反則にならないことと、終わることを見る）
+        const nx = TS.apply(x, TS.cpu(x, p, { cpu: ['weak', 'normal', 'strong'][i % 3] }));
+        assert.ok(nx && i < 200, `多数決の陣地: 一斉に置くの ${n}人で CPU どうしが最後まで`);
+        assert.ok(real.every((v, q) => q >= p || v !== null), '多数決の陣地: 選ぶのは席の順');
+        x = nx;
+      }
+      assert.ok(x.zones.every((z, i) => z.length === 5 || x.shut[i]), `多数決の陣地: ${n}人で全部の陣地が埋まるか締め切ったら終わり`);
+      assert.equal(x.moves, x.zones.reduce((a, z) => a + z.length, 0), '多数決の陣地: 置いた数は陣地の石の合計');
+      assert.deepEqual(TS.result(x).scores, tsScores(x), '多数決の陣地: 結果の点は取った点');
+    }
+  }
+
+  // 色うつり四目の自分の色は動かせない
+  {
+    const at = (r, c) => r * 6 + c;
+    const only = (list) => { const b = Array(36).fill(null); for (const [i, v] of list) b[i] = v; return b; };
+    const b = only([[at(2, 2), 0], [at(4, 4), -1], [at(0, 0), 1]]);
+    assert.ok(!movesOf(b, -1, 0).some((m) => Math.floor(m / 36) === at(2, 2)), '色うつり四目: 自分の色の駒は動かせない');
+    assert.ok(movesOf(b, -1, 0).some((m) => Math.floor(m / 36) === at(0, 0)) && movesOf(b, -1, 0).some((m) => Math.floor(m / 36) === at(4, 4)), '色うつり四目: 相手の色と色の無い駒は動かせる');
+    const base = { ...UT.init({ rules: { lockOwn: true } }), board: b };
+    assert.equal(UT.apply(base, at(2, 2) * 36 + at(2, 3)), null, '色うつり四目: 自分の色は動かせないでは、自分の色の駒を動かす手は打てない');
+    assert.ok(UT.apply({ ...UT.init({ rules: {} }), board: b }, at(2, 2) * 36 + at(2, 3)), '色うつり四目: なしなら自分の色の駒も動かせる');
+    // 番が来た人が動かせるのが自分の色だけなら、その人の負け
+    const st = UT.apply({ ...base, board: only([[at(0, 0), -1], [at(5, 5), 1]]) }, at(0, 0) * 36 + at(0, 1));
+    assert.deepEqual([UT.result(st)?.winner, !!UT.result(st)?.stuck], [0, true], '色うつり四目: 動かせるのが自分の色の駒だけなら負け');
+    for (const lv of ['weak', 'normal', 'strong']) {
+      let x = UT.init({ rules: { lockOwn: true } });
+      for (let i = 0; !UT.result(x); i++) {
+        const p = UT.turn(x);
+        const m = UT.cpu(x, p, { cpu: lv });
+        assert.notEqual(x.board[Math.floor(m / 36)], p, '色うつり四目: CPU も自分の色の駒は動かさない');
+        const nx = UT.apply(x, m);
+        assert.ok(nx && i < 40, `色うつり四目: 自分の色は動かせないで CPU（${lv}）どうしが最後まで`);
+        x = nx;
+      }
+    }
+  }
+  console.log('49th OK');
+}
+
 // 2026-11-25 の47回目の案: かべ置きレースの壁の数・積み上げタワーの10段勝負・音当ての和音
 {
   // かべ置きレース 壁の数
