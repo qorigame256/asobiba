@@ -271,7 +271,7 @@ p { margin: 0; }
 @keyframes beg-glow { 0%, 100% { outline-color: rgba(255, 140, 0, .95); } 50% { outline-color: rgba(255, 140, 0, .2); } }
 body.beginner #screen-play:is([data-game="reversi"]) .rv-cell.playable,
 body.beginner #screen-play:is([data-game="mancala"]) button.mc-pit.playable,
-body.beginner #screen-play:is([data-game="shogi"], [data-game="hasami"]) button.sg-cell,
+body.beginner #screen-play:is([data-game="shogi"], [data-game="hasami"], [data-game="omosa"]) button.sg-cell,
 body.beginner #screen-play:is([data-game="shogi"], [data-game="hasami"]) .sg-hand-piece.playable,
 body.beginner #screen-play:is([data-game="colors"]) .ccard.playable,
 body.beginner #screen-play:is([data-game="daifugo"], [data-game="speed"], [data-game="doubt"], [data-game="sevens"]) .pcard.usable {
@@ -4235,3 +4235,25 @@ g.promo-flip { transform-box: fill-box; transform-origin: center; }
 .ak .ak-lamp.pop { animation: pop .35s ease-out; }
 .ak-left { margin-left: 3px; opacity: .8; font-size: .85em; }
 @media (prefers-reduced-motion: reduce) { .board .ak-cell.chg, .ak .ak-lamp.pop { animation: none; } .board .ak-cell { transition: none; } }
+/* ---------- 重さの手番（omosa.js。2026-11-27） ---------- */
+/* 盤と駒ははさみ将棋と同じ .sg。駒の右下に重さの数字、盤の上に2人の時計の物差し（小さい方の時計から4目盛り） */
+.om .om-w { position: absolute; right: 3%; bottom: 2%; min-width: 1.15em; padding: 0 2px; box-sizing: border-box; border-radius: 999px; background: rgba(60, 38, 10, .78); color: #fff; font-size: clamp(.55rem, 2.6vw, .75rem); font-weight: 700; line-height: 1.35; text-align: center; pointer-events: none; z-index: 3; } /* 選んで浮いた駒（z-index 2）にも隠れない */
+.om .sg-cell.caught { animation: hs-caught .7s ease-out; }
+.om .sg-cell.om-king { background: #e2574a; }
+.om-clock { display: grid; gap: 4px; padding: 6px 8px; border: 1.5px solid var(--line); border-radius: 10px; background: var(--panel); }
+.om-row { display: grid; grid-template-columns: 3.6em 1fr 4.2em; align-items: center; gap: 6px; opacity: .6; }
+.om-row.turn { opacity: 1; }
+.om-row.turn .om-name { font-weight: 700; }
+.om-name { font-size: .85rem; white-space: nowrap; }
+.om-row.p1 .om-name { color: #c62d1f; }
+.om-track { position: relative; height: 26px; border-radius: 6px;
+  background: repeating-linear-gradient(90deg, transparent 0 calc(100% / var(--span) - 1px), rgba(107, 74, 31, .35) calc(100% / var(--span) - 1px) calc(100% / var(--span))), #f6ead0; } /* 地は木の盤と同じ明るい色をどの色の組でも直に書く（駒と点線の字が暗い色のため） */
+.om-tok { position: absolute; top: 2px; bottom: 2px; left: calc(100% / var(--span) * var(--x)); width: calc(100% / var(--span)); box-sizing: border-box; display: grid; place-items: center;
+  border-radius: 6px; font-weight: 700; font-size: .85rem; color: #fff; background: #2a241c; transition: left .3s ease-out; }
+.om-tok.p1 { background: #c62d1f; }
+.om-tok.ghost { background: transparent; border: 2px dashed #2a241c; color: #2a241c; }
+.om-tok.ghost.p1 { border-color: #c62d1f; color: #c62d1f; }
+.om-tok.step { animation: om-step .45s ease-out; }
+@keyframes om-step { from { transform: translateX(calc(var(--dx) * 100%)); } }
+.om-tag { font-size: .78rem; font-weight: 700; white-space: nowrap; color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .om-tok.step { animation: none; } .om-tok { transition: none; } }

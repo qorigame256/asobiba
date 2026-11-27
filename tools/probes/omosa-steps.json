@@ -1,0 +1,15 @@
+[
+  {"wait": 2500},
+  {"shot": "start"},
+  {"click": "#board [aria-label=\"5段目 3列目\"]"},
+  {"wait": 300},
+  {"shot": "selected", "selector": "#board"},
+  {"click": "#board [aria-label=\"4段目 3列目\"]"},
+  {"wait": 3500},
+  {"shot": "after"},
+  {"click": "#board [aria-label=\"6段目 4列目\"]"},
+  {"wait": 300},
+  {"shot": "lance", "selector": "#board"},
+  {"eval": "document.querySelector('.om-clock')?.innerText", "as": "clock"},
+  {"eval": "document.querySelector('#status')?.innerText", "as": "status"}
+]

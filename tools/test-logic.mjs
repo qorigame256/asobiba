@@ -13663,6 +13663,72 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('akari OK');
 }
 
+// 重さの手番（2026-11-27。omosa.js）
+{
+  const OM = GAMES.omosa;
+  const { WEIGHT, nextTurn, targetsOf } = await import('../app/js/games/omosa.js');
+  const at = (r, c) => r * 6 + c;
+  const mv = (f, d) => f * 36 + d;
+  const KIND = ['王', '兵', '槍', '騎'];
+  assert.deepEqual(WEIGHT, [2, 1, 3, 3], '重さの手番: 重さは 王2・兵1・槍3・騎3');
+  const s0 = OM.init({ rules: {} });
+  const count = (s, p) => KIND.map((_, k) => s.board.filter((v) => v !== null && v >> 2 === p && (v & 3) === k).length);
+  assert.deepEqual([count(s0, 0), count(s0, 1)], [[1, 4, 1, 1], [1, 4, 1, 1]], '重さの手番: 駒は各自 王1・兵4・槍1・騎1');
+  assert.ok(s0.board.every((v, i) => (v === null) === (s0.board[35 - i] === null) && (v === null || (v & 3) === (s0.board[35 - i] & 3))), '重さの手番: 2番手は1番手を180度回した並べ方');
+  assert.equal(OM.turn(s0), 0, '重さの手番: 最初は1番手');
+  // 時計: 遅れている人が動く・同じなら直前に動かなかった人
+  assert.equal(nextTurn([1, 0], 0), 1, '重さの手番: 時計が遅れている人が動く');
+  assert.equal(nextTurn([2, 3], 0), 0, '重さの手番: 時計が遅れていれば続けて動く');
+  assert.equal(nextTurn([3, 3], 0), 1, '重さの手番: 時計が同じなら直前に動かなかった人（1番手が動いた → 2番手）');
+  assert.equal(nextTurn([3, 3], 1), 0, '重さの手番: 時計が同じなら直前に動かなかった人（2番手が動いた → 1番手）');
+  let s = OM.apply(s0, mv(at(4, 2), at(3, 2))); // 1番手の兵（重さ1）
+  assert.deepEqual([s.t, s.turn], [[1, 0], 1], '重さの手番: 兵を動かすと時計が1進み、2番手の番');
+  s = OM.apply(s, mv(at(0, 2), at(0, 1))); // 2番手の槍（重さ3）
+  assert.deepEqual([s.t, s.turn], [[1, 3], 0], '重さの手番: 槍を動かすと時計が3進む');
+  s = OM.apply(s, mv(at(4, 3), at(3, 3)));
+  s = OM.apply(s, mv(at(3, 3), at(2, 3)));
+  assert.deepEqual([s.t, s.turn], [[3, 3], 1], '重さの手番: 1番手が兵で続けて2手動き、時計が並んだので2番手の番');
+  assert.equal(OM.apply(s, mv(at(3, 2), at(2, 2))), null, '重さの手番: 番でない人の駒は動かせない');
+  // 動き: 兵は前と斜め前（下がれない）・槍はたて・よこ・騎はななめ・飛び越えられない・自分の駒には行けない
+  const only = (list) => { const b = Array(36).fill(null); for (const [i, v] of list) b[i] = v; return b; };
+  const sorted = (a) => [...a].sort((x, y) => x - y);
+  assert.deepEqual(sorted(targetsOf(only([[at(3, 3), 1]]), at(3, 3))), [at(2, 2), at(2, 3), at(2, 4)], '重さの手番: 1番手の兵は上の3マス');
+  assert.deepEqual(sorted(targetsOf(only([[at(3, 3), 5]]), at(3, 3))), [at(4, 2), at(4, 3), at(4, 4)], '重さの手番: 2番手の兵は下の3マス');
+  assert.deepEqual(targetsOf(only([[at(0, 3), 1]]), at(0, 3)), [], '重さの手番: 向こうの端の兵は動けない（成らない）');
+  assert.deepEqual(sorted(targetsOf(only([[at(3, 3), 2], [at(3, 1), 1], [at(1, 3), 5]]), at(3, 3))),
+    sorted([at(2, 3), at(1, 3), at(4, 3), at(5, 3), at(3, 2), at(3, 4), at(3, 5)]), '重さの手番: 槍はたて・よこ。自分の駒の手前まで・相手の駒は取れて先へは行けない');
+  assert.deepEqual(sorted(targetsOf(only([[at(3, 3), 3], [at(1, 1), 5]]), at(3, 3))),
+    sorted([at(2, 2), at(1, 1), at(2, 4), at(1, 5), at(4, 2), at(5, 1), at(4, 4), at(5, 5)]), '重さの手番: 騎はななめで、相手の駒は取れて先へは行けない');
+  assert.equal(targetsOf(only([[at(3, 3), 0]]), at(3, 3)).length, 8, '重さの手番: 王は周り8マス');
+  // 王を取ったら勝ち・取った駒の記録
+  let k = { ...OM.init({ rules: {} }), board: only([[at(5, 0), 0], [at(5, 5), 2], [at(0, 5), 4], [at(0, 0), 5]]) };
+  const w = OM.apply(k, mv(at(5, 5), at(0, 5)));
+  assert.equal(OM.result(w)?.winner, 0, '重さの手番: 相手の王を取ったら勝ち');
+  assert.deepEqual(w.taken[0], [0], '重さの手番: 取った駒を数える');
+  assert.equal(OM.apply(w, mv(at(0, 5), at(1, 5))), null, '重さの手番: 決着のあとは動かせない');
+  const k2 = OM.apply(k, mv(at(5, 5), at(4, 5)));
+  assert.equal(OM.result(k2), null, '重さの手番: 王を取らなければ続く');
+  assert.equal(OM.result(OM.apply({ ...k, ply: 199 }, mv(at(5, 5), at(4, 5))))?.winner, null, '重さの手番: 200手で引き分け');
+  assert.equal(OM.result(OM.apply({ ...k, ply: 198 }, mv(at(5, 5), at(4, 5)))), null, '重さの手番: 199手ではまだ続く');
+  // 動かせる駒が無い人の負け: 2番手の駒が向こうの端（下の端）の兵だけの形
+  const blocked = { ...OM.init({ rules: {} }), board: only([[at(4, 0), 0], [at(5, 5), 5], [at(1, 1), 1]]) };
+  const st = OM.apply(blocked, mv(at(1, 1), at(0, 1)));
+  assert.equal(OM.result(st)?.winner, 0, '重さの手番: 番が来たのに動かせる駒が無い人の負け');
+  assert.ok(OM.result(st)?.stuck, '重さの手番: 動かせない負けの印');
+  // CPU どうしで最後まで（反則なし・200手まで）
+  for (const lv of ['weak', 'normal', 'strong']) {
+    let x = OM.init({ rules: {} });
+    for (let i = 0; !OM.result(x); i++) {
+      const nx = OM.apply(x, OM.cpu(x, OM.turn(x), { cpu: lv }));
+      assert.ok(nx && i < 200, `重さの手番: CPU（${lv}）どうしが最後まで`);
+      assert.ok(Math.abs(nx.t[0] - nx.t[1]) <= 3, '重さの手番: 時計の差はいつも3以内');
+      x = nx;
+    }
+    assert.ok(x.ply <= 200, '重さの手番: 200手までに終わる');
+  }
+  console.log('omosa OK');
+}
+
 // 2026-11-25 の47回目の案: かべ置きレースの壁の数・積み上げタワーの10段勝負・音当ての和音
 {
   // かべ置きレース 壁の数

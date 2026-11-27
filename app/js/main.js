@@ -286,7 +286,7 @@ function setMark(id, mark) {
 // 付け外しは各自の端末で（localStorage）。名前に 🔰 を付けて、部屋のみんなにも見せる（ホストが集めて state の beg で送る）。
 // 光らせるのは選べる所が限られるゲームだけ（全部のマスが置けるゲームで全部光ると、かえって分かりにくい。style.css の body.beginner）
 const BEG_KEY = 'bg-beginner';
-const BEG_GAMES = new Set(['reversi', 'mancala', 'hasami', 'shogi', 'colors', 'daifugo', 'speed', 'doubt', 'sevens']);
+const BEG_GAMES = new Set(['reversi', 'mancala', 'hasami', 'omosa', 'shogi', 'colors', 'daifugo', 'speed', 'doubt', 'sevens']);
 let beginner = false;
 try { beginner = localStorage.getItem(BEG_KEY) === '1'; } catch { /* 覚えられなくても使える */ }
 
@@ -1818,7 +1818,7 @@ const READING = {
   kanjiplus: 'かんじたしざん かんじ たしざん ぶしゅ くいず はやおし',
   jigsaw: 'じぐそーはやとき じぐそー ぱずる え はやとき',
   hitofude: 'ひとふでがきはやとき ひとふでがき ひとふで せん ぱずる はやとき',
-  kabe: 'かべおきれーす かべ れーす ばん', akari: 'あかりのじんとり あかり じんとり ばん', hasami: 'はさみしょうぎ ばん', shogi: 'しょうぎ ばん', mahjong: 'まーじゃん',
+  kabe: 'かべおきれーす かべ れーす ばん', akari: 'あかりのじんとり あかり じんとり ばん', omosa: 'おもさのてばん おもさ てばん とけい ばん', hasami: 'はさみしょうぎ ばん', shogi: 'しょうぎ ばん', mahjong: 'まーじゃん',
 };
 const toHira = (t) => String(t ?? '').toLowerCase().replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60)).replace(/\s+/g, '');
 const gameHay = (id) => toHira(`${GAMES[id].name}${READING[id] ?? ''}${GAMES[id].desc ?? ''}`);
@@ -3934,7 +3934,7 @@ function endStamp(game, res, me, end, delay) {
 //   はみ出した所は main の外へ出さない（main.slow-zoom の overflow: clip。横にスクロールできるようにならないように）。戻すときに盤は元の位置へ戻すが、スクロールはそのまま（その手が見える所）。
 //   横は画面のまんなかでなく盤のまんなか（スマホを横にしたときは盤が左の列にあるため。縦の画面では同じ所）。
 // 盤は描き直しで作り直されるので、途中で描き直されたら石の動きはそこで終わる（寄せと暗さは盤の入れ物と body に付けてあるので残る）
-const SLOW_GAMES = new Set(['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'hasami', 'shogi']);
+const SLOW_GAMES = new Set(['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'hasami', 'omosa', 'shogi']);
 const SLOW_ZOOM = 1.3; // 決め手へ寄せる倍率（2026-11-22。本人に見本の絵で選んでもらう）
 const SLOW_LAND = 560; // 石が着くまで
 const SLOW_LINE = 900; // 線を引き始めるまで（winLine のいつもの 160ms を含む）

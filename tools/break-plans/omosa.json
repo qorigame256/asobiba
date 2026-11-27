@@ -1,0 +1,106 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "app/fonts",
+    "app/voice",
+    "app/sounds",
+    "tools/test-logic.mjs",
+    "tools/font-chars.json",
+    "tools/font-texts.mjs",
+    "tools/voice-texts.mjs",
+    "tools/probes/uiux13-logic.mjs"
+  ],
+  "cwd": "copy",
+  "env": {
+    "QUICK": "1",
+    "SEED": "1"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 300,
+  "breaks": [
+    {
+      "name": "重さの手番: 時計が同じとき、直前に動いた人がまた動く",
+      "file": "app/js/games/omosa.js",
+      "old": "return mv === 0 ? 1 : 0;",
+      "new": "return mv === 0 ? 0 : 1;",
+      "expect": [
+        "重さの手番: 時計が同じなら直前に動かなかった人（1番手が動いた → 2番手）"
+      ]
+    },
+    {
+      "name": "重さの手番: 時計が進んでいる人が動く",
+      "file": "app/js/games/omosa.js",
+      "old": "if (t[0] !== t[1]) return t[0] < t[1] ? 0 : 1;",
+      "new": "if (t[0] !== t[1]) return t[0] < t[1] ? 1 : 0;",
+      "expect": [
+        "重さの手番: 時計が遅れている人が動く"
+      ]
+    },
+    {
+      "name": "重さの手番: どの駒も時計を1だけ進める",
+      "file": "app/js/games/omosa.js",
+      "old": "t[p] += WEIGHT[kindOf(v)];",
+      "new": "t[p] += 1;",
+      "expect": [
+        "重さの手番: 槍を動かすと時計が3進む"
+      ]
+    },
+    {
+      "name": "重さの手番: 兵が後ろへも動ける",
+      "file": "app/js/games/omosa.js",
+      "old": "step(fw, -1); step(fw, 0); step(fw, 1); }",
+      "new": "step(fw, -1); step(fw, 0); step(fw, 1); step(-fw, 0); }",
+      "expect": [
+        "重さの手番: 1番手の兵は上の3マス"
+      ]
+    },
+    {
+      "name": "重さの手番: 槍・騎が相手の駒を飛び越えて先へ行ける",
+      "file": "app/js/games/omosa.js",
+      "old": "if (w === null) { out.push(r * N + c); continue; }",
+      "new": "if (w === null || owner(w) !== p) { out.push(r * N + c); continue; }",
+      "expect": [
+        "重さの手番: 槍はたて・よこ。自分の駒の手前まで・相手の駒は取れて先へは行けない"
+      ]
+    },
+    {
+      "name": "重さの手番: 王を取っても終わらない",
+      "file": "app/js/games/omosa.js",
+      "old": "if (cap === KING) won = { winner: p, king: d };",
+      "new": "if (false) won = { winner: p, king: d };",
+      "expect": [
+        "重さの手番: 相手の王を取ったら勝ち"
+      ]
+    },
+    {
+      "name": "重さの手番: 動かせる駒が無くても負けにしない",
+      "file": "app/js/games/omosa.js",
+      "old": "else if (!hasMove(board, turn)) won = { winner: 1 - turn, stuck: true };",
+      "new": "",
+      "expect": [
+        "重さの手番: 番が来たのに動かせる駒が無い人の負け"
+      ]
+    },
+    {
+      "name": "重さの手番: 201手で引き分け",
+      "file": "app/js/games/omosa.js",
+      "old": "const MAX_PLY = 200;",
+      "new": "const MAX_PLY = 201;",
+      "expect": [
+        "重さの手番: 200手で引き分け"
+      ]
+    }
+  ]
+}
