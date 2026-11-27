@@ -1,0 +1,15 @@
+[
+  {"wait": 2500},
+  {"click": "#board [aria-label=\"2段目 2列目\"]"}, {"click": "#board [aria-label=\"1段目 2列目\"]"}, {"wait": 700},
+  {"click": "#board [aria-label=\"5段目 2列目\"]"}, {"click": "#board [aria-label=\"6段目 2列目\"]"}, {"wait": 700},
+  {"click": "#board [aria-label=\"2段目 3列目\"]"}, {"click": "#board [aria-label=\"1段目 3列目\"]"}, {"wait": 700},
+  {"click": "#board [aria-label=\"5段目 3列目\"]"}, {"click": "#board [aria-label=\"6段目 3列目\"]"}, {"wait": 700},
+  {"click": "#board [aria-label=\"2段目 4列目\"]"}, {"click": "#board [aria-label=\"1段目 4列目\"]"}, {"wait": 700},
+  {"click": "#board [aria-label=\"5段目 4列目\"]"}, {"click": "#board [aria-label=\"6段目 4列目\"]"}, {"wait": 700},
+  {"shot": "three"},
+  {"click": "#board [aria-label=\"2段目 5列目\"]"}, {"click": "#board [aria-label=\"1段目 5列目\"]"}, {"wait": 4500},
+  {"shot": "won"},
+  {"eval": "document.querySelectorAll('#board .ut-disc.win').length", "as": "winDiscs"},
+  {"eval": "!!document.querySelector('#board svg.win-line')", "as": "line"},
+  {"eval": "document.querySelector('#status')?.innerText", "as": "status"}
+]

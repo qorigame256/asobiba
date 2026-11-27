@@ -1,0 +1,97 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "app/fonts",
+    "app/voice",
+    "app/sounds",
+    "tools/test-logic.mjs",
+    "tools/font-chars.json",
+    "tools/font-texts.mjs",
+    "tools/voice-texts.mjs",
+    "tools/probes/uiux13-logic.mjs"
+  ],
+  "cwd": "copy",
+  "env": {
+    "QUICK": "1",
+    "SEED": "1"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 300,
+  "breaks": [
+    {
+      "name": "色うつり四目: 直前に動いた駒も動かせる",
+      "file": "app/js/games/utsuri.js",
+      "old": "if (b[f] === null || f === lock) continue;",
+      "new": "if (b[f] === null) continue;",
+      "expect": [
+        "色うつり四目: 直前に動いた駒は動かせない"
+      ]
+    },
+    {
+      "name": "色うつり四目: 色の付いた駒は動かしても色が変わらない",
+      "file": "app/js/games/utsuri.js",
+      "old": "board[d] = p;",
+      "new": "board[d] = was === NONE ? p : was;",
+      "expect": [
+        "色うつり四目: 相手の色の駒も、動かすと自分の色になる"
+      ]
+    },
+    {
+      "name": "色うつり四目: ななめの並びを数えない",
+      "file": "app/js/games/utsuri.js",
+      "old": "const run = [d];",
+      "new": "const run = [d]; if (dr && dc) continue;",
+      "expect": [
+        "色うつり四目: ななめに4つで勝ち"
+      ]
+    },
+    {
+      "name": "色うつり四目: 駒のあるマスへも動ける",
+      "file": "app/js/games/utsuri.js",
+      "old": " || b[rr * N + cc] !== null) continue;",
+      "new": ") continue;",
+      "expect": [
+        "色うつり四目: 駒のあるマスと盤の外へは動けない"
+      ]
+    },
+    {
+      "name": "色うつり四目: 41手で引き分け",
+      "file": "app/js/games/utsuri.js",
+      "old": "else if (ply >= MAX_PLY)",
+      "new": "else if (ply > MAX_PLY)",
+      "expect": [
+        "色うつり四目: 40手で引き分け"
+      ]
+    },
+    {
+      "name": "色うつり四目: 動かせる駒が無くても負けにしない",
+      "file": "app/js/games/utsuri.js",
+      "old": "else if (!movesOf(board, d).length) won = { winner: p, stuck: true, cells: [] };",
+      "new": "",
+      "expect": [
+        "色うつり四目: 番が来たのに動かせる駒が無い人の負け"
+      ]
+    },
+    {
+      "name": "色うつり四目: つよいが適当に打つ",
+      "file": "app/js/games/utsuri.js",
+      "old": "mistake: { weak: 0.4, normal: 0.15, strong: 0 }",
+      "new": "mistake: { weak: 0.4, normal: 0.15, strong: 1 }",
+      "expect": [
+        "色うつり四目: CPU（つよい）は勝てる手を打つ"
+      ]
+    }
+  ]
+}

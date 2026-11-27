@@ -1,0 +1,237 @@
+// 色うつり四目（2026-11-27 本人が選んだ、Claude が考えた独自ルール。分かれ目は Claude の推奨を本人が承認）。2人。
+// 盤の駒はだれのものでもなく、動かした駒がその人の色になる。直前に動いた駒は動かせない。自分の色を4つ並べたら勝ち。
+//
+// 本人が承認した分かれ目: 6×6 の盤に色の無い駒12個を決まった形で置いて始める。駒は縦横の空きマスへ1マス動く。
+//   縦横斜めに自分の色が4つで勝ち。40手で決まらなければ引き分け。
+// Claude の判断: 並べ方は LAYOUT（下）。つよいどうしの先手・後手の勝ち数で選んだ（実測は LAYOUT の上）。
+//   動かせるのはどの色の駒でも（色の無い駒・自分の色・相手の色）。相手の色の駒を動かすと自分の色になる（相手の並びを崩せる）。
+//   「直前に動いた駒」は、相手がいま動かした駒（そのマスにある駒）。始めの1手には無い。
+//   色が変わるのは動かした駒だけなので、並びができるのは動かした人だけ（相手の並びが同時にできることは無い）。
+//   40手は2人合わせて（1人20手）。番が来たのに動かせる駒が無い人の負け（駒12個では まず起きない）。
+//
+// 局面: { board: マスごとの駒（null 空き・-1 色の無い駒・0/1 その席の色）, turn, last: { f, d, was: 動かす前の色 } か null, ply, won }。
+// 手 = 動かす駒のマス * 36 + 行き先のマス（マス = 段*6+列。段0が一番上）。
+
+import { CPU_SETTING, PEEK_SETTING, peekMark, boardCpu, boardJudge, grabbable, justDragged, winLine, col } from './util.js';
+
+const N = 6;
+const CELLS = N * N;
+const NONE = -1;
+export const MAX_PLY = 40;
+export const NEED = 4;
+
+// 始めの並べ方（'X' が色の無い駒）。四角い輪。
+// 2026-11-27 の実測: つよい（3手読み）どうしは、どの並べ方でもほとんど引き分け（相手の色の駒を動かせば並びを崩せるため。
+//   輪・X字・ひし形・2本の棒・四隅・まんなかの固まり など8つを各10局で、決着は合わせて2局）。輪で40局は 1番手 1勝・2番手 0勝・引き分け 39。
+//   1割だけ適当に打たせたつよいどうしは 1番手 6勝・2番手 9勝・引き分け 25（40局）、ふつうどうし 18・11・71、よわいどうし 48・46・6（各100局）で、先手の偏りは小さい
+export const LAYOUT = [
+  '......',
+  '.XXXX.',
+  '.X..X.',
+  '.X..X.',
+  '.XXXX.',
+  '......',
+];
+
+export function startBoard(layout = LAYOUT) {
+  const b = Array(CELLS).fill(null);
+  layout.forEach((row, r) => [...row].forEach((ch, c) => { if (ch === 'X') b[r * N + c] = NONE; }));
+  return b;
+}
+
+const ORTH = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+// 4つ並びの窓（よこ 18・たて 18・ななめ 9×2 = 54）
+const WINDOWS = [];
+for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+  for (const [dr, dc] of [[0, 1], [1, 0], [1, 1], [1, -1]]) {
+    const er = r + dr * (NEED - 1);
+    const ec = c + dc * (NEED - 1);
+    if (er < 0 || er >= N || ec < 0 || ec >= N) continue;
+    WINDOWS.push(Array.from({ length: NEED }, (_, k) => (r + dr * k) * N + c + dc * k));
+  }
+}
+
+// lock（直前に動いた駒のマス）を除いた、動かせる手の一覧
+export function movesOf(b, lock) {
+  const out = [];
+  for (let f = 0; f < CELLS; f++) {
+    if (b[f] === null || f === lock) continue;
+    const r = Math.floor(f / N);
+    const c = f % N;
+    for (const [dr, dc] of ORTH) {
+      const rr = r + dr;
+      const cc = c + dc;
+      if (rr < 0 || rr >= N || cc < 0 || cc >= N || b[rr * N + cc] !== null) continue;
+      out.push(f * CELLS + rr * N + cc);
+    }
+  }
+  return out;
+}
+const lockOf = (s) => (s.last ? s.last.d : -1);
+
+// マス d を通る、色 p のいちばん長い並び（4つ以上の並びのマスをまとめて返す。無ければ空）
+export function lineAt(b, d, p) {
+  const r0 = Math.floor(d / N);
+  const c0 = d % N;
+  const out = new Set();
+  for (const [dr, dc] of [[0, 1], [1, 0], [1, 1], [1, -1]]) {
+    const run = [d];
+    for (const sg of [1, -1]) {
+      for (let r = r0 + dr * sg, c = c0 + dc * sg; r >= 0 && r < N && c >= 0 && c < N && b[r * N + c] === p; r += dr * sg, c += dc * sg) run.push(r * N + c);
+    }
+    if (run.length >= NEED) for (const x of run) out.add(x);
+  }
+  return [...out];
+}
+
+/* ---------- CPU ---------- */
+
+// p から見た点数: 4つの窓ごとに、相手の色が無ければ自分の色の数で足し、自分の色が無ければ相手の色の数で引く。
+// 窓の中の色の無い駒・空きは、あとで自分の色にできる所として少しだけ数える
+const W = [0, 1, 5, 24];
+export function score(s, p) {
+  const b = s.board;
+  let v = 0;
+  for (const w of WINDOWS) {
+    let mine = 0;
+    let theirs = 0;
+    for (const i of w) {
+      const x = b[i];
+      if (x === p) mine++;
+      else if (x !== null && x !== NONE) theirs++;
+    }
+    if (mine && !theirs) v += W[mine];
+    else if (theirs && !mine) v -= W[theirs];
+  }
+  return v;
+}
+
+let ui = { key: null, from: null }; // 選んでいる駒（通信で描き直されても消えないよう外に持つ）
+
+export default {
+  id: 'utsuri',
+  name: '色うつり四目',
+  icon: '🎨',
+  desc: '駒はだれのものでもなく、動かした駒が自分の色になる。自分の色を4つ並べたら勝ち',
+  ready: true,
+  keepColor: true, // 続けて遊ぶ間は、その人の色を変えない（util.js の col）
+  players: ['赤', '青'],
+  settings: [
+    PEEK_SETTING,
+    CPU_SETTING,
+  ],
+
+  // CPU: 何手先まで読むかで強さを変える（4手読みは1手に最長2.4秒かかり、引き分けばかりで強くもならなかったので つよい は3手）。
+  //   実測（強い方の勝ち・負け・引き分け。2026-11-27）: ふつう-よわい 23・4・3（30局）、つよい-ふつう 6・0・14（20局）、つよい-よわい 27・0・3（30局）。1手の最長 約80ms
+  cpu(s, p, rules) {
+    return boardCpu(this, s, rules, (x) => movesOf(x.board, lockOf(x)), score, {
+      depth: { weak: 1, normal: 2, strong: 3 }, mistake: { weak: 0.4, normal: 0.15, strong: 0 },
+    });
+  },
+
+  // 形勢（util.js の boardJudge）: 4つの窓の数え方を2手先まで読む
+  judge(s) { return boardJudge(this, s, (x) => movesOf(x.board, lockOf(x)), score, 2, 30); },
+
+  init() {
+    return { board: startBoard(), turn: 0, last: null, ply: 0, won: null };
+  },
+
+  turn(s) { return s.turn; },
+
+  apply(s, m) {
+    if (s.won || !Number.isInteger(m) || m < 0 || m >= CELLS * CELLS) return null;
+    if (!movesOf(s.board, lockOf(s)).includes(m)) return null;
+    const f = Math.floor(m / CELLS);
+    const d = m % CELLS;
+    const p = s.turn;
+    const board = s.board.slice();
+    const was = board[f];
+    board[f] = null;
+    board[d] = p;
+    const ply = s.ply + 1;
+    const line = lineAt(board, d, p);
+    let won = null;
+    if (line.length) won = { winner: p, cells: line };
+    else if (ply >= MAX_PLY) won = { winner: null, long: true, cells: [] };
+    else if (!movesOf(board, d).length) won = { winner: p, stuck: true, cells: [] };
+    return { ...s, board, turn: 1 - p, last: { f, d, was }, ply, won };
+  },
+
+  result(s) { return s.won; },
+
+  sound() { return 'place'; },
+
+  info(s) {
+    const n = (p) => s.board.filter((v) => v === p).length;
+    let html = `<b class="pl p${col(0)}">${this.players[col(0)]} ${n(0)}個</b>　−　<b class="pl p${col(1)}">${this.players[col(1)]} ${n(1)}個</b>`;
+    if (s.won?.long) html += `<br>${MAX_PLY}手になったので引き分け`;
+    else if (s.won?.stuck) html += `<br>${this.players[col(1 - s.won.winner)]}は動かせる駒が無くなった`;
+    else if (!s.won && s.gave === undefined) html += `　<small class="ut-left">あと${MAX_PLY - s.ply}手</small>`;
+    return html;
+  },
+
+  render(root, s, o) {
+    const draw = () => this.render(root, s, o);
+    const over = !!s.won || s.gave !== undefined;
+    const key = `${s.ply}:${o.me}`;
+    if (ui.key !== key) ui = { key, from: null };
+    const can = o.canMove && !over;
+    const lock = lockOf(s);
+    const legal = can ? movesOf(s.board, lock) : [];
+    const movable = new Set(legal.map((m) => Math.floor(m / CELLS)));
+    const targets = new Set(ui.from === null ? [] : legal.filter((m) => Math.floor(m / CELLS) === ui.from).map((m) => m % CELLS));
+    const win = new Set(s.won?.cells ?? []);
+
+    root.innerHTML = '';
+    root.className = 'board ut';
+    const grid = document.createElement('div');
+    grid.className = 'ut-grid';
+    grid.style.setProperty('--pt', `var(--p${col(s.turn)})`); // 行き先の印に使う、番の人の色
+    const winEls = [];
+    for (let i = 0; i < CELLS; i++) {
+      const v = s.board[i];
+      const isTarget = targets.has(i);
+      const isMovable = movable.has(i);
+      const cell = document.createElement(isTarget || isMovable ? 'button' : 'div');
+      cell.className = 'ut-cell';
+      if (s.last && (s.last.d === i || s.last.f === i)) cell.classList.add('last');
+      if (i === ui.from) cell.classList.add('selected');
+      if (isTarget) { cell.classList.add('target'); cell.dataset.drop = i; } // data-drop: つまんだ駒を離せる所
+      peekMark(cell, i, o, isTarget, () => ({ f: ui.from, d: null })); // 相手の迷いが見える（main.js の o.peek・o.peekIn）
+      if (v !== null) {
+        const disc = document.createElement('span');
+        disc.className = 'ut-disc ' + (v === NONE ? 'none' : 'p' + col(v)) + (win.has(i) ? ' win' : '');
+        const moved = s.last && s.last.d === i;
+        // 動かした駒は元のマスから滑ってきて置かれる（main.js の flyPlay）。色が変わった駒はくるっと回って染まる
+        disc.dataset.fly = moved ? `mv:${s.ply}` : `sq:${i}`;
+        if (moved) {
+          Object.assign(disc.dataset, { flyFrom: `sq:${s.last.f}`, flySlide: '' });
+          disc.dataset.last = 'still'; // 決め手のスロー（main.js の slowFinish）: 駒は滑ってくるので寄せるだけ
+          if (o.fresh && s.last.was !== v) disc.classList.add('dye');
+        }
+        if (i === lock && !over) {
+          disc.classList.add('locked'); // 直前に動いた駒（いまは動かせない）
+          cell.setAttribute('aria-label', '直前に動いた駒（動かせない）');
+        }
+        if (win.has(i)) winEls.push(cell);
+        cell.append(disc);
+      }
+      if (isTarget || isMovable) {
+        cell.type = 'button';
+        cell.setAttribute('aria-label', `${Math.floor(i / N) + 1}段目 ${i % N + 1}列目`);
+        cell.onclick = () => {
+          if (justDragged()) return;
+          if (isTarget) { const f = ui.from; ui = { ...ui, from: null }; o.onMove(f * CELLS + i); return; }
+          ui = { ...ui, from: ui.from === i ? null : i };
+          draw();
+        };
+        // 指でつまんで動かす（util.js の grabbable）
+        if (isMovable) grabbable(cell, { piece: () => cell.querySelector('.ut-disc'), pick: () => { ui = { ...ui, from: i }; draw(); }, drop: (t) => { if (t !== null && ui.from === i) { ui = { ...ui, from: null }; o.onMove(i * CELLS + Number(t)); } } });
+      }
+      grid.append(cell);
+    }
+    root.append(grid);
+    if (winEls.length) winLine(grid, winEls, o.fresh, 'ut:' + [...win].join(','), 420);
+    o.peek?.({ f: ui.from, d: null, a: null }); // 相手の迷いが見える: いまの選びを知らせる
+  },
+};

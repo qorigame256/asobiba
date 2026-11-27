@@ -6437,8 +6437,11 @@ console.log('kaisen OK');
   ds.count = ds.lines.length;
   ds.boxes = ds.boxes.map((_, b) => (b < 12 ? 0 : b < 20 ? 1 : 2)); // 25マス: 12・8・5
   assert.deepEqual(seatPoints(DT.result(ds), 3), [2, 1, 0], '点と線の3人: 四角の多い順に 2・1・0点');
-  ds.boxes = ds.boxes.map((_, b) => (b < 10 ? 0 : b < 20 ? 1 : 2)); // 10・10・5 は1位が同点の引き分け（今までどおりだれも点なし）
-  assert.deepEqual(seatPoints(DT.result(ds), 3), [0, 0, 0], '点と線の3人: 1位が同点なら引き分け');
+  ds.boxes = ds.boxes.map((_, b) => (b < 10 ? 0 : b < 20 ? 1 : 2)); // 10・10・5 は1位が同点の引き分けだが、下の人とは順位で差を付ける（2026-11-27 本人の決定）
+  assert.equal(DT.result(ds).winner, null, '点と線の3人: 1位が同点なら引き分け');
+  assert.deepEqual(seatPoints(DT.result(ds), 3), [1, 1, 0], '点と線の3人: 1位が同点でも、下の人とは順位で点の差');
+  assert.deepEqual(seatPoints({ winner: null, cells: [], scores: [4, 4, 4] }, 3), [0, 0, 0], '1位が全員で並んだら全員0点');
+  assert.deepEqual(seatPoints({ winner: null, cells: [], place: [1, 3, 1, 4] }, 4), [2, 1, 2, 0], '1位が並んだ順位（place。海戦ゲームのヒット数）でも、下の人とは順位で点の差');
   const MK = GAMES.mancala;
   const ms = MK.init({ rules: { players: 3 } });
   const goals = ms.pits.map((v, i) => (v === 0 ? i : -1)).filter((i) => i >= 0); // 始めはゴールだけ0個
@@ -13788,6 +13791,81 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.equal(TS.result(x).winner, null, '多数決の陣地: 2人のつよいどうしは引き分け（2番手のおまけ4点）');
   }
   console.log('tasuu OK');
+}
+
+// 色うつり四目（2026-11-27。utsuri.js）
+{
+  const UT = GAMES.utsuri;
+  const { movesOf, lineAt, MAX_PLY, NEED } = await import('../app/js/games/utsuri.js');
+  const at = (r, c) => r * 6 + c;
+  const mv = (f, d) => f * 36 + d;
+  const s0 = UT.init({ rules: {} });
+  assert.equal(s0.board.filter((v) => v === -1).length, 12, '色うつり四目: 始めは色の無い駒12個');
+  assert.equal(s0.board.filter((v) => v !== null && v !== -1).length, 0, '色うつり四目: 始めはだれの色の駒も無い');
+  assert.ok(s0.board.every((v, i) => v === s0.board[35 - i]), '色うつり四目: 始めの並べ方は点対称');
+  assert.equal(UT.turn(s0), 0, '色うつり四目: 最初は1番手');
+  assert.deepEqual([MAX_PLY, NEED], [40, 4], '色うつり四目: 40手で引き分け・4つで勝ち');
+  // 動き: たて・よこの空きへ1マスだけ
+  const only = (list) => { const b = Array(36).fill(null); for (const [i, v] of list) b[i] = v; return b; };
+  const sorted = (a) => [...a].sort((x, y) => x - y);
+  assert.deepEqual(sorted(movesOf(only([[at(2, 2), -1]]), -1)), sorted([mv(at(2, 2), at(1, 2)), mv(at(2, 2), at(3, 2)), mv(at(2, 2), at(2, 1)), mv(at(2, 2), at(2, 3))]), '色うつり四目: 駒はたて・よこの空きへ1マス');
+  assert.deepEqual(sorted(movesOf(only([[at(0, 0), 1], [at(0, 1), -1]]), -1)), sorted([mv(at(0, 0), at(1, 0)), mv(at(0, 1), at(1, 1)), mv(at(0, 1), at(0, 2))]), '色うつり四目: 駒のあるマスと盤の外へは動けない');
+  // 動かした駒が自分の色になる（色の無い駒も相手の色の駒も）・直前に動いた駒は動かせない
+  let s = UT.apply(s0, mv(at(1, 1), at(0, 1)));
+  assert.deepEqual([s.board[at(0, 1)], s.board[at(1, 1)], s.turn], [0, null, 1], '色うつり四目: 動かした駒が1番手の色になり、2番手の番');
+  assert.equal(UT.apply(s, mv(at(0, 1), at(0, 0))), null, '色うつり四目: 直前に動いた駒は動かせない');
+  s = UT.apply(s, mv(at(1, 2), at(0, 2)));
+  assert.equal(s.board[at(0, 2)], 1, '色うつり四目: 2番手が動かした駒は2番手の色');
+  s = UT.apply(s, mv(at(0, 1), at(0, 0)));
+  assert.equal(s?.board[at(0, 0)], 0, '色うつり四目: 自分が1つ前に動かした駒は、また動かせる');
+  assert.equal(UT.apply(s, mv(at(0, 0), at(1, 0))), null, '色うつり四目: 相手が直前に動かした駒（相手の色）は動かせない');
+  s = UT.apply(s, mv(at(1, 3), at(0, 3)));
+  s = UT.apply(s, mv(at(0, 2), at(0, 1)));
+  assert.equal(s?.board[at(0, 1)], 0, '色うつり四目: 相手の色の駒も、動かすと自分の色になる');
+  assert.equal(UT.apply(s, mv(at(2, 1), at(2, 1))), null, '色うつり四目: 動かない手は打てない');
+  assert.equal(UT.apply(s, mv(at(2, 1), at(2, 3))), null, '色うつり四目: 2マス先へは動けない');
+  // 4つ並べたら勝ち（よこ・たて・ななめ）・3つでは続く
+  const base = { ...UT.init({ rules: {} }), last: null };
+  const won = (list, m, p = 0) => UT.apply({ ...base, turn: p, board: only(list) }, m);
+  let w = won([[at(5, 0), 0], [at(5, 1), 0], [at(5, 2), 0], [at(4, 3), -1]], mv(at(4, 3), at(5, 3)));
+  assert.deepEqual([UT.result(w)?.winner, sorted(UT.result(w).cells)], [0, [at(5, 0), at(5, 1), at(5, 2), at(5, 3)]], '色うつり四目: よこに4つで勝ち（並んだマス）');
+  w = won([[at(0, 5), 1], [at(1, 5), 1], [at(2, 5), 1], [at(3, 4), 0]], mv(at(3, 4), at(3, 5)), 1);
+  assert.equal(UT.result(w)?.winner, 1, '色うつり四目: たてに4つで勝ち（相手の色の駒を動かして）');
+  w = won([[at(0, 0), 0], [at(1, 1), 0], [at(2, 2), 0], [at(3, 2), -1]], mv(at(3, 2), at(3, 3)));
+  assert.equal(UT.result(w)?.winner, 0, '色うつり四目: ななめに4つで勝ち');
+  w = won([[at(0, 3), 0], [at(1, 2), 0], [at(2, 1), 0], [at(3, 1), -1]], mv(at(3, 1), at(3, 0)));
+  assert.equal(UT.result(w)?.winner, 0, '色うつり四目: 逆ななめに4つで勝ち');
+  w = won([[at(5, 0), 0], [at(5, 1), 0], [at(4, 3), -1]], mv(at(4, 3), at(5, 3)));
+  assert.equal(UT.result(w), null, '色うつり四目: 間が空いた並びでは勝たない');
+  w = won([[at(5, 0), 1], [at(5, 1), 0], [at(5, 2), 0], [at(4, 3), -1], [at(0, 0), -1]], mv(at(4, 3), at(5, 3)));
+  assert.equal(UT.result(w), null, '色うつり四目: 相手の色がまじった並びでは勝たない');
+  assert.deepEqual(sorted(lineAt(only([[0, 0], [1, 0], [2, 0], [3, 0], [4, 0]]), 2, 0)), [0, 1, 2, 3, 4], '色うつり四目: 5つ並んだら5つとも並びのマス');
+  assert.equal(UT.apply(won([[at(5, 0), 0], [at(5, 1), 0], [at(5, 2), 0], [at(4, 3), -1], [at(0, 0), -1]], mv(at(4, 3), at(5, 3))), mv(at(0, 0), at(0, 1))), null, '色うつり四目: 決着のあとは動かせない');
+  // 40手で引き分け・39手では続く
+  const near = { ...base, board: only([[at(0, 0), -1], [at(5, 5), -1]]) };
+  assert.equal(UT.result(UT.apply({ ...near, ply: 39 }, mv(at(0, 0), at(0, 1))))?.winner, null, '色うつり四目: 40手で引き分け');
+  assert.ok(UT.result(UT.apply({ ...near, ply: 39 }, mv(at(0, 0), at(0, 1))))?.long, '色うつり四目: 40手の引き分けの印');
+  assert.equal(UT.result(UT.apply({ ...near, ply: 38 }, mv(at(0, 0), at(0, 1)))), null, '色うつり四目: 39手ではまだ続く');
+  // 番が来たのに動かせる駒が無い人の負け（駒が1つだけで、それが直前に動いた駒）
+  const st = UT.apply({ ...base, board: only([[at(0, 0), -1]]) }, mv(at(0, 0), at(0, 1)));
+  assert.deepEqual([UT.result(st)?.winner, !!UT.result(st)?.stuck], [0, true], '色うつり四目: 番が来たのに動かせる駒が無い人の負け');
+  // CPU どうしで最後まで（反則なし・40手まで）
+  for (const lv of ['weak', 'normal', 'strong']) {
+    let x = UT.init({ rules: {} });
+    for (let i = 0; !UT.result(x); i++) {
+      const nx = UT.apply(x, UT.cpu(x, UT.turn(x), { cpu: lv }));
+      assert.ok(nx && i < 40, `色うつり四目: CPU（${lv}）どうしが最後まで`);
+      assert.equal(nx.board.filter((v) => v !== null).length, 12, '色うつり四目: 駒はいつも12個');
+      x = nx;
+    }
+  }
+  // CPU（つよい）は勝てる手を見逃さない・相手の3つ並びを崩す（つよい）
+  const one = { ...base, board: only([[at(5, 0), 0], [at(5, 1), 0], [at(5, 2), 0], [at(4, 3), -1], [at(0, 0), -1], [at(0, 5), -1]]) };
+  assert.equal(UT.result(UT.apply(one, UT.cpu(one, 0, { cpu: 'strong' })))?.winner, 0, '色うつり四目: CPU（つよい）は勝てる手を打つ');
+  const guard = { ...one, turn: 1 };
+  const g2 = UT.apply(guard, UT.cpu(guard, 1, { cpu: 'strong' }));
+  assert.ok(!movesOf(g2.board, g2.last.d).some((m) => UT.result(UT.apply(g2, m))?.winner === 0), '色うつり四目: CPU（つよい）は相手の勝ちの手を残さない');
+  console.log('utsuri OK');
 }
 
 // 2026-11-25 の47回目の案: かべ置きレースの壁の数・積み上げタワーの10段勝負・音当ての和音

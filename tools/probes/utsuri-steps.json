@@ -1,0 +1,13 @@
+[
+  {"wait": 2500},
+  {"shot": "start"},
+  {"click": "#board [aria-label=\"2段目 2列目\"]"},
+  {"wait": 300},
+  {"shot": "selected", "selector": "#board"},
+  {"click": "#board [aria-label=\"1段目 2列目\"]"},
+  {"wait": 3500},
+  {"shot": "after"},
+  {"eval": "[...document.querySelectorAll('#board .ut-disc')].map((d) => d.className).join(' | ')", "as": "discs"},
+  {"eval": "document.querySelector('#status')?.innerText", "as": "status"},
+  {"eval": "document.querySelector('#info')?.innerText ?? document.querySelector('.info')?.innerText", "as": "info"}
+]

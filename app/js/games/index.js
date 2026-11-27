@@ -117,6 +117,7 @@ import kabe from './kabe.js';
 import akari from './akari.js';
 import omosa from './omosa.js';
 import tasuu from './tasuu.js';
+import utsuri from './utsuri.js';
 import hitai from './hitai.js';
 import kioku from './kioku.js';
 import danmaku from './danmaku.js';
@@ -211,16 +212,16 @@ import { withGiveUp } from './util.js';
 // 準備中のゲームを一覧に出すとき: soon('id', '名前', '絵文字')
 export const soon = (id, name, icon) => ({ id, name, icon, desc: 'じゅんび中', ready: false });
 
-export const GAME_ORDER = ['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'oni', 'race', 'kabe', 'akari', 'omosa', 'tasuu', 'colors', 'daifugo', 'poker', 'speed', 'babanuki', 'doubt', 'sevens', 'blackjack', 'hitai', 'hitblow', 'sensou', 'yubisuma', 'tamebeam', 'heitai', 'acchi', 'kaidan', 'memory', 'yacht', 'sugoroku', 'bingo', 'seri', 'nim', 'taru', 'seesaw', 'koori', 'hanabi', 'fusen', 'amida', 'kaburi', 'fukuwarai', 'flags', 'kanji', 'mannaka', 'kanjiplus', 'goji', 'oxquiz', 'nazo', 'nearpin', 'kakudo', 'kage', 'todofuken', 'michi', 'kirigami', 'tenkai', 'eitango', 'karuta', 'make10', 'anzan', 'suretsu', 'numtouch', 'nukekazu', 'kotoba', 'narabe', 'slide', 'jigsaw', 'nanpure', 'tsunagi', 'hitofude', 'iromizu', 'tokei', 'tenbin', 'mizu', 'matchbo', 'okane', 'meiro', 'targets', 'mikiri', 'isutori', 'iroji', 'ooi', 'sakkaku', 'hitogomi', 'hiyoko', 'cup', 'atodashi', 'tataite', 'pittari', 'meoshi', 'rhythm', 'oto', 'kioku', 'typing', 'danmaku', 'tamaire', 'yuki', 'tsuna', 'nawa', 'hane', 'sumo', 'bowling', 'golf', 'darts', 'katachi', 'kingyo', 'somen', 'tower', 'chicken', 'iraira', 'billiards', 'machigai', 'bombs', 'daruma', 'umigame', 'wordwolf', 'ishin', 'kachikan', 'oogiri', 'jinro', 'oekaki', 'hockey', 'hasami', 'shogi', 'mahjong'];
+export const GAME_ORDER = ['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'oni', 'race', 'kabe', 'akari', 'omosa', 'tasuu', 'utsuri', 'colors', 'daifugo', 'poker', 'speed', 'babanuki', 'doubt', 'sevens', 'blackjack', 'hitai', 'hitblow', 'sensou', 'yubisuma', 'tamebeam', 'heitai', 'acchi', 'kaidan', 'memory', 'yacht', 'sugoroku', 'bingo', 'seri', 'nim', 'taru', 'seesaw', 'koori', 'hanabi', 'fusen', 'amida', 'kaburi', 'fukuwarai', 'flags', 'kanji', 'mannaka', 'kanjiplus', 'goji', 'oxquiz', 'nazo', 'nearpin', 'kakudo', 'kage', 'todofuken', 'michi', 'kirigami', 'tenkai', 'eitango', 'karuta', 'make10', 'anzan', 'suretsu', 'numtouch', 'nukekazu', 'kotoba', 'narabe', 'slide', 'jigsaw', 'nanpure', 'tsunagi', 'hitofude', 'iromizu', 'tokei', 'tenbin', 'mizu', 'matchbo', 'okane', 'meiro', 'targets', 'mikiri', 'isutori', 'iroji', 'ooi', 'sakkaku', 'hitogomi', 'hiyoko', 'cup', 'atodashi', 'tataite', 'pittari', 'meoshi', 'rhythm', 'oto', 'kioku', 'typing', 'danmaku', 'tamaire', 'yuki', 'tsuna', 'nawa', 'hane', 'sumo', 'bowling', 'golf', 'darts', 'katachi', 'kingyo', 'somen', 'tower', 'chicken', 'iraira', 'billiards', 'machigai', 'bombs', 'daruma', 'umigame', 'wordwolf', 'ishin', 'kachikan', 'oogiri', 'jinro', 'oekaki', 'hockey', 'hasami', 'shogi', 'mahjong'];
 export const GAMES = {
   tictactoe, connect4, reversi, colors, daifugo, poker, speed, hitblow, sensou, yubisuma, memory, nim, flags, kanji, targets, umigame, shogi, mahjong, hockey,
   gomoku, dots, babanuki, doubt, yacht, wordwolf, jinro, sevens, mancala, oekaki, seri, blackjack, kaisen, pittari, typing, danmaku, tamaire, machigai, bombs, hasami, hitai, kioku, tamebeam, make10, ishin, karuta, acchi, daruma, slide, nanpure, mikiri, bingo, meiro, iroji, sugoroku, taru,
-  isutori, cube4, kaidan, atodashi, bowling, tsuna, eitango, kaburi, anzan, golf, billiards, numtouch, mannaka, oxquiz, kotoba, oogiri, fukuwarai, nawa, darts, amida, narabe, kingyo, tower, fusen, kage, hane, kachikan, tsunagi, sumo, nearpin, kanjiplus, jigsaw, hitofude, ooi, yuki, hanabi, somen, kirigami, iromizu, heitai, oni, race, kabe, akari, omosa, tasuu, cup, seesaw, katachi, rhythm, todofuken, meoshi, tokei, tenbin, matchbo, okane, tenkai, nazo, goji, suretsu, mizu, tataite, sakkaku, michi, kakudo, nukekazu, chicken, oto, koori, hitogomi, hiyoko, iraira,
+  isutori, cube4, kaidan, atodashi, bowling, tsuna, eitango, kaburi, anzan, golf, billiards, numtouch, mannaka, oxquiz, kotoba, oogiri, fukuwarai, nawa, darts, amida, narabe, kingyo, tower, fusen, kage, hane, kachikan, tsunagi, sumo, nearpin, kanjiplus, jigsaw, hitofude, ooi, yuki, hanabi, somen, kirigami, iromizu, heitai, oni, race, kabe, akari, omosa, tasuu, utsuri, cup, seesaw, katachi, rhythm, todofuken, meoshi, tokei, tenbin, matchbo, okane, tenkai, nazo, goji, suretsu, mizu, tataite, sakkaku, michi, kakudo, nukekazu, chicken, oto, koori, hitogomi, hiyoko, iraira,
 };
 // 参りました（2026-11-12 本人の選択。room.md「UI・UX の5回目」）を付ける2人で打つ盤のゲーム（util.js の withGiveUp で apply と result を包む）。
 // 将棋はもとから投了があるので入れない。見えない鬼ごっこ・方眼紙レースは全員が遊ぶ形（multi）なので入れない（Claude の判断）。
 // 3〜4人にできるゲームも入れてあるが、ボタンを出すのは2人のときだけ（main.js の canGiveUp）
-export const GIVE_UP = ['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'hasami', 'kabe', 'akari', 'omosa', 'tasuu'];
+export const GIVE_UP = ['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'hasami', 'kabe', 'akari', 'omosa', 'tasuu', 'utsuri'];
 for (const id of GIVE_UP) withGiveUp(GAMES[id]);
 // 遊び方（howto.js）。対局画面の「？遊び方」で出す（main.js の renderHowto）
 for (const [id, lines] of Object.entries(HOWTO)) if (GAMES[id]) GAMES[id].howto = lines;
@@ -232,7 +233,7 @@ for (const [id, figs] of Object.entries(FIGS)) if (GAMES[id]) GAMES[id].howtoFig
 // 分け方は rules のファイルにほぼ合わせた（Claude の判断。extra-games の手遊び・ヒット＆ブローはパーティー、戦争・神経衰弱はトランプなのでカード・牌）。
 // main.js の始まりの顔合わせ（introFx）は、quick と action のゲームには出さない
 export const CATEGORIES = [
-  { key: 'board', name: '盤のゲーム', ids: ['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'oni', 'race', 'kabe', 'akari', 'omosa', 'tasuu', 'hasami', 'shogi'] },
+  { key: 'board', name: '盤のゲーム', ids: ['tictactoe', 'connect4', 'cube4', 'reversi', 'gomoku', 'dots', 'mancala', 'kaisen', 'oni', 'race', 'kabe', 'akari', 'omosa', 'tasuu', 'utsuri', 'hasami', 'shogi'] },
   { key: 'card', name: 'カード・牌', ids: ['colors', 'daifugo', 'poker', 'speed', 'babanuki', 'doubt', 'sevens', 'blackjack', 'hitai', 'sensou', 'memory', 'mahjong'] },
   {
     key: 'party', name: 'パーティー',
@@ -253,17 +254,23 @@ export function winnersOf(res) {
 }
 
 // 部屋の成績表の「順位で点」（2026-10-24 本人の決定。28回目の案）: 席ごとの点 ＝ その対局で自分より下の順位になった人の数
-// （4人で1位なら3点・2位なら2点、2人で勝てば1点。同じ順位の人は数えない。引き分けはだれも0点）。n は席の数（CPU も入る）。
+// （4人で1位なら3点・2位なら2点、2人で勝てば1点。同じ順位の人は数えない。引き分けはだれも0点。ただし3人以上で1位だけが並んだときは下の人と差を付ける）。n は席の数（CPU も入る）。
 // 結果の形はゲームごとに違うので、次の順で「強さ」（大きいほど上）を決める。ゲームの結果に足す欄の約束でもある:
 //   place（席ごとの順位。1 が一番上。同じ順位がありうるゲームはこれを持つ）→ ranking と places（ranking の並びごとの順位。ひたいカード）→
 //   ranking と pts（席ごとの合計点。点数で勝負する回数制）→ ranking（上から並べた席。同じ順位なし）→ scores（席ごとの点。teams があるチーム戦は使わない）→
-//   勝った人だけ（勝った人が上・ほかは同じ）。勝った人がいないときは、負けた人（loser）だけが下（ほかは同じ）、それも無ければ引き分け。draw: true も引き分け。
+//   勝った人だけ（勝った人が上・ほかは同じ）。勝った人がいないときは、負けた人（loser）だけが下（ほかは同じ）、それも無ければ place か scores の順位、それも無ければ引き分け。draw: true も引き分け。
 export function seatPoints(res, n) {
   const w = winnersOf(res);
   const none = Array(n).fill(0);
   if (res.draw === true) return none;
-  if (!w.length) return Number.isInteger(res.loser) ? none.map((_, p) => (p === res.loser ? 0 : 1)) : none;
   const okArr = (a) => Array.isArray(a) && a.length === n && a.every(Number.isFinite);
+  if (!w.length) {
+    if (Number.isInteger(res.loser)) return none.map((_, p) => (p === res.loser ? 0 : 1));
+    // 1位が並んで勝った人がいない（点と線・マンカラ・灯りの陣取り・多数決の陣地・海戦ゲームのヒット数の3〜4人）ときも、席ごとの順位（place）か点（scores）があれば
+    // 下の人とは順位で差を付ける（2026-11-27 本人の決定。並んだ1位どうしは同じ点。全員が並んだら全員0点）
+    const st0 = okArr(res.place) ? res.place.map((v) => -v) : okArr(res.scores) && res.teams === undefined ? res.scores : null;
+    return st0 ? st0.map((v) => st0.filter((x) => x < v).length) : none;
+  }
   const rk = Array.isArray(res.ranking) ? res.ranking.filter((p) => Number.isInteger(p) && p >= 0 && p < n) : null;
   let st;
   if (okArr(res.place)) st = res.place.map((v) => -v);

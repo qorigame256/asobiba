@@ -244,7 +244,9 @@ for (const [g, sn, nn] of [[C, 20, 26], [R, 12, 20], [RS, 16, 24], [RC, 12, 20],
     // 重さの手番（2026-11-27）。40局の実測で強い方の勝ち: ふつう-よわい 37・負け 3、つよい-ふつう 39・負け 0
     [GAMES.omosa, {}, 2, 30, 'omosa'],
     // 多数決の陣地（2026-11-27）。120局の実測で強い方の勝ち・負け: 2人 ふつう-よわい 103・12、つよい-ふつう（60局）37・0、3人 102・11・107・4、4人 93・15・102・11
-    [GAMES.tasuu, {}, 2, 30, 'tasuu'], [GAMES.tasuu, { players: 3 }, 3, 30, 'tasuu-3'], [GAMES.tasuu, { players: 4 }, 4, 30, 'tasuu-4']]) {
+    [GAMES.tasuu, {}, 2, 30, 'tasuu'], [GAMES.tasuu, { players: 3 }, 3, 30, 'tasuu-3'], [GAMES.tasuu, { players: 4 }, 4, 30, 'tasuu-4'],
+    // 色うつり四目（2026-11-27）。実測で強い方の勝ち・負け・引き分け: ふつう-よわい 23・4・3（30局）、つよい-ふつう 6・0・14（20局。つよいどうしはほとんど引き分けになる遊び）
+    [GAMES.utsuri, {}, 2, 30, 'utsuri']]) {
     // 3人以上の点と線は、つよいとふつうの差が小さい（適当に引く1割だけ）ので、よわいとの差だけを見る
     for (const [i, [a, b]] of (n === 2 ? [['normal', 'weak'], ['strong', 'normal']] : [['normal', 'weak'], ['strong', 'weak']]).entries()) {
       const games = Array.isArray(counts) ? counts[i] : counts;

@@ -1,0 +1,61 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "app/fonts",
+    "app/voice",
+    "app/sounds",
+    "tools/test-logic.mjs",
+    "tools/font-chars.json",
+    "tools/font-texts.mjs",
+    "tools/voice-texts.mjs",
+    "tools/probes/uiux13-logic.mjs"
+  ],
+  "cwd": "copy",
+  "env": {
+    "QUICK": "1",
+    "SEED": "1"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 300,
+  "breaks": [
+    {
+      "name": "1位が並んだら全員0点（前の作り）",
+      "file": "app/js/games/index.js",
+      "old": "return st0 ? st0.map((v) => st0.filter((x) => x < v).length) : none;",
+      "new": "return none;",
+      "expect": [
+        "点と線の3人: 1位が同点でも、下の人とは順位で点の差"
+      ]
+    },
+    {
+      "name": "1位が並んだときに順位（place）を見ない",
+      "file": "app/js/games/index.js",
+      "old": "const st0 = okArr(res.place) ? res.place.map((v) => -v) : ",
+      "new": "const st0 = ",
+      "expect": [
+        "1位が並んだ順位（place。海戦ゲームのヒット数）でも、下の人とは順位で点の差"
+      ]
+    },
+    {
+      "name": "1位が全員で並んでも点を付ける",
+      "file": "app/js/games/index.js",
+      "old": "return st0 ? st0.map((v) => st0.filter((x) => x < v).length) : none;",
+      "new": "return st0 ? st0.map((v) => (st0.every((x) => x === v) ? 1 : st0.filter((x) => x < v).length)) : none;",
+      "expect": [
+        "1位が全員で並んだら全員0点"
+      ]
+    }
+  ]
+}
