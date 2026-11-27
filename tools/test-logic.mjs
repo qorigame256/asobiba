@@ -13729,6 +13729,67 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   console.log('omosa OK');
 }
 
+// 多数決の陣地（2026-11-27。tasuu.js）
+{
+  const TS = GAMES.tasuu;
+  const { scoresOf, ownerOf } = await import('../app/js/games/tasuu.js');
+  const { seatPoints } = await import('../app/js/games/index.js');
+  const put = (s, zs) => zs.reduce((x, z) => { const nx = TS.apply(x, z); assert.ok(nx, `多数決の陣地: 陣地 ${z} に置ける`); return nx; }, s);
+  // 陣地と点の並び
+  const s0 = TS.init({ rules: {}, seed: 11 });
+  assert.equal(s0.zones.length, 5, '多数決の陣地: 陣地は5つ');
+  assert.deepEqual(s0.pts.slice().sort(), [2, 3, 4, 5, 6], '多数決の陣地: 点は 2〜6 を並べ替えたもの');
+  assert.deepEqual(TS.init({ rules: {}, seed: 11 }).pts, s0.pts, '多数決の陣地: 同じ種なら同じ並び');
+  assert.ok(new Set([1, 2, 3, 4, 5, 6, 7, 8].map((sd) => TS.init({ rules: {}, seed: sd }).pts.join())).size > 1, '多数決の陣地: 点の並びは対局ごとに変わる');
+  // おまけ点
+  assert.deepEqual([2, 3, 4].map((n) => TS.init({ rules: { players: n } }).bonus), [[0, 4], [0, 1, 2], [0, 1, 2, 2]], '多数決の陣地: おまけ点は 2人 0・4、3人 0・1・2、4人 0・1・2・2');
+  assert.deepEqual(scoresOf(s0), [0, 4], '多数決の陣地: 点はおまけ点から始まる');
+  // 置き方・順番
+  let s = put(s0, [0]);
+  assert.deepEqual(s.zones[0], [0], '多数決の陣地: 置いた石は手番の人の石');
+  assert.equal(TS.turn(s), 1, '多数決の陣地: 置いたら次の人');
+  assert.equal(TS.apply(s, 5), null, '多数決の陣地: 無い陣地には置けない');
+  s = put(s, [0, 0, 0, 0]); // 1番手 3つ・2番手 2つで埋まる
+  assert.equal(TS.apply(s, 0), null, '多数決の陣地: 5つ埋まった陣地には置けない');
+  assert.equal(ownerOf(2, s.zones[0]), 0, '多数決の陣地: 埋まったらいちばん多い人の陣地');
+  assert.deepEqual(scoresOf(s), [s0.pts[0], 4], '多数決の陣地: 埋まった陣地の点をいちばん多い人が取る');
+  assert.equal(TS.result(s), null, '多数決の陣地: 埋まっていない陣地があるうちは続く');
+  // 3人: いちばん多い人が並んだら、だれも取らない（2・2・1）
+  let t = TS.init({ rules: { players: 3 }, seed: 3 });
+  t = put(t, [1, 1, 1, 1, 1]); // 席 0・1・2・0・1 → 0 が2つ・1 が2つ・2 が1つ
+  assert.equal(ownerOf(3, t.zones[1]), -1, '多数決の陣地: いちばん多い人が並んだら、その陣地はだれも取らない');
+  assert.deepEqual(scoresOf(t), [0, 1, 2], '多数決の陣地: だれも取らない陣地の点はだれにも入らない');
+  // 終わりと勝ち（CPU どうし）
+  for (const n of [2, 3, 4]) {
+    let x = TS.init({ rules: { players: n }, seed: 100 + n });
+    const seen = [];
+    for (let i = 0; !TS.result(x); i++) {
+      seen.push(TS.turn(x));
+      const nx = TS.apply(x, TS.cpu(x, TS.turn(x), { cpu: n === 2 ? ['weak', 'normal'][i % 2] : ['weak', 'normal', 'strong'][i % 3] }));
+      assert.ok(nx && i < 25, `多数決の陣地: ${n}人で CPU どうしが最後まで`);
+      x = nx;
+    }
+    assert.equal(seen.length, 25, `多数決の陣地: ${n}人でも石は全部で25個`);
+    assert.ok(seen.every((p, i) => p === i % n), `多数決の陣地: ${n}人は席の順に回る`);
+    assert.ok(x.zones.every((z) => z.length === 5), '多数決の陣地: 全部の陣地が埋まったら終わり');
+    const r = TS.result(x);
+    assert.deepEqual(r.scores, scoresOf(x), '多数決の陣地: 結果の点は取った点とおまけ点の合計');
+    const top = Math.max(...r.scores);
+    const tops = r.scores.filter((v) => v === top).length;
+    assert.equal(r.winner, tops === 1 ? r.scores.indexOf(top) : null, '多数決の陣地: 点の多い人の勝ち・並んだら引き分け');
+    const pts = seatPoints(r, n);
+    assert.ok(r.scores.every((v, p) => r.scores.every((w, q) => (v > w) === (pts[p] > pts[q]))), `多数決の陣地: ${n}人の成績表の点は点の順`);
+  }
+  // 2人のつよいどうし（読み切り）は、おまけ4点で必ず引き分け（最善どうしなら1番手が4点差で勝つ形のため）。形勢も0のまま
+  {
+    let x = TS.init({ rules: {}, seed: 7 });
+    assert.equal(TS.judge(x), 0, '多数決の陣地: 2人の始めの形勢は互角');
+    while (!TS.result(x)) x = TS.apply(x, TS.cpu(x, TS.turn(x), { cpu: 'strong' }));
+    assert.equal(TS.result(x).winner, null, '多数決の陣地: 2人のつよいどうしは引き分け（2番手のおまけ4点）');
+  }
+  console.log('tasuu OK');
+}
+
 // 2026-11-25 の47回目の案: かべ置きレースの壁の数・積み上げタワーの10段勝負・音当ての和音
 {
   // かべ置きレース 壁の数

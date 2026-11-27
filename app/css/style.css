@@ -4257,3 +4257,28 @@ g.promo-flip { transform-box: fill-box; transform-origin: center; }
 @keyframes om-step { from { transform: translateX(calc(var(--dx) * 100%)); } }
 .om-tag { font-size: .78rem; font-weight: 700; white-space: nowrap; color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { .om-tok.step { animation: none; } .om-tok { transition: none; } }
+/* ---------- 多数決の陣地（tasuu.js。2026-11-27） ---------- */
+/* 5つの陣地を札のように横に並べる。石は下から積む。取った陣地はその人の色で縁取り、並んでだれも取らない陣地は縞 */
+.tsu .tsu-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; width: var(--board); margin: 0 auto; touch-action: manipulation; }
+.tsu .p0 { --pc: var(--p0); } .tsu .p1 { --pc: var(--p1); } .tsu .p2 { --pc: var(--p2); } .tsu .p3 { --pc: var(--p3); }
+.board .tsu-zone { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; padding: 8px 2px 6px; border: 2px solid var(--line); border-radius: 12px; background: var(--field); color: inherit; transition: border-color .3s, background-color .3s; }
+.board button.tsu-zone.playable { cursor: pointer; }
+.board button.tsu-zone.playable:hover { border-color: var(--pc); }
+.board .tsu-zone.won { border-color: var(--pc); background: color-mix(in srgb, var(--pc) 16%, var(--field)); }
+.board .tsu-zone.tie { background: repeating-linear-gradient(45deg, var(--field) 0 6px, color-mix(in srgb, var(--muted) 18%, var(--field)) 6px 12px); }
+.board .tsu-zone.win { box-shadow: 0 0 0 3px var(--win); }
+.board .tsu-zone.just { animation: tsu-just .7s ease-out; }
+@keyframes tsu-just { 30% { transform: scale(1.06); } }
+.tsu-pt { font-size: 1.7rem; font-weight: 800; line-height: 1; }
+.tsu-pt::after { content: '点'; font-size: .45em; font-weight: 700; margin-left: 1px; opacity: .7; }
+.tsu-slots { display: flex; flex-direction: column; gap: 4px; width: 100%; align-items: center; }
+.tsu-slot { display: grid; place-items: center; width: min(40px, 76%); aspect-ratio: 1; border-radius: 50%; border: 2px dashed color-mix(in srgb, var(--muted) 45%, transparent); box-sizing: border-box; }
+.tsu-slot:has(.tsu-stone) { border-color: transparent; }
+.tsu-stone { width: 100%; height: 100%; border-radius: 50%; background: radial-gradient(circle at 35% 30%, color-mix(in srgb, var(--pc) 45%, #fff) 0 12%, var(--pc) 55%, color-mix(in srgb, var(--pc) 70%, #000) 100%); box-shadow: 0 2px 3px rgba(0, 0, 0, .3); }
+.tsu-stone.last { outline: 2px solid var(--ink, #2d2a26); outline-offset: 2px; }
+.tsu-stone.pop { animation: pop .35s ease-out; }
+.tsu-tally { min-height: 1.3em; font-size: .78rem; font-weight: 700; text-align: center; line-height: 1.3; display: flex; gap: 4px; justify-content: center; flex-wrap: wrap; }
+.tsu-tally b { color: var(--pc); opacity: .75; }
+.tsu-tally b.lead { opacity: 1; text-decoration: underline; text-underline-offset: 2px; }
+.tsu-bonus { margin-left: 3px; opacity: .8; font-size: .8em; }
+@media (prefers-reduced-motion: reduce) { .board .tsu-zone.just, .tsu-stone.pop { animation: none; } .board .tsu-zone { transition: none; } }

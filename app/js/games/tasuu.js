@@ -1,0 +1,300 @@
+// 多数決の陣地（2026-11-27 本人が選んだ、Claude が考えた独自ルール。分かれ目は Claude の推奨を本人が承認）。2〜4人（詳細設定「人数」）。
+// 点の付いた5つの陣地に、順番に石を1つずつ置く。陣地が埋まったら、そこにいちばん多く置いた人がその点を取る。全部の陣地が埋まったら、点の多い人の勝ち。
+//
+// 本人が承認した分かれ目: 陣地は5つで、点の 2〜6 を対局ごとに並べ替える（対局の種 seed から。全員の端末で同じ並び）。1つの陣地に石は5つまで。
+//   いちばん多い人が並んだら、その陣地はだれも取らない。全部の陣地が埋まったら終わり。
+// Claude の判断: 置けるのは埋まっていない陣地ならどこでも。順番は席の順に回る（石は全部で25個なので、2人なら1番手が13個・2番手が12個置く。
+//   3人は 9・8・8、4人は 7・6・6・6。もう一回では順番が回る）。陣地は5つ目の石が置かれたその場で決まる。
+//   点のいちばん多い人が並んだら引き分け（3〜4人は成績表で順位の点）。2人では1つの陣地で並ぶことは無い（5つは奇数）。
+// おまけ点（本人の選択「後の席におまけ点」。2026-11-27）: 2人は2番手に4点（本人が承認した数）。2人を読み切ると、点の並び120通りのすべてで
+//   最善どうしなら1番手が4点差で勝つため（おまけ4点で最善どうしは引き分け。つよいどうし20局が全部引き分け）。
+//   3〜4人の数は Claude の判断: つよいどうし（試し打ち）で、並んだら頭数で分けた席ごとの取り分を比べて決めた。
+//   3人 0・1・2点 → 36%・36%・27%（並んだ局 53%）。なし 43%・29%・28%、0・1・1 は 40%・44%・15%、0・0.5・1 は 50%・41%・10%。
+//   4人 0・1・2・2点 → 32%・23%・30%・15%（並んだ局 49%）。なし 81%・8%・9%・1%、0・1・2・3 は 27%・15%・25%・33%、0・2・2・2 は 8%・55%・22%・14%。
+//   CPU は「自分の点 − いちばん多い人の点」で打つので、おまけ点を持った席がほかの CPU に狙われ、数を変えると取り分が大きく入れ替わる（人どうしの釣り合いは未確認）。
+//
+// 局面: { n, pts: 陣地ごとの点, bonus: 席ごとのおまけ点, zones: 陣地ごとに置いた人の席を置いた順に並べた配列, turn, last: 直前に置いた陣地（無ければ null）, moves: 置いた数 }。
+// 手 = 陣地の番号 0〜4。
+
+import { CPU_SETTING, TAP_PEEK_SETTING, col, mulberry32, shuffle, judgeOf } from './util.js';
+
+const ZONES = 5;
+const CAP = 5;
+const POINTS = [2, 3, 4, 5, 6];
+// 後の席のおまけ点（決め方と実測はファイルの先頭）
+export const BONUS = { 2: [0, 4], 3: [0, 1, 2], 4: [0, 1, 2, 2] };
+
+// 陣地 z の石の数（席ごと）
+const countIn = (n, z) => {
+  const c = new Array(n).fill(0);
+  for (const p of z) c[p]++;
+  return c;
+};
+// 埋まった陣地を取った人（並んだら -1。埋まっていなければ null）
+export function ownerOf(n, z) {
+  if (z.length < CAP) return null;
+  const c = countIn(n, z);
+  const top = Math.max(...c);
+  const w = c.map((v, p) => (v === top ? p : -1)).filter((p) => p >= 0);
+  return w.length === 1 ? w[0] : -1;
+}
+// 席ごとの取った点
+export function scoresOf(s) {
+  const sc = s.bonus.slice();
+  s.zones.forEach((z, i) => {
+    const w = ownerOf(s.n, z);
+    if (w !== null && w >= 0) sc[w] += s.pts[i];
+  });
+  return sc;
+}
+const legalOf = (s) => s.zones.map((z, i) => (z.length < CAP ? i : -1)).filter((i) => i >= 0);
+
+/* ---------- CPU ---------- */
+
+// 速く数えるため、CPU の中では陣地ごと・席ごとの石の数（cnt[陣地][席]）と陣地の石の数（len）で持つ
+const countsOf = (s) => ({ cnt: s.zones.map((z) => countIn(s.n, z)), len: s.zones.map((z) => z.length) });
+// 埋まった陣地を取った人（並んだら -1）
+function winnerOfCnt(c) {
+  let top = -1, who = -1;
+  for (let p = 0; p < c.length; p++) {
+    if (c[p] > top) { top = c[p]; who = p; } else if (c[p] === top) who = -1;
+  }
+  return who;
+}
+
+// 2人の読み切り。手ごとに、手番の人から見た「これから取る点 − 相手がこれから取る点」（両者が最善）を返す。
+// 2人の局面の数は始めからでも約55万で、手元の PC で 0.13 秒（2026-11-27 の実測）。陣地ごとの (1番手の数, 2番手の数) を36進で1つの数にして覚える。
+// 1つの陣地に5つなので、2人では並ぶことが無い（多い方が取る）
+// 同じ局面をまた聞かれたとき（観戦の形勢の帯は描き直すたびに聞く）のために、答えだけを最近の30局面ぶん覚えておく（読みの途中の表は捨てる。始めの局面の表は約44MB）
+const solved = new Map();
+function solve2(s) {
+  const sig = `${s.pts}|${s.turn}|${s.zones.map((z) => z.join('')).join('/')}`;
+  const hit = solved.get(sig);
+  if (hit) return hit;
+  const out = solve2raw(s);
+  solved.set(sig, out);
+  if (solved.size > 30) solved.delete(solved.keys().next().value);
+  return out;
+}
+function solve2raw(s) {
+  const { cnt } = countsOf(s);
+  const a = cnt.map((c) => c[0]);
+  const b = cnt.map((c) => c[1]);
+  const memo = new Map();
+  // turn の人がマス i に置いた（mine[i] は置いたあと）ときに取る点
+  const gainOf = (i, mine) => (a[i] + b[i] === CAP ? (mine[i] * 2 > CAP ? s.pts[i] : -s.pts[i]) : 0);
+  const rec = (turn) => {
+    let key = 0;
+    for (let i = 0; i < ZONES; i++) key = key * 36 + a[i] * 6 + b[i];
+    const hit = memo.get(key);
+    if (hit !== undefined) return hit;
+    const mine = turn === 0 ? a : b;
+    let best = -Infinity;
+    for (let i = 0; i < ZONES; i++) {
+      if (a[i] + b[i] >= CAP) continue;
+      mine[i]++;
+      const v = gainOf(i, mine) - rec(1 - turn);
+      mine[i]--;
+      if (v > best) best = v;
+    }
+    if (best === -Infinity) best = 0;
+    memo.set(key, best);
+    return best;
+  };
+  const mine = s.turn === 0 ? a : b;
+  const moves = legalOf(s).map((i) => {
+    mine[i]++;
+    const v = gainOf(i, mine) - rec(1 - s.turn);
+    mine[i]--;
+    return { i, v };
+  });
+  return { moves, rest: moves.length ? Math.max(...moves.map((x) => x.v)) : 0 };
+}
+const best2 = (s) => {
+  const { moves, rest } = solve2(s);
+  return moves.filter((x) => x.v === rest).map((x) => x.i);
+};
+
+// 3〜4人: 手ごとに「その手のあと、全員が空いた陣地へ適当に置いて最後まで行く」試しを tries 回して、
+// 自分の点 − ほかの人でいちばん多い人の点（おまけ点も入れる）の平均がいちばん良い手
+function rollout(s, tries) {
+  const { cnt: c0, len: l0 } = countsOf(s);
+  const moves = legalOf(s);
+  const n = s.n;
+  const me = s.turn;
+  let bestV = -Infinity;
+  let top = [];
+  for (const m of moves) {
+    let sum = 0;
+    for (let t = 0; t < tries; t++) {
+      const cnt = c0.map((c) => c.slice());
+      const len = l0.slice();
+      let turn = me;
+      let z = m;
+      for (;;) {
+        cnt[z][turn]++;
+        len[z]++;
+        turn = (turn + 1) % n;
+        const open = [];
+        for (let i = 0; i < ZONES; i++) if (len[i] < CAP) open.push(i);
+        if (!open.length) break;
+        z = open[Math.floor(Math.random() * open.length)];
+      }
+      const sc = s.bonus.slice();
+      for (let i = 0; i < ZONES; i++) { const w = winnerOfCnt(cnt[i]); if (w >= 0) sc[w] += s.pts[i]; }
+      let other = -Infinity;
+      for (let p = 0; p < n; p++) if (p !== me && sc[p] > other) other = sc[p];
+      sum += sc[me] - other;
+    }
+    const v = sum / tries;
+    if (v > bestV) { bestV = v; top = [m]; } else if (v === bestV) top.push(m);
+  }
+  return top;
+}
+
+// よわい: 4割は適当。ほかは、置いて陣地が埋まり自分が取れるならそこ、なければ埋まって取られる陣地を避けて適当
+// ふつう: 2人は読み切りの手を選ぶが 2割は適当。3〜4人は試し40回で選び、1割は適当
+// つよい: 2人は読み切り。3〜4人は試し300回
+// 120局の実測（強い方の勝ち・負け・引き分け。2026-11-27。おまけ点あり）: 2人 ふつう-よわい 103・12・5、つよい-ふつう（60局）37・0・23、
+//   3人 ふつう-よわい 102・11・7、つよい-よわい 107・4・9、4人 93・15・12、102・11・7。1手の最長は 2人の読み切りの始めの手で約0.2〜0.35秒（一時的に約44MB）、3〜4人 28ms
+const LEVEL = { weak: { slip: 0.4 }, normal: { slip2: 0.2, slip: 0.1, tries: 40 }, strong: { slip2: 0, slip: 0, tries: 300 } };
+function weakPick(s) {
+  const moves = legalOf(s);
+  const good = [];
+  const safe = [];
+  for (const i of moves) {
+    if (s.zones[i].length === CAP - 1) {
+      const w = ownerOf(s.n, [...s.zones[i], s.turn]);
+      if (w === s.turn) good.push(i);
+    } else safe.push(i);
+  }
+  return good.length ? good : safe.length ? safe : moves;
+}
+function tasuuCpu(s, rules) {
+  const lv = LEVEL[rules?.cpu] ?? LEVEL.weak;
+  const moves = legalOf(s);
+  const pick = (a) => a[Math.floor(Math.random() * a.length)];
+  if (moves.length === 1) return moves[0];
+  if (Math.random() < (s.n === 2 && lv.slip2 !== undefined ? lv.slip2 : lv.slip)) return pick(moves);
+  if (!lv.tries) return pick(weakPick(s));
+  return pick(s.n === 2 ? best2(s) : rollout(s, lv.tries));
+}
+
+// 形勢（2人の観戦の帯・ふりかえり）: 読み切りの点の差（おまけ点を入れる）を、1番手から見た −100〜100 にする（Math.random を使わない）
+function judge2(s) {
+  if (s.n !== 2) return null;
+  const sc = scoresOf(s);
+  const res = s.moves >= ZONES * CAP;
+  if (res) return sc[0] === sc[1] ? 0 : sc[0] > sc[1] ? 100 : -100;
+  const rest = solve2(s).rest * (s.turn === 0 ? 1 : -1); // 1番手から見たこれからの点の差
+  const d = sc[0] - sc[1] + rest;
+  return d === 0 ? 0 : judgeOf(d, 4);
+}
+
+function applyMove(s0, z) {
+  if (!Number.isInteger(z) || z < 0 || z >= ZONES || !s0.zones[z] || s0.zones[z].length >= CAP) return null;
+  const zones = s0.zones.slice();
+  zones[z] = [...zones[z], s0.turn];
+  return { ...s0, zones, turn: (s0.turn + 1) % s0.n, last: z, moves: s0.moves + 1 };
+}
+
+export default {
+  id: 'tasuu',
+  name: '多数決の陣地',
+  icon: '🗳️',
+  desc: '点の付いた陣地に交代で石を置き、埋まったらいちばん多く置いた人が点を取る。2〜4人',
+  ready: true,
+  keepColor: true, // 続けて遊ぶ間は、その人の色を変えない（util.js の col）
+  players: ['赤', '青', '緑', '紫'],
+  seatCount(rules) { return rules?.players ?? 2; },
+  settings: [
+    { key: 'players', label: '人数', desc: '順番に石を置く人数（石は全部で25個）', def: 2, choices: [[2, '2人'], [3, '3人'], [4, '4人']] },
+    TAP_PEEK_SETTING,
+    CPU_SETTING,
+  ],
+
+  cpu(s, p, rules) { return tasuuCpu(s, rules); },
+  judge(s) { return judge2(s); },
+
+  init({ rules = {}, seed = 0 } = {}) {
+    const n = [2, 3, 4].includes(rules.players) ? rules.players : 2;
+    const pts = shuffle(POINTS, mulberry32((seed ^ 0x7a50) >>> 0));
+    return { n, pts, bonus: BONUS[n].slice(), zones: Array.from({ length: ZONES }, () => []), turn: 0, last: null, moves: 0 };
+  },
+
+  turn(s) { return s.turn; },
+
+  apply(s0, z) { return applyMove(s0, z); },
+
+  result(s) {
+    if (s.moves < ZONES * CAP) return null;
+    const sc = scoresOf(s);
+    const top = Math.max(...sc);
+    const winners = sc.map((v, p) => (v === top ? p : -1)).filter((p) => p >= 0);
+    return { winner: winners.length === 1 ? winners[0] : null, cells: [], scores: sc }; // scores: 成績表の順位で点・表彰台（3〜4人）
+  },
+
+  info(s) {
+    const sc = scoresOf(s);
+    return sc.map((v, p) => `<b class="pl p${col(p)}">${this.players[col(p)]} <span data-roll="tsu${p}" data-v="${v}">${v}</span>点</b>`
+      + (s.bonus[p] ? `<small class="tsu-bonus">おまけ${s.bonus[p]}</small>` : '')).join('　');
+  },
+
+  render(root, s, o) {
+    root.innerHTML = '';
+    root.className = 'board tsu';
+    const res = this.result(s);
+    const sc = scoresOf(s);
+    const top = res ? Math.max(...sc) : null;
+    const row = document.createElement('div');
+    row.className = 'tsu-row';
+    s.zones.forEach((z, i) => {
+      const w = ownerOf(s.n, z);
+      const c = countIn(s.n, z);
+      const box = document.createElement('button');
+      box.type = 'button';
+      box.className = 'tsu-zone' + (w !== null ? (w >= 0 ? ` won p${col(w)}` : ' tie') : '')
+        + (w !== null && w >= 0 && res && sc[w] === top ? ' win' : '') + (o.fresh && s.last === i && w !== null ? ' just' : '');
+      // 点の札
+      const pt = document.createElement('div');
+      pt.className = 'tsu-pt';
+      pt.textContent = s.pts[i];
+      box.append(pt);
+      // 石の置き場（下から順に積む。空きも描く。2回押しの薄い石はこの空きに入る）
+      const slots = document.createElement('div');
+      slots.className = 'tsu-slots';
+      for (let k = CAP - 1; k >= 0; k--) {
+        const sl = document.createElement('span');
+        sl.className = 'tsu-slot';
+        if (k < z.length) {
+          const st = document.createElement('span');
+          const last = s.last === i && k === z.length - 1;
+          st.className = 'tsu-stone p' + col(z[k]) + (last ? ' last' : '') + (last && o.fresh ? ' pop' : '');
+          if (last) st.dataset.last = '';
+          sl.append(st);
+        }
+        slots.append(sl);
+      }
+      box.append(slots);
+      // 席ごとの数（いちばん多い人が分かるように）と、決まったあとの持ち主
+      const tally = document.createElement('div');
+      tally.className = 'tsu-tally';
+      if (w !== null) tally.textContent = w >= 0 ? `${this.players[col(w)]}の陣地` : 'だれも取らない';
+      else if (z.length) {
+        const mx = Math.max(...c);
+        tally.innerHTML = c.map((v, p) => (v ? `<b class="p${col(p)}${v === mx ? ' lead' : ''}">${v}</b>` : '')).filter(Boolean).join('');
+      }
+      box.append(tally);
+      box.setAttribute('aria-label', `${s.pts[i]}点の陣地（石 ${z.length}/${CAP}）`);
+      if (o.canMove && z.length < CAP) {
+        box.classList.add('playable', 'p' + col(s.turn));
+        box.onclick = () => o.onMove(i);
+      } else {
+        box.tabIndex = -1;
+        box.disabled = w !== null;
+      }
+      row.append(box);
+    });
+    root.append(row);
+  },
+};

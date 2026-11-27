@@ -1,0 +1,97 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "app/fonts",
+    "app/voice",
+    "app/sounds",
+    "tools/test-logic.mjs",
+    "tools/font-chars.json",
+    "tools/font-texts.mjs",
+    "tools/voice-texts.mjs",
+    "tools/probes/uiux13-logic.mjs"
+  ],
+  "cwd": "copy",
+  "env": {
+    "QUICK": "1",
+    "SEED": "1"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 300,
+  "breaks": [
+    {
+      "name": "多数決の陣地: いちばん多い人が並んでも、先の席の人が取る",
+      "file": "app/js/games/tasuu.js",
+      "old": "return w.length === 1 ? w[0] : -1;",
+      "new": "return w[0];",
+      "expect": [
+        "多数決の陣地: いちばん多い人が並んだら、その陣地はだれも取らない"
+      ]
+    },
+    {
+      "name": "多数決の陣地: 2人のおまけ点を3点にする",
+      "file": "app/js/games/tasuu.js",
+      "old": "export const BONUS = { 2: [0, 4],",
+      "new": "export const BONUS = { 2: [0, 3],",
+      "expect": [
+        "多数決の陣地: おまけ点は 2人 0・4、3人 0・1・2、4人 0・1・2・2"
+      ]
+    },
+    {
+      "name": "多数決の陣地: 点におまけ点を入れない",
+      "file": "app/js/games/tasuu.js",
+      "old": "export function scoresOf(s) {\n  const sc = s.bonus.slice();",
+      "new": "export function scoresOf(s) {\n  const sc = new Array(s.n).fill(0);",
+      "expect": [
+        "多数決の陣地: 点はおまけ点から始まる"
+      ]
+    },
+    {
+      "name": "多数決の陣地: 埋まった陣地にも置ける",
+      "file": "app/js/games/tasuu.js",
+      "old": " || s0.zones[z].length >= CAP) return null;",
+      "new": ") return null;",
+      "expect": [
+        "多数決の陣地: 5つ埋まった陣地には置けない"
+      ]
+    },
+    {
+      "name": "多数決の陣地: 順番を逆に回す",
+      "file": "app/js/games/tasuu.js",
+      "old": "turn: (s0.turn + 1) % s0.n,",
+      "new": "turn: (s0.turn + s0.n - 1) % s0.n,",
+      "expect": [
+        "多数決の陣地: 3人は席の順に回る"
+      ]
+    },
+    {
+      "name": "多数決の陣地: 点の並びを変えない",
+      "file": "app/js/games/tasuu.js",
+      "old": "const pts = shuffle(POINTS, mulberry32((seed ^ 0x7a50) >>> 0));",
+      "new": "const pts = POINTS.slice();",
+      "expect": [
+        "多数決の陣地: 点の並びは対局ごとに変わる"
+      ]
+    },
+    {
+      "name": "多数決の陣地: 2人のつよいが読み切りの良い手を選ばない",
+      "file": "app/js/games/tasuu.js",
+      "old": "return moves.filter((x) => x.v === rest).map((x) => x.i);",
+      "new": "return moves.map((x) => x.i);",
+      "expect": [
+        "多数決の陣地: 2人のつよいどうしは引き分け（2番手のおまけ4点）"
+      ]
+    }
+  ]
+}

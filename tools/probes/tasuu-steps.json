@@ -1,0 +1,18 @@
+[
+  {"wait": 2500},
+  {"shot": "start"},
+  {"click": "#board .tsu-zone:nth-child(3)"},
+  {"wait": 2500},
+  {"click": "#board .tsu-zone:nth-child(3)"},
+  {"wait": 2500},
+  {"click": "#board .tsu-zone:nth-child(3)"},
+  {"wait": 2500},
+  {"shot": "filled"},
+  {"click": "#board .tsu-zone:nth-child(1)"},
+  {"wait": 2500},
+  {"click": "#board .tsu-zone:nth-child(5)"},
+  {"wait": 2500},
+  {"shot": "mid"},
+  {"eval": "document.querySelector('#status')?.innerText", "as": "status"},
+  {"eval": "[...document.querySelectorAll('.tsu-zone')].map((z) => z.getAttribute('aria-label') + ' ' + z.className).join(' | ')", "as": "zones"}
+]

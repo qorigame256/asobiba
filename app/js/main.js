@@ -342,7 +342,7 @@ function openView() {
   pop.append(box);
   const rows = [
     ['big', '字の大きさ', '状態の欄・ボタン・名前などの字をひと回り大きくします', [[false, 'ふつう'], [true, '大きい']]],
-    ['twoTap', '2回押して置く', 'マルバツ・四目並べ・リバーシ・五目並べ・立体四目並べ・点と線・灯りの陣取りで、1回目に薄い印が出て、同じ所をもう一度押すと置きます（押し間違いを防ぎます）', [[false, '切る'], [true, '使う']]],
+    ['twoTap', '2回押して置く', 'マルバツ・四目並べ・リバーシ・五目並べ・立体四目並べ・点と線・灯りの陣取り・多数決の陣地で、1回目に薄い印が出て、同じ所をもう一度押すと置きます（押し間違いを防ぎます）', [[false, '切る'], [true, '使う']]],
     ['shapes', '色に形を添える', '3〜4人の盤で、人ごとの色の上に ● ▲ ■ ◆ を重ねます（色が見分けにくいときに）', [[false, '切る'], [true, '使う']]],
     ['loupe', '小さいマスの拡大鏡', '五目並べ・リバーシ・点と線・マルバツ・立体四目並べ・海戦ゲームで、指を当てている間は指の上に拡大した丸い窓を出し、指を離した所に置きます（指でずらして合わせられます。指で触る端末だけで働きます）。イライラ棒では、玉をつかんでいる間、玉のまわりを映します', [[false, '切る'], [true, '使う']]],
   ];
@@ -1818,7 +1818,7 @@ const READING = {
   kanjiplus: 'かんじたしざん かんじ たしざん ぶしゅ くいず はやおし',
   jigsaw: 'じぐそーはやとき じぐそー ぱずる え はやとき',
   hitofude: 'ひとふでがきはやとき ひとふでがき ひとふで せん ぱずる はやとき',
-  kabe: 'かべおきれーす かべ れーす ばん', akari: 'あかりのじんとり あかり じんとり ばん', omosa: 'おもさのてばん おもさ てばん とけい ばん', hasami: 'はさみしょうぎ ばん', shogi: 'しょうぎ ばん', mahjong: 'まーじゃん',
+  kabe: 'かべおきれーす かべ れーす ばん', akari: 'あかりのじんとり あかり じんとり ばん', omosa: 'おもさのてばん おもさ てばん とけい ばん', tasuu: 'たすうけつのじんち たすうけつ じんち いし ばん', hasami: 'はさみしょうぎ ばん', shogi: 'しょうぎ ばん', mahjong: 'まーじゃん',
 };
 const toHira = (t) => String(t ?? '').toLowerCase().replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60)).replace(/\s+/g, '');
 const gameHay = (id) => toHira(`${GAMES[id].name}${READING[id] ?? ''}${GAMES[id].desc ?? ''}`);
@@ -5394,7 +5394,7 @@ function rouletteButton() {
 // 相手の迷いが見える（詳細設定 peek。util.js の PEEK_SETTING）: 番の人の端末が、つまんでいる駒（ゲームが o.peek({ f, d, a }) で知らせる）か
 //   2回押しの1回目の手（{ m }）を送りっぱなしで送り、受け取った端末は描き直して、ゲームに o.peekIn で渡す（{ m } は main.js が .peek-ghost で出す）。
 //   Claude の判断: 同じ中身は続けて送らない。局面が進んだら（ghostKey が変わったら）出さない。自分が送ったものは出さない。
-const TWO_TAP_GAMES = new Set(['tictactoe', 'connect4', 'reversi', 'gomoku', 'cube4', 'dots', 'akari']);
+const TWO_TAP_GAMES = new Set(['tictactoe', 'connect4', 'reversi', 'gomoku', 'cube4', 'dots', 'akari', 'tasuu']);
 let tapGhost = null; // { k: どの局面か, sig: 手の JSON, move, at: 押した物の場所 }
 let lastTap = null; // 盤の中で最後に押した物（押した手の印を付けるため。onclick より先に捕まえる）
 el('board').addEventListener('click', (e) => { lastTap = e.target; }, true);

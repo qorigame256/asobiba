@@ -242,7 +242,9 @@ for (const [g, sn, nn] of [[C, 20, 26], [R, 12, 20], [RS, 16, 24], [RC, 12, 20],
     // 灯りの陣取り（2026-11-27）。120局の実測で強い方の勝ち: 2人 ふつう-よわい 89%・つよい-ふつう 78%、3人 63%・74%、4人 41%・58%（4人の勝ち越しの線は約14%）
     [GAMES.akari, {}, 2, 30, 'akari'], [GAMES.akari, { players: 3 }, 3, 30, 'akari-3'], [GAMES.akari, { players: 4 }, 4, 40, 'akari-4'],
     // 重さの手番（2026-11-27）。40局の実測で強い方の勝ち: ふつう-よわい 37・負け 3、つよい-ふつう 39・負け 0
-    [GAMES.omosa, {}, 2, 30, 'omosa']]) {
+    [GAMES.omosa, {}, 2, 30, 'omosa'],
+    // 多数決の陣地（2026-11-27）。120局の実測で強い方の勝ち・負け: 2人 ふつう-よわい 103・12、つよい-ふつう（60局）37・0、3人 102・11・107・4、4人 93・15・102・11
+    [GAMES.tasuu, {}, 2, 30, 'tasuu'], [GAMES.tasuu, { players: 3 }, 3, 30, 'tasuu-3'], [GAMES.tasuu, { players: 4 }, 4, 30, 'tasuu-4']]) {
     // 3人以上の点と線は、つよいとふつうの差が小さい（適当に引く1割だけ）ので、よわいとの差だけを見る
     for (const [i, [a, b]] of (n === 2 ? [['normal', 'weak'], ['strong', 'normal']] : [['normal', 'weak'], ['strong', 'weak']]).entries()) {
       const games = Array.isArray(counts) ? counts[i] : counts;
