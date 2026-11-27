@@ -147,7 +147,11 @@ function bounceBack(hit, p) {
   const fly = hit.cloneNode(true);
   fly.classList.remove('ak-hit');
   Object.assign(fly.style, { position: 'fixed', left: a.left + 'px', top: a.top + 'px', width: a.width + 'px', height: a.height + 'px', margin: '0', zIndex: '60', pointerEvents: 'none' });
-  document.body.append(fly);
+  // 灯りの見た目（.ak .ak-lamp・.ak .p◯ の色）は .ak の中でだけ効くので、.ak の入れ物に入れてページに置く（盤の外へ出すと見えなくなっていた。2026-11-27 の Codex の点検）
+  const wrap = document.createElement('div');
+  wrap.className = 'ak';
+  wrap.append(fly);
+  document.body.append(wrap);
   hit.remove();
   const dx = b.left + b.width / 2 - (a.left + a.width / 2);
   const dy = b.top + b.height / 2 - (a.top + a.height / 2);
@@ -156,8 +160,8 @@ function bounceBack(hit, p) {
     { transform: `translate(${dx * 0.5}px, ${dy * 0.5 - 40}px) scale(1.1)`, opacity: 1, offset: 0.45 },
     { transform: `translate(${dx}px, ${dy}px) scale(.4)`, opacity: 0.2 },
   ], { duration: 620, easing: 'ease-in-out' });
-  anim.onfinish = () => { fly.remove(); to.classList.remove('ak-got'); void to.offsetWidth; to.classList.add('ak-got'); };
-  anim.oncancel = () => fly.remove();
+  anim.onfinish = () => { wrap.remove(); to.classList.remove('ak-got'); void to.offsetWidth; to.classList.add('ak-got'); };
+  anim.oncancel = () => wrap.remove();
 }
 
 export default {
@@ -177,7 +181,12 @@ export default {
   ],
   noPeek(rules) { return rules?.hide === true; }, // 隠し灯りがあるときは「相手の迷いを見せる」を使わない（main.js の peekOn）
   // 2回押して置くの薄い灯り（main.js の ghostOne）を、最後の1つでは出さない（当てた局面は決着で、まだ見えない隠し灯りが開くため）
-  noGhost(s) { return !!s.hide && s.order.length + 1 >= s.n * s.per && s.hide.some((c, q) => c !== null && !s.open[q]); },
+  // ほかの人のまだ見つかっていない隠し灯りのマスを押した手も出さない（当てた局面ではその灯りが見つかって表になり、2回目を押す前に場所が分かってしまった。2026-11-27 の Codex の点検）
+  noGhost(s, m) {
+    if (!s.hide) return false;
+    if (Number.isInteger(m) && hiddenFrom(s, m >= HIDE ? m - HIDE : m, s.turn)) return true;
+    return s.order.length + 1 >= s.n * s.per && s.hide.some((c, q) => c !== null && !s.open[q]);
+  },
 
   cpu(s, p, rules) {
     const c = akariCpu(viewOf(s, s.turn), rules); // ほかの人の隠し灯りは見ないで選ぶ
@@ -185,9 +194,9 @@ export default {
     return s.hide && s.hide[s.turn] === null && s.per - mine === 2 ? c + HIDE : c;
   },
 
-  init({ rules = {} } = {}) {
+  init({ rules = {}, seed = 0 } = {}) {
     const n = [2, 3, 4].includes(rules.players) ? rules.players : 2;
-    const s = { n, k: SIZE, per: PER[n], lamps: new Array(SIZE * SIZE).fill(null), order: [], turn: 0, last: null };
+    const s = { n, k: SIZE, per: PER[n], lamps: new Array(SIZE * SIZE).fill(null), order: [], turn: 0, last: null, seed }; // seed は「隠して置く」（ui）を対局ごとに分けるためだけ（ルールには使わない）
     return rules.hide === true ? { ...s, hide: new Array(n).fill(null), open: new Array(n).fill(false) } : s;
   },
 
@@ -243,8 +252,9 @@ export default {
     const f = field(v);
     const sc = res ? countOf(s.n, f.who) : null;
     const top = res ? Math.max(...sc) : null;
-    const key = `${s.order.length}:${me}`;
-    if (ui.key !== key) ui = { key, hide: false };
+    const key = `${s.seed}:${s.order.length}:${me}`; // 種を入れないと、始め直した対局に前の「隠して置く」が残る（2026-11-27 の Codex の点検。かべ置きレースと同じ）
+    // 押せる画面のときだけ覚え直す（2回押して置くの薄い灯りは、1つ先の局面を押せない形で描くので、そこで消すと「隠して置く」が外れていた。同じ点検）
+    if (o.canMove && ui.key !== key) ui = { key, hide: false };
     const canHide = o.canMove && !res && !!s.hide && s.hide[s.turn] === null;
     const hiding = canHide && ui.hide;
     const quiet = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -284,7 +294,9 @@ export default {
       const e = document.createElement('button');
       e.type = 'button';
       const w = f.who[c];
-      e.className = 'ak-cell' + (w >= 0 ? ' own p' + col(w) : v.order.length ? ' tie' : '') + (res && w >= 0 && sc[w] === top ? ' win' : '');
+      // 光らせるのは勝った人の陣地（参りましたで終わったら参らなかった人。陣地の広さでは決めない。2026-11-27 の Codex の点検）
+      const winner = res ? (res.gave !== undefined ? w === res.winner : sc[w] === top) : false;
+      e.className = 'ak-cell' + (w >= 0 ? ' own p' + col(w) : v.order.length ? ' tie' : '') + (w >= 0 && winner ? ' win' : '');
       if (before && before[c] !== w) {
         e.classList.add('wave');
         e.style.setProperty('--from', fromBg(before[c]));
@@ -306,7 +318,8 @@ export default {
         e.tabIndex = -1;
         e.setAttribute('aria-label', `${this.players[col(lp)]}の${hid ? '隠し' : ''}灯り`);
       } else if (o.canMove) {
-        e.classList.add('playable', 'p' + col(s.turn));
+        // 番の人の色は付けない（陣地の色の p◯ と重なり、後ろに書いた色の指定が勝って、ほかの人の陣地が番の人の色に見えた。2026-11-27 の Codex の点検。のせた所の色は grid の --pt）
+        e.classList.add('playable');
         e.setAttribute('aria-label', hiding ? '隠し灯りを置く' : '灯りを置く');
         e.onclick = () => o.onMove(hiding ? c + HIDE : c);
         // PC でマスにのせたら、置いたときに自分の陣地になる所（と、ほかの人から取れる所）を明るく見せる

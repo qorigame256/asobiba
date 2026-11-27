@@ -13,7 +13,7 @@
 //   どこにも無い行は、書き換えた行（意図した書き換えかを1つずつ確かめる）か、写し忘れ。
 // 終了コード: 0 = どこにも無い行が0 / 1 = どこにも無い行がある / 2 = 使い方の誤り
 //
-// 比べ方: 行末の空白（CR を含む）と先頭の BOM を除き、字下げも含めて同じ形の行があれば残っていると見る。
+// 比べ方: 行末の空白（CR を含む）と先頭の BOM を除き、字下げも含めて同じ形の行があれば残っていると見る（同じ形の行は本数まで数える）。
 //   ほかの行の一部として入っているだけのものは数えない（移すときは行ごとそのまま写す決まりのため）。
 
 import { readFileSync } from 'node:fs';
@@ -37,8 +37,11 @@ const readLines = (file) => {
 
 const [beforeFile, afterFile, ...destFiles] = files;
 const before = readLines(beforeFile);
-const after = new Set(readLines(afterFile));
-const dest = new Set(destFiles.flatMap(readLines));
+// 同じ形の行が何本あるかで数える（1本ずつ使い切る）。整理前に同じ行が2本あって片方を消したとき、残った1本で両方を「残った」と数えないように（2026-11-27 の Codex の点検）
+const bag = (lines) => { const m = new Map(); for (const l of lines) m.set(l, (m.get(l) ?? 0) + 1); return m; };
+const take = (m, line) => { const n = m.get(line) ?? 0; if (!n) return false; m.set(line, n - 1); return true; };
+const after = bag(readLines(afterFile));
+const dest = bag(destFiles.flatMap(readLines));
 
 let kept = 0;
 let empty = 0;
@@ -46,8 +49,8 @@ const moved = [];
 const missing = [];
 before.forEach((line, i) => {
   if (line.trim() === '') { empty++; return; }
-  if (after.has(line)) kept++;
-  else if (dest.has(line)) moved.push([i + 1, line]);
+  if (take(after, line)) kept++;
+  else if (take(dest, line)) moved.push([i + 1, line]);
   else missing.push([i + 1, line]);
 });
 

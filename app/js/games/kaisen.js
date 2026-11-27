@@ -551,7 +551,11 @@ const game = {
   // 印（・と ✕）と当たりの色は、弾が着いてから出す。サルボは1発ずつ少しずらす。沈めたときに船の形を出す動きは本人が不採用にした
   render(root, s, o) {
     this.renderSeas(root, s, o);
-    if (!o.fresh || !s.last || s.last.placed || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
+    // 新しい手でない描き直し（「↺ さっきの手」の1手前の画面・次の対局の並べる画面 など）で覚えを消す。消さないと、同じ手をもう一度見せるときや、
+    // 次の対局の1発目が前の対局と同じときに弾が落ちなかった（2026-11-27 の Codex の点検）。推理のメモの付け外しは同じ o（fresh のまま）で描き直すので、そのときは落とさない
+    if (!o.fresh) fxKey = null;
+    // ソナーは撃っていないので落とさない（撃ったあとのマスを真ん中に調べると、前の弾がもう一度落ちていた。同じ点検）
+    if (!o.fresh || !s.last || s.last.placed || s.last.sonar !== undefined || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)) return;
     const key = `${o.me}:${s.turn}:${JSON.stringify(s.last)}`;
     if (fxKey === key) return;
     fxKey = key;

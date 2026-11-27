@@ -350,7 +350,7 @@ export default {
   seatCount(rules) { return rules?.players ?? 2; },
   settings: [
     { key: 'players', label: '人数', desc: '順番に石を置く人数（石は全部で25個）', def: 2, choices: [[2, '2人'], [3, '3人'], [4, '4人']] },
-    { key: 'together', label: '一斉に置く', desc: '1回ごとに全員がこっそり陣地を選び、そろったら同時に開いて置く（おまけ点なし）。入りきらない陣地は、その回の「先に入る人」から入れる', def: false, choices: [[false, 'なし'], [true, 'あり']] },
+    { key: 'together', label: '一斉に置く', desc: '1回ごとに全員がこっそり陣地を選び、そろったら同時に開いて置く（おまけ点なし）。空きより多く重なった陣地は、石が入らずにその場で締め切り', def: false, choices: [[false, 'なし'], [true, 'あり']] },
     TAP_PEEK_SETTING,
     CPU_SETTING,
   ],
@@ -359,7 +359,12 @@ export default {
   noGhost(s) { return !!s.tog && s.pend.filter((x) => x === null).length === 1; },
 
   cpu(s, p, rules) { return tasuuCpu(s, rules); },
-  judge(s) { return judge2(s); },
+  judge(s) {
+    // 決着した局面（参りましたも）は結果のとおり（util.js の boardJudge と同じ。前は参りましたのあとも、参る前の形勢のままだった。2026-11-27 の Codex の点検）
+    const r = this.result(s);
+    if (r && s.n === 2 && !s.tog) return r.winner === null ? 0 : r.winner === 0 ? 100 : -100;
+    return judge2(s);
+  },
 
   init({ rules = {}, seed = 0 } = {}) {
     const n = [2, 3, 4].includes(rules.players) ? rules.players : 2;
@@ -414,12 +419,14 @@ export default {
       const w = ownerOf(s.n, z, !!s.shut?.[i]);
       const c = countIn(s.n, z);
       // 一斉に置く: 直前に開いた回で、この陣地に入った石の数・この陣地が開いた回に選ばれたか
-      const fresh = s.tog && o.fresh && s.rev ? s.rev.picks.filter((x, p) => x === i && s.rev.got[p]).length : 0;
-      const hit = s.tog && o.fresh && !!s.rev && s.rev.picks.includes(i);
+      // 動かすのは回がそろって開いた手のときだけ（だれも選んでいない）。次の回にだれかが選んだだけの手では、前の回の rev が残っていても動かさない（2026-11-27 の Codex の点検）
+      const opened = s.tog && o.fresh && !!s.rev && s.pend.every((x) => x === null);
+      const fresh = opened ? s.rev.picks.filter((x, p) => x === i && s.rev.got[p]).length : 0;
+      const hit = opened && s.rev.picks.includes(i);
       const box = document.createElement('button');
       box.type = 'button';
       box.className = 'tsu-zone' + (w !== null ? (w >= 0 ? ` won p${col(w)}` : ' tie') : '')
-        + (w !== null && w >= 0 && res && sc[w] === top ? ' win' : '') + ((o.fresh && s.last === i) || hit ? (w !== null ? ' just' : '') : '')
+        + (w !== null && w >= 0 && res && (res.gave !== undefined ? w === res.winner : sc[w] === top) ? ' win' : '') // 参りましたで終わったら参らなかった人（2026-11-27 の Codex の点検） + ((o.fresh && s.last === i) || hit ? (w !== null ? ' just' : '') : '')
         + (s.shut?.[i] ? ' shut' : '') + (hit && s.shut?.[i] && fresh === 0 && s.rev.picks.filter((x) => x === i).length ? ' bounce' : '');
       // 点の札
       const pt = document.createElement('div');

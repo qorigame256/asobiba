@@ -376,7 +376,7 @@ main.slow-zoom > section > #board { position: relative; z-index: 2; } /* 下へ�
 .judge-chart .jc-lab { display: flex; justify-content: space-between; font-size: .72rem; color: var(--muted); }
 .status-sub.jc-note { color: #b06a00; font-weight: 700; }
 /* あぶない所の知らせ（2026-11-12。util.js の dangerMoves）: 赤い枠と「！」。中身（字・子の要素）は足さない（2回押して置くの薄い石の見分けが、マスが空かどうかで見ているため） */
-.board .danger, .board .ut-cell.danger { /* 色うつり四目のマスは下の方の .board .ut-cell が background でまとめて塗るので、強くした指定で上書きする（2026-11-27） */
+.board .danger, .board .ut-cell.danger.danger { /* 色うつり四目のマスは下の方の .board .ut-cell・.board .ut-cell.last が background でまとめて塗るので、強くした指定で上書きする（2026-11-27。.last に負けていたのも同日の Codex の点検で直した） */
   box-shadow: inset 0 0 0 3px #d23a2e;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Crect x='8.3' y='2.5' width='3.4' height='10' rx='1.7' fill='%23d23a2e'/%3E%3Ccircle cx='10' cy='16.2' r='2' fill='%23d23a2e'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
@@ -2473,6 +2473,7 @@ html:has(.ac-live), html:has(.ac-live) body { overflow: hidden; overscroll-behav
 .tb-last.hit { background: var(--soft, #ffe1dc); } /* 暗い色の組で字が読めなかった（CLAUDE.md のスキンの決まり。2026-11-26 の Codex の点検） */
 .tb-last-head { font-size: .78rem; color: var(--muted); }
 .tb-last.pop, .tb-act.pop { animation: pop .3s ease-out; }
+@media (prefers-reduced-motion: reduce) { .tb-last.pop, .tb-act.pop { animation: none; } } /* 上の行より後に置く（前の方の同じ指定は、この行の弾む指定に負けていた。2026-11-27 の Codex の点検） */
 .tb-players { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
 .tb-player { background: var(--panel); border: 1.5px solid var(--line); border-radius: var(--radius); padding: 8px; text-align: center; }
 .tb-player.mine { border-width: 2.5px; }
@@ -3581,15 +3582,17 @@ h1, h2, .sheet-head h3, .picker-head h3, .game-banner, .cat-h, .tile-nm, .lobby-
 
 /* 色に形を添える（2026-11-11。main.js の setView・html の .shapes）: 3〜4人の盤（main.js が board に data-seats を付ける）で、人ごとの石に ● ▲ ■ ◆ を重ねる（点と線の陣地は「赤」などの字が入っているので重ねない。マルバツは印が人ごとに違う）。
    色そのものは変えない。順番の帯の印にも添える。石の ::after は「最後の手」の印に使っているので ::before に描く */
-.shapes .board:is([data-seats="3"], [data-seats="4"]) :is(.c4-disc, .rv-disc, .gm-stone, .cb-disc):is(.p0, .p1, .p2, .p3)::before {
+.shapes .board:is([data-seats="3"], [data-seats="4"]) :is(.c4-disc, .rv-disc, .gm-stone, .cb-disc, .ak-lamp, .tsu-stone):is(.p0, .p1, .p2, .p3)::before {
   position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none;
   font-size: clamp(9px, 3vw, 17px); line-height: 1; color: #fff; text-shadow: 0 0 2px #000, 0 0 1px #000; opacity: .85;
 }
 .shapes .board:is([data-seats="3"], [data-seats="4"]) .rv-disc { position: relative; }
-.shapes .board:is([data-seats="3"], [data-seats="4"]) :is(.c4-disc, .rv-disc, .gm-stone, .cb-disc).p0::before { content: "●"; }
-.shapes .board:is([data-seats="3"], [data-seats="4"]) :is(.c4-disc, .rv-disc, .gm-stone, .cb-disc).p1::before { content: "▲"; }
-.shapes .board:is([data-seats="3"], [data-seats="4"]) :is(.c4-disc, .rv-disc, .gm-stone, .cb-disc).p2::before { content: "■"; }
-.shapes .board:is([data-seats="3"], [data-seats="4"]) :is(.c4-disc, .rv-disc, .gm-stone, .cb-disc).p3::before { content: "◆"; }
+/* 灯りの陣取りの灯り・多数決の陣地の石（2026-11-27 の Codex の点検で足した）。落ちてきて当たる灯り・はじかれる石は absolute のまま */
+.shapes .board:is([data-seats="3"], [data-seats="4"]) :is(.ak-lamp:not(.ak-hit), .tsu-stone:not(.tsu-burst)) { position: relative; }
+.shapes .board:is([data-seats="3"], [data-seats="4"]) :is(.c4-disc, .rv-disc, .gm-stone, .cb-disc, .ak-lamp, .tsu-stone).p0::before { content: "●"; }
+.shapes .board:is([data-seats="3"], [data-seats="4"]) :is(.c4-disc, .rv-disc, .gm-stone, .cb-disc, .ak-lamp, .tsu-stone).p1::before { content: "▲"; }
+.shapes .board:is([data-seats="3"], [data-seats="4"]) :is(.c4-disc, .rv-disc, .gm-stone, .cb-disc, .ak-lamp, .tsu-stone).p2::before { content: "■"; }
+.shapes .board:is([data-seats="3"], [data-seats="4"]) :is(.c4-disc, .rv-disc, .gm-stone, .cb-disc, .ak-lamp, .tsu-stone).p3::before { content: "◆"; }
 .shapes .turn-band.seats34 .turn-mark[data-p]::after { font-size: .8rem; margin-left: 2px; vertical-align: middle; }
 .shapes .turn-band.seats34 .turn-mark[data-p="0"]::after { content: "●"; }
 .shapes .turn-band.seats34 .turn-mark[data-p="1"]::after { content: "▲"; }
@@ -4358,7 +4361,7 @@ g.promo-flip { transform-box: fill-box; transform-origin: center; }
 /* ---------- 色うつり四目（utsuri.js。2026-11-27） ---------- */
 /* 6×6 の木の盤に丸い駒。色の無い駒は白、席の色の駒はその色。直前に動いた駒（動かせない）に 🔒。盤の地はどの色の組でも同じ明るい木の色を直に書く（駒と線の色が暗いため） */
 .ut .ut-grid { position: relative; display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; width: var(--board); aspect-ratio: 1; margin: 0 auto; padding: 6px; box-sizing: border-box; background: #c99a5b; border-radius: 10px; touch-action: manipulation; }
-.ut .p0 { --pc: var(--p0); } .ut .p1 { --pc: var(--p1); }
+.ut .p0, .ut-disc.p0 { --pc: var(--p0); } .ut .p1, .ut-disc.p1 { --pc: var(--p1); } /* .ut-disc にも: 指でつまんだ駒の写しは盤の外（body）に置かれるため（2026-11-27 の Codex の点検） */
 .board .ut-cell { position: relative; display: grid; place-items: center; aspect-ratio: 1; border-radius: 6px; background: #f1dcb4; }
 .board button.ut-cell { cursor: pointer; }
 .board .ut-cell.last { background: #f8e9c6; box-shadow: inset 0 0 0 2px rgba(90, 60, 20, .35); }

@@ -1,0 +1,97 @@
+{
+  "root": "../..",
+  "mode": "copy",
+  "copy": [
+    "app/js",
+    "app/fonts",
+    "app/voice",
+    "app/sounds",
+    "tools/test-logic.mjs",
+    "tools/probes",
+    "tools/font-chars.json",
+    "tools/font-texts.mjs",
+    "tools/voice-texts.mjs"
+  ],
+  "cwd": "copy",
+  "env": {
+    "QUICK": "1",
+    "SEED": "1"
+  },
+  "build": [
+    "node",
+    "--input-type=module",
+    "-e",
+    "await import('./app/js/games/index.js')"
+  ],
+  "test": [
+    "node",
+    "tools/test-logic.mjs"
+  ],
+  "failPattern": "AssertionError \\[ERR_ASSERTION\\]: (.*)",
+  "timeoutSec": 300,
+  "breaks": [
+    {
+      "name": "灯りの陣取り: 近さをたて・よこのマス数の和で測る",
+      "file": "app/js/games/akari.js",
+      "old": "  return dr * dr + dc * dc;",
+      "new": "  return Math.abs(dr) + Math.abs(dc);",
+      "expect": [
+        "灯りの陣取り: 陣地はまっすぐの距離（マスの中心どうし）で測る"
+      ]
+    },
+    {
+      "name": "灯りの陣取り: ほかの人の隠し灯りのマスを押した手でも薄い灯りを出す",
+      "file": "app/js/games/akari.js",
+      "old": "    if (Number.isInteger(m) && hiddenFrom(s, m >= HIDE ? m - HIDE : m, s.turn)) return true;\n",
+      "new": "",
+      "expect": [
+        "灯りの陣取り: ほかの人の隠し灯りのマスを押した手は薄い灯りを出さない"
+      ]
+    },
+    {
+      "name": "重さの手番: 兵を2〜5列目に並べる（見送った形）",
+      "file": "app/js/games/omosa.js",
+      "old": "for (const c of [0, 2, 3, 5])",
+      "new": "for (const c of [1, 2, 3, 4])",
+      "expect": [
+        "重さの手番: 1番手の始めの並べ方（兵は 1・3・4・6列目、騎・王・槍は2〜4列目）"
+      ]
+    },
+    {
+      "name": "重さの手番: 決着のあとも手を受け付ける",
+      "file": "app/js/games/omosa.js",
+      "old": "if (s.won || !Number.isInteger(m) || m < 0",
+      "new": "if (!Number.isInteger(m) || m < 0",
+      "expect": [
+        "重さの手番: 決着のあとは動かせない"
+      ]
+    },
+    {
+      "name": "多数決の陣地: 決着した局面も読みの形勢のまま（参りましたを見ない）",
+      "file": "app/js/games/tasuu.js",
+      "old": "if (r && s.n === 2 && !s.tog) return",
+      "new": "if (false) return",
+      "expect": [
+        "多数決の陣地: 参りましたのあとの形勢は、参らなかった人の勝ち"
+      ]
+    },
+    {
+      "name": "多数決の陣地: 一斉に置くの CPU がほかの人のこの回の選びに合わせる",
+      "file": "app/js/games/tasuu.js",
+      "old": "  if (s.tog) {\n    const lt",
+      "new": "  if (s.tog && s.pend.some((x) => x !== null)) return s.pend.find((x) => x !== null);\n  if (s.tog) {\n    const lt",
+      "expect": [
+        "多数決の陣地: 一斉に置くの CPU（weak）はほかの人のこの回の選びを見ない"
+      ]
+    },
+    {
+      "name": "海戦ゲーム: ヒット数で1位が並んだ結果に draw: true を足す",
+      "file": "app/js/games/kaisen.js",
+      "old": "return { winner: top.length === 1 ? top[0] : null, cells: [], place,",
+      "new": "return { winner: top.length === 1 ? top[0] : null, ...(top.length > 1 ? { draw: true } : {}), cells: [], place,",
+      "expect": [
+        "海戦: 1位が並んだ結果でも、成績表の点は下の人と差が付く"
+      ]
+    }
+  ]
+}

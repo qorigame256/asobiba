@@ -115,7 +115,7 @@ export default {
   render(root, s, o) {
     const me = o.me >= 0 ? o.me : null;
     const nameP = (p) => (p === me ? 'あなた' : o.names[p]);
-    const draw = () => this.render(root, s, o);
+    const draw = () => this.render(root, s, { ...o, fresh: false }); // 選んだだけの描き直しは新しい手でない（fresh のままだと、前の回の数え上げが初めから流れた。2026-11-27 の Codex の点検）
     const can = o.canMove;
     const key = `${s.n}:${s.round}:${s.hands.join()}`;
     if (sel.key !== key) sel = { key, up: null, call: null };

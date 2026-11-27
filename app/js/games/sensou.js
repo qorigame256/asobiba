@@ -171,7 +171,7 @@ export default {
     const nameP = (p) => (p === me ? 'あなた' : o.names[p]);
     const can = o.canMove;
     if (!can || chosen?.step !== s.step) chosen = null;
-    const draw = () => this.render(root, s, o);
+    const draw = () => this.render(root, s, { ...o, fresh: false }); // 選んだだけの描き直しは新しい手でない（fresh のままだと、前の手のタッチが初めから流れた。2026-11-27 の Codex の点検）
     const res = this.result(s);
 
     const L = s.last;

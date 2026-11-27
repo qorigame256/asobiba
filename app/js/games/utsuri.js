@@ -76,19 +76,22 @@ const lockOf = (s) => (s.last ? s.last.d : -1);
 const legalOf = (s, p = s.turn) => movesOf(s.board, lockOf(s), s.lockOwn ? p : undefined);
 
 // マス d を通る、色 p のいちばん長い並び（4つ以上の並びのマスをまとめて返す。無ければ空）
-export function lineAt(b, d, p) {
+// マス d を通る色 p の、NEED 以上の並び（向きごと）
+function linesAt(b, d, p) {
   const r0 = Math.floor(d / N);
   const c0 = d % N;
-  const out = new Set();
+  const out = [];
   for (const [dr, dc] of [[0, 1], [1, 0], [1, 1], [1, -1]]) {
     const run = [d];
     for (const sg of [1, -1]) {
       for (let r = r0 + dr * sg, c = c0 + dc * sg; r >= 0 && r < N && c >= 0 && c < N && b[r * N + c] === p; r += dr * sg, c += dc * sg) run.push(r * N + c);
     }
-    if (run.length >= NEED) for (const x of run) out.add(x);
+    if (run.length >= NEED) out.push(run);
   }
-  return [...out];
+  return out;
 }
+export function lineAt(b, d, p) { return [...new Set(linesAt(b, d, p).flat())]; }
+export const firstLine = (b, d, p) => linesAt(b, d, p)[0] ?? []; // 線を引く1本（render）
 
 /* ---------- CPU ---------- */
 
@@ -187,8 +190,8 @@ export default {
   // 形勢（util.js の boardJudge）: 4つの窓の数え方を2手先まで読む
   judge(s) { return boardJudge(this, s, (x) => legalOf(x), score, 2, 30); },
 
-  init({ rules = {} } = {}) {
-    const s = { board: startBoard(), turn: 0, last: null, ply: 0, won: null };
+  init({ rules = {}, seed = 0 } = {}) {
+    const s = { board: startBoard(), turn: 0, last: null, ply: 0, won: null, seed }; // seed は選んでいる駒（ui）を対局ごとに分けるためだけ（ルールには使わない）
     return rules.lockOwn === true ? { ...s, lockOwn: true } : s;
   },
 
@@ -229,7 +232,7 @@ export default {
   render(root, s, o) {
     const draw = () => this.render(root, s, o);
     const over = !!s.won || s.gave !== undefined;
-    const key = `${s.ply}:${o.me}`;
+    const key = `${s.seed}:${s.ply}:${o.me}`; // 種を入れないと、始め直した対局に前に選んだ駒が残る（2026-11-27 の Codex の点検。かべ置きレースと同じ）
     if (ui.key !== key) ui = { key, from: null };
     const can = o.canMove && !over;
     const lock = lockOf(s);
@@ -271,7 +274,7 @@ export default {
           disc.classList.add('locked'); // 直前に動いた駒（いまは動かせない）
           cell.setAttribute('aria-label', '直前に動いた駒（動かせない）');
         }
-        if (win.has(i)) winEls.push(cell);
+        if (win.has(i)) { cell.dataset.i = i; winEls.push(cell); }
         cell.append(disc);
       }
       if (isTarget || isMovable) {
@@ -289,7 +292,10 @@ export default {
       grid.append(cell);
     }
     root.append(grid);
-    if (winEls.length) winLine(grid, winEls, o.fresh, 'ut:' + [...win].join(','), 420);
+    // 線を引くのは1本目の並びだけ（たて・よこを同時にそろえると、光るマスの両端どうしをななめに結んでいた。2026-11-27 の Codex の点検）。光らせるのはそろったマス全部
+    const run1 = s.won?.cells?.length && s.last ? firstLine(s.board, s.last.d, s.board[s.last.d]) : [];
+    const lineEls = winEls.filter((c) => run1.includes(Number(c.dataset.i)));
+    if (lineEls.length) winLine(grid, lineEls, o.fresh, 'ut:' + [...win].join(','), 420);
     // 崩した並びが割れる（同じ14回目）: 相手の色の駒を動かして、その駒を通る相手の3つ以上の並びを崩したとき、その並びに線を出し、動かした駒の所で2つに割って落とす
     if (o.fresh && s.last && s.last.was !== NONE && s.last.was !== s.board[s.last.d] && !(typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches)) {
       const b0 = s.board.slice();

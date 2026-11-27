@@ -5949,6 +5949,8 @@ assert.ok(sonarUsed >= 40, 'CPU もソナーを使う: ' + sonarUsed);
     assert.deepEqual([r.winner, r.place], [0, [1, 3, 2]], '海戦: ヒット数の多い人の勝ち');
     const d = KS.result({ ...h, won: 2, out: [true, true, false], hitN: [6, 4, 6] });
     assert.deepEqual([d.winner, d.place], [null, [1, 3, 1]], '海戦: 1位が並んだら引き分け');
+    // その結果をそのまま成績表の点にしても、下の人と差が付く（結果に draw: true が混ざると全員0点になるため。2026-11-27 の Codex の点検で足した）
+    assert.deepEqual((await import('../app/js/games/index.js')).seatPoints(d, 3), [1, 0, 1], '海戦: 1位が並んだ結果でも、成績表の点は下の人と差が付く');
     assert.equal(KS.result(h), null, '海戦: 続いている間は決着しない');
     // CPU どうしで最後まで打っても、ヒット数の合計 = ほかの人の海の船のマスのうち撃たれたマスの数
     // 3人とも違う並びにする（同じ並びの2人は同じ1発で一緒に脱落し、「最初の脱落で終わる」まちがいを見分けられなかった。2026-11-24 の Codex の点検）
@@ -13634,6 +13636,33 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   const sc0 = scoresOf(d);
   d.order = [...d.order, at(8, 8)]; d.lamps[at(8, 8)] = 0;
   assert.ok(scoresOf(d)[0] > sc0[0], '灯りの陣取り: 灯りを足すと陣地が広がる');
+  // まっすぐの距離で測っているか（たて・よこのマス数の和とは持ち主が変わる形）: 赤 (0,0)・青 (2,2) なら (0,3) は赤まで 9・青まで 5 で青（マス数の和ならどちらも3で並ぶ）。
+  // 決まった形と、種から作った形で、この確認の中で数えた陣地の広さ（まっすぐの距離）と比べる（2026-11-27 の Codex の点検。前は広がることしか見ていなかった）
+  {
+    const euclid = (lamps) => {
+      const sc = [0, 0];
+      for (let x = 0; x < 81; x++) {
+        const dd = lamps.map(([c]) => (Math.floor(x / 9) - Math.floor(c / 9)) ** 2 + (x % 9 - c % 9) ** 2);
+        const m = Math.min(...dd);
+        const who = new Set(lamps.filter((_, i) => dd[i] === m).map(([, p]) => p));
+        if (who.size === 1) sc[[...who][0]]++;
+      }
+      return sc;
+    };
+    const { mulberry32, shuffle } = await import('../app/js/games/util.js');
+    const rnd = mulberry32(2711);
+    const cases = [[[at(0, 0), 0], [at(2, 2), 1]]];
+    for (let k = 0; k < 6; k++) {
+      const cells = shuffle([...Array(81).keys()], rnd).slice(0, 6);
+      cases.push(cells.map((c, i) => [c, i % 2]));
+    }
+    for (const lamps of cases) {
+      let e = AK.init({ rules: {} });
+      e = { ...e, lamps: e.lamps.slice(), order: [] };
+      for (const [c, p] of lamps) { e.lamps[c] = p; e.order.push(c); }
+      assert.deepEqual(scoresOf(e), euclid(lamps), '灯りの陣取り: 陣地はまっすぐの距離（マスの中心どうし）で測る');
+    }
+  }
   // 同じ人の灯りどうしが同じ近さなら、その人の陣地
   let same = AK.init({ rules: {} });
   same = AK.apply(same, at(0, 0)); same = AK.apply(same, at(8, 8)); same = AK.apply(same, at(0, 8));
@@ -13678,6 +13707,8 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   const count = (s, p) => KIND.map((_, k) => s.board.filter((v) => v !== null && v >> 2 === p && (v & 3) === k).length);
   assert.deepEqual([count(s0, 0), count(s0, 1)], [[1, 4, 1, 1], [1, 4, 1, 1]], '重さの手番: 駒は各自 王1・兵4・槍1・騎1');
   assert.ok(s0.board.every((v, i) => (v === null) === (s0.board[35 - i] === null) && (v === null || (v & 3) === (s0.board[35 - i] & 3))), '重さの手番: 2番手は1番手を180度回した並べ方');
+  // 承認した並べ方そのもの（兵は 1・3・4・6列目。2〜5列目に並べる形は見送った。2026-11-27 の Codex の点検で、数と対称しか見ていなかったのを足した）。値は 席*4+種類（王0・兵1・槍2・騎3）
+  assert.deepEqual([4, 5].map((r) => s0.board.slice(r * 6, r * 6 + 6)), [[1, null, 1, 1, null, 1], [null, 3, 0, 2, null, null]], '重さの手番: 1番手の始めの並べ方（兵は 1・3・4・6列目、騎・王・槍は2〜4列目）');
   assert.equal(OM.turn(s0), 0, '重さの手番: 最初は1番手');
   // 時計: 遅れている人が動く・同じなら直前に動かなかった人
   assert.equal(nextTurn([1, 0], 0), 1, '重さの手番: 時計が遅れている人が動く');
@@ -13708,7 +13739,10 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
   const w = OM.apply(k, mv(at(5, 5), at(0, 5)));
   assert.equal(OM.result(w)?.winner, 0, '重さの手番: 相手の王を取ったら勝ち');
   assert.deepEqual(w.taken[0], [0], '重さの手番: 取った駒を数える');
-  assert.equal(OM.apply(w, mv(at(0, 5), at(1, 5))), null, '重さの手番: 決着のあとは動かせない');
+  // 決着のあと、時計で番が来ている2番手（兵 (0,0)）の、決着の前なら通る手で見る（前は番でない1番手の駒を動かしていて、決着の確かめを外しても通っていた。2026-11-27 の Codex の点検）
+  assert.equal(OM.turn(w), 1, '重さの手番: 王を取ったあとの時計の番は2番手');
+  assert.ok(OM.apply({ ...w, won: null }, mv(at(0, 0), at(1, 0))), '重さの手番: 決着していなければ2番手の兵は動ける');
+  assert.equal(OM.apply(w, mv(at(0, 0), at(1, 0))), null, '重さの手番: 決着のあとは動かせない');
   const k2 = OM.apply(k, mv(at(5, 5), at(4, 5)));
   assert.equal(OM.result(k2), null, '重さの手番: 王を取らなければ続く');
   assert.equal(OM.result(OM.apply({ ...k, ply: 199 }, mv(at(5, 5), at(4, 5))))?.winner, null, '重さの手番: 200手で引き分け');
@@ -13782,6 +13816,13 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     assert.equal(r.winner, tops === 1 ? r.scores.indexOf(top) : null, '多数決の陣地: 点の多い人の勝ち・並んだら引き分け');
     const pts = seatPoints(r, n);
     assert.ok(r.scores.every((v, p) => r.scores.every((w, q) => (v > w) === (pts[p] > pts[q]))), `多数決の陣地: ${n}人の成績表の点は点の順`);
+    // 形勢（2人だけ）: 決着したら結果のとおり（2026-11-27 の Codex の点検で足した。前は始めの互角しか見ていなかった）
+    if (n === 2) assert.equal(TS.judge(x), r.winner === null ? 0 : r.winner === 0 ? 100 : -100, '多数決の陣地: 決着した局面の形勢は結果のとおり');
+  }
+  // 参りましたのあとの形勢は、参らなかった人の勝ち（前は参る前の形勢のままだった。同じ点検）
+  {
+    const g = TS.apply(put(TS.init({ rules: {}, seed: 9 }), [0]), { give: true }); // 2番手が参りました
+    assert.deepEqual([TS.result(g).winner, TS.judge(g)], [0, 100], '多数決の陣地: 参りましたのあとの形勢は、参らなかった人の勝ち');
   }
   // 2人のつよいどうし（読み切り）は、おまけ4点で必ず引き分け（最善どうしなら1番手が4点差で勝つ形のため）。形勢も0のまま
   {
@@ -13966,6 +14007,9 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     last = AK.apply(last, 0 + HIDE);
     for (let c = 1; last.order.length < 11; c++) last = AK.apply(last, c);
     assert.ok(AK.noGhost(last) && !AK.noGhost(AK.init({ rules: { hide: true } })), '灯りの陣取り: 最後の1つだけ薄い灯りを出さない');
+    // ほかの人のまだ見つかっていない隠し灯りのマスを押した手も、薄い灯りを出さない（当てると見つかって表になるため。2026-11-27 の Codex の点検）
+    const hid = AK.apply(AK.init({ rules: { hide: true } }), 40 + HIDE);
+    assert.deepEqual([AK.noGhost(hid, 40), AK.noGhost(hid, 40 + HIDE), AK.noGhost(hid, 41)], [true, true, false], '灯りの陣取り: ほかの人の隠し灯りのマスを押した手は薄い灯りを出さない');
   }
 
   // 多数決の陣地の一斉に置く
@@ -13993,6 +14037,17 @@ function runCpus(G, n, seed, rules, stepMs, guardMax = 3000) {
     const g0 = TS.init({ rules: { players: 3, together: true }, seed: 5 });
     assert.deepEqual([TS.noGhost(g0), TS.noGhost(TS.apply(TS.apply(g0, 0), 1))], [false, true], '多数決の陣地: 回がそろう手だけ薄い石を出さない');
     assert.equal(TS.judge(s), null, '多数決の陣地: 一斉に置くは形勢を数えない');
+    // CPU はほかの人のこの回の選びを見ない: 1番手が選んだ陣地だけが違う2つの局面で、同じ乱数なら2番手の CPU は同じ手を選ぶ（2026-11-27 の Codex の点検で足した）
+    const { mulberry32 } = await import('../app/js/games/util.js');
+    for (const lv of ['weak', 'normal', 'strong']) {
+      const base = TS.init({ rules: { together: true }, seed: 21 });
+      const picks = [0, 1, 2, 3, 4].map((z) => {
+        const keep = Math.random;
+        Math.random = mulberry32(77);
+        try { return TS.cpu(TS.apply(base, z), 1, { cpu: lv }); } finally { Math.random = keep; }
+      });
+      assert.ok(picks.every((m) => m === picks[0]), `多数決の陣地: 一斉に置くの CPU（${lv}）はほかの人のこの回の選びを見ない`);
+    }
     for (const n of [2, 3, 4]) {
       let x = TS.init({ rules: { players: n, together: true }, seed: 50 + n });
       for (let i = 0; !TS.result(x); i++) {

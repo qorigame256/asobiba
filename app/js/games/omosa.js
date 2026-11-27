@@ -153,8 +153,8 @@ export default {
   // 形勢（util.js の boardJudge）: 駒の値打ちと時計の遅れを2手先まで読む
   judge(s) { return boardJudge(this, s, legalOf, score, 2, 4); },
 
-  init({ rules = {} } = {}) {
-    const s = { board: startBoard(), t: [0, 0], mv: -1, turn: 0, taken: [[], []], last: null, ply: 0, won: null, hist: [] };
+  init({ rules = {}, seed = 0 } = {}) {
+    const s = { board: startBoard(), t: [0, 0], mv: -1, turn: 0, taken: [[], []], last: null, ply: 0, won: null, hist: [], seed }; // seed は選んでいる駒（ui）を対局ごとに分けるためだけ（ルールには使わない）
     return rules.wait === true ? { ...s, wait: [WAITS, WAITS] } : s;
   },
 
@@ -214,7 +214,7 @@ export default {
     const bottom = Number.isInteger(o.view) ? o.view : o.me === 1 ? 1 : 0; // 自分の駒が下に来るように。観戦と同じ画面の対局では 1番手が下。盤の向きを変えた（⇅）ときは o.view の人が下
     const cellAt = (k) => (bottom === 0 ? k : CELLS - 1 - k);
     const over = !!s.won || s.gave !== undefined;
-    const key = `${s.ply}:${o.me}`;
+    const key = `${s.seed}:${s.ply}:${o.me}`; // 種を入れないと、始め直した対局に前に選んだ駒が残る（2026-11-27 の Codex の点検。かべ置きレースと同じ）
     if (ui.key !== key) ui = { key, from: null };
     const can = o.canMove && !over;
     const legal = can ? movesOf(s.board, s.turn) : []; // 駒を動かす手（待つ手は下のボタン）
@@ -249,7 +249,8 @@ export default {
       };
       const mine = tok(s.t[p], 'p' + p);
       mine.textContent = s.t[p];
-      if (o.fresh && s.mv === p && s.last) { mine.classList.add('step'); mine.style.setProperty('--dx', s.last.wait ? -1 : -WEIGHT[kindOf(s.board[s.last.d])]); }
+      // 滑り始めは物差しの左端より外にしない（時計が並んで物差しの左端が進んだとき、目盛りの外から滑っていた。2026-11-27 の Codex の点検）
+      if (o.fresh && s.mv === p && s.last) { mine.classList.add('step'); mine.style.setProperty('--dx', -Math.min(s.last.wait ? 1 : WEIGHT[kindOf(s.board[s.last.d])], Math.min(s.t[p] - base, SPAN - 1))); }
       track.append(mine);
       row.append(name, track);
       // 続けて動けるときの「もう1手！」（2026-11-27 の UI・UX の14回目）: 動かしたあとも同じ人の番のとき、その人の行に跳ねて出す（あなたのターンの帯は長く待ったあとの番でしか出ないため）
@@ -328,8 +329,10 @@ export default {
         piece.textContent = KIND[kindOf(v)];
         // 選んだ駒が浮く（main.js の flyPlay）: 動かした駒は元のマスから浮いたまま滑ってきて置かれる（はさみ将棋と同じ形）
         const moved = s.last && s.last.d === i;
-        piece.dataset.fly = moved ? `mv:${s.ply}` : `sq:${i}`;
-        if (moved) Object.assign(piece.dataset, { flyFrom: `sq:${s.last.f}`, flySlide: '', flyLift: '' });
+        // 鍵はマスと駒（持ち主と種類）で作る。前は動かした駒だけ mv:手数 にしていたので、同じ駒を続けて動かすと、前の画面にその駒の sq: が無くて滑らなかった（2026-11-27 の Codex の点検）。
+        // 取られた駒は駒が違うので、行き先のマスの前の駒から滑ることは無い
+        piece.dataset.fly = `sq:${i}:${v}`;
+        if (moved) Object.assign(piece.dataset, { flyFrom: `sq:${s.last.f}:${v}`, flySlide: '', flyLift: '' });
         if (piece.classList.contains('flip')) piece.dataset.flyBase = 'rotate(180deg)';
         const w = document.createElement('span');
         w.className = 'om-w';

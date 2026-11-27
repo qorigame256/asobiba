@@ -4527,7 +4527,8 @@ function moveSound(game, st, res, prevLen, mine, hold = 0, endHold = 0) {
       });
     };
     // 帯を出している間にゲストが待合室へ移ったら、待合室で勝ち負けの音・判子・紙吹雪を出さない（対局の鍵は変わらないので画面も見る。2026-11-26 の Codex の点検）
-    if (gap) setTimeout(() => { if (S && timerKey() === key && !(S.lobbyView && !S.isHost)) finish(); }, gap); else finish();
+    // 待つ間にふりかえりを開いたときも出さない（灯りの陣取りの数え上げの間にふりかえりへ移ると、ふりかえりの画面で音と紙吹雪が出た。2026-11-27 の Codex の点検。判子はもとから endStamp が見ていた）
+    if (gap) setTimeout(() => { if (S && timerKey() === key && !(S.lobbyView && !S.isHost) && !reviewing()) finish(); }, gap); else finish();
     return;
   }
   // 手が2つ以上まとめて届いたとき、前は最後の1手の音だけ鳴らしていたので、最後がほかの人の「鳴らさない」手だと無音になった（2026-10-26 本人の声「効果音がならないゲームがある」）。
